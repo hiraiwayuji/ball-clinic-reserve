@@ -1,0 +1,302 @@
+[
+  {
+    "id": "3247d78b-c5a9-4560-865e-ce0ed7476ae5",
+    "customer_id": "83e75c24-f98f-463a-bd3b-6df9685df56e",
+    "start_time": "2026-03-12T06:30:00+00:00",
+    "end_time": "2026-03-12T07:30:00+00:00",
+    "status": "confirmed",
+    "memo": "実費診療 (test)",
+    "is_first_visit": false,
+    "created_at": "2026-03-10T17:45:16.851505+00:00"
+  },
+  {
+    "id": "dd2e02d8-3076-4106-b4a4-514c07ff30fd",
+    "customer_id": "bb9bc18d-9a8a-4be0-85be-728bd565c636",
+    "start_time": "2026-03-12T05:00:00+00:00",
+    "end_time": "2026-03-09T02:30:00+00:00",
+    "status": "cancelled",
+    "memo": "[院内追加] Test reservation added via admin panel. updated",
+    "is_first_visit": false,
+    "created_at": "2026-03-07T12:51:49.046095+00:00"
+  },
+  {
+    "id": "841a0092-83db-43eb-bf3d-fa6804ac6422",
+    "customer_id": "283daf38-3e50-403f-b3de-e5044b3a0c48",
+    "start_time": "2026-03-12T06:00:00+00:00",
+    "end_time": "2026-03-12T06:30:00+00:00",
+    "status": "confirmed",
+    "memo": "AirRESERVEからの移行",
+    "is_first_visit": false,
+    "created_at": "2026-03-10T17:45:17.318349+00:00"
+  },
+  {
+    "id": "5030eb37-4a2f-4d93-a0a5-9e0c916d6595",
+    "customer_id": "ce533f8a-6ee4-4947-b598-6b345a3fffda",
+    "start_time": "2026-03-13T09:30:00+00:00",
+    "end_time": "2026-03-13T10:00:00+00:00",
+    "status": "confirmed",
+    "memo": "AirRESERVEからの移行",
+    "is_first_visit": false,
+    "created_at": "2026-03-10T17:49:58.817333+00:00"
+  },
+  {
+    "id": "746d220d-ef59-4064-8117-8d66add7366f",
+    "customer_id": "5436be23-a00f-43d9-b8c7-2974cdcdd763",
+    "start_time": "2026-03-13T10:00:00+00:00",
+    "end_time": "2026-03-13T10:30:00+00:00",
+    "status": "confirmed",
+    "memo": "AirRESERVEからの移行",
+    "is_first_visit": false,
+    "created_at": "2026-03-10T17:49:58.891952+00:00"
+  },
+  {
+    "id": "86b6acca-082a-40b0-acdd-a54dc91ec153",
+    "customer_id": "5dfdfe8d-c404-4cbe-b7c1-745820a00b09",
+    "start_time": "2026-03-14T01:00:00+00:00",
+    "end_time": "2026-03-14T01:30:00+00:00",
+    "status": "confirmed",
+    "memo": "AirRESERVEからの移行",
+    "is_first_visit": false,
+    "created_at": "2026-03-10T17:49:59.275564+00:00"
+  },
+  {
+    "id": "11d0280c-a1a2-4fca-b7d8-ce4256a3bfff",
+    "customer_id": "98923fab-686b-4a5b-bd89-73b4d56d1845",
+    "start_time": "2026-03-14T03:00:00+00:00",
+    "end_time": "2026-03-14T03:30:00+00:00",
+    "status": "confirmed",
+    "memo": "実費診療",
+    "is_first_visit": false,
+    "created_at": "2026-03-10T17:49:59.348291+00:00"
+  },
+  {
+    "id": "e6929d30-537b-4f83-949a-17106bba0600",
+    "customer_id": "6da8512d-52fb-4431-8c29-7365c7cd63f5",
+    "start_time": "2026-03-14T06:00:00+00:00",
+    "end_time": "2026-03-14T06:30:00+00:00",
+    "status": "confirmed",
+    "memo": "AirRESERVEからの移行",
+    "is_first_visit": false,
+    "created_at": "2026-03-10T17:49:59.422549+00:00"
+  },
+  {
+    "id": "97f76251-9489-4275-87f7-e7201fd7769c",
+    "customer_id": "8ea6976d-4873-4705-a527-6dfc6976a936",
+    "start_time": "2026-03-14T09:00:00+00:00",
+    "end_time": "2026-03-14T09:30:00+00:00",
+    "status": "confirmed",
+    "memo": "AirRESERVEからの移行",
+    "is_first_visit": false,
+    "created_at": "2026-03-10T17:49:59.574412+00:00"
+  },
+  {
+    "id": "435d1236-fcb7-4a2c-a5dc-e6e5654f747d",
+    "customer_id": "23a70a41-5f50-4c20-aa79-e3626bb2ce67",
+    "start_time": "2026-03-13T03:00:00+00:00",
+    "end_time": "2026-03-13T04:00:00+00:00",
+    "status": "confirmed",
+    "memo": "実費診療",
+    "is_first_visit": false,
+    "created_at": "2026-03-10T17:49:58.585904+00:00"
+  },
+  {
+    "id": "9c976b4f-9028-44a3-a979-1298aa828447",
+    "customer_id": "1049be6b-0a58-4d4a-a189-2614e1b8c1a3",
+    "start_time": "2026-03-14T07:00:00+00:00",
+    "end_time": "2026-03-14T08:00:00+00:00",
+    "status": "confirmed",
+    "memo": "実費診療",
+    "is_first_visit": false,
+    "created_at": "2026-03-10T17:49:59.49724+00:00"
+  },
+  {
+    "id": "618b101f-1ff0-4cfc-ae51-73f694b9f24b",
+    "customer_id": "89c617bc-21de-4e18-9609-d36b1fb69b6a",
+    "start_time": "2026-03-13T07:00:00+00:00",
+    "end_time": "2026-03-13T07:30:00+00:00",
+    "status": "confirmed",
+    "memo": "AirRESERVEからの移行",
+    "is_first_visit": false,
+    "created_at": "2026-03-10T17:49:58.656937+00:00"
+  },
+  {
+    "id": "5033eb3f-c438-49a5-b0f4-508aba9b645a",
+    "customer_id": "05273602-cdf1-4ab7-a06b-cc4cfc938d9d",
+    "start_time": "2026-03-13T08:30:00+00:00",
+    "end_time": "2026-03-13T09:00:00+00:00",
+    "status": "confirmed",
+    "memo": "AirRESERVEからの移行",
+    "is_first_visit": false,
+    "created_at": "2026-03-10T17:49:58.736503+00:00"
+  },
+  {
+    "id": "f6489ce5-2736-454a-a32e-c46a001cb9ec",
+    "customer_id": "ebb50bc3-9bb0-47e4-b516-1729c820c194",
+    "start_time": "2026-03-13T12:30:00+00:00",
+    "end_time": "2026-03-13T13:00:00+00:00",
+    "status": "confirmed",
+    "memo": "AirRESERVEからの移行",
+    "is_first_visit": false,
+    "created_at": "2026-03-10T17:49:59.127968+00:00"
+  },
+  {
+    "id": "7ee31ad8-611d-411b-a256-06fd06b70a72",
+    "customer_id": "1b79a5f4-9ff8-4f9e-9ea9-2f972e528475",
+    "start_time": "2026-03-13T10:30:00+00:00",
+    "end_time": "2026-03-13T11:30:00+00:00",
+    "status": "confirmed",
+    "memo": "実費診療",
+    "is_first_visit": false,
+    "created_at": "2026-03-10T17:49:58.968568+00:00"
+  },
+  {
+    "id": "b46745e6-f63d-49e8-83b7-3be73f459655",
+    "customer_id": "ab270137-2cc6-4b2f-b338-b313692d8dae",
+    "start_time": "2026-03-13T11:30:00+00:00",
+    "end_time": "2026-03-13T12:30:00+00:00",
+    "status": "confirmed",
+    "memo": "実費診療",
+    "is_first_visit": false,
+    "created_at": "2026-03-10T17:49:59.051835+00:00"
+  },
+  {
+    "id": "e1b8c697-1e02-4b26-adf6-0aec9d76a31c",
+    "customer_id": "3d55d5f0-2ca8-4851-9cd5-68336ca2d069",
+    "start_time": "2026-03-13T13:00:00+00:00",
+    "end_time": "2026-03-13T13:30:00+00:00",
+    "status": "confirmed",
+    "memo": "AirRESERVEからの移行",
+    "is_first_visit": false,
+    "created_at": "2026-03-10T17:49:59.204009+00:00"
+  },
+  {
+    "id": "5e280bc4-e94d-45ac-ab71-2e190ff48656",
+    "customer_id": "3033d752-65c7-4863-aca8-345651c2f9a1",
+    "start_time": "2026-03-12T08:00:00+00:00",
+    "end_time": "2026-03-12T08:30:00+00:00",
+    "status": "confirmed",
+    "memo": "AirRESERVEからの移行",
+    "is_first_visit": false,
+    "created_at": "2026-03-10T17:49:57.825503+00:00"
+  },
+  {
+    "id": "28d6dfb8-9f25-4e5b-9f89-b866bcd08fc4",
+    "customer_id": "2001f4ee-2437-4ae3-91bc-a0c8c57b5267",
+    "start_time": "2026-03-12T08:30:00+00:00",
+    "end_time": "2026-03-12T09:00:00+00:00",
+    "status": "confirmed",
+    "memo": "AirRESERVEからの移行",
+    "is_first_visit": false,
+    "created_at": "2026-03-10T17:49:57.901352+00:00"
+  },
+  {
+    "id": "dad1f8ef-74f0-4347-85b4-390c3d471652",
+    "customer_id": "394fabc0-6d3d-4b1f-ac50-e0486d6916cf",
+    "start_time": "2026-03-12T09:00:00+00:00",
+    "end_time": "2026-03-12T09:30:00+00:00",
+    "status": "confirmed",
+    "memo": "AirRESERVEからの移行",
+    "is_first_visit": false,
+    "created_at": "2026-03-10T17:49:57.976025+00:00"
+  },
+  {
+    "id": "7b6a932f-3428-4d17-a551-da0c30594a7e",
+    "customer_id": "3822a5d7-dad7-4d23-be7c-b6e76066eb2b",
+    "start_time": "2026-03-12T09:30:00+00:00",
+    "end_time": "2026-03-12T10:00:00+00:00",
+    "status": "confirmed",
+    "memo": "AirRESERVEからの移行",
+    "is_first_visit": false,
+    "created_at": "2026-03-10T17:49:58.055718+00:00"
+  },
+  {
+    "id": "477f3c79-27ef-48e2-8c36-e0d664837d59",
+    "customer_id": "55a45655-ff3e-455a-816b-dda70a64966d",
+    "start_time": "2026-03-12T10:00:00+00:00",
+    "end_time": "2026-03-12T10:30:00+00:00",
+    "status": "confirmed",
+    "memo": "AirRESERVEからの移行",
+    "is_first_visit": false,
+    "created_at": "2026-03-10T17:49:58.13199+00:00"
+  },
+  {
+    "id": "e73415ce-e6db-41ac-8242-032192f58316",
+    "customer_id": "ab19bc0c-ca78-42e8-9338-663b12802bc5",
+    "start_time": "2026-03-12T10:30:00+00:00",
+    "end_time": "2026-03-12T11:00:00+00:00",
+    "status": "confirmed",
+    "memo": "AirRESERVEからの移行",
+    "is_first_visit": false,
+    "created_at": "2026-03-10T17:49:58.213735+00:00"
+  },
+  {
+    "id": "75de2d8a-3d34-4601-b98c-5a756a76cdcd",
+    "customer_id": "7b737652-53d3-4176-a986-e712c8bb0dae",
+    "start_time": "2026-03-12T11:00:00+00:00",
+    "end_time": "2026-03-12T11:30:00+00:00",
+    "status": "confirmed",
+    "memo": "AirRESERVEからの移行",
+    "is_first_visit": false,
+    "created_at": "2026-03-10T17:49:58.289302+00:00"
+  },
+  {
+    "id": "40a4802c-09dc-4497-8026-4638b7598c60",
+    "customer_id": "f7598936-ec76-44e8-a283-3cdc6f1f33fb",
+    "start_time": "2026-03-12T11:30:00+00:00",
+    "end_time": "2026-03-12T12:00:00+00:00",
+    "status": "confirmed",
+    "memo": "AirRESERVEからの移行",
+    "is_first_visit": false,
+    "created_at": "2026-03-10T17:49:58.360271+00:00"
+  },
+  {
+    "id": "14b9030d-3a04-4d7c-b92b-d612550c0f48",
+    "customer_id": "18787c68-4102-4432-955c-dd54d1ad0f64",
+    "start_time": "2026-03-12T12:00:00+00:00",
+    "end_time": "2026-03-12T12:30:00+00:00",
+    "status": "confirmed",
+    "memo": "AirRESERVEからの移行",
+    "is_first_visit": false,
+    "created_at": "2026-03-10T17:49:58.437914+00:00"
+  },
+  {
+    "id": "31d983c8-2fd8-4cc2-ae32-f9b526dd6250",
+    "customer_id": "96b90bee-55c8-4a0f-a159-8f086266edfa",
+    "start_time": "2026-03-12T12:30:00+00:00",
+    "end_time": "2026-03-12T13:00:00+00:00",
+    "status": "confirmed",
+    "memo": "AirRESERVEからの移行",
+    "is_first_visit": false,
+    "created_at": "2026-03-10T17:49:58.511711+00:00"
+  },
+  {
+    "id": "5b77713c-d494-4396-b5d5-b0d7377a76ef",
+    "customer_id": "c5469ca4-4160-45e0-b79a-c701dee78239",
+    "start_time": "2026-03-12T05:00:00+00:00",
+    "end_time": "2026-03-12T05:30:00+00:00",
+    "status": "confirmed",
+    "memo": "AirRESERVEからの移行",
+    "is_first_visit": false,
+    "created_at": "2026-03-10T17:49:57.648026+00:00"
+  },
+  {
+    "id": "b1005361-b52f-45a1-b9f5-f3316afb40b5",
+    "customer_id": "0259a602-208e-472c-bff0-40b644eed3ab",
+    "start_time": "2026-03-14T03:30:00+00:00",
+    "end_time": "2026-03-14T06:00:00+00:00",
+    "status": "confirmed",
+    "memo": "[院内追加]",
+    "is_first_visit": true,
+    "created_at": "2026-03-11T08:36:50.148389+00:00"
+  },
+  {
+    "id": "9f404529-c27b-4259-9580-62b1398b0a6c",
+    "customer_id": "b2cedf9e-9985-4b6f-8fda-629bdcfe1bb5",
+    "start_time": "2026-03-12T02:00:00+00:00",
+    "end_time": "2026-03-12T03:00:00+00:00",
+    "status": "confirmed",
+    "memo": "実費診療",
+    "is_first_visit": false,
+    "created_at": "2026-03-10T17:49:57.56898+00:00"
+  }
+]

@@ -1,0 +1,2 @@
+[2026/3/15 1:45:23] Initialized debug log
+[2026/3/16 1:15:25] Captured: UserID=UTEST_LOCAL, Type=message, Msg=LOCAL_TEST

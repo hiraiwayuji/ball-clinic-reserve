@@ -1,0 +1,685 @@
+"use client";
+
+import { useState, useEffect, useCallback } from "react";
+import Link from "next/link";
+import { format, isSameMonth, isSameDay, isToday, isPast, startOfDay, startOfMonth, endOfMonth, eachDayOfInterval, startOfWeek, endOfWeek } from "date-fns";
+import { ja } from "date-fns/locale";
+import { ChevronLeft, ChevronRight, ArrowLeft, Clock, CalendarDays, X, CheckCircle2, AlertCircle } from "lucide-react";
+import { createWaitlistReservation } from "@/app/actions/reserve";
+import { getClinicHolidays, type ClinicHoliday } from "@/app/actions/holidays";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { createClient } from "@/lib/supabase/client";
+
+import { getTimeSlots, getMaxSlots, isDateWithinAllowedRange, isTimeSlotWithinTwoHours } from "@/lib/time-slots";
+
+// 静的なTIME_SLOTS, MAX_SLOTSを削除
+
+type AvailabilityLevel = "available" | "few" | "full" | "closed" | "past";
+
+function getAvailabilityLevel(dateStr: string, bookedCount: number, date: Date, clinicHolidays: ClinicHoliday[]): AvailabilityLevel {
+  const isHoliday = clinicHolidays.some(h => h.date === dateStr);
+  if (isHoliday) return "closed";
+
+  const day = date.getDay();
+  if (day === 0 || day === 3) return "closed";
+  if (isPast(startOfDay(date)) && !isToday(date)) return "past";
+  
+  // 1ヶ月制限のチェック
+  if (!isDateWithinAllowedRange(date)) return "closed";
+  
+  // 実際に予約可能なスロット（2時間前制限にかかっていないもの）をカウントする
+  const allSlots = getTimeSlots(date);
+  const totalSlots = allSlots.length;
+
+  if (totalSlots === 0) return "closed";
+
+  const freeCount = totalSlots - bookedCount;
+  const freeRate = freeCount / totalSlots;
+
+  // 1. 全て埋まっている場合 (空き 0) -> × (full)
+  if (freeCount <= 0) return "full";
+  
+  // 2. 空き率が 50% 未満の場合 -> △ (few)
+  if (freeRate < 0.5) return "few";
+
+  // 3. 空き率が 50% 以上の場合 -> ◯ (available)
+  return "available";
+}
+
+const levelConfig = {
+  available: {
+    bg: "bg-emerald-50 hover:bg-emerald-100",
+    border: "border-emerald-200",
+    dot: "bg-emerald-500",
+    label: "◯ 空き",
+    symbol: "◯",
+    labelClass: "text-emerald-700",
+    text: "text-slate-800",
+  },
+  few: {
+    bg: "bg-amber-50 hover:bg-amber-100",
+    border: "border-amber-200",
+    dot: "bg-amber-500",
+    label: "△ 残りわずか",
+    symbol: "△",
+    labelClass: "text-amber-700",
+    text: "text-slate-800",
+  },
+  full: {
+    bg: "bg-rose-50 hover:bg-rose-100",
+    border: "border-rose-200",
+    dot: "bg-rose-500",
+    label: "× 予約済",
+    symbol: "×",
+    labelClass: "text-rose-700",
+    text: "text-slate-800",
+  },
+  closed: {
+    bg: "bg-slate-100",
+    border: "border-slate-200",
+    dot: "bg-slate-300",
+    label: "休診",
+    labelClass: "text-slate-400",
+    text: "text-slate-400",
+  },
+  past: {
+    bg: "bg-slate-50",
+    border: "border-slate-100",
+    dot: "bg-slate-200",
+    label: "",
+    labelClass: "",
+    text: "text-slate-300",
+  },
+};
+
+type WaitlistState = "idle" | "form" | "submitting" | "success";
+
+export default function ReserveCalendarPage() {
+  const [currentMonth, setCurrentMonth] = useState<Date | null>(null);
+  const [monthlyData, setMonthlyData] = useState<Record<string, number>>({});
+  const [clinicHolidays, setClinicHolidays] = useState<ClinicHoliday[]>([]);
+  const [selectedDate, setSelectedDate] = useState<Date | null>(null);
+  const [selectedLevel, setSelectedLevel] = useState<AvailabilityLevel | null>(null);
+  const [dailySlots, setDailySlots] = useState<string[]>([]);
+  const [loadingMonth, setLoadingMonth] = useState(false);
+  const [loadingDay, setLoadingDay] = useState(false);
+
+  // キャンセル待ちフォーム状態
+  const [waitlistState, setWaitlistState] = useState<WaitlistState>("idle");
+  const [waitlistStart, setWaitlistStart] = useState("15:00");
+  const [waitlistEnd, setWaitlistEnd] = useState("20:00");
+  const [waitlistName, setWaitlistName] = useState("");
+  const [waitlistPhone, setWaitlistPhone] = useState("");
+  const [waitlistSymptoms, setWaitlistSymptoms] = useState("");
+  const [waitlistError, setWaitlistError] = useState("");
+  const [waitlistNumber, setWaitlistNumber] = useState("");
+
+  const fetchMonthData = useCallback(async (monthDate: Date) => {
+    setLoadingMonth(true);
+    const supabase = createClient();
+    const year = monthDate.getFullYear();
+    const month = monthDate.getMonth() + 1;
+    const lastDay = new Date(year, month, 0).getDate();
+    
+    const startOfMonthJST = new Date(`${year}-${String(month).padStart(2, '0')}-01T00:00:00+09:00`);
+    const endOfMonthJST = new Date(`${year}-${String(month).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}T23:59:59+09:00`);
+    
+    // DBのUTC形式と100%一致させるためにtoISOString()で変換
+    const startOfMonthUTC = startOfMonthJST.toISOString();
+    const endOfMonthUTC = endOfMonthJST.toISOString();
+
+    // 直接Supabaseからデータを取得 (キャッシュ完全破棄のためダミー条件付与)
+    const [ { data: aptData }, { data: holidayData } ] = await Promise.all([
+      supabase.from("appointments").select("start_time, end_time, customers(name)")
+        .gte("start_time", startOfMonthUTC)
+        .lte("start_time", endOfMonthUTC)
+        .neq("status", "cancelled"),
+      supabase.from("clinic_holidays").select("*")
+    ]);
+
+    const counts: Record<string, number> = {};
+    if (aptData) {
+      aptData.forEach((app: any) => {
+        // ユーザー指示のJSTログ出力
+        console.log(`[予約データ取得] ${app.customers?.name || 'Unknown'}: start_time=${new Date(app.start_time).toLocaleString("ja-JP", {timeZone: "Asia/Tokyo"})}`);
+        
+        const dStart = new Date(app.start_time);
+        const dEnd = app.end_time ? new Date(app.end_time) : new Date(dStart.getTime() + 30 * 60000);
+        let current = dStart.getTime();
+        
+        while (current < dEnd.getTime()) {
+          // 絶対時間 (UTC) に 9時間 (JST) を足して、UTCのメソッドでJSTの時刻を取得する
+          const jstDate = new Date(current + 9 * 3600000);
+          const yyyy = jstDate.getUTCFullYear();
+          const mon = String(jstDate.getUTCMonth() + 1).padStart(2, '0');
+          const dd = String(jstDate.getUTCDate()).padStart(2, '0');
+          const hh = String(jstDate.getUTCHours()).padStart(2, '0');
+          const mm = String(jstDate.getUTCMinutes()).padStart(2, '0');
+          
+          const dateKey = `${yyyy}-${mon}-${dd}`; // YYYY-MM-DD
+          const slotTime = `${hh}:${mm}`; // HH:mm
+          
+          const slotDateObj = new Date(`${dateKey}T00:00:00+09:00`);
+          const businessSlots = getTimeSlots(slotDateObj);
+          
+          if (businessSlots.includes(slotTime)) {
+            counts[dateKey] = (counts[dateKey] || 0) + 1;
+          }
+          current += 30 * 60000;
+        }
+      });
+    }
+
+    setMonthlyData(counts);
+    setClinicHolidays(holidayData || []);
+    setLoadingMonth(false);
+  }, []);
+
+  useEffect(() => {
+    setCurrentMonth(new Date(new Date().getFullYear(), new Date().getMonth(), 1));
+  }, []);
+
+  useEffect(() => {
+    if (currentMonth) {
+      fetchMonthData(currentMonth);
+    }
+    setSelectedDate(null);
+    setDailySlots([]);
+    setWaitlistState("idle");
+  }, [currentMonth, fetchMonthData]);
+
+  // リアルタイム同期の設定 (Supabase Real-time)
+  useEffect(() => {
+    const supabase = createClient();
+    const channel = supabase
+      .channel("public-calendar-realtime")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "appointments" },
+        () => {
+          console.log("[REALTIME] Appointment change, refreshing...");
+          if (currentMonth) fetchMonthData(currentMonth);
+          if (selectedDate) {
+            const dateStr = format(selectedDate, "yyyy-MM-dd");
+            const startOfDayUTC = new Date(`${dateStr}T00:00:00+09:00`).toISOString();
+            const endOfDayUTC = new Date(`${dateStr}T23:59:59+09:00`).toISOString();
+            supabase.from("appointments").select("start_time, end_time")
+              .gte("start_time", startOfDayUTC)
+              .lte("start_time", endOfDayUTC)
+              .neq("status", "cancelled")
+              .then(({data}) => {
+              const slotCounts: Record<string, number> = {};
+              if (data) {
+                data.forEach((app: any) => {
+                  const start = new Date(app.start_time);
+                  const end = app.end_time ? new Date(app.end_time) : new Date(start.getTime() + 30 * 60000);
+                  let current = start.getTime();
+                  while (current < end.getTime()) {
+                    // 絶対時間に9時間(JST)を加え、フォーマットブレのない手動0埋めでHH:mmを生成
+                    const jstDate = new Date(current + 9 * 3600000);
+                    const hh = String(jstDate.getUTCHours()).padStart(2, '0');
+                    const mm = String(jstDate.getUTCMinutes()).padStart(2, '0');
+                    const timeKey = `${hh}:${mm}`;
+                    
+                    slotCounts[timeKey] = (slotCounts[timeKey] || 0) + 1;
+                    current += 30 * 60000;
+                  }
+                });
+              }
+              const bookedTimes = Object.keys(slotCounts).filter(time => slotCounts[time] >= 1);
+              setDailySlots(bookedTimes);
+            });
+          }
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "clinic_holidays" },
+        () => {
+          console.log("[REALTIME] Holiday change, refreshing...");
+          if (currentMonth) fetchMonthData(currentMonth);
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [currentMonth, selectedDate, fetchMonthData]);
+
+  const handleDayClick = async (date: Date, level: AvailabilityLevel) => {
+    if (level === "closed" || level === "past") return;
+    setSelectedDate(date);
+    setSelectedLevel(level);
+    setWaitlistState("idle");
+    setLoadingDay(true);
+    
+    const dateStr = format(date, "yyyy-MM-dd");
+    const supabase = createClient();
+    
+    // JSTからUTC文字列に厳密に変換する (DBのUTCデータと100%一致させるため)
+    const startOfDayUTC = new Date(`${dateStr}T00:00:00+09:00`).toISOString();
+    const endOfDayUTC = new Date(`${dateStr}T23:59:59+09:00`).toISOString();
+    
+    // 直接Supabaseからデータを取得（キャッシュ回避のためダミー条件を付与）
+    const { data: aptData, error: aptError } = await supabase
+      .from("appointments")
+      .select("start_time, end_time, customers(name)")
+      .gte("start_time", startOfDayUTC)
+      .lte("start_time", endOfDayUTC)
+      .neq("status", "cancelled");
+
+    if (aptError) console.error("データ取得エラー:", aptError);
+
+    const slotCounts: Record<string, number> = {};
+    if (aptData) {
+      aptData.forEach((app: any) => {
+        // ユーザー指示のJSTログ出力
+        console.log(`[予約データ取得] ${app.customers?.name || 'Unknown'}: start_time=${new Date(app.start_time).toLocaleString("ja-JP", {timeZone: "Asia/Tokyo"})}`);
+        
+        const start = new Date(app.start_time);
+        const end = app.end_time ? new Date(app.end_time) : new Date(start.getTime() + 30 * 60000);
+        let current = start.getTime();
+        while (current < end.getTime()) {
+          // 絶対時間に9時間(JST)を加え、フォーマットブレのない手動0埋めでHH:mmを生成
+          const jstDate = new Date(current + 9 * 3600000);
+          const hh = String(jstDate.getUTCHours()).padStart(2, '0');
+          const mm = String(jstDate.getUTCMinutes()).padStart(2, '0');
+          const timeKey = `${hh}:${mm}`;
+          
+          slotCounts[timeKey] = (slotCounts[timeKey] || 0) + 1;
+          
+          current += 30 * 60000;
+        }
+      });
+    }
+
+    const bookedTimes = Object.keys(slotCounts).filter(time => slotCounts[time] >= 1);
+    
+    setDailySlots(bookedTimes);
+    setLoadingDay(false);
+  };
+
+  const handleWaitlistSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedDate) return;
+    setWaitlistError("");
+
+    if (!waitlistName || !waitlistPhone || !waitlistStart || !waitlistEnd) {
+      setWaitlistError("必須項目をすべてご入力ください。");
+      return;
+    }
+    if (waitlistStart >= waitlistEnd) {
+      setWaitlistError("終了時間は開始時間より後にしてください。");
+      return;
+    }
+
+    setWaitlistState("submitting");
+    const fd = new FormData();
+    fd.append("date", format(selectedDate, "yyyy-MM-dd"));
+    fd.append("startTime", waitlistStart);
+    fd.append("endTime", waitlistEnd);
+    fd.append("name", waitlistName);
+    fd.append("phone", waitlistPhone);
+    fd.append("symptoms", waitlistSymptoms);
+
+    const result = await createWaitlistReservation(fd);
+    if (result.success) {
+      setWaitlistNumber(result.reservationNumber || "");
+      setWaitlistState("success");
+    } else {
+      setWaitlistError(result.error || "エラーが発生しました。");
+      setWaitlistState("form");
+    }
+  };
+
+  // カレンダーグリッド生成
+  if (!currentMonth) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+        <div className="text-slate-400 animate-pulse">カレンダーを読み込み中...</div>
+      </div>
+    );
+  }
+
+  const monthStart = startOfMonth(currentMonth);
+  const monthEnd = endOfMonth(currentMonth);
+  const calStart = startOfWeek(monthStart, { weekStartsOn: 0 });
+  const calEnd = endOfWeek(monthEnd, { weekStartsOn: 0 });
+  const calDays = eachDayOfInterval({ start: calStart, end: calEnd });
+
+  const prevMonth = () => setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() - 1, 1));
+  const nextMonth = () => setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 1));
+
+  const WEEKDAYS = ["日", "月", "火", "水", "木", "金", "土"];
+
+  const closeDetail = () => {
+    setSelectedDate(null);
+    setSelectedLevel(null);
+    setDailySlots([]);
+    setWaitlistState("idle");
+  };
+
+  return (
+    <div className="min-h-screen bg-slate-50 py-8 px-4">
+      <div className="max-w-3xl mx-auto">
+        <Link href="/reserve" className="inline-flex items-center text-sm text-slate-500 hover:text-blue-600 mb-6 transition">
+          <ArrowLeft className="w-4 h-4 mr-1" />
+          予約フォームに戻る
+        </Link>
+
+        <div className="bg-white rounded-2xl shadow-sm overflow-hidden border border-slate-100">
+          {/* ヘッダー */}
+          <div className="bg-gradient-to-r from-blue-700 to-blue-600 px-6 py-5 text-white">
+            <div className="flex items-center gap-2 mb-1">
+              <CalendarDays className="w-5 h-5" />
+              <h1 className="text-lg font-bold">予約空き状況カレンダー</h1>
+            </div>
+            <p className="text-blue-200 text-sm">日付をクリックすると、その日の時間帯別空き状況が確認できます。<br/>※1ヶ月先までの予約が可能です。</p>
+          </div>
+
+          {/* 月ナビゲーション */}
+          <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
+            <button onClick={prevMonth} className="w-9 h-9 flex items-center justify-center rounded-full hover:bg-slate-100 transition text-slate-600" aria-label="前月">
+              <ChevronLeft className="w-5 h-5" />
+            </button>
+            <h2 className="text-xl font-bold text-slate-800 tabular-nums">
+              {currentMonth && format(currentMonth, "yyyy年M月", { locale: ja })}
+            </h2>
+            <button onClick={nextMonth} className="w-9 h-9 flex items-center justify-center rounded-full hover:bg-slate-100 transition text-slate-600" aria-label="翌月">
+              <ChevronRight className="w-5 h-5" />
+            </button>
+          </div>
+
+          {/* 凡例 */}
+          <div className="flex flex-wrap gap-x-4 gap-y-2 px-6 py-3 bg-slate-50 border-b border-slate-100 text-xs">
+            {(["available", "few", "full", "closed"] as const).map(level => (
+              <div key={level} className="flex items-center gap-1.5">
+                <span className={`w-2.5 h-2.5 rounded-full ${levelConfig[level].dot}`} />
+                <span className="text-slate-600">{levelConfig[level].label || "休診日"}</span>
+              </div>
+            ))}
+          </div>
+
+          {/* カレンダーグリッド */}
+          <div className="p-4">
+            <div className="grid grid-cols-7 mb-2">
+              {WEEKDAYS.map((d, i) => (
+                <div key={d} className={`text-center text-xs font-semibold py-1 ${i === 0 ? "text-red-500" : i === 6 ? "text-blue-500" : "text-slate-500"}`}>{d}</div>
+              ))}
+            </div>
+
+            {loadingMonth ? (
+              <div className="flex items-center justify-center h-48 text-slate-400 text-sm animate-pulse">読み込み中...</div>
+            ) : (
+              <div className="grid grid-cols-7 gap-1">
+                {calDays.map((day) => {
+                  const dateStr = format(day, "yyyy-MM-dd");
+                  const bookedCount = monthlyData[dateStr] || 0;
+                  const level = getAvailabilityLevel(dateStr, bookedCount, day, clinicHolidays);
+                  const cfg = levelConfig[level];
+                  const isSelected = selectedDate && isSameDay(day, selectedDate);
+                  const isCurrentMonth = isSameMonth(day, currentMonth);
+                  const isClickable = level !== "closed" && level !== "past" && isCurrentMonth;
+
+                  return (
+                    <div
+                      key={dateStr}
+                      onClick={() => isClickable && handleDayClick(day, level)}
+                      className={`
+                        relative rounded-xl p-1 border transition-all duration-150 select-none flex flex-col items-center justify-center
+                        ${isCurrentMonth ? (isClickable ? cfg.bg : "bg-slate-50") : "bg-transparent border-transparent opacity-30"}
+                        ${isCurrentMonth ? cfg.border : ""}
+                        ${isClickable ? "cursor-pointer" : "cursor-default"}
+                        ${isSelected ? "ring-2 ring-blue-500 ring-offset-1 z-10" : ""}
+                        ${isToday(day) ? "font-bold" : ""}
+                      `}
+                      style={{ minHeight: "80px" }}
+                    >
+                      <span className={`text-xs absolute top-1 left-1.5 ${isCurrentMonth ? cfg.text : "text-slate-200"}`}>
+                        {format(day, "d")}
+                      </span>
+                      {isCurrentMonth && level !== "past" && (
+                        <div className={`text-xl font-bold mt-2 ${cfg.labelClass}`}>
+                          {(cfg as any).symbol}
+                        </div>
+                      )}
+                      {isToday(day) && (
+                        <span className="absolute top-1 right-1.5 text-[8px] font-bold text-blue-600 bg-blue-50 px-1 rounded border border-blue-100">今日</span>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* 選択日の詳細パネル */}
+          {selectedDate && (
+            <div className="border-t border-slate-100">
+              {/* 時間帯一覧 */}
+              <div className="px-6 py-5">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="font-bold text-slate-800 flex items-center gap-2">
+                    <Clock className="w-4 h-4 text-blue-600" />
+                    {format(selectedDate, "M月d日 (E)", { locale: ja })} の時間帯
+                  </h3>
+                  <button onClick={closeDetail} className="text-slate-400 hover:text-slate-600 transition">
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+
+                {loadingDay ? (
+                  <div className="text-center text-slate-400 text-sm animate-pulse py-4">読み込み中...</div>
+                ) : (
+                  <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2 mb-5">
+                      {getTimeSlots(selectedDate).map((slot) => {
+                        const isBooked = dailySlots.includes(slot);
+                        const isTooClose = isTimeSlotWithinTwoHours(selectedDate, slot);
+                        
+                        if (isBooked) {
+                          return (
+                            <div
+                              key={slot}
+                              className="px-3 py-3 rounded-lg text-center text-sm font-medium border transition bg-rose-50 border-rose-200 text-rose-700"
+                            >
+                              <div className="text-xs">{slot}</div>
+                              <div className="text-[10px] py-0.5">予約済</div>
+                            </div>
+                          );
+                        }
+
+                        if (isTooClose) {
+                        return (
+                          <div
+                            key={slot}
+                            className="px-3 py-3 rounded-lg text-center text-sm font-medium border transition bg-slate-50 border-slate-100 text-slate-300"
+                          >
+                            <div className="text-xs">{slot}</div>
+                            <div className="text-[10px] py-1">TEL</div>
+                          </div>
+                        );
+                      }
+                      return (
+                        <Link
+                          key={slot}
+                          href={`/reserve?date=${format(selectedDate, "yyyy-MM-dd")}&time=${slot}`}
+                          className="px-3 py-3 rounded-lg text-center text-sm font-medium border transition bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100 hover:border-emerald-400 shadow-sm active:scale-95 flex flex-col items-center"
+                        >
+                          <div className="text-xs">{slot}</div>
+                          <div className="text-[10px] py-0.5">空き</div>
+                        </Link>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {/* 予約枠が1つでもある場合は予約フォームへのリンクを表示 */}
+                {dailySlots.length < getTimeSlots(selectedDate).length ? (
+                  <Button asChild className="w-full bg-blue-600 hover:bg-blue-700">
+                    <Link href={`/reserve?date=${format(selectedDate, "yyyy-MM-dd")}`}>
+                      <CalendarDays className="w-4 h-4 mr-2" />
+                      {format(selectedDate, "M月d日", { locale: ja })} に予約する
+                    </Link>
+                  </Button>
+                ) : (
+                  /* 全て埋まっている場合のみキャンセル待ちボタンを表示 */
+                  <div className="space-y-3">
+                    <div className="flex items-start gap-2 bg-red-50 border border-red-200 rounded-xl p-3 text-sm text-red-700">
+                      <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                      <span>この日の予約枠はすべて埋まっています。ご希望の時間帯を入力してキャンセル待ちに登録できます。</span>
+                    </div>
+                    {waitlistState === "idle" && (
+                      <Button
+                        onClick={() => setWaitlistState("form")}
+                        className="w-full bg-amber-500 hover:bg-amber-600 text-white"
+                      >
+                        <Clock className="w-4 h-4 mr-2" />
+                        希望時間帯を指定してキャンセル待ちに登録する
+                      </Button>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* キャンセル待ちフォーム */}
+              {(waitlistState === "form" || waitlistState === "submitting") && (
+                <div className="border-t border-amber-100 bg-amber-50/50 px-6 py-5">
+                  <h4 className="font-bold text-amber-900 mb-4 flex items-center gap-2">
+                    <Clock className="w-4 h-4" />
+                    キャンセル待ち登録
+                  </h4>
+                  <form onSubmit={handleWaitlistSubmit} className="space-y-4">
+                    {/* 希望時間帯 */}
+                    <div>
+                      <Label className="text-sm font-semibold text-slate-700 mb-2 block">
+                        ご希望の時間帯 <span className="text-red-500">*</span>
+                      </Label>
+                      <div className="flex items-center gap-3">
+                        <select
+                          value={waitlistStart}
+                          onChange={e => setWaitlistStart(e.target.value)}
+                          className="flex-1 border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 bg-white"
+                        >
+                          {getTimeSlots(selectedDate).map(t => {
+                            const isTooClose = isTimeSlotWithinTwoHours(selectedDate, t);
+                            return <option key={t} value={t} disabled={isTooClose}>{t} {isTooClose ? "(問合)" : ""}</option>
+                          })}
+                        </select>
+                        <span className="text-slate-500 text-sm font-medium shrink-0">〜</span>
+                        <select
+                          value={waitlistEnd}
+                          onChange={e => setWaitlistEnd(e.target.value)}
+                          className="flex-1 border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 bg-white"
+                        >
+                          {getTimeSlots(selectedDate).filter(t => t > waitlistStart).concat([selectedDate.getDay() === 6 ? "18:00" : "23:00"]).map(t => (
+                            <option key={t} value={t}>{t}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <p className="text-xs text-slate-500 mt-1.5">例：ご希望の範囲で空きが出たらご連絡します</p>
+                    </div>
+
+                    {/* お名前 */}
+                    <div>
+                      <Label htmlFor="waitlist-name" className="text-sm font-medium text-slate-700">
+                        お名前 <span className="text-red-500">*</span>
+                      </Label>
+                      <Input
+                        id="waitlist-name"
+                        value={waitlistName}
+                        onChange={e => setWaitlistName(e.target.value)}
+                        placeholder="例: 山田 太郎"
+                        className="mt-1"
+                      />
+                    </div>
+
+                    {/* 電話番号 */}
+                    <div>
+                      <Label htmlFor="waitlist-phone" className="text-sm font-medium text-slate-700">
+                        お電話番号 <span className="text-red-500">*</span>
+                      </Label>
+                      <Input
+                        id="waitlist-phone"
+                        type="tel"
+                        value={waitlistPhone}
+                        onChange={e => setWaitlistPhone(e.target.value)}
+                        placeholder="例: 090-1234-5678"
+                        className="mt-1"
+                      />
+                    </div>
+
+                    {/* 症状（任意） */}
+                    <div>
+                      <Label htmlFor="waitlist-symptoms" className="text-sm font-medium text-slate-700">
+                        お悩みの症状（任意）
+                      </Label>
+                      <textarea
+                        id="waitlist-symptoms"
+                        value={waitlistSymptoms}
+                        onChange={e => setWaitlistSymptoms(e.target.value)}
+                        placeholder="例: 腰痛、肩こりなど"
+                        rows={2}
+                        className="mt-1 w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 resize-none"
+                      />
+                    </div>
+
+                    {waitlistError && (
+                      <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+                        {waitlistError}
+                      </p>
+                    )}
+
+                    <div className="flex gap-3">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => setWaitlistState("idle")}
+                        className="flex-1"
+                        disabled={waitlistState === "submitting"}
+                      >
+                        キャンセル
+                      </Button>
+                      <Button
+                        type="submit"
+                        className="flex-1 bg-amber-500 hover:bg-amber-600 text-white font-bold"
+                        disabled={waitlistState === "submitting"}
+                      >
+                        {waitlistState === "submitting" ? "登録中..." : `${waitlistStart}〜${waitlistEnd} でキャンセル待ち登録`}
+                      </Button>
+                    </div>
+                  </form>
+                </div>
+              )}
+
+              {/* キャンセル待ち登録完了 */}
+              {waitlistState === "success" && (
+                <div className="border-t border-slate-100 px-6 py-6 text-center">
+                  <CheckCircle2 className="w-12 h-12 text-amber-500 mx-auto mb-3" />
+                  <h4 className="font-bold text-slate-800 text-lg mb-2">キャンセル待ちを受け付けました</h4>
+                  <p className="text-slate-600 text-sm mb-4">
+                    {format(selectedDate, "M月d日", { locale: ja })} の <strong>{waitlistStart}〜{waitlistEnd}</strong> の範囲でキャンセルが出た場合にご連絡いたします。
+                  </p>
+                  <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-4 inline-block">
+                    <p className="text-xs text-amber-700 mb-1">受付番号</p>
+                    <p className="text-2xl font-mono font-bold text-amber-800 tracking-widest">{waitlistNumber}</p>
+                  </div>
+                  <p className="text-xs text-slate-500 mt-2">
+                    ※ LINEでの連絡をご希望の方は <a href="/reserve" className="text-blue-600 hover:underline">予約フォーム</a> よりご連絡ください。
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        <div className="mt-4 text-xs text-slate-500 text-center space-y-1">
+          <p>※ 水曜・日曜は休診日です</p>
+          <p>※ 空き状況はリアルタイムで変わります。ご予約はお早めに。</p>
+        </div>
+      </div>
+    </div>
+  );
+}

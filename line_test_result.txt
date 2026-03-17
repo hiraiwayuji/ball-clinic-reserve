@@ -1,0 +1,20 @@
+=== 看板アカウント送信テスト開始 ===
+Channel ID: 2003288674
+Target User ID: U8f8ca3940218a83e74ec11a2fbc0ffbc
+
+✅ 短期トークン取得成功
+ボット情報: {
+  "userId": "U5eadbdcbfc95ce3e8a6294430eb651e6",
+  "basicId": "@shc8761q",
+  "displayName": "ボール接骨院",
+  "pictureUrl": "https://profile.line-scdn.net/0hV4Fx8RQmCRt7ASLio4Z2TEdEB3YMLw9TAzMVdVkGUi8BMUlORWNHL1gEBS9RME9MRDIWfQ1WB3he",
+  "chatMode": "chat",
+  "markAsReadMode": "manual"
+}
+
+--- [Dynamic Token] 送信テスト開始 ---
+❌ [Dynamic Token] 送信失敗 (HTTP 400): {"message":"Failed to send messages"}
+
+.env.local の静的トークンでもテストします...
+--- [Static Token] 送信テスト開始 ---
+❌ [Static Token] 送信失敗 (HTTP 400): {"message":"Failed to send messages"}
