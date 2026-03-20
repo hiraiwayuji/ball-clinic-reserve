@@ -17,7 +17,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { updateAppointmentDetails, deleteAppointment } from "@/app/actions/adminReserve";
+import { updateAppointmentDetails, deleteAppointment, updateAppointmentStatus } from "@/app/actions/adminReserve";
+import { CheckCircle } from "lucide-react";
 import { toast } from "sonner";
 import { getTimeSlots } from "@/lib/time-slots";
 
@@ -99,6 +100,25 @@ export function EditAppointmentDialog({ open, onOpenChange, appointment, onSucce
       const result = await deleteAppointment(appointment.id);
       if (result.success) {
         toast.success("予約を削除しました");
+        onOpenChange(false);
+        if (onSuccess) onSuccess();
+      } else {
+        toast.error(result.error || "エラーが発生しました");
+      }
+    } catch (error) {
+      toast.error("通信エラーが発生しました");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleConfirm = async () => {
+    if (!appointment) return;
+    setIsSubmitting(true);
+    try {
+      const result = await updateAppointmentStatus(appointment.id, "confirmed");
+      if (result.success) {
+        toast.success("予約を確定しました");
         onOpenChange(false);
         if (onSuccess) onSuccess();
       } else {
@@ -209,10 +229,18 @@ export function EditAppointmentDialog({ open, onOpenChange, appointment, onSucce
           </div>
 
           <div className="flex justify-between items-center pt-4 border-t">
-            <Button type="button" variant="destructive" onClick={handleDelete} disabled={isSubmitting}>
-              <Trash2 className="w-4 h-4 mr-2" />
-              予約を削除
-            </Button>
+            <div className="flex gap-2">
+              <Button type="button" variant="destructive" onClick={handleDelete} disabled={isSubmitting}>
+                <Trash2 className="w-4 h-4 mr-2" />
+                削除
+              </Button>
+              {appointment.status === "pending" && (
+                <Button type="button" variant="default" onClick={handleConfirm} disabled={isSubmitting} className="bg-emerald-600 hover:bg-emerald-700 text-white">
+                  <CheckCircle className="w-4 h-4 mr-2" />
+                  確定
+                </Button>
+              )}
+            </div>
             <div className="space-x-2">
               <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
                 キャンセル

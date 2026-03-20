@@ -17,6 +17,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { getEvents, createEvent, updateEvent, deleteEvent, getCalendar, updateCalendarName, type CalendarEvent } from "@/app/actions/calendar";
+import { extractEventsFromImage } from "@/app/actions/ai-calendar";
+import { toast } from "sonner";
+import { Loader2, Sparkles } from "lucide-react";
 
 // メンバーカラーパレット
 const COLORS = [
@@ -102,6 +105,7 @@ export default function FamilyCalendarPage() {
   const [selectedDay, setSelectedDay] = useState<Date | null>(null);
   const [form, setForm] = useState<EventFormData>(defaultForm());
   const [saving, setSaving] = useState(false);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
 
   // イベント取得範囲を計算
   const fetchRange = useMemo(() => {
@@ -215,6 +219,39 @@ export default function FamilyCalendarPage() {
     await deleteEvent(id);
     await fetchEvents();
     setSelectedDayEvents(null);
+  };
+
+  // AI画像解析
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith("image/")) {
+      toast.error("画像ファイルを選択してください");
+      return;
+    }
+
+    setIsAnalyzing(true);
+    const reader = new FileReader();
+    reader.onloadend = async () => {
+      const base64 = reader.result as string;
+      try {
+        const res = await extractEventsFromImage(base64, calendarId);
+        if (res.success) {
+          toast.success(`AIが${res.count}件の予定を抽出・登録しました！`);
+          await fetchEvents();
+        } else {
+          toast.error(res.error || "解析に失敗しました");
+        }
+      } catch (err) {
+        toast.error("エラーが発生しました");
+      } finally {
+        setIsAnalyzing(false);
+      }
+    };
+    reader.readAsDataURL(file);
+    // 同じファイルを再度選択できるようにリセット
+    e.target.value = "";
   };
 
   // ================= 月ビュー =================
@@ -453,6 +490,32 @@ export default function FamilyCalendarPage() {
             {copied ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
             <span className="hidden sm:inline">{copied ? "コピー済み!" : "共有"}</span>
           </button>
+
+          {/* [NEW] AI画像解析ボタン */}
+          <div className="relative">
+            <input
+              type="file"
+              id="ai-upload"
+              className="hidden"
+              accept="image/*"
+              onChange={handleFileSelect}
+              disabled={isAnalyzing}
+            />
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={isAnalyzing}
+              onClick={() => document.getElementById("ai-upload")?.click()}
+              className="border-violet-200 bg-violet-50 text-violet-700 hover:bg-violet-100 hover:text-violet-800 transition shadow-sm h-8 px-3 rounded-lg"
+            >
+              {isAnalyzing ? (
+                <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+              ) : (
+                <Sparkles className="w-3.5 h-3.5 mr-1.5 text-violet-500" />
+              )}
+              <span className="hidden sm:inline">{isAnalyzing ? "解析中..." : "写真から予定抽出"}</span>
+            </Button>
+          </div>
 
           {/* 追加ボタン */}
           <Button
