@@ -125,7 +125,7 @@ export default function DashboardPrototype() {
   const monthlyProgress = data && data.monthlyRevenue && data.targetIncome 
     ? Math.min(100, Math.round((data.monthlyRevenue.total / data.targetIncome) * 100)) 
     : 0;
-  const todayTarget = 50000; // Hardcoded default target for now
+  const todayTarget = data?.targetIncome ? Math.round(data.targetIncome / 30) : 50000;
   const todayProgress = data ? Math.min(100, Math.round((data.todaySales / todayTarget) * 100)) : 0;
   const remainingAction = Math.max(0, todayTarget - (data?.todaySales || 0));
   const remainingPatients = Math.ceil(remainingAction / 6000);

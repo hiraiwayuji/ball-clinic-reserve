@@ -47,6 +47,9 @@ async function getLineAccessToken() {
  */
 export async function sendAppointmentReminders(testLineId: string | null = null) {
   await checkAdminAuth();
+  
+  // Use provided testLineId or fallback to environment variable
+  const effectiveTestId = testLineId || process.env.TEST_LINE_USER_ID;
   const todayStart = new Date();
   todayStart.setHours(0, 0, 0, 0);
   
@@ -83,8 +86,8 @@ export async function sendAppointmentReminders(testLineId: string | null = null)
        
        console.log(`\n========== LINE送信シミュレーション ==========`);
        console.log(`宛先: ${customer.name} 様`);
-       if (testLineId) {
-         console.log(`[TEST MODE] 送信先LINE ID: ${testLineId} に上書き送信します。`);
+       if (effectiveTestId) {
+         console.log(`[TEST MODE] 送信先LINE ID: ${effectiveTestId} に上書き送信します。`);
        } else if (customer.line_user_id) {
          console.log(`送信先LINE ID: ${customer.line_user_id}`);
        } else {
@@ -98,7 +101,7 @@ export async function sendAppointmentReminders(testLineId: string | null = null)
        // --- 実際の送信処理 ---
        const settings = await getClinicSettings();
        const channelToken = settings?.line_channel_access_token || await getLineAccessToken();
-       const targetId = testLineId || customer.line_user_id;
+       const targetId = effectiveTestId || customer.line_user_id;
 
        if (channelToken && targetId) {
          try {
@@ -131,19 +134,18 @@ export async function sendAppointmentReminders(testLineId: string | null = null)
     }
   }
 
-  // もし1件もなければテストモードに従ってダミーで送信する
   if (sentTo.length === 0) {
-    if (testLineId) {
+    if (effectiveTestId) {
       const dummyMsg = `テストユーザー様\n\nこんにちは！ボール接骨院です。\n本日 12:00 から予約を頂いております。(テスト配信)`;
       debugLogs.push(`【テスト送信】\n${dummyMsg}`);
       
       const channelToken = await getLineAccessToken();
-      if (channelToken && testLineId) {
+      if (channelToken && effectiveTestId) {
          try {
            const res = await fetch('https://api.line.me/v2/bot/message/push', {
              method: 'POST',
              headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${channelToken}` },
-             body: JSON.stringify({ to: testLineId, messages: [{ type: 'text', text: dummyMsg }] })
+             body: JSON.stringify({ to: effectiveTestId, messages: [{ type: 'text', text: dummyMsg }] })
            });
            if (res.ok) {
              debugLogs[debugLogs.length-1] += `\n(→ 実機テスト送信: 成功)`;
@@ -158,10 +160,10 @@ export async function sendAppointmentReminders(testLineId: string | null = null)
       
       console.log(`\n========== LINEテスト送信シミュレーション ==========`);
       console.log(`[TEST MODE] 宛先: テストユーザー 様`);
-      console.log(`[送信先LINE ID] : ${testLineId}`);
+      console.log(`[送信先LINE ID] : ${effectiveTestId}`);
       console.log(`[メッセージ内容]\n${dummyMsg}`);
       console.log(`===================================================\n`);
-      sentTo.push(`テストユーザー（ID: ${testLineId.substring(0,6)}...）`);
+      sentTo.push(`テストユーザー（ID: ${effectiveTestId.substring(0,6)}...）`);
     } else {
       sentTo.push("（予約がなかったため送信されていません）");
     }
