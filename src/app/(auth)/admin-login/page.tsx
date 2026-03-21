@@ -5,6 +5,7 @@ import { loginAction } from "@/app/actions/auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Lock, Mail, Eye, EyeOff, Shield, ArrowRight } from "lucide-react";
+import Image from "next/image";
 
 export default function AdminLoginPage() {
   const [error, setError] = useState<string | null>(null);
@@ -59,16 +60,21 @@ export default function AdminLoginPage() {
 
       {/* Login card */}
       <div className="relative z-10 w-full max-w-md">
-        {/* Logo / Brand section */}
         <div className="text-center mb-8">
           <div 
-            className="inline-flex items-center justify-center w-20 h-20 rounded-2xl mb-6 shadow-2xl"
+            className="inline-flex items-center justify-center w-20 h-20 rounded-2xl mb-6 shadow-2xl overflow-hidden bg-white/10 backdrop-blur-sm"
             style={{
-              background: 'linear-gradient(135deg, #3b82f6 0%, #06b6d4 100%)',
               boxShadow: '0 0 40px rgba(59, 130, 246, 0.3)',
             }}
           >
-            <Shield className="w-10 h-10 text-white" />
+            <div className="relative w-14 h-14">
+              <Image 
+                src="/images/logo-white.png" 
+                alt="ボール接骨院" 
+                fill 
+                className="object-contain"
+              />
+            </div>
           </div>
           <h1 className="text-3xl font-black text-white tracking-tight">
             ボール接骨院

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { CalendarDays, Clock, MapPin, Phone } from "lucide-react";
+import Image from "next/image";
 
 export default function Home() {
   return (
@@ -8,11 +9,18 @@ export default function Home() {
       {/* Header */}
       <header className="bg-white sticky top-0 z-50 shadow-sm">
         <div className="container mx-auto px-4 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center text-white font-bold">
-              B
-            </div>
-            <span className="text-xl font-bold text-slate-900">ボール接骨院</span>
+          <div className="flex items-center gap-3">
+            <Link href="/" className="flex items-center gap-2">
+              <div className="relative w-10 h-10">
+                <Image 
+                  src="/images/logo-black.png" 
+                  alt="ボール接骨院" 
+                  fill 
+                  className="object-contain"
+                />
+              </div>
+              <span className="text-xl font-bold text-slate-900">ボール接骨院</span>
+            </Link>
           </div>
           <nav className="hidden md:flex gap-6 text-sm font-medium text-slate-600">
             <Link href="#about" className="hover:text-blue-600 transition">当院について</Link>
@@ -108,9 +116,14 @@ export default function Home() {
       {/* Footer */}
       <footer className="bg-slate-900 text-slate-400 py-12 border-t border-slate-800">
         <div className="container mx-auto px-4 text-center">
-          <div className="flex items-center justify-center gap-2 mb-6">
-            <div className="w-6 h-6 bg-slate-700 rounded-full flex items-center justify-center text-slate-300 text-xs font-bold">
-              B
+          <div className="flex items-center justify-center gap-3 mb-6">
+            <div className="relative w-8 h-8">
+              <Image 
+                src="/images/logo-white.png" 
+                alt="ボール接骨院" 
+                fill 
+                className="object-contain"
+              />
             </div>
             <span className="text-lg font-bold text-slate-200">ボール接骨院</span>
           </div>
