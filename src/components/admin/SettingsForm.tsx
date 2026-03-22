@@ -24,6 +24,7 @@ export default function SettingsForm({ initialSettings }: { initialSettings: Cli
       const res = await updateClinicSettings(settings);
       if (res.success) {
         toast.success("設定を保存しました");
+        alert("✅ 設定を保存しました！");
         router.refresh();
       } else {
         toast.error(res.error || "保存に失敗しました");
@@ -265,3 +266,4 @@ export default function SettingsForm({ initialSettings }: { initialSettings: Cli
     </div>
   );
 }
+
