@@ -16,19 +16,28 @@ export default function SettingsEditor({ initialSettings }: { initialSettings: C
   const [settings, setSettings] = useState<ClinicSettings | null>(initialSettings);
   const [isSaving, setIsSaving] = useState(false);
 
-  const handleSave = async () => {
-    if (!settings) return;
+  
+    const handleSave = async () => {
+    if (!settings) {
+      alert("settings が null です");
+      return;
+    }
     setIsSaving(true);
     try {
+      console.log("保存開始:", settings);
       const result = await updateClinicSettings(settings);
+      console.log("保存結果:", result);
       if (result.success) {
         toast.success("設定を保存しました");
         alert("保存に成功しました！");
         router.push("/admin/settings");
         router.refresh();
+      } else {
+        alert("保存失敗: " + result.error);
       }
     } catch (err) {
-      toast.error("保存に失敗しました");
+      console.error("保存エラー:", err);
+      alert("例外エラー: " + err);
     } finally {
       setIsSaving(false);
     }
@@ -136,3 +145,4 @@ export default function SettingsEditor({ initialSettings }: { initialSettings: C
     </div>
   );
 }
+
