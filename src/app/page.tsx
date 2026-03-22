@@ -58,7 +58,7 @@ export default function Home() {
               <Button asChild size="lg" variant="outline" className="border-white text-white hover:bg-white/10 hover:text-white text-lg h-14 px-8">
                 <Link href="tel:088-635-5344">
                   <Phone className="mr-2 h-5 w-5" />
-                  088-635-5344
+                  <span className="text-white">088-635-5344</span>
                 </Link>
               </Button>
             </div>
@@ -134,3 +134,4 @@ export default function Home() {
     </div>
   );
 }
+
