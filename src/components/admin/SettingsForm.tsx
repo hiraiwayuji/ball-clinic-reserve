@@ -38,7 +38,8 @@ export default function SettingsForm({ initialSettings }: { initialSettings: Cli
   };
 
   const handleTestLine = async () => {
-    const userId = prompt("LINEユーザーID（U...）を入力してください");
+    const defaultId = process.env.NEXT_PUBLIC_TEST_LINE_USER_ID || "U1236495734df25789d98f15d7b2b3b46";
+    const userId = prompt("LINEユーザーID（U...）を入力してください", defaultId);
     if (!userId) return;
     const res = await fetch("/api/line/test", {
       method: "POST",
@@ -266,4 +267,5 @@ export default function SettingsForm({ initialSettings }: { initialSettings: Cli
     </div>
   );
 }
+
 
