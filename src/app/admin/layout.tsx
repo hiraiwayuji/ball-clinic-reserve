@@ -1,4 +1,5 @@
 import { checkAdminAuth, logoutAction } from "@/app/actions/auth";
+import { Toaster } from "@/components/ui/sonner";
 import { Button } from "@/components/ui/button";
 import { LogOut } from "lucide-react";
 import Link from "next/link";
@@ -65,3 +66,4 @@ export default async function AdminLayout({
     </div>
   );
 }
+
