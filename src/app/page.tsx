@@ -59,6 +59,9 @@ export default function Home() {
                   <Phone className="h-5 w-5" />
                   088-635-5344
                 </a>
+              <Link href="/cancel" className="flex items-center justify-center gap-2 border border-white/50 text-white/80 text-sm h-10 px-6 rounded-md hover:bg-white/10">
+                予約のキャンセルはこちら
+              </Link>
             </div>
           </div>
         </section>
@@ -132,5 +135,6 @@ export default function Home() {
     </div>
   );
 }
+
 
 
