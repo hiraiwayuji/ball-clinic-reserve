@@ -4,7 +4,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Search, CheckCircle, Clock, CalendarDays } from "lucide-react";
+import { Search, CalendarDays } from "lucide-react";
 import Link from "next/link";
 
 export default function CheckPage() {
@@ -61,43 +61,29 @@ export default function CheckPage() {
                 予約を検索
               </CardTitle>
               <div className="flex gap-2 mt-2">
-                <button
-                  onClick={() => { setSearchType("number"); setError(""); }}
-                  className={`flex-1 py-2 rounded-md text-sm font-medium transition-colors ${searchType === "number" ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-600"}`}
-                >
+                <button onClick={() => { setSearchType("number"); setError(""); }}
+                  className={`flex-1 py-2 rounded-md text-sm font-medium transition-colors ${searchType === "number" ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-600"}`}>
                   予約番号で検索
                 </button>
-                <button
-                  onClick={() => { setSearchType("phone"); setError(""); }}
-                  className={`flex-1 py-2 rounded-md text-sm font-medium transition-colors ${searchType === "phone" ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-600"}`}
-                >
+                <button onClick={() => { setSearchType("phone"); setError(""); }}
+                  className={`flex-1 py-2 rounded-md text-sm font-medium transition-colors ${searchType === "phone" ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-600"}`}>
                   電話番号で検索
                 </button>
               </div>
             </CardHeader>
             <CardContent className="space-y-4">
               {searchType === "number" ? (
-                <Input
-                  placeholder="例: ABC12345（英数字8文字）"
-                  value={reservationNumber}
+                <Input placeholder="例: ABC12345（英数字8文字）" value={reservationNumber}
                   onChange={(e) => setReservationNumber(e.target.value.toUpperCase())}
-                  className="text-center text-lg tracking-widest font-mono"
-                  maxLength={8}
-                />
+                  className="text-center text-lg tracking-widest font-mono" maxLength={8} />
               ) : (
-                <Input
-                  placeholder="例: 090-0000-0000"
-                  value={phone}
-                  onChange={(e) => setPhone(e.target.value)}
-                  type="tel"
-                />
+                <Input placeholder="例: 090-0000-0000" value={phone}
+                  onChange={(e) => setPhone(e.target.value)} type="tel" />
               )}
               {error && <p className="text-red-500 text-sm text-center">{error}</p>}
-              <Button
-                onClick={handleSearch}
+              <Button onClick={handleSearch}
                 disabled={loading || (searchType === "number" ? reservationNumber.length < 8 : phone.length < 5)}
-                className="w-full bg-blue-600 hover:bg-blue-700"
-              >
+                className="w-full bg-blue-600 hover:bg-blue-700">
                 {loading ? "検索中..." : "予約を確認する"}
               </Button>
             </CardContent>
@@ -133,19 +119,9 @@ export default function CheckPage() {
               );
             })}
             <div className="flex flex-col gap-2">
-              <Button variant="outline" className="w-full" onClick={() => setStep("input")}>
-                別の予約を確認する
-              </Button>
-              <Link href="/cancel">
-                <Button variant="ghost" className="w-full text-red-500 hover:text-red-600">
-                  この予約をキャンセルする
-                </Button>
-              </Link>
-              <Link href="/reserve/calendar">
-                <Button className="w-full bg-blue-600 hover:bg-blue-700">
-                  新しく予約する
-                </Button>
-              </Link>
+              <Button variant="outline" className="w-full" onClick={() => setStep("input")}>別の予約を確認する</Button>
+              <Link href="/cancel"><Button variant="ghost" className="w-full text-red-500 hover:text-red-600">この予約をキャンセルする</Button></Link>
+              <Link href="/reserve/calendar"><Button className="w-full bg-blue-600 hover:bg-blue-700">新しく予約する</Button></Link>
             </div>
           </div>
         )}
