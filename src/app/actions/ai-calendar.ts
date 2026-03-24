@@ -8,6 +8,8 @@ async function getSupabase() {
   return await createClient();
 }
 
+const DEFAULT_CLINIC_ID = '00000000-0000-0000-0000-000000000001';
+
 export async function extractEventsFromImage(base64Image: string, calendarId: string) {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) return { success: false, error: "AI APIキーが設定されていません" };
@@ -62,6 +64,7 @@ export async function extractEventsFromImage(base64Image: string, calendarId: st
 
     const appointmentsToInsert = events.map((ev: any) => ({
       calendar_id: calendarId,
+      clinic_id: DEFAULT_CLINIC_ID,
       title: ev.title,
       description: ev.description,
       start_time: ev.start_time,

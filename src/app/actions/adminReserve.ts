@@ -8,6 +8,8 @@ async function getSupabase() {
   return await createClient();
 }
 
+const DEFAULT_CLINIC_ID = '00000000-0000-0000-0000-000000000001';
+
 export async function createManualReservation(formData: FormData) {
   await checkAdminAuth();
   try {
@@ -31,7 +33,11 @@ export async function createManualReservation(formData: FormData) {
       // 1. 顧客の作成（名前と電話番号で簡易登録）
       const { data: customer, error: customerErr } = await supabase
         .from("customers")
-        .insert([{ name, phone }])
+        .insert([{ 
+          name, 
+          phone,
+          clinic_id: DEFAULT_CLINIC_ID
+        }])
         .select()
         .single();
         
@@ -62,7 +68,8 @@ export async function createManualReservation(formData: FormData) {
           end_time: endDateTimeStr,
           memo: memoText,
           is_first_visit: i === 0 ? isFirstVisit : false,
-          status: "confirmed"
+          status: "confirmed",
+          clinic_id: DEFAULT_CLINIC_ID
         });
       }
 

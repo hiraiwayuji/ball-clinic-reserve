@@ -8,6 +8,8 @@ async function getSupabase() {
   return await createClient();
 }
 
+const DEFAULT_CLINIC_ID = '00000000-0000-0000-0000-000000000001';
+
 // --- Cash Sales Actions ---
 
 export async function addCashSale(formData: FormData) {
@@ -28,7 +30,8 @@ export async function addCashSale(formData: FormData) {
       sale_date: saleDate, 
       customer_name: customerName, 
       treatment_fee: treatmentFee,
-      memo
+      memo,
+      clinic_id: DEFAULT_CLINIC_ID
     };
     
     // 他のテーブルでエラーが出る可能性があるため、一旦 clinic_id なしで試行
@@ -108,7 +111,8 @@ export async function addInsurancePayment(formData: FormData) {
       .insert([{ 
         payment_month: paymentMonth, 
         insurance_name: insuranceName, 
-        amount
+        amount,
+        clinic_id: DEFAULT_CLINIC_ID
       }]);
 
     if (error) throw error;
@@ -244,7 +248,8 @@ export async function addExpense(formData: FormData) {
         category, 
         description, 
         amount, 
-        memo
+        memo,
+        clinic_id: DEFAULT_CLINIC_ID
       }]);
 
     if (error) throw error;
@@ -653,7 +658,8 @@ export async function finalizePendingExpense(id: string, finalData: any) {
         category: finalData.category,
         description: finalData.description,
         amount: finalData.amount,
-        memo: finalData.memo
+        memo: finalData.memo,
+        clinic_id: DEFAULT_CLINIC_ID
       }]);
 
     if (insertErr) throw insertErr;

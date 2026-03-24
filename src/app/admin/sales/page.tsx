@@ -45,13 +45,21 @@ export default function SalesPage() {
     formData.set("sale_date", format(date, "yyyy-MM-dd"));
 
     startTransition(async () => {
-      const res = await addCashSale(formData);
-      if (res.success) {
-        toast.success("登録しました");
-        (e.target as HTMLFormElement).reset();
-        fetchSales(date);
-      } else {
-        toast.error(res.error || "エラーが発生しました");
+      try {
+        console.log("送信開始", Object.fromEntries(formData));
+        const res = await addCashSale(formData);
+        console.log("結果:", res);
+        if (res.success) {
+          toast.success("登録しました");
+          (e.target as HTMLFormElement).reset();
+          fetchSales(date);
+        } else {
+          toast.error(res.error || "エラーが発生しました");
+          alert("エラー: " + res.error);
+        }
+      } catch(err) {
+        console.error("例外:", err);
+        alert("例外: " + err);
       }
     });
   };
@@ -197,3 +205,4 @@ export default function SalesPage() {
     </div>
   );
 }
+

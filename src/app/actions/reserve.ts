@@ -21,6 +21,7 @@ function getAdminSupabase() {
   });
 }
 
+const DEFAULT_CLINIC_ID = '00000000-0000-0000-0000-000000000001';
 const MAX_CAPACITY = 1; // 1枠あたりの最大受け入れ人数（1名入れば予約済みにする）
 
 // キャンセル待ちを時間帯範囲で登録するアクション（例: 15:00 〜 20:00）
@@ -55,7 +56,8 @@ export async function createWaitlistReservation(formData: FormData) {
         .from("customers")
         .insert([{ 
           name, 
-          phone
+          phone,
+          clinic_id: DEFAULT_CLINIC_ID
         }])
         .select()
         .single();
@@ -77,7 +79,8 @@ export async function createWaitlistReservation(formData: FormData) {
           end_time: endDateTime,
           memo,
           is_first_visit: false,
-          status: "waiting"
+          status: "waiting",
+          clinic_id: DEFAULT_CLINIC_ID
         }])
         .select()
         .single();
@@ -275,7 +278,8 @@ export async function createReservation(formData: FormData) {
             .from("customers")
             .insert([{ 
               name, 
-              phone
+              phone,
+              clinic_id: DEFAULT_CLINIC_ID
             }])
             .select()
             .single();
@@ -299,7 +303,8 @@ export async function createReservation(formData: FormData) {
             .from("customers")
             .insert([{ 
               name, 
-              phone: null
+              phone: null,
+              clinic_id: DEFAULT_CLINIC_ID
             }])
             .select()
             .single();
@@ -344,7 +349,8 @@ export async function createReservation(formData: FormData) {
           end_time: endDateTimeStr,
           memo: symptoms,
           is_first_visit: isFirstVisit,
-          status: finalStatus
+          status: finalStatus,
+          clinic_id: DEFAULT_CLINIC_ID
         }])
         .select()
         .single();

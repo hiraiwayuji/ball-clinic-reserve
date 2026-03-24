@@ -17,7 +17,6 @@ export type ClinicHoliday = {
 
 // 1. 休診日一覧を取得
 export async function getClinicHolidays(): Promise<ClinicHoliday[]> {
-  await checkAdminAuth();
   noStore();
   const supabase = await getSupabase();
   if (!supabase) return [];

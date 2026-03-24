@@ -7,6 +7,8 @@ async function getSupabase() {
   return await createClient();
 }
 
+const DEFAULT_CLINIC_ID = '00000000-0000-0000-0000-000000000001';
+
 export type CalendarEvent = {
   id: string;
   calendar_id: string;
@@ -104,7 +106,7 @@ export async function createEvent(
   try {
     const { data, error } = await supabase
       .from("calendar_events")
-      .insert([{ ...event, calendar_id: calendarId }])
+      .insert([{ ...event, calendar_id: calendarId, clinic_id: DEFAULT_CLINIC_ID }])
       .select()
       .single();
     if (error) {
