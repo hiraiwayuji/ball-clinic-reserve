@@ -11,6 +11,7 @@ async function getLineToken(): Promise<string | null> {
       body: `grant_type=client_credentials&client_id=${channelId}&client_secret=${channelSecret}`,
     });
     const data = await res.json();
+    console.log("[LINE-DEBUG] getLineToken: status=", res.status, "access_token=", data.access_token ? "OK" : "NULL/MISSING", "data=", JSON.stringify(data));
     return data.access_token ?? null;
   } catch {
     return null;
@@ -28,6 +29,7 @@ async function notifyOwner(
   isWaiting: boolean | null
 ) {
   const ownerLineId = process.env.OWNER_LINE_USER_ID;
+  console.log("[LINE-DEBUG] notifyOwner called, ownerLineId=", ownerLineId ? "SET" : "NOT SET");
   const visitLabel = visitType === "new" ? "初診（60分）" : "再診（30分）";
   const statusLabel = isWaiting ? "⏳【キャンセル待ち登録】" : "🔔【新規予約】";
   const messageText = `${statusLabel}\n\n患者名: ${name}\n日時: ${rawDate} ${time}\n電話: ${phone || "未入力"}\n種別: ${visitLabel}\n症状: ${symptoms || "なし"}\n予約番号: ${reservationNumber}`;
@@ -35,6 +37,7 @@ async function notifyOwner(
   if (ownerLineId) {
     try {
       const token = await getLineToken();
+      console.log("[LINE-DEBUG] notifyOwner: token=", token ? "RECEIVED" : "NULL - LINE API failed");
       if (token) {
         const res = await fetch("https://api.line.me/v2/bot/message/push", {
           method: "POST",
