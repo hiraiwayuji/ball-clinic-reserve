@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useState, useEffect, Suspense } from "react";
 import Link from "next/link";
@@ -148,7 +148,7 @@ function ReserveContent() {
               LINEで予約を完了する
             </p>
             <p className="text-blue-100/70 text-sm text-center">以下のボタンからボール接骨院のLINEを友だち追加して、予約内容をお伝えください。</p>
-            
+            <a
               href="https://line.me/ti/p/%40shc8761q"
               target="_blank"
               rel="noreferrer"
