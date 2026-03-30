@@ -25,7 +25,7 @@ async function notifyOwner(
   visitType: string,
   symptoms: string,
   reservationNumber: string,
-  isWaiting: boolean
+  isWaiting: boolean | null
 ) {
   const ownerLineId = process.env.OWNER_LINE_USER_ID;
   const visitLabel = visitType === "new" ? "初診（60分）" : "再診（30分）";
