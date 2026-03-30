@@ -306,7 +306,7 @@ function ReserveContent() {
                         </label>
                       </div>
                       {!lineRegistered && (
-                        
+                        <a
                           href="https://line.me/ti/p/%40shc8761q"
                           target="_blank"
                           rel="noreferrer"
