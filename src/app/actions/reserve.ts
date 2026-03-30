@@ -1,5 +1,80 @@
 "use server";
 
+// ===== 予約通知機能 =====
+
+async function getLineToken(): Promise<string | null> {
+  const channelId = process.env.LINE_CHANNEL_ID;
+  const channelSecret = process.env.LINE_CHANNEL_SECRET;
+  if (!channelId || !channelSecret) return null;
+  try {
+    const res = await fetch("https://api.line.me/v2/oauth/accessToken", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: `grant_type=client_credentials&client_id=${channelId}&client_secret=${channelSecret}`,
+    });
+    const data = await res.json();
+    return data.access_token ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function notifyOwner(
+  name: string,
+  phone: string,
+  rawDate: string,
+  time: string,
+  visitType: string,
+  symptoms: string,
+  reservationNumber: string,
+  isWaiting: boolean
+) {
+  const ownerLineId = process.env.OWNER_LINE_USER_ID;
+  const visitLabel = visitType === "new" ? "初診（60分）" : "再診（30分）";
+  const statusLabel = isWaiting ? "⏳【キャンセル待ち登録】" : "🔔【新規予約】";
+  const messageText = `${statusLabel}\n\n患者名: ${name}\n日時: ${rawDate} ${time}\n電話: ${phone || "未入力"}\n種別: ${visitLabel}\n症状: ${symptoms || "なし"}\n予約番号: ${reservationNumber}`;
+
+  // LINE通知
+  if (ownerLineId) {
+    try {
+      const token = await getLineToken();
+      if (token) {
+        const res = await fetch("https://api.line.me/v2/bot/message/push", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ to: ownerLineId, messages: [{ type: "text", text: messageText }] }),
+        });
+        if (!res.ok) console.error("[LINE通知] 送信失敗:", await res.json());
+        else console.log("[LINE通知] 送信成功");
+      }
+    } catch (err) {
+      console.error("[LINE通知] エラー:", err);
+    }
+  }
+
+  // メール通知 (RESEND_API_KEYが設定されている場合)
+  const resendKey = process.env.RESEND_API_KEY;
+  if (resendKey) {
+    try {
+      await fetch("https://api.resend.com/emails", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${resendKey}` },
+        body: JSON.stringify({
+          from: "ボール接骨院予約 <onboarding@resend.dev>",
+          to: ["hiraiwayuji@gmail.com"],
+          subject: `${statusLabel} ${name}様 ${rawDate} ${time}`,
+          text: messageText,
+        }),
+      });
+      console.log("[メール通知] 送信成功");
+    } catch (err) {
+      console.error("[メール通知] エラー:", err);
+    }
+  }
+}
+
+// ===== 予約通知機能 ここまで =====
+
 import { createClient as createServerClient } from "@/lib/supabase/server";
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { getTimeSlots, isDateWithinAllowedRange, isTimeSlotWithinTwoHours } from "@/lib/time-slots";
@@ -9,7 +84,7 @@ async function getSupabase() {
   return await createServerClient();
 }
 
-// 可用性チェック専用の管理者クライアント（RLSをバイパスして予約有無だけを確認するため）
+// å¯ç¨æ§ãã§ãã¯å°ç¨ã®ç®¡çèã¯ã©ã¤ã¢ã³ãï¼RLSããã¤ãã¹ãã¦äºç´æç¡ã ããç¢ºèªããããï¼
 function getAdminSupabase() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -22,9 +97,9 @@ function getAdminSupabase() {
 }
 
 const DEFAULT_CLINIC_ID = '00000000-0000-0000-0000-000000000001';
-const MAX_CAPACITY = 1; // 1枠あたりの最大受け入れ人数（1名入れば予約済みにする）
+const MAX_CAPACITY = 1; // 1æ ãããã®æå¤§åãå¥ãäººæ°ï¼1åå¥ãã°äºç´æ¸ã¿ã«ããï¼
 
-// キャンセル待ちを時間帯範囲で登録するアクション（例: 15:00 〜 20:00）
+// ã­ã£ã³ã»ã«å¾ã¡ãæéå¸¯ç¯å²ã§ç»é²ããã¢ã¯ã·ã§ã³ï¼ä¾: 15:00 ã 20:00ï¼
 export async function createWaitlistReservation(formData: FormData) {
   try {
     const dateStr = formData.get("date") as string;
@@ -35,23 +110,23 @@ export async function createWaitlistReservation(formData: FormData) {
     const symptoms = formData.get("symptoms") as string | null;
 
     if (!dateStr || !startTime || !endTime || !name || !phone) {
-      return { success: false, error: "必須項目が不足しています" };
+      return { success: false, error: "å¿é é ç®ãä¸è¶³ãã¦ãã¾ã" };
     }
 
-    // 1ヶ月制限のチェック
+    // 1ã¶æå¶éã®ãã§ãã¯
     const reservationDate = new Date(dateStr);
     if (!isDateWithinAllowedRange(reservationDate)) {
-      return { success: false, error: "1ヶ月より先の予約はできません。" };
+      return { success: false, error: "1ã¶æããåã®äºç´ã¯ã§ãã¾ããã" };
     }
 
-    // 2時間前制限のチェック
+    // 2æéåå¶éã®ãã§ãã¯
     if (isTimeSlotWithinTwoHours(dateStr, startTime)) {
-      return { success: false, error: "直前（2時間以内）のキャンセル待ちはWebからは受け付けておりません。" };
+      return { success: false, error: "ç´åï¼2æéä»¥åï¼ã®ã­ã£ã³ã»ã«å¾ã¡ã¯Webããã¯åãä»ãã¦ããã¾ããã" };
     }
 
     const supabase = await getSupabase();
     if (supabase) {
-      // 顧客作成
+      // é¡§å®¢ä½æ
       const { data: customer, error: customerErr } = await supabase
         .from("customers")
         .insert([{ 
@@ -62,14 +137,14 @@ export async function createWaitlistReservation(formData: FormData) {
         .select()
         .single();
       if (customerErr) {
-        return { success: false, error: "顧客情報の登録に失敗しました" };
+        return { success: false, error: "é¡§å®¢æå ±ã®ç»é²ã«å¤±æãã¾ãã" };
       }
 
-      // キャンセル待ち予約を作成
-      // start_time = 希望範囲の開始、end_time = 希望範囲の終了、status = "waiting"
+      // ã­ã£ã³ã»ã«å¾ã¡äºç´ãä½æ
+      // start_time = å¸æç¯å²ã®éå§ãend_time = å¸æç¯å²ã®çµäºãstatus = "waiting"
       const startDateTime = `${dateStr}T${startTime}:00+09:00`;
       const endDateTime = `${dateStr}T${endTime}:00+09:00`;
-      const memo = `【キャンセル待ち希望時間帯: ${startTime}〜${endTime}】${symptoms ? ` ${symptoms}` : ""}`;
+      const memo = `ãã­ã£ã³ã»ã«å¾ã¡å¸ææéå¸¯: ${startTime}ã${endTime}ã${symptoms ? ` ${symptoms}` : ""}`;
 
       const { data: appointment, error: aptErr } = await supabase
         .from("appointments")
@@ -86,24 +161,24 @@ export async function createWaitlistReservation(formData: FormData) {
         .single();
 
       if (aptErr || !appointment) {
-        return { success: false, error: "キャンセル待ち登録に失敗しました" };
+        return { success: false, error: "ã­ã£ã³ã»ã«å¾ã¡ç»é²ã«å¤±æãã¾ãã" };
       }
 
       const reservationNumber = appointment.id.split('-')[0].toUpperCase();
       return { success: true, reservationNumber };
     } else {
-      // デモモード（Supabase未設定）
+      // ãã¢ã¢ã¼ãï¼Supabaseæªè¨­å®ï¼
       await new Promise(resolve => setTimeout(resolve, 800));
       const demoNumber = Math.random().toString(36).substring(2, 8).toUpperCase();
       return { success: true, reservationNumber: demoNumber };
     }
   } catch (err) {
     console.error(err);
-    return { success: false, error: "予期せぬエラーが発生しました" };
+    return { success: false, error: "äºæãã¬ã¨ã©ã¼ãçºçãã¾ãã" };
   }
 }
 
-// 指定月の各日の予約数を取得するアクション
+// æå®æã®åæ¥ã®äºç´æ°ãåå¾ããã¢ã¯ã·ã§ã³
 export async function getMonthlyAvailability(year: number, month: number): Promise<Record<string, number>> {
   noStore();
   const supabase = getAdminSupabase() || await getSupabase();
@@ -126,18 +201,18 @@ export async function getMonthlyAvailability(year: number, month: number): Promi
       return {};
     }
 
-    // 日付ごとの予約数をカウント (30分=1枠として換算、営業時間内のみ)
+    // æ¥ä»ãã¨ã®äºç´æ°ãã«ã¦ã³ã (30å=1æ ã¨ãã¦æç®ãå¶æ¥­æéåã®ã¿)
     const counts: Record<string, number> = {};
     data.forEach((app: { start_time: string, end_time?: string }) => {
-      // データベースから返される時刻はUTCとして解釈されるべき (例: "2026-03-16T04:00:00+00:00")
+      // ãã¼ã¿ãã¼ã¹ããè¿ãããæå»ã¯UTCã¨ãã¦è§£éãããã¹ã (ä¾: "2026-03-16T04:00:00+00:00")
       const dStart = new Date(app.start_time);
       const dEnd = app.end_time ? new Date(app.end_time) : new Date(dStart.getTime() + 30 * 60000);
       
       let current = dStart.getTime();
       while (current < dEnd.getTime()) {
-        // JavascriptのDateはシステムのローカルタイムゾーンで解釈されるため、明示的にJSTへフォーマットする
-        // サーバーがUTCで動いている場合を考慮し、JST(+9h)を足してISO文字列の先頭を使うなどの手動計算はズレやすい。
-        // 代わりに toLocaleString で JST の文字列を取得してから必要な部分を抽出する。
+        // Javascriptã®Dateã¯ã·ã¹ãã ã®ã­ã¼ã«ã«ã¿ã¤ã ã¾ã¼ã³ã§è§£éããããããæç¤ºçã«JSTã¸ãã©ã¼ããããã
+        // ãµã¼ãã¼ãUTCã§åãã¦ããå ´åãèæ®ããJST(+9h)ãè¶³ãã¦ISOæå­åã®åé ­ãä½¿ããªã©ã®æåè¨ç®ã¯ãºã¬ãããã
+        // ä»£ããã« toLocaleString ã§ JST ã®æå­åãåå¾ãã¦ããå¿è¦ãªé¨åãæ½åºããã
         const jstFormatter = new Intl.DateTimeFormat('ja-JP', {
           timeZone: 'Asia/Tokyo',
           year: 'numeric',
@@ -162,7 +237,7 @@ export async function getMonthlyAvailability(year: number, month: number): Promi
       }
     });
 
-    // 1日の総枠数 * 定員 でしきい値を計算（カレンダーの「残りわずか」等の判定用）
+    // 1æ¥ã®ç·æ æ° * å®å¡ ã§ãããå¤ãè¨ç®ï¼ã«ã¬ã³ãã¼ã®ãæ®ãããããç­ã®å¤å®ç¨ï¼
     return counts;
   } catch (err) {
     console.error(err);
@@ -170,7 +245,7 @@ export async function getMonthlyAvailability(year: number, month: number): Promi
   }
 }
 
-// 指定日の予約状況（埋まっている時間帯）を取得するアクション
+// æå®æ¥ã®äºç´ç¶æ³ï¼åã¾ã£ã¦ããæéå¸¯ï¼ãåå¾ããã¢ã¯ã·ã§ã³
 export async function getDailyAvailability(dateStr: string) {
   noStore();
   const supabase = getAdminSupabase() || await getSupabase();
@@ -192,7 +267,7 @@ export async function getDailyAvailability(dateStr: string) {
       return [];
     }
 
-    // 取得した予約日時の開始・終了から、各30分枠ごとの予約数をカウント
+    // åå¾ããäºç´æ¥æã®éå§ã»çµäºãããå30åæ ãã¨ã®äºç´æ°ãã«ã¦ã³ã
     const slotCounts: Record<string, number> = {};
     data.forEach((app: { start_time: string, end_time?: string }) => {
       const start = new Date(app.start_time);
@@ -214,7 +289,7 @@ export async function getDailyAvailability(dateStr: string) {
       }
     });
 
-    // 定員(MAX_CAPACITY)に達した枠のみを「埋まっている」として返す
+    // å®å¡(MAX_CAPACITY)ã«éããæ ã®ã¿ããåã¾ã£ã¦ãããã¨ãã¦è¿ã
     const bookedTimes = Object.keys(slotCounts).filter(time => slotCounts[time] >= MAX_CAPACITY);
     
     console.log(`[DEBUG] getDailyAvailability for ${dateStr} returned (filled slots):`, bookedTimes);
@@ -238,31 +313,31 @@ export async function createReservation(formData: FormData) {
     const isFirstVisit = visitType === "new";
 
     if (!rawDate || !time || !name) {
-      return { success: false, error: "必須項目が不足しています" };
+      return { success: false, error: "å¿é é ç®ãä¸è¶³ãã¦ãã¾ã" };
     }
 
     if (isFirstVisit && !phone) {
-      return { success: false, error: "初診の場合は電話番号が必須です" };
+      return { success: false, error: "åè¨ºã®å ´åã¯é»è©±çªå·ãå¿é ã§ã" };
     }
 
-    // 1ヶ月制限のチェック
+    // 1ã¶æå¶éã®ãã§ãã¯
     const reservationDate = new Date(rawDate);
     if (!isDateWithinAllowedRange(reservationDate)) {
-      return { success: false, error: "1ヶ月より先の予約はできません。" };
+      return { success: false, error: "1ã¶æããåã®äºç´ã¯ã§ãã¾ããã" };
     }
 
-    // 2時間前制限のチェック
+    // 2æéåå¶éã®ãã§ãã¯
     if (isTimeSlotWithinTwoHours(rawDate, time)) {
-      return { success: false, error: "直前（2時間以内）のご予約はお電話またはLINEなどでお問い合わせください。" };
+      return { success: false, error: "ç´åï¼2æéä»¥åï¼ã®ãäºç´ã¯ãé»è©±ã¾ãã¯LINEãªã©ã§ãåãåãããã ããã" };
     }
 
     const supabase = await getSupabase();
     if (supabase) {
       let customerId = null;
 
-      // 顧客の検索または作成処理
+      // é¡§å®¢ã®æ¤ç´¢ã¾ãã¯ä½æå¦ç
       if (phone) {
-        // 電話番号がある場合はそれで照合・更新・作成
+        // é»è©±çªå·ãããå ´åã¯ããã§ç§åã»æ´æ°ã»ä½æ
         const { data: existingPhoneCustomer } = await supabase
           .from("customers")
           .select("id")
@@ -271,7 +346,7 @@ export async function createReservation(formData: FormData) {
 
         if (existingPhoneCustomer) {
           customerId = existingPhoneCustomer.id;
-          // 名前の更新（必要に応じて）
+          // ååã®æ´æ°ï¼å¿è¦ã«å¿ãã¦ï¼
           await supabase.from("customers").update({ name }).eq("id", customerId);
         } else {
           const { data: newCustomer, error: insertErr } = await supabase
@@ -287,7 +362,7 @@ export async function createReservation(formData: FormData) {
           customerId = newCustomer.id;
         }
       } else {
-        // 再診で電話番号が空の場合は名前で照合を試みる
+        // åè¨ºã§é»è©±çªå·ãç©ºã®å ´åã¯ååã§ç§åãè©¦ã¿ã
         const { data: existingNameCustomer, error: nameErr } = await supabase
           .from("customers")
           .select("id")
@@ -315,7 +390,7 @@ export async function createReservation(formData: FormData) {
 
       const startDateTimeStr = `${rawDate}T${time}:00+09:00`;
       
-      // 予約枠の定員チェック
+      // äºç´æ ã®å®å¡ãã§ãã¯
       const adminDb = getAdminSupabase() || supabase;
       const { data: existingApps } = await adminDb
         .from("appointments")
@@ -325,17 +400,17 @@ export async function createReservation(formData: FormData) {
         
       const isCapacityFull = existingApps && existingApps.length >= MAX_CAPACITY;
       
-      // ダブルブッキングの厳格な防御（ユーザーが空きだと思って押したのに埋まっていた場合）
+      // ããã«ããã­ã³ã°ã®å³æ ¼ãªé²å¾¡ï¼ã¦ã¼ã¶ã¼ãç©ºãã ã¨æã£ã¦æ¼ããã®ã«åã¾ã£ã¦ããå ´åï¼
       if (isCapacityFull && !isWaitlistIntent) {
-        return { success: false, error: "申し訳ありません。タッチの差で予約が埋まりました。お手数ですが、別のお時間をお選びください。" };
+        return { success: false, error: "ç³ãè¨³ããã¾ãããã¿ããã®å·®ã§äºç´ãåã¾ãã¾ããããææ°ã§ãããå¥ã®ãæéããé¸ã³ãã ããã" };
       }
 
       const finalStatus = isCapacityFull ? "waiting" : "pending";
 
-      // 予約の作成
+      // äºç´ã®ä½æ
       const isFirstVisit = visitType === "new";
       
-      // 初診は60分、再診は30分枠を確保
+      // åè¨ºã¯60åãåè¨ºã¯30åæ ãç¢ºä¿
       const durationMinutes = isFirstVisit ? 60 : 30;
       const jstDate = new Date(startDateTimeStr);
       const endDate = new Date(jstDate.getTime() + durationMinutes * 60000);
@@ -357,13 +432,16 @@ export async function createReservation(formData: FormData) {
 
       if (appointmentErr || !appointmentData) {
         console.error("Appointment insertion error:", appointmentErr);
-        return { success: false, error: "予約情報の登録に失敗しました" };
+        return { success: false, error: "äºç´æå ±ã®ç»é²ã«å¤±æãã¾ãã" };
       }
       
       const reservationNumber = appointmentData.id.split('-')[0].toUpperCase();
-      return { success: true, isWaiting: isCapacityFull, reservationNumber };
+      // 予約通知（LINE + メール）
+  await notifyOwner(name, phone, rawDate, time, visitType, symptoms, reservationNumber, isCapacityFull);
+
+  return { success: true, isWaiting: isCapacityFull, reservationNumber };
     } else {
-      // SupabaseのURLが設定されていない場合の動作保証（デモ用）
+      // Supabaseã®URLãè¨­å®ããã¦ããªãå ´åã®åä½ä¿è¨¼ï¼ãã¢ç¨ï¼
       console.log("Supabase URL not configured. Simulating successful reservation.");
       console.log("Data:", { rawDate, time, name, phone, visitType, symptoms });
       await new Promise(resolve => setTimeout(resolve, 1000));
@@ -372,6 +450,6 @@ export async function createReservation(formData: FormData) {
     }
   } catch (err) {
     console.error(err);
-    return { success: false, error: "予期せぬエラーが発生しました" };
+    return { success: false, error: "äºæãã¬ã¨ã©ã¼ãçºçãã¾ãã" };
   }
 }
