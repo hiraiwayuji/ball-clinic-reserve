@@ -157,6 +157,64 @@ export async function updateAppointmentDetails(
   }
 }
 
+// 患者のLINEに予約確認メッセージを送信するアクション
+export async function sendLineConfirmation(appointmentId: string) {
+  await checkAdminAuth();
+  try {
+    const supabase = await getSupabase();
+    if (!supabase) return { success: false, error: "DB接続エラー" };
+
+    // 予約と顧客情報（line_user_id含む）を取得
+    const { data: apt, error } = await supabase
+      .from("appointments")
+      .select("id, start_time, is_first_visit, status, customers(name, line_user_id)")
+      .eq("id", appointmentId)
+      .single();
+
+    if (error || !apt) return { success: false, error: "予約情報の取得に失敗しました" };
+
+    const customer = Array.isArray(apt.customers) ? apt.customers[0] : apt.customers;
+    const lineUserId = customer?.line_user_id;
+
+    if (!lineUserId) {
+      return { success: false, error: "この患者のLINE IDが未登録です。患者がLINE公式アカウントにメッセージを送ると登録されます。" };
+    }
+
+    const token = process.env.LINE_CHANNEL_ACCESS_TOKEN;
+    if (!token) return { success: false, error: "LINE_CHANNEL_ACCESS_TOKEN が未設定です" };
+
+    const startTime = new Date(apt.start_time);
+    const dateStr = startTime.toLocaleDateString("ja-JP", {
+      year: "numeric", month: "long", day: "numeric", weekday: "short", timeZone: "Asia/Tokyo",
+    });
+    const timeStr = startTime.toLocaleTimeString("ja-JP", {
+      hour: "2-digit", minute: "2-digit", timeZone: "Asia/Tokyo",
+    });
+    const visitLabel = apt.is_first_visit ? "初診（60分）" : "再診（30分）";
+    const statusLabel = apt.status === "confirmed" ? "✅ 予約確定" : "⏳ 確認待ち";
+    const reservationNumber = apt.id.split("-")[0].toUpperCase();
+
+    const messageText = `${statusLabel}\n\n${customer?.name || ""}様の予約内容をお知らせします。\n\n📅 日時: ${dateStr} ${timeStr}\n🏥 種別: ${visitLabel}\n📋 予約番号: ${reservationNumber}\n\nご来院をお待ちしております。`;
+
+    const res = await fetch("https://api.line.me/v2/bot/message/push", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ to: lineUserId, messages: [{ type: "text", text: messageText }] }),
+    });
+
+    if (!res.ok) {
+      const errBody = await res.json();
+      console.error("[LINE送信失敗]", errBody);
+      return { success: false, error: "LINE送信に失敗しました。患者が友だち追加しているか確認してください。" };
+    }
+
+    return { success: true };
+  } catch (err) {
+    console.error(err);
+    return { success: false, error: "予期せぬエラーが発生しました" };
+  }
+}
+
 // 予約の削除アクション
 export async function deleteAppointment(appointmentId: string) {
   await checkAdminAuth();

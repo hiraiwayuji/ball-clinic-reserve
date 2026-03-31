@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { format, parseISO } from "date-fns";
 import { ja } from "date-fns/locale";
-import { CalendarIcon, Edit, Trash2 } from "lucide-react";
+import { CalendarIcon, Edit, Trash2, MessageCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
@@ -17,7 +17,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { updateAppointmentDetails, deleteAppointment, updateAppointmentStatus } from "@/app/actions/adminReserve";
+import { updateAppointmentDetails, deleteAppointment, updateAppointmentStatus, sendLineConfirmation } from "@/app/actions/adminReserve";
 import { CheckCircle } from "lucide-react";
 import { toast } from "sonner";
 import { getTimeSlots } from "@/lib/time-slots";
@@ -106,6 +106,23 @@ export function EditAppointmentDialog({ open, onOpenChange, appointment, onSucce
         toast.error(result.error || "エラーが発生しました");
       }
     } catch (error) {
+      toast.error("通信エラーが発生しました");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleSendLine = async () => {
+    if (!appointment) return;
+    setIsSubmitting(true);
+    try {
+      const result = await sendLineConfirmation(appointment.id);
+      if (result.success) {
+        toast.success("LINEを送信しました");
+      } else {
+        toast.error(result.error || "LINE送信に失敗しました");
+      }
+    } catch {
       toast.error("通信エラーが発生しました");
     } finally {
       setIsSubmitting(false);
@@ -240,6 +257,10 @@ export function EditAppointmentDialog({ open, onOpenChange, appointment, onSucce
                   確定
                 </Button>
               )}
+              <Button type="button" variant="outline" onClick={handleSendLine} disabled={isSubmitting} className="border-green-400 text-green-700 hover:bg-green-50">
+                <MessageCircle className="w-4 h-4 mr-2" />
+                LINE通知
+              </Button>
             </div>
             <div className="space-x-2">
               <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
