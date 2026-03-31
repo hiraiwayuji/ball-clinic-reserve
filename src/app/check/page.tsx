@@ -139,6 +139,7 @@ export default function CheckPage() {
               <Button variant="outline" className="w-full" onClick={() => setStep("input")}>別の予約を確認する</Button>
               <Link href="/cancel"><Button variant="ghost" className="w-full text-red-500 hover:text-red-600">この予約をキャンセルする</Button></Link>
               <Link href="/reserve/calendar"><Button className="w-full bg-blue-600 hover:bg-blue-700">新しく予約する</Button></Link>
+              <Link href="/"><Button variant="ghost" className="w-full text-slate-500 hover:text-slate-700">トップへ戻る</Button></Link>
             </div>
           </div>
         )}
