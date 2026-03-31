@@ -3,7 +3,12 @@
 async function getLineToken(): Promise<string | null> {
   const channelId = process.env.LINE_CHANNEL_ID;
   const channelSecret = process.env.LINE_CHANNEL_SECRET;
-  if (!channelId || !channelSecret) return null;
+  // チャンネルID/Secretが揃っていれば動的トークンを取得、なければ静的トークンにフォールバック
+  if (!channelId || !channelSecret) {
+    const staticToken = process.env.LINE_CHANNEL_ACCESS_TOKEN ?? null;
+    console.log("[LINE-DEBUG] getLineToken: LINE_CHANNEL_ID未設定、静的トークンにフォールバック=", staticToken ? "OK" : "NULL");
+    return staticToken;
+  }
   try {
     const res = await fetch("https://api.line.me/v2/oauth/accessToken", {
       method: "POST",
@@ -11,10 +16,10 @@ async function getLineToken(): Promise<string | null> {
       body: `grant_type=client_credentials&client_id=${channelId}&client_secret=${channelSecret}`,
     });
     const data = await res.json();
-    console.log("[LINE-DEBUG] getLineToken: status=", res.status, "access_token=", data.access_token ? "OK" : "NULL/MISSING", "data=", JSON.stringify(data));
-    return data.access_token ?? null;
+    console.log("[LINE-DEBUG] getLineToken: status=", res.status, "access_token=", data.access_token ? "OK" : "NULL/MISSING");
+    return data.access_token ?? process.env.LINE_CHANNEL_ACCESS_TOKEN ?? null;
   } catch {
-    return null;
+    return process.env.LINE_CHANNEL_ACCESS_TOKEN ?? null;
   }
 }
 
