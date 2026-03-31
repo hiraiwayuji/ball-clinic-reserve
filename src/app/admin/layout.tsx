@@ -40,6 +40,7 @@ export default async function AdminLayout({
               <Link href="/admin/insurance" className="text-slate-600 hover:text-blue-600">保険入金</Link>
               <Link href="/admin/expenses" className="text-slate-600 hover:text-blue-600">経費</Link>
               <Link href="/admin/evaluation" className="text-slate-600 hover:text-blue-600">経営評価</Link>
+              <Link href="/admin/waitlist" className="text-slate-600 hover:text-blue-600">C待ち</Link>
               <Link href="/admin/holidays" className="text-slate-600 hover:text-blue-600">休診日</Link>
               <Link href="/admin/marketing" className="text-slate-600 hover:text-blue-600">LINE・販促</Link>
               <Link href="/admin/settings" className="text-slate-600 hover:text-blue-600 border-l pl-4 border-slate-300">設定</Link>

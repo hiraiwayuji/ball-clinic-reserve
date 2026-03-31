@@ -124,6 +124,13 @@ export default function CheckPage() {
                       <span className="text-slate-500 text-sm">ステータス</span>
                       <span className={`text-sm font-bold px-3 py-1 rounded-full ${status.color}`}>{status.text}</span>
                     </div>
+                    {apt.status === "waiting" && apt.waitlistPosition != null && (
+                      <div className="mt-2 p-3 bg-orange-50 border border-orange-200 rounded-lg text-center">
+                        <p className="text-xs text-orange-600 font-medium">キャンセル待ち順位</p>
+                        <p className="text-2xl font-bold text-orange-700">{apt.waitlistPosition}<span className="text-sm font-normal"> 番目</span></p>
+                        <p className="text-xs text-orange-500 mt-1">空きが出た際にご連絡いたします</p>
+                      </div>
+                    )}
                   </CardContent>
                 </Card>
               );

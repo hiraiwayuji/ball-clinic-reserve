@@ -8,7 +8,7 @@ function getSupabase() {
   return createClient(url, key);
 }
 
-function formatApt(apt: any) {
+function formatApt(apt: any, waitlistPosition?: number) {
   const startTime = new Date(apt.start_time);
   const customer = Array.isArray(apt.customers) ? apt.customers[0] : apt.customers;
   return {
@@ -18,7 +18,20 @@ function formatApt(apt: any) {
     time: startTime.toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Tokyo" }),
     visitType: apt.is_first_visit ? "初診" : "再診",
     status: apt.status,
+    waitlistPosition: waitlistPosition ?? null,
   };
+}
+
+async function getWaitlistPosition(supabase: any, aptId: string, startTime: string): Promise<number | null> {
+  const { data } = await supabase
+    .from("appointments")
+    .select("id, created_at")
+    .eq("start_time", startTime)
+    .eq("status", "waiting")
+    .order("created_at", { ascending: true });
+  if (!data) return null;
+  const index = data.findIndex((a: any) => a.id === aptId);
+  return index >= 0 ? index + 1 : null;
 }
 
 export async function GET(req: NextRequest) {
@@ -35,7 +48,8 @@ export async function GET(req: NextRequest) {
       .order("created_at", { ascending: false });
     const apt = (appointments || []).find(a => a.id.startsWith(id.toLowerCase()));
     if (!apt) return NextResponse.json({ error: "予約が見つかりませんでした。番号をご確認ください。" }, { status: 404 });
-    return NextResponse.json({ success: true, appointment: formatApt(apt) });
+    const position = apt.status === "waiting" ? await getWaitlistPosition(supabase, apt.id, apt.start_time) : null;
+    return NextResponse.json({ success: true, appointment: formatApt(apt, position ?? undefined) });
   }
 
   if (phone) {
@@ -55,7 +69,11 @@ export async function GET(req: NextRequest) {
       .order("start_time", { ascending: true });
     if (!appointments || appointments.length === 0)
       return NextResponse.json({ error: "有効な予約が見つかりませんでした" }, { status: 404 });
-    return NextResponse.json({ success: true, appointments: appointments.map(formatApt) });
+    const formatted = await Promise.all(appointments.map(async (a: any) => {
+      const pos = a.status === "waiting" ? await getWaitlistPosition(supabase, a.id, a.start_time) : null;
+      return formatApt(a, pos ?? undefined);
+    }));
+    return NextResponse.json({ success: true, appointments: formatted });
   }
 
   const name = req.nextUrl.searchParams.get("name");
@@ -75,7 +93,11 @@ export async function GET(req: NextRequest) {
       .order("start_time", { ascending: true });
     if (!appointments || appointments.length === 0)
       return NextResponse.json({ error: "有効な予約が見つかりませんでした" }, { status: 404 });
-    return NextResponse.json({ success: true, appointments: appointments.map(formatApt) });
+    const formatted = await Promise.all(appointments.map(async (a: any) => {
+      const pos = a.status === "waiting" ? await getWaitlistPosition(supabase, a.id, a.start_time) : null;
+      return formatApt(a, pos ?? undefined);
+    }));
+    return NextResponse.json({ success: true, appointments: formatted });
   }
 
   return NextResponse.json({ error: "検索条件が必要です" }, { status: 400 });
