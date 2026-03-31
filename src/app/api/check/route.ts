@@ -58,5 +58,25 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ success: true, appointments: appointments.map(formatApt) });
   }
 
+  const name = req.nextUrl.searchParams.get("name");
+  if (name) {
+    const { data: customers } = await supabase
+      .from("customers")
+      .select("id")
+      .ilike("name", `%${name.trim()}%`);
+    if (!customers || customers.length === 0)
+      return NextResponse.json({ error: "この名前の予約が見つかりませんでした" }, { status: 404 });
+    const customerIds = customers.map((c: any) => c.id);
+    const { data: appointments } = await supabase
+      .from("appointments")
+      .select("id, start_time, is_first_visit, status, customers(name)")
+      .in("customer_id", customerIds)
+      .in("status", ["pending", "confirmed", "waiting"])
+      .order("start_time", { ascending: true });
+    if (!appointments || appointments.length === 0)
+      return NextResponse.json({ error: "有効な予約が見つかりませんでした" }, { status: 404 });
+    return NextResponse.json({ success: true, appointments: appointments.map(formatApt) });
+  }
+
   return NextResponse.json({ error: "検索条件が必要です" }, { status: 400 });
 }

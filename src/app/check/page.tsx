@@ -8,9 +8,10 @@ import { Search, CalendarDays } from "lucide-react";
 import Link from "next/link";
 
 export default function CheckPage() {
-  const [searchType, setSearchType] = useState<"number" | "phone">("number");
+  const [searchType, setSearchType] = useState<"number" | "phone" | "name">("number");
   const [reservationNumber, setReservationNumber] = useState("");
   const [phone, setPhone] = useState("");
+  const [name, setName] = useState("");
   const [step, setStep] = useState<"input" | "result">("input");
   const [appointments, setAppointments] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
@@ -28,7 +29,9 @@ export default function CheckPage() {
     try {
       const params = searchType === "number"
         ? `id=${reservationNumber.trim().toUpperCase()}`
-        : `phone=${phone.trim()}`;
+        : searchType === "phone"
+        ? `phone=${phone.trim()}`
+        : `name=${encodeURIComponent(name.trim())}`;
       const res = await fetch(`/api/check?${params}`);
       const data = await res.json();
       if (data.success) {
@@ -50,7 +53,7 @@ export default function CheckPage() {
         <div className="text-center mb-8">
           <Link href="/" className="text-xl font-bold text-slate-900">ボール接骨院</Link>
           <h1 className="text-2xl font-bold text-slate-800 mt-4">予約確認</h1>
-          <p className="text-slate-500 text-sm mt-2">予約番号または電話番号で確認できます</p>
+          <p className="text-slate-500 text-sm mt-2">予約番号・電話番号・お名前で確認できます</p>
         </div>
 
         {step === "input" && (
@@ -63,11 +66,15 @@ export default function CheckPage() {
               <div className="flex gap-2 mt-2">
                 <button onClick={() => { setSearchType("number"); setError(""); }}
                   className={`flex-1 py-2 rounded-md text-sm font-medium transition-colors ${searchType === "number" ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-600"}`}>
-                  予約番号で検索
+                  予約番号
                 </button>
                 <button onClick={() => { setSearchType("phone"); setError(""); }}
                   className={`flex-1 py-2 rounded-md text-sm font-medium transition-colors ${searchType === "phone" ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-600"}`}>
-                  電話番号で検索
+                  電話番号
+                </button>
+                <button onClick={() => { setSearchType("name"); setError(""); }}
+                  className={`flex-1 py-2 rounded-md text-sm font-medium transition-colors ${searchType === "name" ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-600"}`}>
+                  お名前
                 </button>
               </div>
             </CardHeader>
@@ -76,13 +83,16 @@ export default function CheckPage() {
                 <Input placeholder="例: ABC12345（英数字8文字）" value={reservationNumber}
                   onChange={(e) => setReservationNumber(e.target.value.toUpperCase())}
                   className="text-center text-lg tracking-widest font-mono" maxLength={8} />
-              ) : (
+              ) : searchType === "phone" ? (
                 <Input placeholder="例: 090-0000-0000" value={phone}
                   onChange={(e) => setPhone(e.target.value)} type="tel" />
+              ) : (
+                <Input placeholder="例: 山田 太郎" value={name}
+                  onChange={(e) => setName(e.target.value)} />
               )}
               {error && <p className="text-red-500 text-sm text-center">{error}</p>}
               <Button onClick={handleSearch}
-                disabled={loading || (searchType === "number" ? reservationNumber.length < 8 : phone.length < 5)}
+                disabled={loading || (searchType === "number" ? reservationNumber.length < 8 : searchType === "phone" ? phone.length < 5 : name.trim().length < 1)}
                 className="w-full bg-blue-600 hover:bg-blue-700">
                 {loading ? "検索中..." : "予約を確認する"}
               </Button>
