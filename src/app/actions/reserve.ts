@@ -1,5 +1,74 @@
 "use server";
 
+async function getLineToken(): Promise<string | null> {
+  const channelId = process.env.LINE_CHANNEL_ID;
+  const channelSecret = process.env.LINE_CHANNEL_SECRET;
+  if (!channelId || !channelSecret) return null;
+  try {
+    const res = await fetch("https://api.line.me/v2/oauth/accessToken", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: `grant_type=client_credentials&client_id=${channelId}&client_secret=${channelSecret}`,
+    });
+    const data = await res.json();
+    console.log("[LINE-DEBUG] getLineToken: status=", res.status, "access_token=", data.access_token ? "OK" : "NULL/MISSING", "data=", JSON.stringify(data));
+    return data.access_token ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function notifyOwner(
+  name: string,
+  phone: string,
+  rawDate: string,
+  time: string,
+  visitType: string,
+  symptoms: string,
+  reservationNumber: string,
+  isWaiting: boolean | null
+) {
+  const ownerLineId = process.env.OWNER_LINE_USER_ID;
+  console.log("[LINE-DEBUG] notifyOwner called, ownerLineId=", ownerLineId ? "SET" : "NOT SET");
+  const visitLabel = visitType === "new" ? "初診（60分）" : "再診（30分）";
+  const statusLabel = isWaiting ? "⏳【キャンセル待ち登録】" : "🔔【新規予約】";
+  const messageText = `${statusLabel}\n\n患者名: ${name}\n日時: ${rawDate} ${time}\n電話: ${phone || "未入力"}\n種別: ${visitLabel}\n症状: ${symptoms || "なし"}\n予約番号: ${reservationNumber}`;
+
+  if (ownerLineId) {
+    try {
+      const token = await getLineToken();
+      console.log("[LINE-DEBUG] notifyOwner: token=", token ? "RECEIVED" : "NULL - LINE API failed");
+      if (token) {
+        const res = await fetch("https://api.line.me/v2/bot/message/push", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ to: ownerLineId, messages: [{ type: "text", text: messageText }] }),
+        });
+        if (!res.ok) console.error("[LINE通知] 送信失敗:", await res.json());
+        else console.log("[LINE通知] 送信成功");
+      }
+    } catch (err) { console.error("[LINE通知] エラー:", err); }
+  }
+
+  const resendKey = process.env.RESEND_API_KEY;
+  if (resendKey) {
+    try {
+      await fetch("https://api.resend.com/emails", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${resendKey}` },
+        body: JSON.stringify({
+          from: "ボール接骨院予約 <onboarding@resend.dev>",
+          to: ["hiraiwayuji@gmail.com"],
+          subject: `${statusLabel} ${name}様 ${rawDate} ${time}`,
+          text: messageText,
+        }),
+      });
+      console.log("[メール通知] 送信成功");
+    } catch (err) { console.error("[メール通知] エラー:", err); }
+  }
+}
+
+
 import { createClient as createServerClient } from "@/lib/supabase/server";
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { getTimeSlots, isDateWithinAllowedRange, isTimeSlotWithinTwoHours } from "@/lib/time-slots";
@@ -288,22 +357,28 @@ export async function createReservation(formData: FormData) {
         }
       } else {
         // 再診で電話番号が空の場合は名前で照合を試みる
-        const { data: existingNameCustomer } = await supabase
+        const { data: existingNameCustomer, error: nameErr } = await supabase
           .from("customers")
           .select("id")
           .eq("name", name)
           .order('created_at', { ascending: false })
           .limit(1)
           .single();
-
+          
         if (existingNameCustomer) {
           customerId = existingNameCustomer.id;
         } else {
-          // 再診でお名前が見つからない場合、新規登録は電話番号が必要なためエラーを返す
-          return { 
-            success: false, 
-            error: "ご入力いただいたお名前での登録が見つかりませんでした。初めての方は『初診』をお選びいただくか、お名前を再度ご確認ください。" 
-          };
+          const { data: newCustomer, error: insertErr } = await supabase
+            .from("customers")
+            .insert([{ 
+              name, 
+              phone: null,
+              clinic_id: DEFAULT_CLINIC_ID
+            }])
+            .select()
+            .single();
+          if (insertErr || !newCustomer) throw new Error("Customer creation failed");
+          customerId = newCustomer.id;
         }
       }
 
@@ -355,32 +430,8 @@ export async function createReservation(formData: FormData) {
       }
       
       const reservationNumber = appointmentData.id.split('-')[0].toUpperCase();
-
-      // 院長個人LINEに通知を送る
-      try {
-        const ownerLineId = process.env.OWNER_LINE_USER_ID;
-        const lineToken = process.env.LINE_CHANNEL_ACCESS_TOKEN;
-        if (ownerLineId && lineToken) {
-          const visitLabel = isFirstVisit ? "初診" : "再診";
-          const statusLabel = isCapacityFull ? "【キャンセル待ち】" : "【仮予約】";
-          const message = `${statusLabel} 新しい予約が入りました！\n\n👤 お名前: ${name}\n📅 日時: ${rawDate} ${time}\n🏥 区分: ${visitLabel}\n📞 電話: ${phone || "未入力"}\n🔢 予約番号: ${reservationNumber}`;
-          await fetch("https://api.line.me/v2/bot/message/push", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "Authorization": `Bearer ${lineToken}`
-            },
-            body: JSON.stringify({
-              to: ownerLineId,
-              messages: [{ type: "text", text: message }]
-            })
-          });
-        }
-      } catch (lineErr) {
-        console.error("LINE通知エラー:", lineErr);
-      }
-
-      return { success: true, isWaiting: isCapacityFull, reservationNumber };
+        await notifyOwner(name, phone, rawDate, time, visitType, symptoms, reservationNumber, isCapacityFull);
+  return { success: true, isWaiting: isCapacityFull, reservationNumber };
     } else {
       // SupabaseのURLが設定されていない場合の動作保証（デモ用）
       console.log("Supabase URL not configured. Simulating successful reservation.");
@@ -394,4 +445,3 @@ export async function createReservation(formData: FormData) {
     return { success: false, error: "予期せぬエラーが発生しました" };
   }
 }
-
