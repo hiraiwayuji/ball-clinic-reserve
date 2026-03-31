@@ -2,26 +2,28 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useParams } from "next/navigation";
-import { ChevronLeft, ChevronRight, Plus, X, Pencil, Trash2, Check, Clock, User, CalendarDays } from "lucide-react";
+import { ChevronLeft, ChevronRight, Plus, X, Pencil, Trash2, Check, Clock, User, CalendarDays, Settings2, Palette } from "lucide-react";
 import {
   getEvents,
   createEvent,
   updateEvent,
   deleteEvent,
   ensureCalendarExists,
+  updateCalendarMembers,
   type CalendarEvent,
+  type CalendarMember,
 } from "@/app/actions/family-calendar";
 import { cn } from "@/lib/utils";
 
-// ─── メンバーカラー ───────────────────────────────────
-const MEMBERS = [
-  { name: "パパ",    color: "#ef4444", bg: "bg-red-500",    light: "bg-red-100",    text: "text-red-700"    },
-  { name: "ママ",    color: "#ec4899", bg: "bg-pink-500",   light: "bg-pink-100",   text: "text-pink-700"   },
-  { name: "子ども1", color: "#3b82f6", bg: "bg-blue-500",   light: "bg-blue-100",   text: "text-blue-700"   },
-  { name: "子ども2", color: "#22c55e", bg: "bg-green-500",  light: "bg-green-100",  text: "text-green-700"  },
-  { name: "家族",    color: "#f59e0b", bg: "bg-amber-500",  light: "bg-amber-100",  text: "text-amber-700"  },
-  { name: "試合",    color: "#dc2626", bg: "bg-red-600",    light: "bg-red-50",     text: "text-red-600", border: "border-red-600" },
-  { name: "その他",  color: "#8b5cf6", bg: "bg-violet-500", light: "bg-violet-100", text: "text-violet-700" },
+// ─── カラープリセット ───────────────────────────────────
+const COLOR_PRESETS = [
+  { color: "#ef4444", bg: "bg-red-500",    light: "bg-red-100",    text: "text-red-700"    },
+  { color: "#3b82f6", bg: "bg-blue-500",   light: "bg-blue-100",   text: "text-blue-700"   },
+  { color: "#ec4899", bg: "bg-pink-500",   light: "bg-pink-100",   text: "text-pink-700"   },
+  { color: "#22c55e", bg: "bg-green-500",  light: "bg-green-100",  text: "text-green-700"  },
+  { color: "#f59e0b", bg: "bg-amber-500",  light: "bg-amber-100",  text: "text-amber-700"  },
+  { color: "#8b5cf6", bg: "bg-violet-500", light: "bg-violet-100", text: "text-violet-700" },
+  { color: "#dc2626", bg: "bg-red-600",    light: "bg-red-50",     text: "text-red-600", border: "border-red-600" },
 ];
 
 const WEEKDAYS = ["日", "月", "火", "水", "木", "金", "土"];
@@ -35,19 +37,15 @@ function formatTime(iso: string) {
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 }
 
-function getMember(name?: string | null) {
-  return MEMBERS.find((m) => m.name === name) ?? MEMBERS[5];
-}
-
-type ModalMode = "create" | "edit" | "view";
+type ModalMode = "create" | "edit" | "view" | "settings";
 interface Form {
   title: string; description: string; date: string;
   startTime: string; endTime: string; isAllDay: boolean; memberName: string;
 }
 
-const blankForm = (date = toLocalDateStr(new Date())): Form => ({
+const blankForm = (date = toLocalDateStr(new Date()), defaultMember = "家族"): Form => ({
   title: "", description: "", date,
-  startTime: "09:00", endTime: "10:00", isAllDay: false, memberName: "家族",
+  startTime: "09:00", endTime: "10:00", isAllDay: false, memberName: defaultMember,
 });
 
 export default function FamilyCalendarPage() {
@@ -59,6 +57,7 @@ export default function FamilyCalendarPage() {
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [calendarName, setCalendarName] = useState("ファミリーカレンダー");
+  const [members, setMembers] = useState<CalendarMember[]>([]);
   const [filter, setFilter] = useState<string | null>(null);
   const [modal, setModal] = useState<{ mode: ModalMode; event?: CalendarEvent; date?: string } | null>(null);
   const [form, setForm] = useState<Form>(blankForm());
@@ -67,11 +66,16 @@ export default function FamilyCalendarPage() {
   const year = current.getFullYear();
   const month = current.getMonth();
 
+  function getMember(name?: string | null) {
+    return members.find((m) => m.name === name) ?? members[0] ?? COLOR_PRESETS[4];
+  }
+
   // カレンダー初期化
   useEffect(() => {
     if (!calendarId) return;
     ensureCalendarExists(calendarId, "ファミリーカレンダー").then((cal) => {
       if (cal?.name) setCalendarName(cal.name);
+      if (cal?.members) setMembers(cal.members);
     });
   }, [calendarId]);
 
@@ -105,7 +109,7 @@ export default function FamilyCalendarPage() {
   }
 
   // モーダル操作
-  function openCreate(date: string) { setForm(blankForm(date)); setModal({ mode: "create", date }); }
+  function openCreate(date: string) { setForm(blankForm(date, members[0]?.name || "家族")); setModal({ mode: "create", date }); }
   function openView(e: CalendarEvent) { setModal({ mode: "view", event: e }); }
   function openEdit(e: CalendarEvent) {
     const s = new Date(e.start_time), en = new Date(e.end_time);
@@ -150,6 +154,14 @@ export default function FamilyCalendarPage() {
     setModal(null);
   }
 
+  async function handleUpdateMembers(newMembers: CalendarMember[]) {
+    setSaving(true);
+    await updateCalendarMembers(calendarId, newMembers);
+    setMembers(newMembers);
+    setSaving(false);
+    setModal(null);
+  }
+
   return (
     <div className="min-h-screen bg-slate-950 text-white">
 
@@ -157,18 +169,22 @@ export default function FamilyCalendarPage() {
       <header className="sticky top-0 z-30 bg-slate-900/90 backdrop-blur border-b border-slate-800 px-3 py-2.5 flex items-center gap-2">
         <CalendarDays className="w-5 h-5 text-violet-400 shrink-0" />
         <span className="font-bold text-sm flex-1 truncate">{calendarName}</span>
-        <div className="flex gap-1 overflow-x-auto scrollbar-none">
+        <div className="flex gap-1 overflow-x-auto scrollbar-none pr-2">
           <button onClick={() => setFilter(null)}
             className={`px-2 py-0.5 rounded-full text-xs font-bold transition whitespace-nowrap ${!filter ? "bg-violet-500 text-white" : "bg-slate-800 text-slate-400"}`}>
             全員
           </button>
-          {MEMBERS.slice(0, 5).map((m) => (
+          {members.map((m) => (
             <button key={m.name} onClick={() => setFilter(filter === m.name ? null : m.name)}
               className={`px-2 py-0.5 rounded-full text-xs font-bold transition whitespace-nowrap ${filter === m.name ? `${m.bg} text-white` : "bg-slate-800 text-slate-400"}`}>
               {m.name}
             </button>
           ))}
         </div>
+        <button onClick={() => setModal({ mode: "settings" })}
+          className="w-8 h-8 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center shrink-0">
+          <Settings2 className="w-4 h-4 text-slate-400" />
+        </button>
       </header>
 
       {/* 月ナビ */}
@@ -234,7 +250,7 @@ export default function FamilyCalendarPage() {
       )}
 
       {/* 今月一覧 */}
-      <div className="px-4 py-5">
+      <div className="px-4 py-5 pb-24">
         <p className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-3">今月の予定</p>
         {events.filter(e => !filter || e.member_name === filter).length === 0 ? (
           <p className="text-slate-600 text-sm text-center py-6">予定なし</p>
@@ -280,7 +296,7 @@ export default function FamilyCalendarPage() {
       {modal && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center"
           onClick={(e) => { if (e.target === e.currentTarget) setModal(null); }}>
-          <div className="bg-slate-900 w-full sm:max-w-md rounded-t-3xl sm:rounded-2xl border border-slate-700 overflow-hidden">
+          <div className="bg-slate-900 w-full sm:max-w-md rounded-t-3xl sm:rounded-2xl border border-slate-700 overflow-hidden shadow-2xl">
 
             {/* VIEW */}
             {modal.mode === "view" && modal.event && (() => {
@@ -295,13 +311,13 @@ export default function FamilyCalendarPage() {
                     <div className="flex items-start justify-between mb-4">
                       <h2 className="text-xl font-black flex-1 pr-3 leading-snug">{ev.title}</h2>
                       <div className="flex gap-2">
-                        <button onClick={() => openEdit(ev)} className="w-9 h-9 rounded-xl bg-slate-800 hover:bg-slate-700 flex items-center justify-center transition">
+                        <button onClick={() => openEdit(ev)} className="w-9 h-9 rounded-xl bg-slate-800 hover:bg-slate-700 flex items-center justify-center transition border border-slate-700">
                           <Pencil className="w-4 h-4 text-slate-300" />
                         </button>
-                        <button onClick={() => handleDelete(ev.id)} className="w-9 h-9 rounded-xl bg-red-900/40 hover:bg-red-900/60 flex items-center justify-center transition">
+                        <button onClick={() => handleDelete(ev.id)} className="w-9 h-9 rounded-xl bg-red-900/40 hover:bg-red-900/60 flex items-center justify-center transition border border-red-900/20">
                           <Trash2 className="w-4 h-4 text-red-400" />
                         </button>
-                        <button onClick={() => setModal(null)} className="w-9 h-9 rounded-xl bg-slate-800 hover:bg-slate-700 flex items-center justify-center transition">
+                        <button onClick={() => setModal(null)} className="w-9 h-9 rounded-xl bg-slate-800 hover:bg-slate-700 flex items-center justify-center transition border border-slate-700">
                           <X className="w-4 h-4 text-slate-300" />
                         </button>
                       </div>
@@ -321,7 +337,7 @@ export default function FamilyCalendarPage() {
                         </div>
                       )}
                       {ev.description && (
-                        <p className="text-slate-400 bg-slate-800 rounded-xl p-3 leading-relaxed">{ev.description}</p>
+                        <p className="text-slate-400 bg-slate-800 rounded-xl p-3 leading-relaxed border border-slate-700">{ev.description}</p>
                       )}
                     </div>
                   </div>
@@ -334,11 +350,11 @@ export default function FamilyCalendarPage() {
               <>
                 <div className="flex items-center justify-between p-5 border-b border-slate-800">
                   <h2 className="text-lg font-black">{modal.mode === "create" ? "予定を追加" : "予定を編集"}</h2>
-                  <button onClick={() => setModal(null)} className="w-8 h-8 rounded-xl bg-slate-800 hover:bg-slate-700 flex items-center justify-center transition">
+                  <button onClick={() => setModal(null)} className="w-8 h-8 rounded-xl bg-slate-800 hover:bg-slate-700 flex items-center justify-center transition border border-slate-700">
                     <X className="w-4 h-4" />
                   </button>
                 </div>
-                <div className="p-5 space-y-4 overflow-y-auto max-h-[65vh]">
+                <div className="p-5 space-y-4 overflow-y-auto max-h-[65vh] scrollbar-none">
 
                   {/* タイトル */}
                   <div>
@@ -351,10 +367,10 @@ export default function FamilyCalendarPage() {
                   {/* メンバー */}
                   <div>
                     <label className="text-xs font-bold text-slate-400 block mb-1.5">メンバー</label>
-                    <div className="flex flex-wrap gap-2">
-                      {MEMBERS.map(m => (
+                    <div className="flex flex-wrap gap-2 text-[10px]">
+                      {members.map(m => (
                         <button key={m.name} onClick={() => setForm({...form, memberName: m.name})}
-                          className={`px-3 py-1.5 rounded-full text-xs font-bold transition ${form.memberName === m.name ? `${m.bg} text-white ring-2 ring-white/20` : "bg-slate-800 text-slate-300 hover:bg-slate-700"}`}>
+                          className={`px-3 py-1.5 rounded-full font-bold transition ${form.memberName === m.name ? `${m.bg} text-white ring-2 ring-white/20` : "bg-slate-800 text-slate-300 hover:bg-slate-700 border border-slate-700"}`}>
                           {m.name}
                         </button>
                       ))}
@@ -369,11 +385,11 @@ export default function FamilyCalendarPage() {
                   </div>
 
                   {/* 終日トグル */}
-                  <div className="flex items-center justify-between bg-slate-800 rounded-xl px-4 py-3">
+                  <div className="flex items-center justify-between bg-slate-800/50 rounded-xl px-4 py-3 border border-slate-800">
                     <span className="text-sm text-slate-300">終日</span>
                     <button onClick={() => setForm({...form, isAllDay: !form.isAllDay})}
-                      className={`w-12 h-6 rounded-full transition-colors relative ${form.isAllDay ? "bg-violet-500" : "bg-slate-600"}`}>
-                      <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-all ${form.isAllDay ? "left-[26px]" : "left-0.5"}`} />
+                      className={`w-12 h-6 rounded-full transition-colors relative ${form.isAllDay ? "bg-violet-500" : "bg-slate-700"}`}>
+                      <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow-md transition-all ${form.isAllDay ? "left-[26px]" : "left-0.5"}`} />
                     </button>
                   </div>
 
@@ -404,17 +420,96 @@ export default function FamilyCalendarPage() {
 
                 <div className="p-4 border-t border-slate-800 bg-slate-900/50">
                   <button onClick={handleSave} disabled={!form.title.trim() || saving}
-                    className="w-full bg-violet-600 hover:bg-violet-500 disabled:opacity-40 text-white font-black py-5 rounded-2xl flex items-center justify-center gap-2 transition shadow-xl shadow-violet-900/20 text-lg active:scale-95">
+                    className="w-full bg-violet-600 hover:bg-violet-500 disabled:opacity-40 text-white font-black py-4 rounded-2xl flex items-center justify-center gap-2 transition shadow-xl shadow-violet-900/20 text-base active:scale-95">
                     {saving
-                      ? <div className="w-6 h-6 border-3 border-white border-t-transparent rounded-full animate-spin" />
-                      : <><Check className="w-6 h-6 stroke-[3]" />保存する</>}
+                      ? <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                      : <><Check className="w-5 h-5 stroke-[3]" />保存する</>}
                   </button>
                 </div>
               </>
+            )}
+
+            {/* SETTINGS (MEMBERS) */}
+            {modal.mode === "settings" && (
+              <MemberSettings members={members} onSave={handleUpdateMembers} onCancel={() => setModal(null)} saving={saving} />
             )}
           </div>
         </div>
       )}
     </div>
+  );
+}
+
+// ─── メンバー設定コンポーネント ───────────────────────────────────
+function MemberSettings({ members, onSave, onCancel, saving }: { members: CalendarMember[], onSave: (m: CalendarMember[]) => void, onCancel: () => void, saving: boolean }) {
+  const [localMembers, setLocalMembers] = useState<CalendarMember[]>([...members]);
+
+  const updateMember = (index: number, updates: Partial<CalendarMember>) => {
+    const next = [...localMembers];
+    next[index] = { ...next[index], ...updates };
+    setLocalMembers(next);
+  };
+
+  const addMember = () => {
+    const preset = COLOR_PRESETS[localMembers.length % COLOR_PRESETS.length];
+    setLocalMembers([...localMembers, { name: "新しい名前", ...preset }]);
+  };
+
+  const removeMember = (index: number) => {
+    if (localMembers.length <= 1) return;
+    setLocalMembers(localMembers.filter((_, i) => i !== index));
+  };
+
+  return (
+    <>
+      <div className="flex items-center justify-between p-5 border-b border-slate-800">
+        <h2 className="text-lg font-black flex items-center gap-2">
+          <Palette className="w-5 h-5 text-violet-400" />
+          メンバー設定
+        </h2>
+        <button onClick={onCancel} className="w-8 h-8 rounded-xl bg-slate-800 hover:bg-slate-700 flex items-center justify-center transition border border-slate-700">
+          <X className="w-4 h-4" />
+        </button>
+      </div>
+      <div className="p-5 space-y-4 overflow-y-auto max-h-[60vh] scrollbar-none">
+        <p className="text-[10px] text-slate-500 font-bold mb-2">名前と色を自由に設定できます（全7色）</p>
+        <div className="space-y-3">
+          {localMembers.map((m, idx) => (
+            <div key={idx} className="flex items-center gap-3 bg-slate-800/50 p-3 rounded-2xl border border-slate-800">
+              <div className="flex-1 space-y-2">
+                <input value={m.name} onChange={e => updateMember(idx, { name: e.target.value })}
+                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-violet-500 font-bold" />
+                <div className="flex gap-1.5">
+                  {COLOR_PRESETS.slice(0, 6).map((preset) => (
+                    <button key={preset.color} onClick={() => updateMember(idx, preset)}
+                      className={`w-6 h-6 rounded-full transition-transform ${m.color === preset.color ? "scale-125 ring-2 ring-white" : "opacity-30 hover:opacity-100"}`}
+                      style={{ backgroundColor: preset.color }} />
+                  ))}
+                  <button onClick={() => updateMember(idx, COLOR_PRESETS[6])}
+                    className={`w-6 h-6 rounded-md transition-transform flex items-center justify-center ${m.color === COLOR_PRESETS[6].color ? "scale-125 ring-2 ring-white" : "opacity-30 hover:opacity-100"}`}
+                    style={{ backgroundColor: COLOR_PRESETS[6].color }}>
+                    <span className="text-white text-[8px] font-black">🔴</span>
+                  </button>
+                </div>
+              </div>
+              <button onClick={() => removeMember(idx)} className="w-8 h-8 rounded-lg bg-red-900/20 hover:bg-red-900/40 flex items-center justify-center text-red-400 transition">
+                <Trash2 className="w-4 h-4" />
+              </button>
+            </div>
+          ))}
+        </div>
+        <button onClick={addMember}
+          className="w-full py-3 rounded-xl border border-dashed border-slate-600 text-slate-400 hover:text-white hover:border-slate-400 transition text-xs font-bold flex items-center justify-center gap-2">
+          <Plus className="w-4 h-4" />
+          メンバーを追加
+        </button>
+      </div>
+      <div className="p-4 border-t border-slate-800 bg-slate-900/50">
+        <button onClick={() => onSave(localMembers)} disabled={saving}
+          className="w-full bg-violet-600 hover:bg-violet-500 disabled:opacity-40 text-white font-black py-4 rounded-2xl flex items-center justify-center gap-2 transition shadow-xl shadow-violet-900/20 text-base">
+          {saving ? <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" /> : <><Check className="w-5 h-5 stroke-[3]" />設定を保存</>}
+        </button>
+      </div>
+    </>
   );
 }

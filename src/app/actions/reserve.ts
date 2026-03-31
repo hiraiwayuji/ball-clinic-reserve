@@ -288,28 +288,22 @@ export async function createReservation(formData: FormData) {
         }
       } else {
         // 再診で電話番号が空の場合は名前で照合を試みる
-        const { data: existingNameCustomer, error: nameErr } = await supabase
+        const { data: existingNameCustomer } = await supabase
           .from("customers")
           .select("id")
           .eq("name", name)
           .order('created_at', { ascending: false })
           .limit(1)
           .single();
-          
+
         if (existingNameCustomer) {
           customerId = existingNameCustomer.id;
         } else {
-          const { data: newCustomer, error: insertErr } = await supabase
-            .from("customers")
-            .insert([{ 
-              name, 
-              phone: null,
-              clinic_id: DEFAULT_CLINIC_ID
-            }])
-            .select()
-            .single();
-          if (insertErr || !newCustomer) throw new Error("Customer creation failed");
-          customerId = newCustomer.id;
+          // 再診でお名前が見つからない場合、新規登録は電話番号が必要なためエラーを返す
+          return { 
+            success: false, 
+            error: "ご入力いただいたお名前での登録が見つかりませんでした。初めての方は『初診』をお選びいただくか、お名前を再度ご確認ください。" 
+          };
         }
       }
 
@@ -361,6 +355,31 @@ export async function createReservation(formData: FormData) {
       }
       
       const reservationNumber = appointmentData.id.split('-')[0].toUpperCase();
+
+      // 院長個人LINEに通知を送る
+      try {
+        const ownerLineId = process.env.OWNER_LINE_USER_ID;
+        const lineToken = process.env.LINE_CHANNEL_ACCESS_TOKEN;
+        if (ownerLineId && lineToken) {
+          const visitLabel = isFirstVisit ? "初診" : "再診";
+          const statusLabel = isCapacityFull ? "【キャンセル待ち】" : "【仮予約】";
+          const message = `${statusLabel} 新しい予約が入りました！\n\n👤 お名前: ${name}\n📅 日時: ${rawDate} ${time}\n🏥 区分: ${visitLabel}\n📞 電話: ${phone || "未入力"}\n🔢 予約番号: ${reservationNumber}`;
+          await fetch("https://api.line.me/v2/bot/message/push", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "Authorization": `Bearer ${lineToken}`
+            },
+            body: JSON.stringify({
+              to: ownerLineId,
+              messages: [{ type: "text", text: message }]
+            })
+          });
+        }
+      } catch (lineErr) {
+        console.error("LINE通知エラー:", lineErr);
+      }
+
       return { success: true, isWaiting: isCapacityFull, reservationNumber };
     } else {
       // SupabaseのURLが設定されていない場合の動作保証（デモ用）
@@ -375,3 +394,4 @@ export async function createReservation(formData: FormData) {
     return { success: false, error: "予期せぬエラーが発生しました" };
   }
 }
+

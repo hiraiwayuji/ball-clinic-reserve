@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useState, useEffect, Suspense } from "react";
 import Link from "next/link";
@@ -126,6 +126,7 @@ function ReserveContent() {
   };
 
   if (isSuccess) {
+    const isConfirmed = lineRegistered;
     return (
       <div className="min-h-screen bg-gradient-to-br from-indigo-900 via-blue-900 to-slate-900 flex flex-col items-center justify-center p-4">
         <div className="max-w-lg w-full bg-white/10 backdrop-blur-xl p-8 md:p-10 rounded-[2.5rem] shadow-2xl border border-white/20 text-center">
@@ -133,31 +134,37 @@ function ReserveContent() {
             <div className="relative w-40 h-16">
               <Image src="/images/logo-white.png" alt="ボール接骨院" fill className="object-contain" />
             </div>
-            <div className="w-20 h-20 bg-emerald-500 rounded-full flex items-center justify-center shadow-lg shadow-emerald-500/40">
+            <div className={`w-20 h-20 rounded-full flex items-center justify-center shadow-lg ${isConfirmed ? "bg-emerald-500 shadow-emerald-500/40" : "bg-blue-500 shadow-blue-500/40"}`}>
               <CheckCircle2 className="w-12 h-12 text-white" />
             </div>
           </div>
           <h1 className="text-3xl font-extrabold text-white mb-2">
-            {isWaitingResult ? "キャンセル待ち受付完了" : "仮予約を受け付けました"}
+            {isWaitingResult ? "キャンセル待ち受付完了" : isConfirmed ? "予約が確定しました！" : "仮予約を受け付けました"}
           </h1>
-          <p className="text-blue-200 text-sm mb-6">院長がLINEにて内容を確認後、予約確定のご連絡をいたします。</p>
+          <p className="text-blue-200 text-sm mb-6">
+            {isConfirmed
+              ? "LINEにて予約内容をお送りください。院長より確認のご連絡をいたします。"
+              : "院長がLINEにて内容を確認後、予約確定のご連絡をいたします。"}
+          </p>
           <div className="h-1 w-20 bg-emerald-500 mx-auto mb-6 rounded-full" />
-          <div className="bg-white/5 border border-white/10 p-6 rounded-3xl mb-6 text-left space-y-3">
-            <p className="text-white font-bold text-center mb-4 flex items-center justify-center gap-2">
-              <MessageCircle className="w-5 h-5 text-green-400" />
-              LINEで予約を完了する
-            </p>
-            <p className="text-blue-100/70 text-sm text-center">以下のボタンからボール接骨院のLINEを友だち追加して、予約内容をお伝えください。</p>
+          {!isConfirmed && (
+            <div className="bg-white/5 border border-white/10 p-6 rounded-3xl mb-6 text-left space-y-3">
+              <p className="text-white font-bold text-center mb-4 flex items-center justify-center gap-2">
+                <MessageCircle className="w-5 h-5 text-green-400" />
+                LINEで予約を完了する
+              </p>
+              <p className="text-blue-100/70 text-sm text-center">以下のボタンからボール接骨院のLINEを友だち追加して、予約内容をお伝えください。</p>
             
-              href="https://line.me/ti/p/%40shc8761q"
-              target="_blank"
-              rel="noreferrer"
-              className="mt-4 inline-flex w-full items-center justify-center bg-[#06C755] hover:bg-[#05b34c] text-white font-bold py-5 px-4 rounded-2xl transition-all shadow-xl shadow-[#06C755]/20 gap-2"
-            >
-              <MessageCircle className="w-5 h-5" />
-              LINEで予約を確定する
-            </a>
-          </div>
+                <a href="https://line.me/ti/p/%40shc8761q"
+                target="_blank"
+                rel="noreferrer"
+                className="mt-4 inline-flex w-full items-center justify-center bg-[#06C755] hover:bg-[#05b34c] text-white font-bold py-5 px-4 rounded-2xl transition-all shadow-xl shadow-[#06C755]/20 gap-2"
+              >
+                <MessageCircle className="w-5 h-5" />
+                LINEで予約を確定する
+              </a>
+            </div>
+          )}
           <Link href="/" className="text-blue-300 hover:text-white transition-colors text-sm font-medium inline-flex items-center gap-1">
             <ArrowLeft className="w-4 h-4" />
             トップページへ戻る
@@ -198,8 +205,6 @@ function ReserveContent() {
           <div className="lg:col-span-8 space-y-6">
             <div className="bg-white/5 backdrop-blur-xl rounded-[2.5rem] border border-white/10 p-8 md:p-10 shadow-2xl">
               <form onSubmit={handleSubmit} className="space-y-10">
-
-                {/* 予約日時 */}
                 <section className="space-y-6">
                   <h2 className="text-xl font-bold text-white tracking-tight">ご希望の日時</h2>
                   <div className="grid md:grid-cols-2 gap-6">
@@ -245,94 +250,64 @@ function ReserveContent() {
                   </div>
                 </section>
 
-                {/* お客様情報 */}
                 <section className="space-y-6">
                   <h2 className="text-xl font-bold text-white tracking-tight">お客様情報</h2>
-
-                  {/* 初診・再診 */}
                   <div className="space-y-2">
                     <Label className="text-blue-100/60 font-bold text-xs uppercase">来院区分</Label>
                     <div className="grid grid-cols-2 gap-3">
-                      <button
-                        type="button"
-                        onClick={() => setVisitType("new")}
-                        className={`h-14 rounded-2xl font-bold text-sm transition-all border ${visitType === "new" ? "bg-blue-600 border-blue-500 text-white" : "bg-white/5 border-white/10 text-blue-100/60 hover:bg-white/10"}`}
-                      >
-                        🆕 初診（初めて）
+                      <button type="button" onClick={() => setVisitType("new")}
+                        className={`h-14 rounded-2xl font-bold text-sm transition-all border ${visitType === "new" ? "bg-blue-600 border-blue-500 text-white" : "bg-white/5 border-white/10 text-blue-100/60 hover:bg-white/10"}`}>
+                        初診（初めて）
                       </button>
-                      <button
-                        type="button"
-                        onClick={() => setVisitType("return")}
-                        className={`h-14 rounded-2xl font-bold text-sm transition-all border ${visitType === "return" ? "bg-blue-600 border-blue-500 text-white" : "bg-white/5 border-white/10 text-blue-100/60 hover:bg-white/10"}`}
-                      >
-                        🔄 再診（2回目以降）
+                      <button type="button" onClick={() => setVisitType("return")}
+                        className={`h-14 rounded-2xl font-bold text-sm transition-all border ${visitType === "return" ? "bg-blue-600 border-blue-500 text-white" : "bg-white/5 border-white/10 text-blue-100/60 hover:bg-white/10"}`}>
+                        再診（2回目以降）
                       </button>
                     </div>
                   </div>
 
-                  {/* お名前 */}
                   <div className="space-y-2">
                     <Label className="text-blue-100/60 font-bold text-xs uppercase" htmlFor="name">お名前</Label>
                     <Input id="name" name="name" value={name} onChange={(e) => setName(e.target.value)} required placeholder="山田 太郎" className="h-14 bg-white/5 border-white/10 rounded-2xl text-white placeholder:text-white/20" />
                   </div>
 
-                  {/* 初診のみ：電話番号・LINE */}
-                  {visitType === "new" && (
-                    <div className="space-y-4 p-6 bg-blue-500/10 border border-blue-500/20 rounded-2xl">
-                      <p className="text-blue-300 text-sm font-bold">📋 初診の方は以下もご入力ください</p>
+                  <div className="space-y-4 p-6 bg-blue-500/10 border border-blue-500/20 rounded-2xl">
+                    <p className="text-blue-300 text-sm font-bold">📋 {visitType === "new" ? "初診の方は以下もご入力ください" : "LINE友だち追加の確認"}</p>
+                    {visitType === "new" && (
                       <div className="space-y-2">
                         <Label className="text-blue-100/60 font-bold text-xs uppercase" htmlFor="phone">電話番号</Label>
-                        <Input
-                          id="phone"
-                          name="phone"
-                          type="tel"
-                          value={phone}
-                          onChange={(e) => setPhone(e.target.value)}
-                          required
-                          placeholder="090-0000-0000"
-                          className="h-14 bg-white/5 border-white/10 rounded-2xl text-white placeholder:text-white/20"
-                        />
+                        <Input id="phone" name="phone" type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} required placeholder="090-0000-0000"
+                          className="h-14 bg-white/5 border-white/10 rounded-2xl text-white placeholder:text-white/20" />
                       </div>
-                      <div className="flex items-center gap-3 p-4 bg-green-500/10 border border-green-500/20 rounded-xl">
-                        <input
-                          type="checkbox"
-                          id="lineRegistered"
-                          checked={lineRegistered}
-                          onChange={(e) => setLineRegistered(e.target.checked)}
-                          className="w-5 h-5 accent-green-500"
-                        />
-                        <label htmlFor="lineRegistered" className="text-sm text-green-200 cursor-pointer">
-                          ボール接骨院のLINE公式アカウントを友だち追加済み
-                        </label>
-                      </div>
-                      {!lineRegistered && (
-                        
-                          href="https://line.me/ti/p/%40shc8761q"
-                          target="_blank"
-                          rel="noreferrer"
-                          className="inline-flex w-full items-center justify-center bg-[#06C755] hover:bg-[#05b34c] text-white font-bold py-3 px-4 rounded-xl transition-all gap-2 text-sm"
-                        >
-                          <MessageCircle className="w-4 h-4" />
-                          LINEを友だち追加する
-                        </a>
-                      )}
+                    )}
+                    <div className="flex items-center gap-3 p-4 bg-green-500/10 border border-green-500/20 rounded-xl">
+                      <input type="checkbox" id="lineRegistered" checked={lineRegistered} onChange={(e) => setLineRegistered(e.target.checked)} className="w-5 h-5 accent-green-500" />
+                      <label htmlFor="lineRegistered" className="text-sm text-green-200 cursor-pointer">
+                        ボール接骨院のLINE公式アカウントを友だち追加済み
+                      </label>
                     </div>
-                  )}
+                    {!lineRegistered && (
+                      <a href="https://line.me/ti/p/%40shc8761q" target="_blank" rel="noreferrer"
+                        className="inline-flex w-full items-center justify-center bg-[#06C755] hover:bg-[#05b34c] text-white font-bold py-3 px-4 rounded-xl transition-all gap-2 text-sm">
+                        <MessageCircle className="w-4 h-4" />
+                        LINEを友だち追加する
+                      </a>
+                    )}
+                  </div>
                 </section>
 
                 <div className="bg-white/5 border border-white/10 p-5 rounded-2xl text-sm text-blue-100/60 space-y-1">
-                  <p className="font-bold text-white text-sm">⚠️ 仮予約について</p>
-                  <p>こちらは仮予約です。院長がLINEにて確認後、予約確定のご連絡をいたします。</p>
+                  <p className="font-bold text-white text-sm">⚠️ {lineRegistered ? "予約について" : "仮予約について"}</p>
+                  <p>{lineRegistered ? "LINE友だち追加済みの方は予約が確定します。LINEにて予約内容をお送りください。" : "こちらは仮予約です。院長がLINEにて確認後、予約確定のご連絡をいたします。"}</p>
                 </div>
 
                 <Button type="submit" disabled={!visitType || isSubmitting} className="w-full h-20 text-xl font-black rounded-3xl bg-blue-600 hover:bg-blue-500 text-white disabled:opacity-40">
-                  {isSubmitting ? "送信中..." : "仮予約を申し込む"}
+                  {isSubmitting ? "送信中..." : lineRegistered ? "予約を確定する" : "仮予約を申し込む"}
                 </Button>
               </form>
             </div>
           </div>
 
-          {/* サイドバー */}
           <div className="lg:col-span-4 space-y-6">
             <div className="bg-white/5 backdrop-blur-xl rounded-[2.5rem] border border-white/10 p-8 shadow-2xl space-y-8">
               <div className="relative w-full h-16">

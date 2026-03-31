@@ -134,6 +134,7 @@ export async function getInsurancePayments(monthStr: string) {
       .from("insurance_payments")
       .select("*")
       .eq("payment_month", monthStr)
+      .eq("clinic_id", DEFAULT_CLINIC_ID)
       .order("insurance_name", { ascending: true });
 
     if (error) throw error;
@@ -178,6 +179,7 @@ export async function getMonthlyTotalRevenue(year: number, month: number) {
     const { data: cashData, error: cashErr } = await supabase
       .from("cash_sales")
       .select("treatment_fee")
+      .eq("clinic_id", DEFAULT_CLINIC_ID)
       .gte("sale_date", startOfMonth)
       .lte("sale_date", endOfMonth);
 
@@ -187,6 +189,7 @@ export async function getMonthlyTotalRevenue(year: number, month: number) {
     const { data: insuranceData, error: insErr } = await supabase
       .from("insurance_payments")
       .select("amount")
+      .eq("clinic_id", DEFAULT_CLINIC_ID)
       .eq("payment_month", startOfMonth);
 
     if (insErr) throw insErr;
@@ -215,6 +218,7 @@ export async function getDailySalesSummary(dateStr: string) {
     const { data, error } = await supabase
       .from("cash_sales")
       .select("treatment_fee")
+      .eq("clinic_id", DEFAULT_CLINIC_ID)
       .eq("sale_date", dateStr);
 
     if (error) throw error;
@@ -270,6 +274,7 @@ export async function getExpenses(dateStr: string) {
     const { data, error } = await supabase
       .from("clinic_expenses")
       .select("*")
+      .eq("clinic_id", DEFAULT_CLINIC_ID)
       .eq("expense_date", dateStr)
       .order("created_at", { ascending: true });
 
@@ -312,6 +317,7 @@ export async function getMonthlyExpenses(year: number, month: number) {
     const { data, error } = await supabase
       .from("clinic_expenses")
       .select("amount, category")
+      .eq("clinic_id", DEFAULT_CLINIC_ID)
       .gte("expense_date", startOfMonth)
       .lte("expense_date", endOfMonth);
 
@@ -361,6 +367,7 @@ export async function getBusinessContext() {
       const { data } = await supabase
         .from("appointments")
         .select("id, start_time, status, is_first_visit, customers(name)")
+        .eq("clinic_id", DEFAULT_CLINIC_ID)
         .gte("start_time", startOfDay)
         .lte("start_time", endOfDay)
         .neq("status", "cancelled");
@@ -375,6 +382,7 @@ export async function getBusinessContext() {
       const { data } = await supabase
         .from("appointments")
         .select("id, is_first_visit")
+        .eq("clinic_id", DEFAULT_CLINIC_ID)
         .gte("start_time", `${startOfMonth}T00:00:00+09:00`)
         .lte("start_time", `${endOfMonth}T23:59:59+09:00`)
         .neq("status", "cancelled");
@@ -389,6 +397,7 @@ export async function getBusinessContext() {
       const { data } = await supabase
         .from("clinic_targets")
         .select("*")
+        .eq("clinic_id", DEFAULT_CLINIC_ID)
         .eq("month", startOfMonth)
         .maybeSingle();
       targetData = data;
@@ -401,7 +410,8 @@ export async function getBusinessContext() {
     try {
       const { count } = await supabase
         .from("customers")
-        .select("id", { count: "exact", head: true });
+        .select("id", { count: "exact", head: true })
+        .eq("clinic_id", DEFAULT_CLINIC_ID);
       totalCustomers = count || 0;
     } catch (e) {
       console.error("[AI_CONTEXT_LOG] Error fetching customers count:", e);
@@ -496,6 +506,7 @@ export async function getTodayDashboardData() {
             name
           )
         `)
+        .eq("clinic_id", DEFAULT_CLINIC_ID)
         .gte("start_time", startOfDay)
         .lte("start_time", endOfDay)
         .neq("status", "cancelled")
@@ -513,6 +524,7 @@ export async function getTodayDashboardData() {
       const { data: target } = await supabase
         .from("clinic_targets")
         .select("target_income")
+        .eq("clinic_id", DEFAULT_CLINIC_ID)
         .eq("month", `${year}-${month.toString().padStart(2, '0')}-01`)
         .maybeSingle();
       if (target?.target_income) targetIncome = target.target_income;
@@ -535,6 +547,7 @@ export async function getTodayDashboardData() {
       const { data: evalData } = await supabase
         .from("monthly_evaluations")
         .select("ai_suggestions")
+        .eq("clinic_id", DEFAULT_CLINIC_ID)
         .eq("month", `${year}-${month.toString().padStart(2, '0')}-01`)
         .maybeSingle();
       aiSuggestions = evalData?.ai_suggestions || null;
@@ -548,6 +561,7 @@ export async function getTodayDashboardData() {
       const { data } = await supabase
         .from("daily_tasks")
         .select("*")
+        .eq("clinic_id", DEFAULT_CLINIC_ID)
         .eq("task_date", dateStr)
         .order("created_at", { ascending: true });
       dailyTasks = data || [];

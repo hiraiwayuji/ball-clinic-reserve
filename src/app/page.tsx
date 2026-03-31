@@ -11,9 +11,9 @@ export default function Home() {
         <div className="container mx-auto px-4 h-16 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <Link href="/" className="flex items-center gap-2">
-              <div className="relative w-10 h-10">
+              <div className="relative w-40 h-12">
                 <Image 
-                  src="/images/logo-black.png" 
+                  src="/images/logo_main_mini_black.png" 
                   alt="ボール接骨院" 
                   fill 
                   className="object-contain"
@@ -138,6 +138,8 @@ export default function Home() {
     </div>
   );
 }
+
+
 
 
 
