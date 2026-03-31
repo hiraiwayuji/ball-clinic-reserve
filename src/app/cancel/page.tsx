@@ -4,36 +4,34 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { XCircle, Search, CheckCircle, Phone } from "lucide-react";
+import { XCircle, Search, CheckCircle, CalendarDays } from "lucide-react";
 import Link from "next/link";
 
 export default function CancelPage() {
-  const [searchType, setSearchType] = useState<"number" | "phone">("number");
+  const [searchType, setSearchType] = useState<"number" | "phone" | "name">("phone");
   const [reservationNumber, setReservationNumber] = useState("");
   const [phone, setPhone] = useState("");
-  const [step, setStep] = useState<"input" | "select" | "confirm" | "done">("input");
+  const [name, setName] = useState("");
+  const [step, setStep] = useState<"input" | "list" | "done">("input");
   const [appointments, setAppointments] = useState<any[]>([]);
-  const [selectedApt, setSelectedApt] = useState<any>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
   const handleSearch = async () => {
     setLoading(true);
     setError("");
+    setSelectedIds(new Set());
     try {
-      const params = searchType === "number"
-        ? `id=${reservationNumber.trim().toUpperCase()}`
-        : `phone=${phone.trim()}`;
+      const params =
+        searchType === "number" ? `id=${reservationNumber.trim().toUpperCase()}` :
+        searchType === "phone" ? `phone=${phone.trim()}` :
+        `name=${encodeURIComponent(name.trim())}`;
       const res = await fetch(`/api/cancel?${params}`);
       const data = await res.json();
       if (data.success) {
-        if (data.appointments) {
-          setAppointments(data.appointments);
-          setStep("select");
-        } else {
-          setSelectedApt(data.appointment);
-          setStep("confirm");
-        }
+        setAppointments(data.appointments || []);
+        setStep("list");
       } else {
         setError(data.error || "予約が見つかりませんでした");
       }
@@ -44,13 +42,24 @@ export default function CancelPage() {
     }
   };
 
-  const handleCancel = async (aptId?: string) => {
+  const toggleSelect = (aptId: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      next.has(aptId) ? next.delete(aptId) : next.add(aptId);
+      return next;
+    });
+  };
+
+  const handleCancel = async () => {
+    if (selectedIds.size === 0) return;
+    if (!confirm(`選択した ${selectedIds.size} 件の予約をキャンセルしますか？`)) return;
     setLoading(true);
+    setError("");
     try {
       const res = await fetch("/api/cancel", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: aptId || reservationNumber.trim().toUpperCase() }),
+        body: JSON.stringify({ ids: Array.from(selectedIds) }),
       });
       const data = await res.json();
       if (data.success) {
@@ -65,13 +74,19 @@ export default function CancelPage() {
     }
   };
 
+  const statusLabel = (status: string) => {
+    if (status === "confirmed") return { text: "確定", color: "text-blue-600 bg-blue-50" };
+    if (status === "waiting") return { text: "C待ち", color: "text-orange-600 bg-orange-50" };
+    return { text: "確認待ち", color: "text-amber-600 bg-amber-50" };
+  };
+
   return (
     <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
           <Link href="/" className="text-xl font-bold text-slate-900">ボール接骨院</Link>
           <h1 className="text-2xl font-bold text-slate-800 mt-4">予約キャンセル</h1>
-          <p className="text-slate-500 text-sm mt-2">予約番号または電話番号でキャンセルできます</p>
+          <p className="text-slate-500 text-sm mt-2">予約を検索してキャンセルする予約を選んでください</p>
         </div>
 
         {step === "input" && (
@@ -82,118 +97,99 @@ export default function CancelPage() {
                 予約を検索
               </CardTitle>
               <div className="flex gap-2 mt-2">
-                <button
-                  onClick={() => { setSearchType("number"); setError(""); }}
-                  className={`flex-1 py-2 rounded-md text-sm font-medium transition-colors ${searchType === "number" ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-600"}`}
-                >
-                  予約番号で検索
-                </button>
-                <button
-                  onClick={() => { setSearchType("phone"); setError(""); }}
-                  className={`flex-1 py-2 rounded-md text-sm font-medium transition-colors ${searchType === "phone" ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-600"}`}
-                >
-                  電話番号で検索
-                </button>
+                {(["phone", "name", "number"] as const).map((type) => (
+                  <button
+                    key={type}
+                    onClick={() => { setSearchType(type); setError(""); }}
+                    className={`flex-1 py-2 rounded-md text-sm font-medium transition-colors ${searchType === type ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-600"}`}
+                  >
+                    {type === "phone" ? "電話番号" : type === "name" ? "お名前" : "予約番号"}
+                  </button>
+                ))}
               </div>
             </CardHeader>
             <CardContent className="space-y-4">
               {searchType === "number" ? (
-                <Input
-                  placeholder="例: ABC12345（英数字8文字）"
-                  value={reservationNumber}
+                <Input placeholder="例: ABC12345（英数字8文字）" value={reservationNumber}
                   onChange={(e) => setReservationNumber(e.target.value.toUpperCase())}
-                  className="text-center text-lg tracking-widest font-mono"
-                  maxLength={8}
-                />
+                  className="text-center text-lg tracking-widest font-mono" maxLength={8} />
+              ) : searchType === "phone" ? (
+                <Input placeholder="例: 090-0000-0000" value={phone}
+                  onChange={(e) => setPhone(e.target.value)} type="tel" />
               ) : (
-                <Input
-                  placeholder="例: 090-0000-0000"
-                  value={phone}
-                  onChange={(e) => setPhone(e.target.value)}
-                  type="tel"
-                />
+                <Input placeholder="例: 山田 太郎" value={name}
+                  onChange={(e) => setName(e.target.value)} />
               )}
               {error && <p className="text-red-500 text-sm text-center">{error}</p>}
               <Button
                 onClick={handleSearch}
-                disabled={loading || (searchType === "number" ? reservationNumber.length < 8 : phone.length < 5)}
+                disabled={loading || (
+                  searchType === "number" ? reservationNumber.length < 8 :
+                  searchType === "phone" ? phone.length < 5 :
+                  name.trim().length < 1
+                )}
                 className="w-full bg-blue-600 hover:bg-blue-700"
               >
                 {loading ? "検索中..." : "予約を検索する"}
               </Button>
+              <Link href="/"><Button variant="ghost" className="w-full text-slate-500">トップへ戻る</Button></Link>
             </CardContent>
           </Card>
         )}
 
-        {step === "select" && (
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-lg">予約を選択してください</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              {appointments.map((apt, i) => (
-                <div key={i} className="border rounded-lg p-4 space-y-2">
-                  <div className="flex justify-between text-sm">
-                    <span className="text-slate-500">日時</span>
-                    <span className="font-bold">{apt.date} {apt.time}</span>
-                  </div>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-slate-500">受診</span>
-                    <span>{apt.visitType}</span>
-                  </div>
-                  <Button
-                    onClick={() => { setSelectedApt(apt); setStep("confirm"); }}
-                    variant="outline"
-                    className="w-full text-red-600 border-red-200 hover:bg-red-50"
-                  >
-                    この予約をキャンセル
-                  </Button>
-                </div>
-              ))}
-              <Button variant="ghost" className="w-full" onClick={() => setStep("input")}>戻る</Button>
-            </CardContent>
-          </Card>
-        )}
+        {step === "list" && (
+          <div className="space-y-4">
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-lg flex items-center gap-2">
+                  <CalendarDays className="w-5 h-5 text-blue-600" />
+                  予約一覧
+                </CardTitle>
+                <p className="text-sm text-slate-500">キャンセルしたい予約にチェックを入れてください</p>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {appointments.map((apt) => {
+                  const s = statusLabel(apt.status);
+                  const checked = selectedIds.has(apt.aptId);
+                  return (
+                    <label
+                      key={apt.aptId}
+                      className={`flex items-start gap-3 p-4 rounded-lg border cursor-pointer transition-colors ${checked ? "border-red-300 bg-red-50" : "border-slate-200 bg-white hover:bg-slate-50"}`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => toggleSelect(apt.aptId)}
+                        className="mt-1 w-4 h-4 accent-red-600 shrink-0"
+                      />
+                      <div className="flex-1 min-w-0 space-y-1">
+                        <div className="flex items-center justify-between">
+                          <span className="font-bold text-slate-800 truncate">{apt.name} 様</span>
+                          <span className={`text-xs font-bold px-2 py-0.5 rounded-full ml-2 shrink-0 ${s.color}`}>{s.text}</span>
+                        </div>
+                        <p className="text-sm text-slate-600">{apt.date} {apt.time}</p>
+                        <p className="text-xs text-slate-400">{apt.visitType}</p>
+                      </div>
+                    </label>
+                  );
+                })}
+              </CardContent>
+            </Card>
 
-        {step === "confirm" && selectedApt && (
-          <Card className="border-orange-200">
-            <CardHeader className="bg-orange-50">
-              <CardTitle className="flex items-center gap-2 text-lg text-orange-800">
-                <XCircle className="w-5 h-5" />
-                キャンセル確認
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="pt-6 space-y-4">
-              <div className="bg-slate-50 rounded-lg p-4 space-y-2 text-sm">
-                <div className="flex justify-between">
-                  <span className="text-slate-500">お名前</span>
-                  <span className="font-bold">{selectedApt.name} 様</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-500">日時</span>
-                  <span className="font-bold">{selectedApt.date} {selectedApt.time}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-500">受診</span>
-                  <span className="font-bold">{selectedApt.visitType}</span>
-                </div>
-              </div>
-              <p className="text-red-600 text-sm text-center font-bold">この予約をキャンセルしますか？</p>
-              {error && <p className="text-red-500 text-sm text-center">{error}</p>}
-              <div className="flex gap-3">
-                <Button variant="outline" className="flex-1" onClick={() => setStep(appointments.length > 0 ? "select" : "input")}>
-                  戻る
-                </Button>
-                <Button
-                  onClick={() => handleCancel(selectedApt.aptId)}
-                  disabled={loading}
-                  className="flex-1 bg-red-600 hover:bg-red-700 text-white"
-                >
-                  {loading ? "処理中..." : "キャンセルする"}
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
+            {error && <p className="text-red-500 text-sm text-center">{error}</p>}
+
+            <Button
+              onClick={handleCancel}
+              disabled={loading || selectedIds.size === 0}
+              className="w-full bg-red-600 hover:bg-red-700 text-white"
+            >
+              {loading ? "処理中..." : `選択した ${selectedIds.size} 件をキャンセルする`}
+            </Button>
+            <Button variant="outline" className="w-full" onClick={() => { setStep("input"); setSelectedIds(new Set()); }}>
+              検索に戻る
+            </Button>
+            <Link href="/"><Button variant="ghost" className="w-full text-slate-500">トップへ戻る</Button></Link>
+          </div>
         )}
 
         {step === "done" && (
@@ -201,12 +197,13 @@ export default function CancelPage() {
             <CardContent className="pt-8 pb-8 text-center space-y-4">
               <CheckCircle className="w-16 h-16 text-green-500 mx-auto" />
               <h2 className="text-xl font-bold text-slate-800">キャンセル完了</h2>
-              <p className="text-slate-500 text-sm">予約をキャンセルしました。<br/>またのご予約をお待ちしております。</p>
-              <Link href="/reserve/calendar">
-                <Button className="w-full bg-blue-600 hover:bg-blue-700 mt-4">
-                  新しく予約する
-                </Button>
-              </Link>
+              <p className="text-slate-500 text-sm">予約をキャンセルしました。<br />またのご予約をお待ちしております。</p>
+              <div className="flex flex-col gap-2 mt-4">
+                <Link href="/reserve/calendar">
+                  <Button className="w-full bg-blue-600 hover:bg-blue-700">新しく予約する</Button>
+                </Link>
+                <Link href="/"><Button variant="ghost" className="w-full text-slate-500">トップへ戻る</Button></Link>
+              </div>
             </CardContent>
           </Card>
         )}
