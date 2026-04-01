@@ -122,11 +122,11 @@ export async function POST(req: NextRequest) {
         continue;
       }
 
-      // 予約番号の形式チェック
+      // 予約番号の形式チェック（8文字英数字以外は担当者対応へ）
       if (!RESERVATION_NUMBER_REGEX.test(userMessage)) {
         await replyMessage(replyToken, [{
           type: "text",
-          text: `「${event.message.text.trim()}」から予約番号を認識できませんでした。\n予約完了画面に表示された英数字8文字の予約番号を送信してください。\n例: 予約番号:ABC12345 または ABC12345`,
+          text: "メッセージありがとうございます。\n担当者が確認次第、ご返信いたします。しばらくお待ちください。\n\n予約内容の確認には、予約完了画面の英数字8文字の予約番号をそのままお送りください。",
         }]);
         continue;
       }
