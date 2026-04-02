@@ -10,6 +10,7 @@ import {
   deleteEvent,
   ensureCalendarExists,
   updateCalendarMembers,
+  bulkUpdateEventMemberName,
   type CalendarEvent,
   type CalendarMember,
 } from "@/app/actions/family-calendar";
@@ -154,16 +155,23 @@ export default function FamilyCalendarPage() {
     setModal(null);
   }
 
-  async function handleUpdateMembers(newMembers: CalendarMember[]) {
+  async function handleUpdateMembers(newMembers: CalendarMember[], renames: { oldName: string; newName: string; bulk: boolean }[]) {
     setSaving(true);
     try {
       const result = await updateCalendarMembers(calendarId, newMembers);
-      if (result.success) {
-        setMembers(newMembers);
-        setModal(null);
-      } else {
+      if (!result.success) {
         alert("保存に失敗しました: " + (result.error ?? "不明なエラー"));
+        return;
       }
+      // 一括変更チェックが入っているメンバーの既存予定を更新
+      for (const r of renames) {
+        if (r.bulk && r.oldName !== r.newName) {
+          await bulkUpdateEventMemberName(calendarId, r.oldName, r.newName);
+        }
+      }
+      setMembers(newMembers);
+      await fetchEvents();
+      setModal(null);
     } catch (e) {
       alert("保存中にエラーが発生しました。再度お試しください。");
     } finally {
@@ -450,8 +458,17 @@ export default function FamilyCalendarPage() {
 }
 
 // ─── メンバー設定コンポーネント ───────────────────────────────────
-function MemberSettings({ members, onSave, onCancel, saving }: { members: CalendarMember[], onSave: (m: CalendarMember[]) => void, onCancel: () => void, saving: boolean }) {
+function MemberSettings({ members, onSave, onCancel, saving }: {
+  members: CalendarMember[];
+  onSave: (m: CalendarMember[], renames: { oldName: string; newName: string; bulk: boolean }[]) => void;
+  onCancel: () => void;
+  saving: boolean;
+}) {
   const [localMembers, setLocalMembers] = useState<CalendarMember[]>([...members]);
+  // 元の名前を記録（一括変更の比較用）
+  const [originalNames] = useState<string[]>(members.map(m => m.name));
+  // 一括変更チェック状態
+  const [bulkFlags, setBulkFlags] = useState<boolean[]>(members.map(() => false));
 
   const updateMember = (index: number, updates: Partial<CalendarMember>) => {
     const next = [...localMembers];
@@ -462,11 +479,22 @@ function MemberSettings({ members, onSave, onCancel, saving }: { members: Calend
   const addMember = () => {
     const preset = COLOR_PRESETS[localMembers.length % COLOR_PRESETS.length];
     setLocalMembers([...localMembers, { name: "新しい名前", ...preset }]);
+    setBulkFlags([...bulkFlags, false]);
   };
 
   const removeMember = (index: number) => {
     if (localMembers.length <= 1) return;
     setLocalMembers(localMembers.filter((_, i) => i !== index));
+    setBulkFlags(bulkFlags.filter((_, i) => i !== index));
+  };
+
+  const handleSave = () => {
+    const renames = localMembers.map((m, i) => ({
+      oldName: originalNames[i] ?? m.name,
+      newName: m.name,
+      bulk: bulkFlags[i] ?? false,
+    }));
+    onSave(localMembers, renames);
   };
 
   return (
@@ -483,29 +511,52 @@ function MemberSettings({ members, onSave, onCancel, saving }: { members: Calend
       <div className="p-5 space-y-4 overflow-y-auto max-h-[60vh] scrollbar-none">
         <p className="text-[10px] text-slate-500 font-bold mb-2">名前と色を自由に設定できます（全7色）</p>
         <div className="space-y-3">
-          {localMembers.map((m, idx) => (
-            <div key={idx} className="flex items-center gap-3 bg-slate-800/50 p-3 rounded-2xl border border-slate-800">
-              <div className="flex-1 space-y-2">
-                <input value={m.name} onChange={e => updateMember(idx, { name: e.target.value })}
-                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-violet-500 font-bold" />
-                <div className="flex gap-1.5">
-                  {COLOR_PRESETS.slice(0, 6).map((preset) => (
-                    <button key={preset.color} onClick={() => updateMember(idx, preset)}
-                      className={`w-6 h-6 rounded-full transition-transform ${m.color === preset.color ? "scale-125 ring-2 ring-white" : "opacity-30 hover:opacity-100"}`}
-                      style={{ backgroundColor: preset.color }} />
-                  ))}
-                  <button onClick={() => updateMember(idx, COLOR_PRESETS[6])}
-                    className={`w-6 h-6 rounded-md transition-transform flex items-center justify-center ${m.color === COLOR_PRESETS[6].color ? "scale-125 ring-2 ring-white" : "opacity-30 hover:opacity-100"}`}
-                    style={{ backgroundColor: COLOR_PRESETS[6].color }}>
-                    <span className="text-white text-[8px] font-black">🔴</span>
+          {localMembers.map((m, idx) => {
+            const nameChanged = m.name !== (originalNames[idx] ?? m.name);
+            return (
+              <div key={idx} className="bg-slate-800/50 p-3 rounded-2xl border border-slate-800 space-y-2">
+                <div className="flex items-center gap-3">
+                  <div className="flex-1 space-y-2">
+                    <input value={m.name} onChange={e => updateMember(idx, { name: e.target.value })}
+                      className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-violet-500 font-bold" />
+                    <div className="flex gap-1.5">
+                      {COLOR_PRESETS.slice(0, 6).map((preset) => (
+                        <button key={preset.color} onClick={() => updateMember(idx, preset)}
+                          className={`w-6 h-6 rounded-full transition-transform ${m.color === preset.color ? "scale-125 ring-2 ring-white" : "opacity-30 hover:opacity-100"}`}
+                          style={{ backgroundColor: preset.color }} />
+                      ))}
+                      <button onClick={() => updateMember(idx, COLOR_PRESETS[6])}
+                        className={`w-6 h-6 rounded-md transition-transform flex items-center justify-center ${m.color === COLOR_PRESETS[6].color ? "scale-125 ring-2 ring-white" : "opacity-30 hover:opacity-100"}`}
+                        style={{ backgroundColor: COLOR_PRESETS[6].color }}>
+                        <span className="text-white text-[8px] font-black">🔴</span>
+                      </button>
+                    </div>
+                  </div>
+                  <button onClick={() => removeMember(idx)} className="w-8 h-8 rounded-lg bg-red-900/20 hover:bg-red-900/40 flex items-center justify-center text-red-400 transition">
+                    <Trash2 className="w-4 h-4" />
                   </button>
                 </div>
+                {/* 名前が変わった場合のみ一括変更オプションを表示 */}
+                {nameChanged && (
+                  <label className="flex items-center gap-2 cursor-pointer bg-violet-900/20 rounded-lg px-3 py-2 border border-violet-800/30">
+                    <input
+                      type="checkbox"
+                      checked={bulkFlags[idx] ?? false}
+                      onChange={e => {
+                        const next = [...bulkFlags];
+                        next[idx] = e.target.checked;
+                        setBulkFlags(next);
+                      }}
+                      className="w-4 h-4 accent-violet-500"
+                    />
+                    <span className="text-xs text-violet-300">
+                      「{originalNames[idx]}」の既存予定をすべて「{m.name}」に変更する
+                    </span>
+                  </label>
+                )}
               </div>
-              <button onClick={() => removeMember(idx)} className="w-8 h-8 rounded-lg bg-red-900/20 hover:bg-red-900/40 flex items-center justify-center text-red-400 transition">
-                <Trash2 className="w-4 h-4" />
-              </button>
-            </div>
-          ))}
+            );
+          })}
         </div>
         <button onClick={addMember}
           className="w-full py-3 rounded-xl border border-dashed border-slate-600 text-slate-400 hover:text-white hover:border-slate-400 transition text-xs font-bold flex items-center justify-center gap-2">
@@ -514,7 +565,7 @@ function MemberSettings({ members, onSave, onCancel, saving }: { members: Calend
         </button>
       </div>
       <div className="p-4 border-t border-slate-800 bg-slate-900/50">
-        <button onClick={() => onSave(localMembers)} disabled={saving}
+        <button onClick={handleSave} disabled={saving}
           className="w-full bg-violet-600 hover:bg-violet-500 disabled:opacity-40 text-white font-black py-4 rounded-2xl flex items-center justify-center gap-2 transition shadow-xl shadow-violet-900/20 text-base">
           {saving ? <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" /> : <><Check className="w-5 h-5 stroke-[3]" />設定を保存</>}
         </button>

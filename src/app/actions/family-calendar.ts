@@ -82,6 +82,26 @@ export async function updateCalendarMembers(id: string, members: CalendarMember[
   } catch (e: unknown) { return { success: false, error: e instanceof Error ? e.message : "Unknown error" }; }
 }
 
+// カレンダー内のイベントのメンバー名を一括変更
+export async function bulkUpdateEventMemberName(
+  calendarId: string,
+  oldName: string,
+  newName: string
+): Promise<{ success: boolean; count?: number; error?: string }> {
+  const supabase = getAdminSupabase();
+  if (!supabase) return { success: false, error: "Admin client unavailable" };
+  try {
+    const { data, error } = await supabase
+      .from("calendar_events")
+      .update({ member_name: newName })
+      .eq("calendar_id", calendarId)
+      .eq("member_name", oldName)
+      .select("id");
+    if (error) return { success: false, error: error.message };
+    return { success: true, count: data?.length ?? 0 };
+  } catch (e: unknown) { return { success: false, error: e instanceof Error ? e.message : "Unknown error" }; }
+}
+
 export async function getEvents(calendarId: string, start: string, end: string): Promise<CalendarEvent[]> {
   const supabase = await getSupabase();
   if (!calendarId) return [];
