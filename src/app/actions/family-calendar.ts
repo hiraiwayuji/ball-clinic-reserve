@@ -8,9 +8,15 @@ async function getSupabase() {
 }
 
 function getAdminSupabase() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY!;
-  return createAdminClient(url, key);
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) return null;
+  return createAdminClient(url, key, {
+    global: {
+      fetch: (fetchUrl: RequestInfo | URL, options?: RequestInit) =>
+        fetch(fetchUrl, { ...options, cache: "no-store" }),
+    },
+  });
 }
 
 export type CalendarMember = {
@@ -52,6 +58,7 @@ export async function ensureCalendarExists(
   name: string = "ファミリーカレンダー"
 ): Promise<{ id: string; name: string; members?: CalendarMember[] } | null> {
   const supabase = getAdminSupabase();
+  if (!supabase) return null;
   const { data: existing } = await supabase.from("calendars").select("*").eq("id", id).single();
   if (existing) {
     if (!existing.members) {
@@ -66,8 +73,8 @@ export async function ensureCalendarExists(
 }
 
 export async function updateCalendarMembers(id: string, members: CalendarMember[]): Promise<{ success: boolean; error?: string }> {
-  // RLSをバイパスするため管理者クライアントを使用（家族カレンダーは認証不要）
   const supabase = getAdminSupabase();
+  if (!supabase) return { success: false, error: "Admin client unavailable" };
   try {
     const { error } = await supabase.from("calendars").update({ members }).eq("id", id);
     if (error) return { success: false, error: error.message };

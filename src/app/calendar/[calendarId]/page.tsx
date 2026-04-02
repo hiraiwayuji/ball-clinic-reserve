@@ -156,10 +156,19 @@ export default function FamilyCalendarPage() {
 
   async function handleUpdateMembers(newMembers: CalendarMember[]) {
     setSaving(true);
-    await updateCalendarMembers(calendarId, newMembers);
-    setMembers(newMembers);
-    setSaving(false);
-    setModal(null);
+    try {
+      const result = await updateCalendarMembers(calendarId, newMembers);
+      if (result.success) {
+        setMembers(newMembers);
+        setModal(null);
+      } else {
+        alert("保存に失敗しました: " + (result.error ?? "不明なエラー"));
+      }
+    } catch (e) {
+      alert("保存中にエラーが発生しました。再度お試しください。");
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
