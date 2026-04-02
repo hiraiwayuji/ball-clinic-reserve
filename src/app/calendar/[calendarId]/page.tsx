@@ -49,12 +49,12 @@ function formatTime(iso: string) {
 type ModalMode = "create" | "edit" | "view" | "settings";
 interface Form {
   title: string; description: string; date: string;
-  startTime: string; endTime: string; isAllDay: boolean; memberName: string;
+  startTime: string; endTime: string; endDate: string; isAllDay: boolean; isMultiDay: boolean; memberName: string;
 }
 
 const blankForm = (date = toLocalDateStr(new Date()), defaultMember = "家族"): Form => ({
   title: "", description: "", date,
-  startTime: "09:00", endTime: "10:00", isAllDay: false, memberName: defaultMember,
+  startTime: "09:00", endTime: "10:00", endDate: date, isAllDay: false, isMultiDay: false, memberName: defaultMember,
 });
 
 export default function FamilyCalendarPage() {
@@ -125,12 +125,16 @@ export default function FamilyCalendarPage() {
   function openView(e: CalendarEvent) { setModal({ mode: "view", event: e }); }
   function openEdit(e: CalendarEvent) {
     const s = new Date(e.start_time), en = new Date(e.end_time);
+    const startDateStr = toJSTDateStr(e.start_time);
+    const endDateStr = toJSTDateStr(e.end_time);
+    const multiDay = startDateStr !== endDateStr;
     setForm({
       title: e.title, description: e.description ?? "",
-      date: toLocalDateStr(s),
+      date: startDateStr,
       startTime: `${String(s.getHours()).padStart(2,"0")}:${String(s.getMinutes()).padStart(2,"0")}`,
       endTime: `${String(en.getHours()).padStart(2,"0")}:${String(en.getMinutes()).padStart(2,"0")}`,
-      isAllDay: e.is_all_day, memberName: e.member_name ?? "家族",
+      endDate: endDateStr,
+      isAllDay: e.is_all_day, isMultiDay: multiDay, memberName: e.member_name ?? "家族",
     });
     setModal({ mode: "edit", event: e });
   }
@@ -140,12 +144,13 @@ export default function FamilyCalendarPage() {
     if (!form.title.trim()) return;
     setSaving(true);
     const member = getMember(form.memberName);
+    const endDateTarget = form.isMultiDay ? form.endDate : form.date;
     const startIso = form.isAllDay
       ? `${form.date}T00:00:00+09:00`
       : `${form.date}T${form.startTime}:00+09:00`;
     const endIso = form.isAllDay
-      ? `${form.date}T23:59:59+09:00`
-      : `${form.date}T${form.endTime}:00+09:00`;
+      ? `${endDateTarget}T23:59:59+09:00`
+      : `${endDateTarget}T${form.endTime}:00+09:00`;
     const payload = {
       title: form.title, description: form.description || null,
       start_time: startIso, end_time: endIso,
@@ -442,8 +447,20 @@ export default function FamilyCalendarPage() {
                       <div className="flex items-center gap-2 text-slate-300">
                         <CalendarDays className="w-4 h-4 text-slate-500 shrink-0" />
                         <span>
-                          {s.getFullYear()}/{s.getMonth()+1}/{s.getDate()}（{WEEKDAYS[s.getDay()]}）
-                          {ev.is_all_day ? " 終日" : ` ${formatTime(ev.start_time)} 〜 ${formatTime(ev.end_time)}`}
+                          {(() => {
+                            const startStr = `${s.getFullYear()}/${s.getMonth()+1}/${s.getDate()}（${WEEKDAYS[s.getDay()]}）`;
+                            const endDateStr = toJSTDateStr(ev.end_time);
+                            const startDateStr = toJSTDateStr(ev.start_time);
+                            const isMultiDay = startDateStr !== endDateStr;
+                            if (ev.is_all_day) {
+                              return isMultiDay
+                                ? `${startStr} 〜 ${en.getFullYear()}/${en.getMonth()+1}/${en.getDate()}（${WEEKDAYS[en.getDay()]}） 終日`
+                                : `${startStr} 終日`;
+                            }
+                            return isMultiDay
+                              ? `${startStr} ${formatTime(ev.start_time)} 〜 ${en.getFullYear()}/${en.getMonth()+1}/${en.getDate()}（${WEEKDAYS[en.getDay()]}） ${formatTime(ev.end_time)}`
+                              : `${startStr} ${formatTime(ev.start_time)} 〜 ${formatTime(ev.end_time)}`;
+                          })()}
                         </span>
                       </div>
                       {ev.member_name && (
@@ -495,8 +512,9 @@ export default function FamilyCalendarPage() {
 
                   {/* 日付 */}
                   <div>
-                    <label className="text-xs font-bold text-slate-400 block mb-1.5">日付</label>
-                    <input type="date" value={form.date} onChange={e => setForm({...form, date: e.target.value})}
+                    <label className="text-xs font-bold text-slate-400 block mb-1.5">開始日</label>
+                    <input type="date" value={form.date}
+                      onChange={e => setForm({...form, date: e.target.value, endDate: e.target.value > form.endDate ? e.target.value : form.endDate})}
                       className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-violet-500 text-sm" />
                   </div>
 
@@ -509,19 +527,58 @@ export default function FamilyCalendarPage() {
                     </button>
                   </div>
 
-                  {/* 時間 */}
+                  {/* 時間（終日でない場合） */}
                   {!form.isAllDay && (
                     <div className="grid grid-cols-2 gap-3">
-                      {[["開始", "startTime"], ["終了", "endTime"]].map(([label, key]) => (
-                        <div key={key}>
+                      <div>
+                        <label className="text-xs font-bold text-slate-400 block mb-1.5">
+                          <Clock className="w-3 h-3 inline mr-1" />開始時間
+                        </label>
+                        <input type="time" value={form.startTime}
+                          onChange={e => setForm({...form, startTime: e.target.value})}
+                          className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-3 text-white focus:outline-none focus:border-violet-500 text-sm" />
+                      </div>
+                      {!form.isMultiDay && (
+                        <div>
                           <label className="text-xs font-bold text-slate-400 block mb-1.5">
-                            <Clock className="w-3 h-3 inline mr-1" />{label}
+                            <Clock className="w-3 h-3 inline mr-1" />終了時間
                           </label>
-                          <input type="time" value={form[key as "startTime" | "endTime"]}
-                            onChange={e => setForm({...form, [key]: e.target.value})}
+                          <input type="time" value={form.endTime}
+                            onChange={e => setForm({...form, endTime: e.target.value})}
                             className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-3 text-white focus:outline-none focus:border-violet-500 text-sm" />
                         </div>
-                      ))}
+                      )}
+                    </div>
+                  )}
+
+                  {/* 翌日以降チェック */}
+                  <div className="flex items-center justify-between bg-slate-800/50 rounded-xl px-4 py-3 border border-slate-800">
+                    <span className="text-sm text-slate-300">翌日以降に終わる</span>
+                    <button onClick={() => setForm({...form, isMultiDay: !form.isMultiDay, endDate: form.date})}
+                      className={`w-12 h-6 rounded-full transition-colors relative ${form.isMultiDay ? "bg-violet-500" : "bg-slate-700"}`}>
+                      <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow-md transition-all ${form.isMultiDay ? "left-[26px]" : "left-0.5"}`} />
+                    </button>
+                  </div>
+
+                  {/* 終了日・終了時間（翌日以降の場合） */}
+                  {form.isMultiDay && (
+                    <div className="bg-slate-800/30 rounded-xl p-3 border border-slate-700 space-y-3">
+                      <div>
+                        <label className="text-xs font-bold text-slate-400 block mb-1.5">終了日</label>
+                        <input type="date" value={form.endDate} min={form.date}
+                          onChange={e => setForm({...form, endDate: e.target.value})}
+                          className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-violet-500 text-sm" />
+                      </div>
+                      {!form.isAllDay && (
+                        <div>
+                          <label className="text-xs font-bold text-slate-400 block mb-1.5">
+                            <Clock className="w-3 h-3 inline mr-1" />終了時間
+                          </label>
+                          <input type="time" value={form.endTime}
+                            onChange={e => setForm({...form, endTime: e.target.value})}
+                            className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-3 text-white focus:outline-none focus:border-violet-500 text-sm" />
+                        </div>
+                      )}
                     </div>
                   )}
 
