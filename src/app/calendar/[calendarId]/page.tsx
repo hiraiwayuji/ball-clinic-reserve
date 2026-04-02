@@ -63,6 +63,9 @@ export default function FamilyCalendarPage() {
   const [modal, setModal] = useState<{ mode: ModalMode; event?: CalendarEvent; date?: string } | null>(null);
   const [form, setForm] = useState<Form>(blankForm());
   const [saving, setSaving] = useState(false);
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkTagModal, setBulkTagModal] = useState(false);
 
   const year = current.getFullYear();
   const month = current.getMonth();
@@ -153,6 +156,24 @@ export default function FamilyCalendarPage() {
     await deleteEvent(id);
     await fetchEvents();
     setModal(null);
+  }
+
+  async function handleBulkTagChange(newMemberName: string) {
+    setSaving(true);
+    const member = getMember(newMemberName);
+    try {
+      await Promise.all(
+        Array.from(selectedIds).map(id =>
+          updateEvent(id, { member_name: newMemberName, color: member.color })
+        )
+      );
+      await fetchEvents();
+    } finally {
+      setSaving(false);
+      setBulkTagModal(false);
+      setSelectMode(false);
+      setSelectedIds(new Set());
+    }
   }
 
   async function handleUpdateMembers(newMembers: CalendarMember[], renames: { oldName: string; newName: string; bulk: boolean }[]) {
@@ -267,8 +288,30 @@ export default function FamilyCalendarPage() {
       )}
 
       {/* 今月一覧 */}
-      <div className="px-4 py-5 pb-24">
-        <p className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-3">今月の予定</p>
+      <div className="px-4 py-5 pb-32">
+        <div className="flex items-center justify-between mb-3">
+          <p className="text-xs font-bold text-slate-500 uppercase tracking-widest">今月の予定</p>
+          <button
+            onClick={() => { setSelectMode(!selectMode); setSelectedIds(new Set()); }}
+            className={`text-xs font-bold px-3 py-1 rounded-full transition ${selectMode ? "bg-violet-500 text-white" : "bg-slate-800 text-slate-400"}`}
+          >
+            {selectMode ? "キャンセル" : "選択する"}
+          </button>
+        </div>
+
+        {/* 選択モード時のアクションバー */}
+        {selectMode && selectedIds.size > 0 && (
+          <div className="mb-3 flex items-center gap-2 bg-violet-900/30 border border-violet-700/40 rounded-xl px-4 py-2">
+            <span className="text-xs text-violet-300 flex-1">{selectedIds.size}件選択中</span>
+            <button
+              onClick={() => setBulkTagModal(true)}
+              className="text-xs font-bold bg-violet-500 hover:bg-violet-400 text-white px-4 py-1.5 rounded-full transition"
+            >
+              タグを変更
+            </button>
+          </div>
+        )}
+
         {events.filter(e => !filter || e.member_name === filter).length === 0 ? (
           <p className="text-slate-600 text-sm text-center py-6">予定なし</p>
         ) : (
@@ -276,12 +319,31 @@ export default function FamilyCalendarPage() {
             {events.filter(e => !filter || e.member_name === filter).map((e) => {
               const m = getMember(e.member_name);
               const s = new Date(e.start_time);
+              const isSelected = selectedIds.has(e.id);
               return (
-                <div key={e.id} onClick={() => openView(e)}
+                <div key={e.id}
+                  onClick={() => {
+                    if (selectMode) {
+                      const next = new Set(selectedIds);
+                      isSelected ? next.delete(e.id) : next.add(e.id);
+                      setSelectedIds(next);
+                    } else {
+                      openView(e);
+                    }
+                  }}
                   className={cn(
-                    "flex items-center gap-3 bg-slate-900 hover:bg-slate-800 rounded-2xl p-4 cursor-pointer transition border border-slate-800 shadow-sm",
-                    (e.member_name === "試合" || e.title.includes("🔴")) && "border-red-900/50 bg-red-950/20"
+                    "flex items-center gap-3 rounded-2xl p-4 cursor-pointer transition border shadow-sm",
+                    isSelected
+                      ? "bg-violet-900/40 border-violet-600"
+                      : (e.member_name === "試合" || e.title.includes("🔴"))
+                        ? "bg-red-950/20 border-red-900/50 hover:bg-slate-800"
+                        : "bg-slate-900 border-slate-800 hover:bg-slate-800"
                   )}>
+                  {selectMode && (
+                    <div className={`w-5 h-5 rounded-full border-2 shrink-0 flex items-center justify-center transition ${isSelected ? "bg-violet-500 border-violet-500" : "border-slate-600"}`}>
+                      {isSelected && <Check className="w-3 h-3 text-white stroke-[3]" />}
+                    </div>
+                  )}
                   <div className={cn("w-2 h-12 rounded-full shrink-0", m.bg)} />
                   <div className="flex-1 min-w-0">
                     <p className="font-bold text-base truncate flex items-center gap-2">
@@ -302,6 +364,35 @@ export default function FamilyCalendarPage() {
           </div>
         )}
       </div>
+
+      {/* 一括タグ変更モーダル */}
+      {bulkTagModal && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center"
+          onClick={(e) => { if (e.target === e.currentTarget) setBulkTagModal(false); }}>
+          <div className="bg-slate-900 w-full sm:max-w-md rounded-t-3xl sm:rounded-2xl border border-slate-700 overflow-hidden shadow-2xl">
+            <div className="flex items-center justify-between p-5 border-b border-slate-800">
+              <h2 className="text-lg font-black">タグを変更（{selectedIds.size}件）</h2>
+              <button onClick={() => setBulkTagModal(false)} className="w-8 h-8 rounded-xl bg-slate-800 hover:bg-slate-700 flex items-center justify-center transition border border-slate-700">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="p-5 space-y-2">
+              <p className="text-xs text-slate-500 mb-3">変更先のタグを選んでください</p>
+              {members.map(m => (
+                <button key={m.name}
+                  onClick={() => handleBulkTagChange(m.name)}
+                  disabled={saving}
+                  className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl border border-slate-700 hover:bg-slate-800 transition disabled:opacity-40`}
+                >
+                  <div className={`w-4 h-4 rounded-full ${m.bg}`} />
+                  <span className="font-bold text-white">{m.name}</span>
+                  {saving && <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin ml-auto" />}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* FAB */}
       <button onClick={() => openCreate(toLocalDateStr(today))}
