@@ -76,7 +76,7 @@ export async function updateCalendarMembers(id: string, members: CalendarMember[
 }
 
 export async function getEvents(calendarId: string, start: string, end: string): Promise<CalendarEvent[]> {
-  const supabase = getAdminSupabase();
+  const supabase = await getSupabase();
   if (!calendarId) return [];
   try {
     const { data, error } = await supabase.from("calendar_events").select("*").eq("calendar_id", calendarId).lte("start_time", end).gte("end_time", start).order("start_time", { ascending: true });
@@ -86,7 +86,7 @@ export async function getEvents(calendarId: string, start: string, end: string):
 }
 
 export async function createEvent(calendarId: string, event: Omit<CalendarEvent, "id" | "calendar_id" | "created_at">): Promise<{ success: boolean; event?: CalendarEvent; error?: string }> {
-  const supabase = getAdminSupabase();
+  const supabase = await getSupabase();
   try {
     const { data, error } = await supabase.from("calendar_events").insert([{ ...event, calendar_id: calendarId }]).select().single();
     if (error) return { success: false, error: error.message };
@@ -95,7 +95,7 @@ export async function createEvent(calendarId: string, event: Omit<CalendarEvent,
 }
 
 export async function updateEvent(id: string, event: Partial<Omit<CalendarEvent, "id" | "calendar_id" | "created_at">>): Promise<{ success: boolean; error?: string }> {
-  const supabase = getAdminSupabase();
+  const supabase = await getSupabase();
   try {
     const { error } = await supabase.from("calendar_events").update(event).eq("id", id);
     if (error) return { success: false, error: error.message };
@@ -104,7 +104,7 @@ export async function updateEvent(id: string, event: Partial<Omit<CalendarEvent,
 }
 
 export async function deleteEvent(id: string): Promise<{ success: boolean; error?: string }> {
-  const supabase = getAdminSupabase();
+  const supabase = await getSupabase();
   try {
     const { error } = await supabase.from("calendar_events").delete().eq("id", id);
     if (error) return { success: false, error: error.message };
