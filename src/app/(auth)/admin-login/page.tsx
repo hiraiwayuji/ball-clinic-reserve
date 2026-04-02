@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { loginAction } from "@/app/actions/auth";
+import { useRouter } from "next/navigation";
+import { loginAction, sendPasswordResetEmail } from "@/app/actions/auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Lock, Mail, Eye, EyeOff, Shield, ArrowRight } from "lucide-react";
@@ -11,19 +12,41 @@ export default function AdminLoginPage() {
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [showReset, setShowReset] = useState(false);
+  const [resetEmail, setResetEmail] = useState("");
+  const [resetSent, setResetSent] = useState(false);
+  const router = useRouter();
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setIsLoading(true);
     setError(null);
-    
+
     const formData = new FormData(e.currentTarget);
     const result = await loginAction(formData);
-    
-    if (result && result.error) {
+
+    if (result?.error) {
       setError(result.error);
       setIsLoading(false);
+      return;
     }
+
+    // クッキーが確定してからナビゲート（スマホブラウザ対応）
+    router.push("/admin");
+    router.refresh();
+  };
+
+  const handlePasswordReset = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsLoading(true);
+    setError(null);
+    const result = await sendPasswordResetEmail(resetEmail, window.location.origin);
+    setIsLoading(false);
+    if (result?.error) {
+      setError(result.error);
+      return;
+    }
+    setResetSent(true);
   };
 
   return (
@@ -106,12 +129,16 @@ export default function AdminLoginPage() {
               </label>
               <div className="relative group">
                 <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500 group-focus-within:text-blue-400 transition-colors" />
-                <Input 
-                  id="email" 
+                <Input
+                  id="email"
                   name="email"
-                  type="email" 
-                  placeholder="admin@example.com" 
+                  type="email"
+                  placeholder="admin@example.com"
                   required
+                  autoCapitalize="off"
+                  autoCorrect="off"
+                  autoComplete="email"
+                  spellCheck={false}
                   className="pl-10 h-12 bg-white/5 border-white/10 text-white placeholder:text-slate-500 focus:border-blue-500/50 focus:ring-blue-500/20 rounded-xl transition-all"
                 />
               </div>
@@ -124,12 +151,16 @@ export default function AdminLoginPage() {
               </label>
               <div className="relative group">
                 <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500 group-focus-within:text-blue-400 transition-colors" />
-                <Input 
-                  id="password" 
+                <Input
+                  id="password"
                   name="password"
                   type={showPassword ? "text" : "password"}
-                  placeholder="パスワードを入力" 
+                  placeholder="パスワードを入力"
                   required
+                  autoCapitalize="off"
+                  autoCorrect="off"
+                  autoComplete="current-password"
+                  spellCheck={false}
                   className="pl-10 pr-10 h-12 bg-white/5 border-white/10 text-white placeholder:text-slate-500 focus:border-blue-500/50 focus:ring-blue-500/20 rounded-xl transition-all"
                 />
                 <button
@@ -176,11 +207,59 @@ export default function AdminLoginPage() {
           </form>
 
           {/* Footer hint */}
-          <div className="mt-8 pt-6 border-t border-white/5 text-center">
+          <div className="mt-8 pt-6 border-t border-white/5 text-center space-y-3">
             <p className="text-slate-500 text-xs">
               セッションはブラウザを閉じても保持されます
             </p>
+            <button
+              type="button"
+              onClick={() => { setShowReset(!showReset); setError(null); setResetSent(false); }}
+              className="text-blue-400/70 hover:text-blue-300 text-xs underline underline-offset-2 transition-colors"
+            >
+              パスワードをお忘れの方はこちら
+            </button>
           </div>
+
+          {/* パスワードリセットフォーム */}
+          {showReset && (
+            <div className="mt-6 pt-6 border-t border-white/10">
+              {resetSent ? (
+                <div className="text-center text-sm text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 rounded-xl p-4">
+                  ✅ リセット用メールを送信しました。<br />
+                  メールのリンクをクリックして新しいパスワードを設定してください。
+                </div>
+              ) : (
+                <form onSubmit={handlePasswordReset} className="space-y-3">
+                  <p className="text-slate-400 text-xs text-center">
+                    登録済みのメールアドレスを入力してください
+                  </p>
+                  <div className="relative">
+                    <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
+                    <Input
+                      type="email"
+                      value={resetEmail}
+                      onChange={(e) => setResetEmail(e.target.value)}
+                      placeholder="admin@example.com"
+                      required
+                      autoCapitalize="off"
+                      autoCorrect="off"
+                      autoComplete="email"
+                      spellCheck={false}
+                      className="pl-10 h-11 bg-white/5 border-white/10 text-white placeholder:text-slate-500 rounded-xl"
+                    />
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={isLoading}
+                    className="w-full h-11 rounded-xl text-sm font-semibold text-white transition-all"
+                    style={{ background: "linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)" }}
+                  >
+                    {isLoading ? "送信中..." : "リセットメールを送信"}
+                  </button>
+                </form>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Copyright */}

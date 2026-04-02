@@ -8,10 +8,9 @@ async function getSupabase() {
   return await createClient();
 }
 
-const DEFAULT_CLINIC_ID = '00000000-0000-0000-0000-000000000001';
 
 export async function createManualReservation(formData: FormData) {
-  await checkAdminAuth();
+  const { clinicId } = await checkAdminAuth();
   try {
     const rawDate = formData.get("date") as string;
     const time = formData.get("time") as string;
@@ -36,7 +35,7 @@ export async function createManualReservation(formData: FormData) {
         .insert([{ 
           name, 
           phone,
-          clinic_id: DEFAULT_CLINIC_ID
+          clinic_id: clinicId
         }])
         .select()
         .single();
@@ -69,7 +68,7 @@ export async function createManualReservation(formData: FormData) {
           memo: memoText,
           is_first_visit: i === 0 ? isFirstVisit : false,
           status: "confirmed",
-          clinic_id: DEFAULT_CLINIC_ID
+          clinic_id: clinicId
         });
       }
 
@@ -95,7 +94,7 @@ export async function createManualReservation(formData: FormData) {
 
 // 予約ステータスの変更アクション
 export async function updateAppointmentStatus(appointmentId: string, newStatus: "confirmed" | "cancelled" | "pending" | "waiting") {
-  await checkAdminAuth();
+  const { clinicId } = await checkAdminAuth();
   try {
       const supabase = await getSupabase();
       const { error } = await supabase
@@ -125,7 +124,7 @@ export async function updateAppointmentDetails(
   isFirstVisit: boolean,
   durationMinutes: number = 30
 ) {
-  await checkAdminAuth();
+  const { clinicId } = await checkAdminAuth();
   try {
     const supabase = await getSupabase();
     if (supabase) {
@@ -159,7 +158,7 @@ export async function updateAppointmentDetails(
 
 // 患者のLINEに予約確認メッセージを送信するアクション
 export async function sendLineConfirmation(appointmentId: string) {
-  await checkAdminAuth();
+  const { clinicId } = await checkAdminAuth();
   try {
     const supabase = await getSupabase();
     if (!supabase) return { success: false, error: "DB接続エラー" };
@@ -217,7 +216,7 @@ export async function sendLineConfirmation(appointmentId: string) {
 
 // 予約の削除アクション
 export async function deleteAppointment(appointmentId: string) {
-  await checkAdminAuth();
+  const { clinicId } = await checkAdminAuth();
   try {
     const supabase = await getSupabase();
     if (supabase) {

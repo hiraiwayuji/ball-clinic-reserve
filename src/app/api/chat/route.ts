@@ -48,9 +48,11 @@ export async function POST(request: NextRequest) {
 
     // 2. Load recent chat history
     const supabase = await createClient();
+    const DEFAULT_CLINIC_ID = "00000000-0000-0000-0000-000000000001";
     const { data: history } = await supabase
       .from("ai_chat_messages")
       .select("role, content")
+      .eq("clinic_id", DEFAULT_CLINIC_ID)
       .order("created_at", { ascending: false })
       .limit(20);
 
@@ -87,8 +89,8 @@ export async function POST(request: NextRequest) {
 
     // 4. Save both messages to DB
     await supabase.from("ai_chat_messages").insert([
-      { role: "user", content: message },
-      { role: "assistant", content: aiResponse },
+      { role: "user", content: message, clinic_id: DEFAULT_CLINIC_ID },
+      { role: "assistant", content: aiResponse, clinic_id: DEFAULT_CLINIC_ID },
     ]);
 
     return NextResponse.json({ response: aiResponse });
@@ -104,9 +106,11 @@ export async function POST(request: NextRequest) {
 export async function GET() {
   try {
     const supabase = await createClient();
+    const DEFAULT_CLINIC_ID = "00000000-0000-0000-0000-000000000001";
     const { data, error } = await supabase
       .from("ai_chat_messages")
       .select("id, role, content, created_at")
+      .eq("clinic_id", DEFAULT_CLINIC_ID)
       .order("created_at", { ascending: false })
       .limit(50);
 

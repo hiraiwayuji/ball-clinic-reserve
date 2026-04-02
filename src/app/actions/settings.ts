@@ -31,10 +31,9 @@ export type ClinicSettings = {
   target_repeat_rate?: number;
 };
 
-const DEFAULT_CLINIC_ID = '00000000-0000-0000-0000-000000000001';
 
 export async function getClinicSettings(): Promise<ClinicSettings | null> {
-  await checkAdminAuth();
+  const { clinicId } = await checkAdminAuth();
   noStore();
   const { createClient } = await import("@/lib/supabase/server");
   const supabase = await createClient();
@@ -43,7 +42,7 @@ export async function getClinicSettings(): Promise<ClinicSettings | null> {
   const { data: settings, error: settingsError } = await supabase
     .from("clinic_settings")
     .select("*")
-    .eq("id", DEFAULT_CLINIC_ID)
+    .eq("id", clinicId)
     .maybeSingle();
 
   if (settingsError) {
@@ -58,7 +57,7 @@ export async function getClinicSettings(): Promise<ClinicSettings | null> {
   const { data: targets, error: targetError } = await supabase
     .from("clinic_targets")
     .select("*")
-    .eq("clinic_id", DEFAULT_CLINIC_ID)
+    .eq("clinic_id", clinicId)
     .eq("month", monthStr)
     .maybeSingle();
 
@@ -77,11 +76,11 @@ export async function getClinicSettings(): Promise<ClinicSettings | null> {
 }
 
 export async function updateClinicSettings(settings: Partial<ClinicSettings>) {
-  await checkAdminAuth();
+  const { clinicId } = await checkAdminAuth();
   const { createClient } = await import("@/lib/supabase/server");
   const supabase = await createClient();
   
-  console.log("Saving settings for clinic:", DEFAULT_CLINIC_ID, settings);
+  console.log("Saving settings for clinic:", clinicId, settings);
 
   // 1. Separate settings for clinic_settings and clinic_targets
   const settingsData = {
@@ -113,7 +112,7 @@ export async function updateClinicSettings(settings: Partial<ClinicSettings>) {
   const { error: settingsError } = await supabase
     .from("clinic_settings")
     .upsert({ 
-      id: DEFAULT_CLINIC_ID,
+      id: clinicId,
       ...settingsData
     });
 
@@ -129,7 +128,7 @@ export async function updateClinicSettings(settings: Partial<ClinicSettings>) {
   const { error: targetError } = await supabase
     .from("clinic_targets")
     .upsert({
-      clinic_id: DEFAULT_CLINIC_ID,
+      clinic_id: clinicId,
       month: monthStr,
       ...targetData,
       updated_at: new Date().toISOString()
@@ -141,8 +140,8 @@ export async function updateClinicSettings(settings: Partial<ClinicSettings>) {
   }
 
   // DB Reflection Log as requested
-  const { data: reflectSettings } = await supabase.from("clinic_settings").select("*").eq("id", DEFAULT_CLINIC_ID).single();
-  const { data: reflectTargets } = await supabase.from("clinic_targets").select("*").eq("clinic_id", DEFAULT_CLINIC_ID).eq("month", monthStr).single();
+  const { data: reflectSettings } = await supabase.from("clinic_settings").select("*").eq("id", clinicId).single();
+  const { data: reflectTargets } = await supabase.from("clinic_targets").select("*").eq("clinic_id", clinicId).eq("month", monthStr).single();
   console.log("DB Reflect - Settings:", reflectSettings);
   console.log("DB Reflect - Targets:", reflectTargets);
 

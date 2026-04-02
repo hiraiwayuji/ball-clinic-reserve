@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
+const DEFAULT_CLINIC_ID = "00000000-0000-0000-0000-000000000001";
+
 function getSupabase() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
@@ -48,6 +50,7 @@ export async function GET(req: NextRequest) {
     const { data: appointments } = await supabase
       .from("appointments")
       .select("id, start_time, is_first_visit, status, customers(name)")
+      .eq("clinic_id", DEFAULT_CLINIC_ID)
       .in("status", ["pending", "confirmed", "waiting"])
       .order("created_at", { ascending: false });
     const apt = (appointments || []).find(a => a.id.startsWith(id.toLowerCase()));
@@ -60,6 +63,7 @@ export async function GET(req: NextRequest) {
     const { data: customers } = await supabase
       .from("customers")
       .select("id")
+      .eq("clinic_id", DEFAULT_CLINIC_ID)
       .or(`phone.ilike.%${cleanPhone}%,phone.ilike.%${phone}%`);
     if (!customers || customers.length === 0)
       return NextResponse.json({ error: "この電話番号の予約が見つかりませんでした" }, { status: 404 });
@@ -79,6 +83,7 @@ export async function GET(req: NextRequest) {
     const { data: customers } = await supabase
       .from("customers")
       .select("id")
+      .eq("clinic_id", DEFAULT_CLINIC_ID)
       .ilike("name", `%${name.trim()}%`);
     if (!customers || customers.length === 0)
       return NextResponse.json({ error: "この名前の予約が見つかりませんでした" }, { status: 404 });
@@ -114,7 +119,8 @@ export async function POST(req: NextRequest) {
   const { error } = await supabase
     .from("appointments")
     .update({ status: "cancelled" })
-    .in("id", ids);
+    .in("id", ids)
+    .eq("clinic_id", DEFAULT_CLINIC_ID);
 
   if (error) return NextResponse.json({ error: "キャンセルに失敗しました" }, { status: 500 });
 

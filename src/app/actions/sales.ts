@@ -8,12 +8,11 @@ async function getSupabase() {
   return await createClient();
 }
 
-const DEFAULT_CLINIC_ID = '00000000-0000-0000-0000-000000000001';
 
 // --- Cash Sales Actions ---
 
 export async function addCashSale(formData: FormData) {
-  await checkAdminAuth();
+  const { clinicId } = await checkAdminAuth();
   try {
     const saleDate = formData.get("sale_date") as string;
     const customerName = formData.get("customer_name") as string;
@@ -31,7 +30,7 @@ export async function addCashSale(formData: FormData) {
       customer_name: customerName, 
       treatment_fee: treatmentFee,
       memo,
-      clinic_id: DEFAULT_CLINIC_ID
+      clinic_id: clinicId
     };
     
     // 他のテーブルでエラーが出る可能性があるため、一旦 clinic_id なしで試行
@@ -51,7 +50,7 @@ export async function addCashSale(formData: FormData) {
 }
 
 export async function getCashSales(dateStr: string) {
-  await checkAdminAuth();
+  const { clinicId } = await checkAdminAuth();
   try {
     const supabase = await getSupabase();
     // Migration完了につき clinic_id フィルタを有効化
@@ -73,7 +72,7 @@ export async function getCashSales(dateStr: string) {
 }
 
 export async function deleteCashSale(id: string) {
-  await checkAdminAuth();
+  const { clinicId } = await checkAdminAuth();
   try {
     const supabase = await getSupabase();
     const { error } = await supabase
@@ -95,7 +94,7 @@ export async function deleteCashSale(id: string) {
 // --- Insurance Payment Actions ---
 
 export async function addInsurancePayment(formData: FormData) {
-  await checkAdminAuth();
+  const { clinicId } = await checkAdminAuth();
   try {
     const paymentMonth = formData.get("payment_month") as string; // "YYYY-MM-01"
     const insuranceName = formData.get("insurance_name") as string;
@@ -112,7 +111,7 @@ export async function addInsurancePayment(formData: FormData) {
         payment_month: paymentMonth, 
         insurance_name: insuranceName, 
         amount,
-        clinic_id: DEFAULT_CLINIC_ID
+        clinic_id: clinicId
       }]);
 
     if (error) throw error;
@@ -127,14 +126,14 @@ export async function addInsurancePayment(formData: FormData) {
 }
 
 export async function getInsurancePayments(monthStr: string) {
-  await checkAdminAuth();
+  const { clinicId } = await checkAdminAuth();
   try {
     const supabase = await getSupabase();
     const { data, error } = await supabase
       .from("insurance_payments")
       .select("*")
       .eq("payment_month", monthStr)
-      .eq("clinic_id", DEFAULT_CLINIC_ID)
+      .eq("clinic_id", clinicId)
       .order("insurance_name", { ascending: true });
 
     if (error) throw error;
@@ -146,7 +145,7 @@ export async function getInsurancePayments(monthStr: string) {
 }
 
 export async function deleteInsurancePayment(id: string) {
-  await checkAdminAuth();
+  const { clinicId } = await checkAdminAuth();
   try {
     const supabase = await getSupabase();
     const { error } = await supabase
@@ -168,7 +167,7 @@ export async function deleteInsurancePayment(id: string) {
 // --- Revenue Statistics ---
 
 export async function getMonthlyTotalRevenue(year: number, month: number) {
-  await checkAdminAuth();
+  const { clinicId } = await checkAdminAuth();
   try {
     const supabase = await getSupabase();
     const monthStr = `${year}-${month.toString().padStart(2, '0')}`;
@@ -179,7 +178,7 @@ export async function getMonthlyTotalRevenue(year: number, month: number) {
     const { data: cashData, error: cashErr } = await supabase
       .from("cash_sales")
       .select("treatment_fee")
-      .eq("clinic_id", DEFAULT_CLINIC_ID)
+      .eq("clinic_id", clinicId)
       .gte("sale_date", startOfMonth)
       .lte("sale_date", endOfMonth);
 
@@ -189,7 +188,7 @@ export async function getMonthlyTotalRevenue(year: number, month: number) {
     const { data: insuranceData, error: insErr } = await supabase
       .from("insurance_payments")
       .select("amount")
-      .eq("clinic_id", DEFAULT_CLINIC_ID)
+      .eq("clinic_id", clinicId)
       .eq("payment_month", startOfMonth);
 
     if (insErr) throw insErr;
@@ -212,13 +211,13 @@ export async function getMonthlyTotalRevenue(year: number, month: number) {
 }
 
 export async function getDailySalesSummary(dateStr: string) {
-  await checkAdminAuth();
+  const { clinicId } = await checkAdminAuth();
   try {
     const supabase = await getSupabase();
     const { data, error } = await supabase
       .from("cash_sales")
       .select("treatment_fee")
-      .eq("clinic_id", DEFAULT_CLINIC_ID)
+      .eq("clinic_id", clinicId)
       .eq("sale_date", dateStr);
 
     if (error) throw error;
@@ -232,7 +231,7 @@ export async function getDailySalesSummary(dateStr: string) {
 // --- Expense Actions ---
 
 export async function addExpense(formData: FormData) {
-  await checkAdminAuth();
+  const { clinicId } = await checkAdminAuth();
   try {
     const expenseDate = formData.get("expense_date") as string;
     const category = formData.get("category") as string;
@@ -253,7 +252,7 @@ export async function addExpense(formData: FormData) {
         description, 
         amount, 
         memo,
-        clinic_id: DEFAULT_CLINIC_ID
+        clinic_id: clinicId
       }]);
 
     if (error) throw error;
@@ -268,13 +267,13 @@ export async function addExpense(formData: FormData) {
 }
 
 export async function getExpenses(dateStr: string) {
-  await checkAdminAuth();
+  const { clinicId } = await checkAdminAuth();
   try {
     const supabase = await getSupabase();
     const { data, error } = await supabase
       .from("clinic_expenses")
       .select("*")
-      .eq("clinic_id", DEFAULT_CLINIC_ID)
+      .eq("clinic_id", clinicId)
       .eq("expense_date", dateStr)
       .order("created_at", { ascending: true });
 
@@ -287,7 +286,7 @@ export async function getExpenses(dateStr: string) {
 }
 
 export async function deleteExpense(id: string) {
-  await checkAdminAuth();
+  const { clinicId } = await checkAdminAuth();
   try {
     const supabase = await getSupabase();
     const { error } = await supabase
@@ -307,7 +306,7 @@ export async function deleteExpense(id: string) {
 }
 
 export async function getMonthlyExpenses(year: number, month: number) {
-  await checkAdminAuth();
+  const { clinicId } = await checkAdminAuth();
   try {
     const supabase = await getSupabase();
     const monthStr = `${year}-${month.toString().padStart(2, '0')}`;
@@ -317,7 +316,7 @@ export async function getMonthlyExpenses(year: number, month: number) {
     const { data, error } = await supabase
       .from("clinic_expenses")
       .select("amount, category")
-      .eq("clinic_id", DEFAULT_CLINIC_ID)
+      .eq("clinic_id", clinicId)
       .gte("expense_date", startOfMonth)
       .lte("expense_date", endOfMonth);
 
@@ -338,7 +337,7 @@ export async function getMonthlyExpenses(year: number, month: number) {
 // --- Business Context for AI Chat ---
 
 export async function getBusinessContext() {
-  await checkAdminAuth();
+  const { clinicId } = await checkAdminAuth();
   try {
     const supabase = await getSupabase();
     const now = new Date();
@@ -367,7 +366,7 @@ export async function getBusinessContext() {
       const { data } = await supabase
         .from("appointments")
         .select("id, start_time, status, is_first_visit, customers(name)")
-        .eq("clinic_id", DEFAULT_CLINIC_ID)
+        .eq("clinic_id", clinicId)
         .gte("start_time", startOfDay)
         .lte("start_time", endOfDay)
         .neq("status", "cancelled");
@@ -382,7 +381,7 @@ export async function getBusinessContext() {
       const { data } = await supabase
         .from("appointments")
         .select("id, is_first_visit")
-        .eq("clinic_id", DEFAULT_CLINIC_ID)
+        .eq("clinic_id", clinicId)
         .gte("start_time", `${startOfMonth}T00:00:00+09:00`)
         .lte("start_time", `${endOfMonth}T23:59:59+09:00`)
         .neq("status", "cancelled");
@@ -397,7 +396,7 @@ export async function getBusinessContext() {
       const { data } = await supabase
         .from("clinic_targets")
         .select("*")
-        .eq("clinic_id", DEFAULT_CLINIC_ID)
+        .eq("clinic_id", clinicId)
         .eq("month", startOfMonth)
         .maybeSingle();
       targetData = data;
@@ -411,7 +410,7 @@ export async function getBusinessContext() {
       const { count } = await supabase
         .from("customers")
         .select("id", { count: "exact", head: true })
-        .eq("clinic_id", DEFAULT_CLINIC_ID);
+        .eq("clinic_id", clinicId);
       totalCustomers = count || 0;
     } catch (e) {
       console.error("[AI_CONTEXT_LOG] Error fetching customers count:", e);
@@ -459,7 +458,7 @@ ${Object.entries(expenseRes.data?.byCategory || {}).map(([cat, amt]) => `  - ${c
 }
 
 export async function getTodayDashboardData() {
-  await checkAdminAuth();
+  const { clinicId } = await checkAdminAuth();
   try {
     const supabase = await getSupabase();
     // Get JST today
@@ -506,7 +505,7 @@ export async function getTodayDashboardData() {
             name
           )
         `)
-        .eq("clinic_id", DEFAULT_CLINIC_ID)
+        .eq("clinic_id", clinicId)
         .gte("start_time", startOfDay)
         .lte("start_time", endOfDay)
         .neq("status", "cancelled")
@@ -524,7 +523,7 @@ export async function getTodayDashboardData() {
       const { data: target } = await supabase
         .from("clinic_targets")
         .select("target_income")
-        .eq("clinic_id", DEFAULT_CLINIC_ID)
+        .eq("clinic_id", clinicId)
         .eq("month", `${year}-${month.toString().padStart(2, '0')}-01`)
         .maybeSingle();
       if (target?.target_income) targetIncome = target.target_income;
@@ -547,7 +546,7 @@ export async function getTodayDashboardData() {
       const { data: evalData } = await supabase
         .from("monthly_evaluations")
         .select("ai_suggestions")
-        .eq("clinic_id", DEFAULT_CLINIC_ID)
+        .eq("clinic_id", clinicId)
         .eq("month", `${year}-${month.toString().padStart(2, '0')}-01`)
         .maybeSingle();
       aiSuggestions = evalData?.ai_suggestions || null;
@@ -561,7 +560,7 @@ export async function getTodayDashboardData() {
       const { data } = await supabase
         .from("daily_tasks")
         .select("*")
-        .eq("clinic_id", DEFAULT_CLINIC_ID)
+        .eq("clinic_id", clinicId)
         .eq("task_date", dateStr)
         .order("created_at", { ascending: true });
       dailyTasks = data || [];
@@ -596,7 +595,7 @@ export async function getTodayDashboardData() {
 // --- Pending Expenses (Triage Flow) ---
 
 export async function addPendingExpense(imageUrl: string | null, triageData: any = {}) {
-  await checkAdminAuth();
+  const { clinicId } = await checkAdminAuth();
   try {
     const supabase = await getSupabase();
     const { data, error } = await supabase
@@ -619,7 +618,7 @@ export async function addPendingExpense(imageUrl: string | null, triageData: any
 }
 
 export async function getPendingExpenses(statusFilter?: string) {
-  await checkAdminAuth();
+  const { clinicId } = await checkAdminAuth();
   try {
     const supabase = await getSupabase();
     let query = supabase.from("pending_expenses").select("*");
@@ -639,7 +638,7 @@ export async function getPendingExpenses(statusFilter?: string) {
 }
 
 export async function updatePendingExpense(id: string, updates: any) {
-  await checkAdminAuth();
+  const { clinicId } = await checkAdminAuth();
   try {
     const supabase = await getSupabase();
     const { error } = await supabase
@@ -660,7 +659,7 @@ export async function updatePendingExpense(id: string, updates: any) {
 }
 
 export async function finalizePendingExpense(id: string, finalData: any) {
-  await checkAdminAuth();
+  const { clinicId } = await checkAdminAuth();
   try {
     const supabase = await getSupabase();
     
@@ -673,7 +672,7 @@ export async function finalizePendingExpense(id: string, finalData: any) {
         description: finalData.description,
         amount: finalData.amount,
         memo: finalData.memo,
-        clinic_id: DEFAULT_CLINIC_ID
+        clinic_id: clinicId
       }]);
 
     if (insertErr) throw insertErr;

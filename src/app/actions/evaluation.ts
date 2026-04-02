@@ -15,7 +15,7 @@ async function getSupabase() {
  * Returns both records and the calculated actuals.
  */
 export async function getMonthlyEvaluation(year: number, month: number) {
-  await checkAdminAuth();
+  const { clinicId } = await checkAdminAuth();
   try {
     const supabase = await getSupabase();
     const monthStr = `${year}-${month.toString().padStart(2, '0')}`;
@@ -32,7 +32,7 @@ export async function getMonthlyEvaluation(year: number, month: number) {
       const { data: newTargets, error: insertTargetErr } = await supabase
         .from("clinic_targets")
         .insert([{ 
-          clinic_id: '00000000-0000-0000-0000-000000000001',
+          clinic_id: clinicId,
           month: firstDayStr, 
           target_patients: 200, 
           target_income: 1500000, 
@@ -55,7 +55,7 @@ export async function getMonthlyEvaluation(year: number, month: number) {
       const { data: newEval, error: insertEvalErr } = await supabase
         .from("monthly_evaluations")
         .insert([{ 
-          clinic_id: '00000000-0000-0000-0000-000000000001',
+          clinic_id: clinicId,
           month: firstDayStr,
           google_review_count: 0,
           google_rating: 0,
@@ -128,7 +128,7 @@ export async function getMonthlyEvaluation(year: number, month: number) {
 }
 
 export async function saveEvaluationTargets(formData: FormData) {
-  await checkAdminAuth();
+  const { clinicId } = await checkAdminAuth();
   try {
     const month = formData.get("month") as string; // "YYYY-MM-01"
     const targetPatients = parseInt(formData.get("target_patients") as string, 10);
@@ -148,7 +148,7 @@ export async function saveEvaluationTargets(formData: FormData) {
     const { error: targetErr } = await supabase
       .from("clinic_targets")
       .upsert({
-        clinic_id: '00000000-0000-0000-0000-000000000001',
+        clinic_id: clinicId,
         month,
         target_patients: isNaN(targetPatients) ? 0 : targetPatients,
         target_income: isNaN(targetIncome) ? 0 : targetIncome,
@@ -163,7 +163,7 @@ export async function saveEvaluationTargets(formData: FormData) {
     const { error: evalErr } = await supabase
       .from("monthly_evaluations")
       .upsert({
-        clinic_id: '00000000-0000-0000-0000-000000000001',
+        clinic_id: clinicId,
         month,
         google_review_count: isNaN(googleReviewCount) ? 0 : googleReviewCount,
         google_rating: isNaN(googleRating) ? 0 : googleRating,
@@ -186,13 +186,13 @@ export async function saveEvaluationTargets(formData: FormData) {
 // We call the generic /api/chat or Gemini API inside the client or a separate utility, 
 // then save the text via this action.
 export async function saveAiSuggestion(month: string, suggestionText: string) {
-  await checkAdminAuth();
+  const { clinicId } = await checkAdminAuth();
   try {
     const supabase = await getSupabase();
     const { error } = await supabase
       .from("monthly_evaluations")
       .upsert({
-        clinic_id: '00000000-0000-0000-0000-000000000001',
+        clinic_id: clinicId,
         month,
         ai_suggestions: suggestionText,
         updated_at: new Date().toISOString()

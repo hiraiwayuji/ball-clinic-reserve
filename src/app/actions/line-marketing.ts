@@ -13,8 +13,12 @@ async function getSupabase() {
  */
 async function getLineAccessToken() {
   const settings = await getClinicSettings();
-  const channelId = process.env.LINE_CHANNEL_ID || "2003288674";
-  const channelSecret = settings?.line_channel_secret || process.env.LINE_CHANNEL_SECRET || "d3ed4c69e889450c22de1aac06d0b1d2";
+  const channelId = process.env.LINE_CHANNEL_ID;
+  const channelSecret = settings?.line_channel_secret || process.env.LINE_CHANNEL_SECRET;
+  if (!channelId || !channelSecret) {
+    console.error("LINE_CHANNEL_ID / LINE_CHANNEL_SECRET が設定されていません");
+    return null;
+  }
 
   try {
     const params = new URLSearchParams();

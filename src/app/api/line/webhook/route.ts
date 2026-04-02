@@ -70,24 +70,24 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
     }
 
+    // 署名検証（未検証データはDBに保存しない）
+    if (!verifySignature(rawBody, signature)) {
+      console.error("Invalid signature from LINE");
+      return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
+    }
+
     // Webhook疎通確認（eventsが空）
     if (!body || !body.events || body.events.length === 0) {
       return NextResponse.json({ status: "ok" });
     }
 
-    // 署名検証前にUserIDを記録（デバッグ用）
+    // 署名検証済みのイベントのみログ保存
     for (const ev of body.events) {
       const uid = ev.source?.userId || "unknown";
       const type = ev.type || "unknown";
       const msg = ev.message?.type === 'text' ? ev.message.text : 'non-text';
       console.log(`LOGGING: UserID=${uid}, Type=${type}, Msg=${msg}`);
       await saveDebugLog(uid, type, msg, rawBody);
-    }
-
-    // 署名検証
-    if (!verifySignature(rawBody, signature)) {
-      console.error("Invalid signature from LINE");
-      return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
     }
 
     for (const event of body.events) {

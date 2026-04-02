@@ -12,6 +12,7 @@ This file serves as a shared "memory" for all AI assistants (Antigravity, Claude
 - [x] **Build Fixes**: Resolved syntax errors and redundant tags in `src/app/reserve/page.tsx`.
 - [x] **Schema Research**: Identified `ai_memos` and `ai_blog_proposals` tables for AI-driven features.
 - [x] **Infrastructure**: Established this `_AI_BRIDGE.md` for cross-AI synchronization.
+- [x] **Claude Code Setup**: Installed Anthropic Claude Code CLI (v2.1.90).
 - [x] **Handover (LINE)**: Integrated LINE Test User ID and testing instructions.
 
 ## 🚧 In Progress / Current State
@@ -29,8 +30,11 @@ This file serves as a shared "memory" for all AI assistants (Antigravity, Claude
 - **Multi-tenancy**: All queries must consider `clinic_id` as the primary tenant identifier.
 
 ## 📝 Handover Notes for Other AIs
-- If you are **Claude (Claudcord)**: Please update the "Current Objective" or "In Progress" section when you take over a task. 
+- If you are **Claude (Claude Code)**: 
+    - The CLI is installed at `C:\Users\hirai\.local\bin\claude.exe`.
+    - You may need to run `claude` once to authenticate if the session is not inherited.
+    - Update the "Current Objective" or "In Progress" section when you take over a task. 
 - **Wait for Input**: We are currently in the process of finalizing the Google Calendar logic using shared snippets.
 
 ---
-*Last Updated: 2026-03-21 15:15 (Antigravity)*
+*Last Updated: 2026-04-03 00:26 (Antigravity)*

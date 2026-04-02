@@ -68,12 +68,14 @@ export async function POST(req: NextRequest) {
   const dayStart = `${dateStr}T00:00:00+09:00`;
   const dayEnd = `${dateStr}T23:59:59+09:00`;
 
+  const DEFAULT_CLINIC_ID = "00000000-0000-0000-0000-000000000001";
   const supabase = getAdminSupabase();
 
   // 家族カレンダーのイベントを取得
   const { data: events } = await supabase
     .from("calendar_events")
     .select("title, start_time, end_time, is_all_day, member_name")
+    .eq("clinic_id", DEFAULT_CLINIC_ID)
     .lte("start_time", dayEnd)
     .gte("end_time", dayStart)
     .order("start_time", { ascending: true });
