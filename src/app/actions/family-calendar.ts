@@ -1,9 +1,16 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
+import { createClient as createAdminClient } from "@supabase/supabase-js";
 
 async function getSupabase() {
   return await createClient();
+}
+
+function getAdminSupabase() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+  return createAdminClient(url, key);
 }
 
 export type CalendarMember = {
@@ -44,10 +51,9 @@ export async function ensureCalendarExists(
   id: string,
   name: string = "ファミリーカレンダー"
 ): Promise<{ id: string; name: string; members?: CalendarMember[] } | null> {
-  const supabase = await getSupabase();
+  const supabase = getAdminSupabase();
   const { data: existing } = await supabase.from("calendars").select("*").eq("id", id).single();
   if (existing) {
-    // もし既存のカレンダーにmembersがなければデフォルトを入れる（移行用）
     if (!existing.members) {
       await supabase.from("calendars").update({ members: DEFAULT_MEMBERS }).eq("id", id);
       return { ...existing, members: DEFAULT_MEMBERS };
@@ -60,7 +66,8 @@ export async function ensureCalendarExists(
 }
 
 export async function updateCalendarMembers(id: string, members: CalendarMember[]): Promise<{ success: boolean; error?: string }> {
-  const supabase = await getSupabase();
+  // RLSをバイパスするため管理者クライアントを使用（家族カレンダーは認証不要）
+  const supabase = getAdminSupabase();
   try {
     const { error } = await supabase.from("calendars").update({ members }).eq("id", id);
     if (error) return { success: false, error: error.message };
@@ -69,7 +76,7 @@ export async function updateCalendarMembers(id: string, members: CalendarMember[
 }
 
 export async function getEvents(calendarId: string, start: string, end: string): Promise<CalendarEvent[]> {
-  const supabase = await getSupabase();
+  const supabase = getAdminSupabase();
   if (!calendarId) return [];
   try {
     const { data, error } = await supabase.from("calendar_events").select("*").eq("calendar_id", calendarId).lte("start_time", end).gte("end_time", start).order("start_time", { ascending: true });
@@ -79,7 +86,7 @@ export async function getEvents(calendarId: string, start: string, end: string):
 }
 
 export async function createEvent(calendarId: string, event: Omit<CalendarEvent, "id" | "calendar_id" | "created_at">): Promise<{ success: boolean; event?: CalendarEvent; error?: string }> {
-  const supabase = await getSupabase();
+  const supabase = getAdminSupabase();
   try {
     const { data, error } = await supabase.from("calendar_events").insert([{ ...event, calendar_id: calendarId }]).select().single();
     if (error) return { success: false, error: error.message };
@@ -88,7 +95,7 @@ export async function createEvent(calendarId: string, event: Omit<CalendarEvent,
 }
 
 export async function updateEvent(id: string, event: Partial<Omit<CalendarEvent, "id" | "calendar_id" | "created_at">>): Promise<{ success: boolean; error?: string }> {
-  const supabase = await getSupabase();
+  const supabase = getAdminSupabase();
   try {
     const { error } = await supabase.from("calendar_events").update(event).eq("id", id);
     if (error) return { success: false, error: error.message };
@@ -97,7 +104,7 @@ export async function updateEvent(id: string, event: Partial<Omit<CalendarEvent,
 }
 
 export async function deleteEvent(id: string): Promise<{ success: boolean; error?: string }> {
-  const supabase = await getSupabase();
+  const supabase = getAdminSupabase();
   try {
     const { error } = await supabase.from("calendar_events").delete().eq("id", id);
     if (error) return { success: false, error: error.message };
