@@ -1,0 +1,37 @@
+name: LINE リマインド通知
+
+on:
+  schedule:
+    # 前日20:00 JST = 11:00 UTC
+    - cron: "0 11 * * *"
+    # 当日07:00 JST = 22:00 UTC (前日)
+    - cron: "0 22 * * *"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "モード (morning or evening)"
+        required: true
+        default: "morning"
+
+jobs:
+  remind:
+    runs-on: ubuntu-latest
+    steps:
+      - name: モードを判定
+        id: mode
+        run: |
+          HOUR=$(date -u +%H)
+          if [ "$HOUR" = "11" ]; then
+            echo "mode=evening" >> $GITHUB_OUTPUT
+          elif [ "$HOUR" = "22" ]; then
+            echo "mode=morning" >> $GITHUB_OUTPUT
+          else
+            echo "mode=${{ github.event.inputs.mode || 'morning' }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: LINEリマインド送信
+        run: |
+          curl -s -X POST "${{ secrets.APP_URL }}/api/line/remind" \
+            -H "Content-Type: application/json" \
+            -d "{\"secret\": \"${{ secrets.REMIND_SECRET }}\", \"mode\": \"${{ steps.mode.outputs.mode }}\"}" \
+            | echo "Response: $(cat)"
