@@ -388,9 +388,33 @@ export async function createReservation(formData: FormData) {
       }
 
       const startDateTimeStr = `${rawDate}T${time}:00+09:00`;
-      
-      // 予約枠の定員チェック
+
       const adminDb = getAdminSupabase() || supabase;
+
+      // オンライン予約停止チェック
+      const { data: customerData } = await adminDb
+        .from("customers")
+        .select("booking_suspended")
+        .eq("id", customerId)
+        .single();
+      if (customerData?.booking_suspended) {
+        return { success: false, error: "現在、オンライン予約のご利用が停止されています。お電話またはLINEにてお問い合わせください。" };
+      }
+
+      // 1人1予約制限: 既に有効な予約がある場合はブロック
+      const nowIso = new Date().toISOString();
+      const { data: existingAppts } = await adminDb
+        .from("appointments")
+        .select("id, start_time")
+        .eq("customer_id", customerId)
+        .in("status", ["pending", "confirmed", "waiting"])
+        .gte("start_time", nowIso)
+        .limit(1);
+      if (existingAppts && existingAppts.length > 0) {
+        return { success: false, error: "すでに予約が入っています。既存の予約をキャンセルしてから新しい予約をお取りください。" };
+      }
+
+      // 予約枠の定員チェック
       const { data: existingApps } = await adminDb
         .from("appointments")
         .select("id")

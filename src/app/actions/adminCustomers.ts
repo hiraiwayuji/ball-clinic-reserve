@@ -1,5 +1,9 @@
+"use server";
+
 import { createClient } from "@/lib/supabase/server";
+import { createClient as createAdminClient } from "@supabase/supabase-js";
 import { checkAdminAuth } from "./auth";
+import { revalidatePath } from "next/cache";
 
 type CustomerWithStats = {
   id: string;
@@ -7,7 +11,9 @@ type CustomerWithStats = {
   phone: string;
   created_at: string;
   appointmentCount: number;
+  cancelCount: number;
   lastVisit: string | null;
+  booking_suspended: boolean;
 };
 
 export async function getCustomers(): Promise<CustomerWithStats[]> {
@@ -15,7 +21,6 @@ export async function getCustomers(): Promise<CustomerWithStats[]> {
   try {
     const supabase = await createClient();
 
-    // customersテーブルと、紐づくappointmentsを取得
     const { data: customers, error } = await supabase
       .from("customers")
       .select(`
@@ -23,9 +28,11 @@ export async function getCustomers(): Promise<CustomerWithStats[]> {
         name,
         phone,
         created_at,
+        booking_suspended,
         appointments (
           id,
-          start_time
+          start_time,
+          status
         )
       `)
       .order("created_at", { ascending: false });
@@ -35,14 +42,14 @@ export async function getCustomers(): Promise<CustomerWithStats[]> {
       return [];
     }
 
-    // 取得したデータから統計情報（予約回数、最終来院日）を計算して整形
     const formattedCustomers: CustomerWithStats[] = customers.map((c: any) => {
       const appointments = c.appointments || [];
-      
-      // start_timeでソートして最新の予約を取り出す（簡易的）
+      const cancelled = appointments.filter((a: any) => a.status === "cancelled");
+      const active = appointments.filter((a: any) => a.status !== "cancelled");
+
       let lastVisit = null;
-      if (appointments.length > 0) {
-        const sorted = [...appointments].sort((a, b) => 
+      if (active.length > 0) {
+        const sorted = [...active].sort((a, b) =>
           new Date(b.start_time).getTime() - new Date(a.start_time).getTime()
         );
         lastVisit = sorted[0].start_time;
@@ -53,8 +60,10 @@ export async function getCustomers(): Promise<CustomerWithStats[]> {
         name: c.name,
         phone: c.phone,
         created_at: c.created_at,
-        appointmentCount: appointments.length,
-        lastVisit
+        appointmentCount: active.length,
+        cancelCount: cancelled.length,
+        lastVisit,
+        booking_suspended: c.booking_suspended ?? false,
       };
     });
 
@@ -63,4 +72,21 @@ export async function getCustomers(): Promise<CustomerWithStats[]> {
     console.error("Customers fetch error:", err);
     return [];
   }
+}
+
+export async function toggleBookingSuspension(customerId: string, suspend: boolean) {
+  await checkAdminAuth();
+
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) throw new Error("Supabase env missing");
+
+  const supabase = createAdminClient(url, key);
+  const { error } = await supabase
+    .from("customers")
+    .update({ booking_suspended: suspend })
+    .eq("id", customerId);
+
+  if (error) throw new Error(error.message);
+  revalidatePath("/admin/customers");
 }
