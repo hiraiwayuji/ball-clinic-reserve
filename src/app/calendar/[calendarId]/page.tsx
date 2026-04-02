@@ -33,6 +33,14 @@ function toLocalDateStr(date: Date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 
+// ISOString → JST の YYYY-MM-DD（タイムゾーンずれ対策）
+function toJSTDateStr(iso: string) {
+  const d = new Date(iso);
+  const f = new Intl.DateTimeFormat("ja-JP", { timeZone: "Asia/Tokyo", year: "numeric", month: "2-digit", day: "2-digit" });
+  const parts = Object.fromEntries(f.formatToParts(d).map(p => [p.type, p.value]));
+  return `${parts.year}-${parts.month}-${parts.day}`;
+}
+
 function formatTime(iso: string) {
   const d = new Date(iso);
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
@@ -108,7 +116,7 @@ export default function FamilyCalendarPage() {
     const dateStr = `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
     return events.filter((e) => {
       if (filter && e.member_name !== filter) return false;
-      return e.start_time.slice(0, 10) === dateStr;
+      return toJSTDateStr(e.start_time) === dateStr;
     });
   }
 
