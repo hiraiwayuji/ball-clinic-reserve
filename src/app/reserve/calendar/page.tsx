@@ -338,7 +338,7 @@ export default function ReserveCalendarPage() {
   // カレンダーグリッド生成
   if (!currentMonth) {
     return (
-      <div className="min-h-screen bg-zinc-950 flex items-center justify-center">
+      <div className="min-h-screen bg-[#0F172A] flex items-center justify-center">
         <div className="flex flex-col items-center gap-3">
           <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
           <p className="text-zinc-500 text-sm font-bold">カレンダーを読み込み中...</p>
@@ -366,10 +366,10 @@ export default function ReserveCalendarPage() {
   };
 
   return (
-    <div className="min-h-screen bg-zinc-950 text-white">
+    <div className="min-h-screen bg-[#0F172A] text-white">
 
       {/* ─── ヘッダーバー ─── */}
-      <div className="sticky top-0 z-20 bg-zinc-950/95 border-b border-zinc-800">
+      <div className="sticky top-0 z-20 bg-[#0F172A]/95 border-b border-zinc-800">
         <div className="max-w-2xl mx-auto px-4 py-3 flex items-center gap-3">
           <Link href="/reserve" className="w-9 h-9 flex items-center justify-center rounded-xl bg-zinc-800 hover:bg-zinc-700 transition shrink-0">
             <ArrowLeft className="w-4 h-4 text-zinc-300" />
@@ -452,14 +452,14 @@ export default function ReserveCalendarPage() {
 
                 // ステータス色（solid ベース）
                 const cellStyle = !isCurrentMonth
-                  ? "bg-zinc-950 opacity-20"
+                  ? "bg-[#0F172A] opacity-20"
                   : level === "available"
                   ? "bg-zinc-900 hover:bg-emerald-950 active:bg-emerald-900"
                   : level === "few"
                   ? "bg-zinc-900 hover:bg-amber-950 active:bg-amber-900"
                   : level === "full"
                   ? "bg-zinc-900 hover:bg-rose-950"
-                  : "bg-zinc-950";
+                  : "bg-[#0F172A]";
 
                 const statusSymbol = level === "available" ? "◯" : level === "few" ? "△" : level === "full" ? "×" : "";
                 const symbolColor = level === "available"
@@ -551,7 +551,7 @@ export default function ReserveCalendarPage() {
                       return (
                         <div
                           key={slot}
-                          className="flex flex-col items-center justify-center rounded-2xl border border-zinc-800 bg-zinc-950 py-3.5 px-2 select-none opacity-50"
+                          className="flex flex-col items-center justify-center rounded-2xl border border-zinc-800 bg-[#0F172A] py-3.5 px-2 select-none opacity-50"
                         >
                           <span className="text-sm font-black text-zinc-500 tabular-nums">{slot}</span>
                           <span className="text-[10px] font-bold text-rose-600 mt-0.5">予約済</span>
@@ -563,7 +563,7 @@ export default function ReserveCalendarPage() {
                       return (
                         <div
                           key={slot}
-                          className="flex flex-col items-center justify-center rounded-2xl border border-zinc-800 bg-zinc-950 py-3.5 px-2 select-none"
+                          className="flex flex-col items-center justify-center rounded-2xl border border-zinc-800 bg-[#0F172A] py-3.5 px-2 select-none"
                         >
                           <span className="text-sm font-black text-zinc-500 tabular-nums">{slot}</span>
                           <span className="text-[10px] font-bold text-zinc-600 mt-0.5">要電話</span>
@@ -617,7 +617,7 @@ export default function ReserveCalendarPage() {
 
             {/* ─── キャンセル待ちフォーム ─── */}
             {(waitlistState === "form" || waitlistState === "submitting") && (
-              <div className="border-t border-zinc-800 bg-zinc-950 px-5 py-6">
+              <div className="border-t border-zinc-800 bg-[#0F172A] px-5 py-6">
                 <h4 className="font-black text-amber-400 mb-5 flex items-center gap-2 text-base">
                   <Clock className="w-5 h-5" />
                   キャンセル待ちに登録
@@ -724,7 +724,7 @@ export default function ReserveCalendarPage() {
 
             {/* ─── キャンセル待ち完了 ─── */}
             {waitlistState === "success" && (
-              <div className="border-t border-zinc-800 bg-zinc-950 px-5 py-10 text-center">
+              <div className="border-t border-zinc-800 bg-[#0F172A] px-5 py-10 text-center">
                 <div className="w-16 h-16 bg-emerald-950 border border-emerald-800 rounded-full flex items-center justify-center mx-auto mb-5">
                   <CheckCircle2 className="w-9 h-9 text-emerald-400" />
                 </div>
