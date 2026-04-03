@@ -338,8 +338,11 @@ export default function ReserveCalendarPage() {
   // カレンダーグリッド生成
   if (!currentMonth) {
     return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
-        <div className="text-slate-400 animate-pulse">カレンダーを読み込み中...</div>
+      <div className="min-h-screen bg-zinc-950 flex items-center justify-center">
+        <div className="flex flex-col items-center gap-3">
+          <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+          <p className="text-zinc-500 text-sm font-bold">カレンダーを読み込み中...</p>
+        </div>
       </div>
     );
   }
@@ -363,322 +366,392 @@ export default function ReserveCalendarPage() {
   };
 
   return (
-    <div className="min-h-screen bg-[#0F172A] py-8 px-4 text-slate-200">
-      <div className="max-w-3xl mx-auto">
-        <Link href="/reserve" className="inline-flex items-center text-sm text-blue-200/60 hover:text-white mb-6 transition font-bold">
-          <ArrowLeft className="w-4 h-4 mr-1" />
-          予約フォームに戻る
-        </Link>
+    <div className="min-h-screen bg-zinc-950 text-white">
 
-        <div className="bg-white/5 backdrop-blur-xl rounded-[2.5rem] shadow-2xl overflow-hidden border border-white/10">
-          {/* ヘッダー */}
-          <div className="bg-blue-600/20 border-b border-white/10 px-6 py-5 text-white">
-            <div className="flex items-center gap-2 mb-1">
-              <CalendarDays className="w-5 h-5 text-blue-400" />
-              <h1 className="text-xl font-black tracking-tight">予約空き状況カレンダー</h1>
-            </div>
-            <p className="text-blue-200/60 text-sm mt-2">日付をクリックすると、その日の時間帯別空き状況が確認できます。<br/>※1ヶ月先までの予約が可能です。</p>
+      {/* ─── ヘッダーバー ─── */}
+      <div className="sticky top-0 z-20 bg-zinc-950/95 border-b border-zinc-800">
+        <div className="max-w-2xl mx-auto px-4 py-3 flex items-center gap-3">
+          <Link href="/reserve" className="w-9 h-9 flex items-center justify-center rounded-xl bg-zinc-800 hover:bg-zinc-700 transition shrink-0">
+            <ArrowLeft className="w-4 h-4 text-zinc-300" />
+          </Link>
+          <div className="flex-1 min-w-0">
+            <p className="text-xs text-zinc-500 font-bold">ボール接骨院</p>
+            <h1 className="text-sm font-black text-white truncate">予約空き状況カレンダー</h1>
           </div>
+          <div className="shrink-0 text-right">
+            <p className="text-[10px] text-zinc-600 font-bold">1ヶ月先まで予約可</p>
+          </div>
+        </div>
+      </div>
 
-          {/* 月ナビゲーション */}
-          <div className="flex items-center justify-between px-6 py-5 border-b border-white/10">
-            <button onClick={prevMonth} className="w-10 h-10 flex items-center justify-center rounded-full hover:bg-white/10 transition text-slate-400" aria-label="前月">
-              <ChevronLeft className="w-6 h-6" />
-            </button>
-            <h2 className="text-2xl font-black text-white tabular-nums tracking-widest">
-              {currentMonth && format(currentMonth, "yyyy年M月", { locale: ja })}
+      <div className="max-w-2xl mx-auto px-4 pb-12">
+
+        {/* ─── 月ナビゲーション ─── */}
+        <div className="flex items-center justify-between py-5">
+          <button
+            onClick={prevMonth}
+            className="w-12 h-12 flex items-center justify-center rounded-2xl bg-zinc-900 border border-zinc-800 hover:bg-zinc-800 active:scale-95 transition"
+            aria-label="前月"
+          >
+            <ChevronLeft className="w-5 h-5 text-zinc-300" />
+          </button>
+          <div className="text-center">
+            <h2 className="text-3xl font-black tabular-nums tracking-tight">
+              {format(currentMonth, "M月", { locale: ja })}
             </h2>
-            <button onClick={nextMonth} className="w-10 h-10 flex items-center justify-center rounded-full hover:bg-white/10 transition text-slate-400" aria-label="翌月">
-              <ChevronRight className="w-6 h-6" />
-            </button>
+            <p className="text-xs text-zinc-500 font-bold mt-0.5">{format(currentMonth, "yyyy年", { locale: ja })}</p>
           </div>
+          <button
+            onClick={nextMonth}
+            className="w-12 h-12 flex items-center justify-center rounded-2xl bg-zinc-900 border border-zinc-800 hover:bg-zinc-800 active:scale-95 transition"
+            aria-label="翌月"
+          >
+            <ChevronRight className="w-5 h-5 text-zinc-300" />
+          </button>
+        </div>
 
-          {/* 凡例 */}
-          <div className="flex flex-wrap gap-x-5 gap-y-3 px-6 py-4 bg-black/20 border-b border-white/10 text-xs">
-            {(["available", "few", "full", "closed"] as const).map(level => (
-              <div key={level} className="flex items-center gap-2">
-                <span className={`w-3 h-3 rounded-full shadow-sm ${levelConfig[level].dot}`} />
-                <span className="text-slate-300 font-bold">{levelConfig[level].label || "休診日"}</span>
+        {/* ─── 凡例 ─── */}
+        <div className="flex items-center justify-between bg-zinc-900 rounded-2xl px-4 py-3 mb-4 border border-zinc-800">
+          {(["available", "few", "full", "closed"] as const).map(lv => (
+            <div key={lv} className="flex flex-col items-center gap-1">
+              <span className={`w-2.5 h-2.5 rounded-full ${levelConfig[lv].dot}`} />
+              <span className="text-[10px] text-zinc-400 font-bold">{levelConfig[lv].label || "休診"}</span>
+            </div>
+          ))}
+        </div>
+
+        {/* ─── カレンダーグリッド ─── */}
+        <div className="bg-zinc-900 rounded-3xl border border-zinc-800 overflow-hidden">
+          {/* 曜日ヘッダー */}
+          <div className="grid grid-cols-7 border-b border-zinc-800">
+            {WEEKDAYS.map((d, i) => (
+              <div key={d} className={`text-center text-xs font-black py-3 ${i === 0 ? "text-rose-400" : i === 6 ? "text-blue-400" : "text-zinc-500"}`}>
+                {d}
               </div>
             ))}
           </div>
 
-          {/* カレンダーグリッド */}
-          <div className="p-4 md:p-6">
-            <div className="grid grid-cols-7 mb-3">
-              {WEEKDAYS.map((d, i) => (
-                <div key={d} className={`text-center text-sm font-black py-1 ${i === 0 ? "text-rose-400" : i === 6 ? "text-blue-400" : "text-blue-200/40"}`}>{d}</div>
-              ))}
+          {loadingMonth ? (
+            <div className="flex items-center justify-center h-56">
+              <div className="flex flex-col items-center gap-3">
+                <div className="w-7 h-7 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+                <p className="text-zinc-600 text-xs font-bold">読み込み中...</p>
+              </div>
             </div>
+          ) : (
+            <div className="grid grid-cols-7">
+              {calDays.map((day, idx) => {
+                const dateStr = format(day, "yyyy-MM-dd");
+                const bookedCount = monthlyData[dateStr] || 0;
+                const level = getAvailabilityLevel(dateStr, bookedCount, day, clinicHolidays);
+                const isSelected = selectedDate && isSameDay(day, selectedDate);
+                const isCurrentMonth = isSameMonth(day, currentMonth);
+                const isClickable = level !== "closed" && level !== "past" && isCurrentMonth;
+                const todayDay = isToday(day);
+                const dow = idx % 7;
 
-            {loadingMonth ? (
-              <div className="flex items-center justify-center h-48 text-blue-200/40 text-sm font-bold animate-pulse">読み込み中...</div>
-            ) : (
-              <div className="grid grid-cols-7 gap-1.5 md:gap-2">
-                {calDays.map((day) => {
-                  const dateStr = format(day, "yyyy-MM-dd");
-                  const bookedCount = monthlyData[dateStr] || 0;
-                  const level = getAvailabilityLevel(dateStr, bookedCount, day, clinicHolidays);
-                  const cfg = levelConfig[level];
-                  const isSelected = selectedDate && isSameDay(day, selectedDate);
-                  const isCurrentMonth = isSameMonth(day, currentMonth);
-                  const isClickable = level !== "closed" && level !== "past" && isCurrentMonth;
+                // ステータス色（solid ベース）
+                const cellStyle = !isCurrentMonth
+                  ? "bg-zinc-950 opacity-20"
+                  : level === "available"
+                  ? "bg-zinc-900 hover:bg-emerald-950 active:bg-emerald-900"
+                  : level === "few"
+                  ? "bg-zinc-900 hover:bg-amber-950 active:bg-amber-900"
+                  : level === "full"
+                  ? "bg-zinc-900 hover:bg-rose-950"
+                  : "bg-zinc-950";
 
-                  return (
-                    <div
-                      key={dateStr}
-                      onClick={() => isClickable && handleDayClick(day, level)}
-                      className={`
-                        relative rounded-2xl p-1 border transition-all duration-200 select-none flex flex-col items-center justify-center
-                        ${isCurrentMonth ? (isClickable ? cfg.bg : "bg-white/5") : "bg-transparent border-transparent opacity-20"}
-                        ${isCurrentMonth ? cfg.border : ""}
-                        ${isClickable ? "cursor-pointer hover:scale-[1.02]" : "cursor-default"}
-                        ${isSelected ? "ring-2 ring-blue-500 ring-offset-2 ring-offset-[#0F172A] z-10 bg-white/10" : ""}
-                        ${isToday(day) ? "font-bold" : ""}
-                      `}
-                      style={{ minHeight: "85px" }}
-                    >
-                      <span className={`text-xs absolute top-1.5 left-2 ${isCurrentMonth ? cfg.text : "text-slate-500"} font-black`}>
-                        {format(day, "d")}
+                const statusSymbol = level === "available" ? "◯" : level === "few" ? "△" : level === "full" ? "×" : "";
+                const symbolColor = level === "available"
+                  ? "text-emerald-400"
+                  : level === "few"
+                  ? "text-amber-400"
+                  : level === "full"
+                  ? "text-rose-500"
+                  : "";
+
+                return (
+                  <div
+                    key={dateStr}
+                    onClick={() => isClickable && handleDayClick(day, level)}
+                    className={`
+                      relative flex flex-col items-center justify-center border-b border-r border-zinc-800 transition-colors
+                      ${dow === 6 ? "border-r-0" : ""}
+                      ${cellStyle}
+                      ${isClickable ? "cursor-pointer" : "cursor-default"}
+                      ${isSelected ? "bg-blue-950 ring-inset ring-2 ring-blue-500" : ""}
+                    `}
+                    style={{ minHeight: "72px" }}
+                  >
+                    {/* 日付数字 */}
+                    <div className={`text-xs font-black mb-1 ${
+                      !isCurrentMonth ? "text-zinc-700" :
+                      dow === 0 ? "text-rose-400" :
+                      dow === 6 ? "text-blue-400" :
+                      "text-zinc-300"
+                    } ${todayDay ? "bg-blue-600 text-white w-5 h-5 flex items-center justify-center rounded-full text-[11px]" : ""}`}>
+                      {format(day, "d")}
+                    </div>
+
+                    {/* ステータス記号 */}
+                    {isCurrentMonth && statusSymbol && (
+                      <span className={`text-base font-black leading-none ${symbolColor}`}>
+                        {statusSymbol}
                       </span>
-                      {isCurrentMonth && level !== "past" && (
-                        <div className={`text-2xl font-black mt-2 ${cfg.labelClass}`}>
-                          {(cfg as any).symbol}
-                        </div>
-                      )}
-                      {isToday(day) && (
-                        <span className="absolute top-1.5 right-1.5 text-[9px] font-black text-white bg-blue-600 px-1.5 py-0.5 rounded shadow-sm">今日</span>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-
-          {/* 選択日の詳細パネル */}
-          {selectedDate && (
-            <div className="border-t border-white/10 bg-black/20">
-              {/* 時間帯一覧 */}
-              <div className="px-6 py-6 md:p-8">
-                <div className="flex items-center justify-between mb-6">
-                  <h3 className="text-lg font-black text-white flex items-center gap-2">
-                    <Clock className="w-5 h-5 text-blue-400" />
-                    {format(selectedDate, "M月d日 (E)", { locale: ja })} の予約状況
-                  </h3>
-                  <button onClick={closeDetail} className="w-8 h-8 flex items-center justify-center rounded-full bg-white/5 text-slate-400 hover:text-white hover:bg-white/10 transition">
-                    <X className="w-4 h-4" />
-                  </button>
-                </div>
-
-                {loadingDay ? (
-                  <div className="text-center text-blue-200/40 text-sm font-bold animate-pulse py-6">時間を読み込み中...</div>
-                ) : (
-                  <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2.5 mb-6">
-                      {getTimeSlots(selectedDate).map((slot) => {
-                        const isBooked = dailySlots.includes(slot);
-                        const isTooClose = isTimeSlotWithinTwoHours(selectedDate, slot);
-                        
-                        if (isBooked) {
-                          return (
-                            <div
-                              key={slot}
-                              className="px-2 py-3 rounded-xl text-center text-sm font-black border transition bg-rose-500/10 border-rose-500/20 text-rose-400 opacity-60"
-                            >
-                              <div className="text-[13px]">{slot}</div>
-                              <div className="text-[10px] py-0.5 mt-0.5 font-bold">予約済</div>
-                            </div>
-                          );
-                        }
-
-                        if (isTooClose) {
-                        return (
-                          <div
-                            key={slot}
-                            className="px-2 py-3 rounded-xl text-center text-sm font-black border transition bg-white/5 border-white/10 text-slate-500"
-                          >
-                            <div className="text-[13px]">{slot}</div>
-                            <div className="text-[10px] py-0.5 mt-0.5 font-bold">要電話</div>
-                          </div>
-                        );
-                      }
-                      return (
-                        <Link
-                          key={slot}
-                          href={`/reserve?date=${format(selectedDate, "yyyy-MM-dd")}&time=${slot}`}
-                          className="px-2 py-3 rounded-xl text-center text-sm font-black border transition bg-emerald-500/10 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20 hover:border-emerald-400 shadow-lg shadow-emerald-900/20 active:scale-95 flex flex-col items-center"
-                        >
-                          <div className="text-[13px]">{slot}</div>
-                          <div className="text-[10px] py-0.5 mt-0.5 font-black text-white">〇 予約</div>
-                        </Link>
-                      );
-                    })}
-                  </div>
-                )}
-
-                {/* 予約枠が1つでもある場合は予約フォームへのリンクを表示 */}
-                {dailySlots.length < getTimeSlots(selectedDate).length ? (
-                  <Button asChild className="w-full h-16 rounded-2xl bg-blue-600 hover:bg-blue-500 text-white text-lg font-black shadow-lg shadow-blue-900/20">
-                    <Link href={`/reserve?date=${format(selectedDate, "yyyy-MM-dd")}`}>
-                      <CalendarDays className="w-5 h-5 mr-2 -mt-0.5" />
-                      {format(selectedDate, "M月d日", { locale: ja })} に予約する
-                    </Link>
-                  </Button>
-                ) : (
-                  /* 全て埋まっている場合のみキャンセル待ちボタンを表示 */
-                  <div className="space-y-4">
-                    <div className="flex items-start gap-2.5 bg-rose-500/10 border border-rose-500/20 rounded-2xl p-4 text-sm text-rose-300 font-bold">
-                      <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5 text-rose-400" />
-                      <span>この日の予約枠はすべて埋まっています。ご希望の時間帯を入力してキャンセル待ちに登録できます。</span>
-                    </div>
-                    {waitlistState === "idle" && (
-                      <Button
-                        onClick={() => setWaitlistState("form")}
-                        className="w-full h-16 rounded-2xl bg-amber-500 hover:bg-amber-400 text-white text-base font-black shadow-lg shadow-amber-900/20"
-                      >
-                        <Clock className="w-5 h-5 mr-2 -mt-0.5" />
-                        希望時間帯を指定してキャンセル待ちに登録
-                      </Button>
+                    )}
+                    {isCurrentMonth && level === "closed" && (
+                      <span className="text-[9px] font-bold text-zinc-700">休</span>
                     )}
                   </div>
-                )}
-              </div>
-
-              {/* キャンセル待ちフォーム */}
-              {(waitlistState === "form" || waitlistState === "submitting") && (
-                <div className="border-t border-amber-500/20 bg-amber-500/5 px-6 py-6 md:p-8 text-white">
-                  <h4 className="font-bold text-amber-400 mb-5 flex items-center gap-2 text-lg tracking-tight">
-                    <Clock className="w-5 h-5" />
-                    キャンセル待ちに登録
-                  </h4>
-                  <form onSubmit={handleWaitlistSubmit} className="space-y-5">
-                    {/* 希望時間帯 */}
-                    <div className="bg-white/5 p-4 rounded-2xl border border-white/10">
-                      <Label className="text-xs font-bold text-blue-100/60 uppercase tracking-widest mb-3 block">
-                        ご希望の時間帯 <span className="text-rose-400">*</span>
-                      </Label>
-                      <div className="flex items-center gap-3">
-                        <select
-                          value={waitlistStart}
-                          onChange={e => setWaitlistStart(e.target.value)}
-                          className="flex-1 bg-slate-900 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-amber-500/50 focus:ring-1 focus:ring-amber-500/50 font-bold"
-                        >
-                          {getTimeSlots(selectedDate).map(t => {
-                            const isTooClose = isTimeSlotWithinTwoHours(selectedDate, t);
-                            return <option key={t} value={t} disabled={isTooClose}>{t} {isTooClose ? "(電話のみ)" : ""}</option>
-                          })}
-                        </select>
-                        <span className="text-blue-100/60 font-bold">〜</span>
-                        <select
-                          value={waitlistEnd}
-                          onChange={e => setWaitlistEnd(e.target.value)}
-                          className="flex-1 bg-slate-900 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-amber-500/50 focus:ring-1 focus:ring-amber-500/50 font-bold"
-                        >
-                          {getTimeSlots(selectedDate).filter(t => t > waitlistStart).concat([selectedDate.getDay() === 6 ? "18:00" : "23:00"]).map(t => (
-                            <option key={t} value={t}>{t}</option>
-                          ))}
-                        </select>
-                      </div>
-                      <p className="text-xs text-amber-200/60 mt-3 font-medium">※ 指定した範囲内で空きが出た際にご連絡いたします</p>
-                    </div>
-
-                    {/* お名前 */}
-                    <div>
-                      <Label htmlFor="waitlist-name" className="text-xs font-bold text-blue-100/60 uppercase tracking-widest mb-2 block">
-                        お名前 <span className="text-rose-400">*</span>
-                      </Label>
-                      <Input
-                        id="waitlist-name"
-                        value={waitlistName}
-                        onChange={e => setWaitlistName(e.target.value)}
-                        placeholder="例: 山田 太郎"
-                        className="h-14 bg-white/5 border-white/10 rounded-xl text-white placeholder:text-white/20 focus:border-amber-500/50 font-bold"
-                      />
-                    </div>
-
-                    {/* 電話番号 */}
-                    <div>
-                      <Label htmlFor="waitlist-phone" className="text-xs font-bold text-blue-100/60 uppercase tracking-widest mb-2 block">
-                        お電話番号 <span className="text-rose-400">*</span>
-                      </Label>
-                      <Input
-                        id="waitlist-phone"
-                        type="tel"
-                        value={waitlistPhone}
-                        onChange={e => setWaitlistPhone(e.target.value)}
-                        placeholder="例: 090-1234-5678"
-                        className="h-14 bg-white/5 border-white/10 rounded-xl text-white placeholder:text-white/20 focus:border-amber-500/50 font-bold"
-                      />
-                    </div>
-
-                    {/* 症状（任意） */}
-                    <div>
-                      <Label htmlFor="waitlist-symptoms" className="text-xs font-bold text-blue-100/60 uppercase tracking-widest mb-2 block">
-                        お悩みの症状（任意）
-                      </Label>
-                      <textarea
-                        id="waitlist-symptoms"
-                        value={waitlistSymptoms}
-                        onChange={e => setWaitlistSymptoms(e.target.value)}
-                        placeholder="例: 腰痛、肩こりなど"
-                        rows={3}
-                        className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white placeholder:text-white/20 focus:outline-none focus:border-amber-500/50 focus:ring-1 focus:ring-amber-500/50 resize-none font-bold"
-                      />
-                    </div>
-
-                    {waitlistError && (
-                      <p className="text-sm text-rose-400 bg-rose-500/10 border border-rose-500/20 rounded-xl p-4 font-bold flex items-center gap-2">
-                        <AlertCircle className="w-5 h-5 flex-shrink-0" />
-                        {waitlistError}
-                      </p>
-                    )}
-
-                    <div className="flex gap-4 pt-2">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        onClick={() => setWaitlistState("idle")}
-                        className="flex-1 h-14 rounded-xl bg-white/5 border-white/10 text-white hover:bg-white/10 hover:text-white"
-                        disabled={waitlistState === "submitting"}
-                      >
-                        キャンセル
-                      </Button>
-                      <Button
-                        type="submit"
-                        className="flex-1 h-14 rounded-xl bg-amber-500 hover:bg-amber-400 text-white font-black shadow-lg shadow-amber-500/20 active:scale-95 transition-all"
-                        disabled={waitlistState === "submitting"}
-                      >
-                        {waitlistState === "submitting" ? "登録処理中..." : "登録する"}
-                      </Button>
-                    </div>
-                  </form>
-                </div>
-              )}
-
-              {/* キャンセル待ち登録完了 */}
-              {waitlistState === "success" && (
-                <div className="border-t border-white/10 px-6 py-8 text-center text-white">
-                  <CheckCircle2 className="w-14 h-14 text-amber-400 mx-auto mb-4" />
-                  <h4 className="font-black text-white text-xl mb-2 tracking-tight">キャンセル待ちを受け付けました</h4>
-                  <p className="text-blue-200/80 text-sm mb-5 font-bold">
-                    {format(selectedDate, "M月d日", { locale: ja })} の <strong className="text-amber-400">{waitlistStart}〜{waitlistEnd}</strong> の範囲でキャンセルが出た場合にご連絡いたします。
-                  </p>
-                  <div className="bg-amber-500/10 border border-amber-500/30 rounded-2xl p-5 mb-5 inline-block">
-                    <p className="text-xs text-amber-400/80 mb-1 font-bold uppercase tracking-widest">受付番号</p>
-                    <p className="text-3xl font-mono font-black text-amber-400 tracking-widest drop-shadow-md">{waitlistNumber}</p>
-                  </div>
-                  <p className="text-xs text-blue-200/60 mt-2 font-bold">
-                    ※ LINEでの連絡をご希望の方は <a href="/reserve" className="text-blue-400 hover:underline">予約フォーム</a> よりご連絡ください。
-                  </p>
-                </div>
-              )}
+                );
+              })}
             </div>
           )}
         </div>
 
-        <div className="mt-6 text-xs text-blue-200/40 text-center space-y-1 font-bold">
-          <p>※ 水曜・日曜は休診日です</p>
-          <p>※ 空き状況はリアルタイムで変わります。ご予約はお早めに。</p>
+        {/* ─── 選択日の時間帯パネル ─── */}
+        {selectedDate && (
+          <div className="mt-4 bg-zinc-900 rounded-3xl border border-zinc-800 overflow-hidden">
+
+            {/* パネルヘッダー */}
+            <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-800">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 bg-blue-600 rounded-xl flex items-center justify-center shrink-0">
+                  <Clock className="w-4 h-4 text-white" />
+                </div>
+                <div>
+                  <p className="text-[11px] text-zinc-500 font-bold">選択中の日付</p>
+                  <h3 className="text-base font-black text-white">
+                    {format(selectedDate, "M月d日（E）", { locale: ja })}
+                  </h3>
+                </div>
+              </div>
+              <button
+                onClick={closeDetail}
+                className="w-8 h-8 flex items-center justify-center rounded-xl bg-zinc-800 hover:bg-zinc-700 transition text-zinc-400"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* 時間スロット */}
+            <div className="p-4">
+              {loadingDay ? (
+                <div className="flex flex-col items-center justify-center py-10 gap-3">
+                  <div className="w-7 h-7 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+                  <p className="text-zinc-600 text-sm font-bold">時間を読み込み中...</p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 mb-4">
+                  {getTimeSlots(selectedDate).map((slot) => {
+                    const isBooked = dailySlots.includes(slot);
+                    const isTooClose = isTimeSlotWithinTwoHours(selectedDate, slot);
+
+                    if (isBooked) {
+                      return (
+                        <div
+                          key={slot}
+                          className="flex flex-col items-center justify-center rounded-2xl border border-zinc-800 bg-zinc-950 py-3.5 px-2 select-none opacity-50"
+                        >
+                          <span className="text-sm font-black text-zinc-500 tabular-nums">{slot}</span>
+                          <span className="text-[10px] font-bold text-rose-600 mt-0.5">予約済</span>
+                        </div>
+                      );
+                    }
+
+                    if (isTooClose) {
+                      return (
+                        <div
+                          key={slot}
+                          className="flex flex-col items-center justify-center rounded-2xl border border-zinc-800 bg-zinc-950 py-3.5 px-2 select-none"
+                        >
+                          <span className="text-sm font-black text-zinc-500 tabular-nums">{slot}</span>
+                          <span className="text-[10px] font-bold text-zinc-600 mt-0.5">要電話</span>
+                        </div>
+                      );
+                    }
+
+                    return (
+                      <Link
+                        key={slot}
+                        href={`/reserve?date=${format(selectedDate, "yyyy-MM-dd")}&time=${slot}`}
+                        className="flex flex-col items-center justify-center rounded-2xl border border-emerald-700 bg-emerald-950 py-3.5 px-2 hover:bg-emerald-900 active:scale-95 transition-all shadow-lg shadow-emerald-950/50 cursor-pointer"
+                      >
+                        <span className="text-sm font-black text-white tabular-nums">{slot}</span>
+                        <span className="text-[10px] font-black text-emerald-400 mt-0.5">◯ 空き</span>
+                      </Link>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* CTA or 満員案内 */}
+              {!loadingDay && (
+                dailySlots.length < getTimeSlots(selectedDate).length ? (
+                  <Link
+                    href={`/reserve?date=${format(selectedDate, "yyyy-MM-dd")}`}
+                    className="flex items-center justify-center gap-2 w-full h-14 rounded-2xl bg-blue-600 hover:bg-blue-500 active:scale-95 text-white text-base font-black shadow-xl shadow-blue-950 transition-all"
+                  >
+                    <CalendarDays className="w-5 h-5" />
+                    {format(selectedDate, "M月d日", { locale: ja })} に予約する
+                  </Link>
+                ) : (
+                  <div className="space-y-3">
+                    <div className="flex items-start gap-3 bg-rose-950 border border-rose-900 rounded-2xl p-4 text-sm text-rose-300 font-bold">
+                      <AlertCircle className="w-5 h-5 shrink-0 mt-0.5 text-rose-400" />
+                      <span>この日の予約枠はすべて埋まっています。キャンセル待ちに登録できます。</span>
+                    </div>
+                    {waitlistState === "idle" && (
+                      <button
+                        onClick={() => setWaitlistState("form")}
+                        className="flex items-center justify-center gap-2 w-full h-14 rounded-2xl bg-amber-500 hover:bg-amber-400 active:scale-95 text-white text-sm font-black shadow-xl shadow-amber-950 transition-all"
+                      >
+                        <Clock className="w-5 h-5" />
+                        希望時間帯を指定してキャンセル待ち登録
+                      </button>
+                    )}
+                  </div>
+                )
+              )}
+            </div>
+
+            {/* ─── キャンセル待ちフォーム ─── */}
+            {(waitlistState === "form" || waitlistState === "submitting") && (
+              <div className="border-t border-zinc-800 bg-zinc-950 px-5 py-6">
+                <h4 className="font-black text-amber-400 mb-5 flex items-center gap-2 text-base">
+                  <Clock className="w-5 h-5" />
+                  キャンセル待ちに登録
+                </h4>
+                <form onSubmit={handleWaitlistSubmit} className="space-y-4">
+                  {/* 希望時間帯 */}
+                  <div className="bg-zinc-900 rounded-2xl border border-zinc-800 p-4">
+                    <Label className="text-[11px] font-bold text-zinc-500 uppercase tracking-widest mb-3 block">
+                      ご希望の時間帯 <span className="text-rose-400">*</span>
+                    </Label>
+                    <div className="flex items-center gap-2">
+                      <select
+                        value={waitlistStart}
+                        onChange={e => setWaitlistStart(e.target.value)}
+                        className="flex-1 bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-3 text-white text-sm font-bold focus:outline-none focus:border-amber-500"
+                      >
+                        {getTimeSlots(selectedDate).map(t => {
+                          const isTooClose = isTimeSlotWithinTwoHours(selectedDate, t);
+                          return <option key={t} value={t} disabled={isTooClose}>{t}{isTooClose ? " (電話のみ)" : ""}</option>;
+                        })}
+                      </select>
+                      <span className="text-zinc-500 font-bold shrink-0">〜</span>
+                      <select
+                        value={waitlistEnd}
+                        onChange={e => setWaitlistEnd(e.target.value)}
+                        className="flex-1 bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-3 text-white text-sm font-bold focus:outline-none focus:border-amber-500"
+                      >
+                        {getTimeSlots(selectedDate).filter(t => t > waitlistStart).concat([selectedDate.getDay() === 6 ? "18:00" : "23:00"]).map(t => (
+                          <option key={t} value={t}>{t}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <p className="text-[11px] text-amber-600 mt-2 font-bold">※ 範囲内で空きが出た際にご連絡いたします</p>
+                  </div>
+
+                  {/* お名前 */}
+                  <div>
+                    <Label className="text-[11px] font-bold text-zinc-500 uppercase tracking-widest mb-2 block">
+                      お名前 <span className="text-rose-400">*</span>
+                    </Label>
+                    <input
+                      value={waitlistName}
+                      onChange={e => setWaitlistName(e.target.value)}
+                      placeholder="例: 山田 太郎"
+                      className="w-full h-12 bg-zinc-800 border border-zinc-700 rounded-xl px-4 text-white text-sm font-bold placeholder:text-zinc-600 focus:outline-none focus:border-amber-500"
+                    />
+                  </div>
+
+                  {/* 電話番号 */}
+                  <div>
+                    <Label className="text-[11px] font-bold text-zinc-500 uppercase tracking-widest mb-2 block">
+                      お電話番号 <span className="text-rose-400">*</span>
+                    </Label>
+                    <input
+                      type="tel"
+                      value={waitlistPhone}
+                      onChange={e => setWaitlistPhone(e.target.value)}
+                      placeholder="例: 090-1234-5678"
+                      className="w-full h-12 bg-zinc-800 border border-zinc-700 rounded-xl px-4 text-white text-sm font-bold placeholder:text-zinc-600 focus:outline-none focus:border-amber-500"
+                    />
+                  </div>
+
+                  {/* 症状（任意） */}
+                  <div>
+                    <Label className="text-[11px] font-bold text-zinc-500 uppercase tracking-widest mb-2 block">
+                      お悩みの症状（任意）
+                    </Label>
+                    <textarea
+                      value={waitlistSymptoms}
+                      onChange={e => setWaitlistSymptoms(e.target.value)}
+                      placeholder="例: 腰痛、肩こりなど"
+                      rows={2}
+                      className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 text-white text-sm font-bold placeholder:text-zinc-600 focus:outline-none focus:border-amber-500 resize-none"
+                    />
+                  </div>
+
+                  {waitlistError && (
+                    <div className="flex items-start gap-2 bg-rose-950 border border-rose-900 rounded-xl p-3 text-sm text-rose-400 font-bold">
+                      <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                      <span>{waitlistError}</span>
+                    </div>
+                  )}
+
+                  <div className="flex gap-3 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => setWaitlistState("idle")}
+                      disabled={waitlistState === "submitting"}
+                      className="flex-1 h-12 rounded-xl bg-zinc-800 border border-zinc-700 text-zinc-300 font-bold text-sm hover:bg-zinc-700 disabled:opacity-40 transition"
+                    >
+                      キャンセル
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={waitlistState === "submitting"}
+                      className="flex-1 h-12 rounded-xl bg-amber-500 hover:bg-amber-400 text-white font-black text-sm active:scale-95 disabled:opacity-50 transition shadow-lg shadow-amber-950"
+                    >
+                      {waitlistState === "submitting" ? "登録中..." : "登録する"}
+                    </button>
+                  </div>
+                </form>
+              </div>
+            )}
+
+            {/* ─── キャンセル待ち完了 ─── */}
+            {waitlistState === "success" && (
+              <div className="border-t border-zinc-800 bg-zinc-950 px-5 py-10 text-center">
+                <div className="w-16 h-16 bg-emerald-950 border border-emerald-800 rounded-full flex items-center justify-center mx-auto mb-5">
+                  <CheckCircle2 className="w-9 h-9 text-emerald-400" />
+                </div>
+                <h4 className="font-black text-white text-xl mb-2">受け付けました</h4>
+                <p className="text-zinc-400 text-sm mb-6 leading-relaxed">
+                  {format(selectedDate, "M月d日", { locale: ja })} の{" "}
+                  <span className="text-amber-400 font-bold">{waitlistStart}〜{waitlistEnd}</span>{" "}
+                  でキャンセルが出た際にご連絡します。
+                </p>
+                <div className="inline-block bg-zinc-900 border border-zinc-800 rounded-2xl px-8 py-4 mb-5">
+                  <p className="text-[10px] text-zinc-600 font-bold uppercase tracking-widest mb-1">受付番号</p>
+                  <p className="text-4xl font-mono font-black text-amber-400 tracking-widest">{waitlistNumber}</p>
+                </div>
+                <p className="text-xs text-zinc-600 font-bold">
+                  LINEでの連絡をご希望の方は{" "}
+                  <a href="/reserve" className="text-blue-400 underline underline-offset-2">予約フォーム</a>{" "}
+                  よりご連絡ください。
+                </p>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* フッター注記 */}
+        <div className="mt-6 space-y-1 text-center">
+          <p className="text-[11px] text-zinc-700 font-bold">※ 水曜・日曜は休診日です</p>
+          <p className="text-[11px] text-zinc-700 font-bold">※ 空き状況はリアルタイムで変わります</p>
         </div>
       </div>
     </div>
