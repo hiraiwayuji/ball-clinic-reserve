@@ -40,6 +40,34 @@ export default function AiChatPanel() {
     }
   }, [isOpen]);
 
+  // Trigger for automatic message sending
+  const [autoSendTrigger, setAutoSendTrigger] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (autoSendTrigger && !isLoading) {
+      sendMessage(autoSendTrigger);
+      setAutoSendTrigger(null);
+    }
+  }, [autoSendTrigger, isLoading]);
+
+  // Listen for external chat triggers
+  useEffect(() => {
+    const handleRemoteOpen = (e: any) => {
+      const { message, autoSend } = e.detail || {};
+      setIsOpen(true);
+      if (message) {
+        if (autoSend) {
+          setAutoSendTrigger(message);
+        } else {
+          setInput(message);
+        }
+      }
+    };
+
+    window.addEventListener("open-ai-chat", handleRemoteOpen);
+    return () => window.removeEventListener("open-ai-chat", handleRemoteOpen);
+  }, []);
+
   const loadHistory = async () => {
     setIsHistoryLoading(true);
     try {
@@ -55,13 +83,14 @@ export default function AiChatPanel() {
     }
   };
 
-  const sendMessage = async () => {
-    const trimmed = input.trim();
+  const sendMessage = async (overrideMsg?: string) => {
+    const contentToSend = overrideMsg || input;
+    const trimmed = contentToSend.trim();
     if (!trimmed || isLoading) return;
 
+    if (!overrideMsg) setInput("");
     const userMessage: ChatMessage = { role: "user", content: trimmed };
     setMessages((prev) => [...prev, userMessage]);
-    setInput("");
     setIsLoading(true);
 
     try {
@@ -256,7 +285,7 @@ export default function AiChatPanel() {
                 disabled={isLoading}
               />
               <button
-                onClick={sendMessage}
+                onClick={() => sendMessage()}
                 disabled={isLoading || !input.trim()}
                 className="bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white rounded-xl px-4 py-2.5 transition-colors shrink-0"
               >

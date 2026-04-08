@@ -106,6 +106,22 @@ export default function AIMemo() {
                 <Edit3 className="w-4 h-4 mr-1" />
                 メモを追記・変更
               </Button>
+              <Button 
+                variant="outline" 
+                size="sm" 
+                className="bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100 shadow-sm"
+                onClick={() => {
+                  window.dispatchEvent(new CustomEvent("open-ai-chat", {
+                    detail: {
+                      message: `【軍師メモに基づく相談】\n以下のメモ内容について、具体的に何をすべきか「壁打ち相手」になってアドバイスをください。\n\nメモ内容:\n${existingMemo?.content}`,
+                      autoSend: true
+                    }
+                  }));
+                }}
+              >
+                <Sparkles className="w-4 h-4 mr-1" />
+                軍師と壁打ちする
+              </Button>
             </div>
           </div>
         )}
