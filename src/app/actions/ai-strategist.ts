@@ -100,7 +100,7 @@ export async function generateAnalyticsComment(comparisonJson: string) {
 
   try {
     const genAI = new GoogleGenerativeAI(apiKey);
-    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
     const prompt = `あなたは接骨院の経営参謀AIです。以下の期間比較データを見て、院長への経営コメントを日本語で生成してください。
 
@@ -129,7 +129,7 @@ export async function generateWeeklyBlogProposal(clinicContext: string) {
 
   try {
     const genAI = new GoogleGenerativeAI(apiKey);
-    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
     const settings = await getClinicSettings();
     const snsContext = settings ? `
@@ -208,7 +208,7 @@ export async function generateDailySnsTasks(dateStr: string) {
 
     const genAI = new GoogleGenerativeAI(apiKey);
     const model = genAI.getGenerativeModel({ 
-      model: "gemini-2.0-flash",
+      model: "gemini-1.5-flash",
       generationConfig: { responseMimeType: "application/json" }
     });
 
