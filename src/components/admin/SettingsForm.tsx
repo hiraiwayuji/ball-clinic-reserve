@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Settings, Video, MapPin, Save, Loader2, MessageSquare, Instagram, Youtube, Twitter } from "lucide-react";
+import { Settings, Video, MapPin, Save, Loader2, MessageSquare, Instagram, Youtube, Twitter, Phone, Users, Building2, Target } from "lucide-react";
 import { updateClinicSettings, ClinicSettings } from "@/app/actions/settings";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
@@ -95,12 +95,76 @@ export default function SettingsForm({ initialSettings }: { initialSettings: Cli
                 基本設定
               </CardTitle>
             </CardHeader>
-            <CardContent className="pt-6 space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="clinic_name">院名</Label>
-                <Input id="clinic_name" value={settings?.clinic_name || ""} onChange={(e) => updateField("clinic_name", e.target.value)} />
+            <CardContent className="pt-6 space-y-6">
+              <div className="space-y-4">
+                <h4 className="text-sm font-bold text-slate-700 border-b pb-2 flex items-center">
+                  <Settings className="w-4 h-4 mr-2" />基本プロフィール
+                </h4>
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="clinic_name">院名</Label>
+                    <Input id="clinic_name" value={settings?.clinic_name || ""} onChange={(e) => updateField("clinic_name", e.target.value)} />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="phone_number">電話番号</Label>
+                    <div className="relative">
+                      <Phone className="absolute left-3 top-3 w-4 h-4 text-slate-400" />
+                      <Input id="phone_number" className="pl-9" placeholder="00-0000-0000" value={settings?.phone_number || ""} onChange={(e) => updateField("phone_number", e.target.value)} />
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="address">住所</Label>
+                    <div className="relative">
+                      <MapPin className="absolute left-3 top-3 w-4 h-4 text-slate-400" />
+                      <Input id="address" className="pl-9" placeholder="東京都○○区..." value={settings?.address || ""} onChange={(e) => updateField("address", e.target.value)} />
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="market_area">マーケット範囲（商圏）</Label>
+                    <Input id="market_area" placeholder="例：駅から徒歩10分圏内、○○市全域など" value={settings?.market_area || ""} onChange={(e) => updateField("market_area", e.target.value)} />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="target_generation">ターゲット年代</Label>
+                    <div className="relative">
+                      <Target className="absolute left-3 top-3 w-4 h-4 text-slate-400" />
+                      <Input id="target_generation" className="pl-9" placeholder="例：30代〜50代、主婦層など" value={settings?.target_generation || ""} onChange={(e) => updateField("target_generation", e.target.value)} />
+                    </div>
+                  </div>
+                </div>
               </div>
-              <div className="space-y-2">
+
+              <div className="space-y-4 pt-4 border-t border-slate-100">
+                <h4 className="text-sm font-bold text-slate-700 border-b pb-2 flex items-center">
+                  <Users className="w-4 h-4 mr-2" />人員・規模
+                </h4>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="doctor_count">先生の人数（人）</Label>
+                    <Input id="doctor_count" type="number" min="0" value={settings?.doctor_count || 0} onChange={(e) => updateField("doctor_count", parseInt(e.target.value))} />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="staff_count">スタッフの人数（人）</Label>
+                    <Input id="staff_count" type="number" min="0" value={settings?.staff_count || 0} onChange={(e) => updateField("staff_count", parseInt(e.target.value))} />
+                  </div>
+                  <div className="space-y-2 col-span-2">
+                    <Label htmlFor="branch_count" className="flex items-center gap-2">
+                      <Building2 className="w-4 h-4 text-slate-500" />分院の数
+                    </Label>
+                    <Input id="branch_count" type="number" min="0" value={settings?.branch_count || 0} onChange={(e) => updateField("branch_count", parseInt(e.target.value))} />
+                  </div>
+                </div>
+                {settings?.branch_count && settings.branch_count > 1 && (
+                  <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-700 flex items-start gap-2">
+                    <Building2 className="w-4 h-4 shrink-0 mt-0.5" />
+                    <div>
+                      <p className="font-bold">多店舗運営モード</p>
+                      <p>分院が複数あるため、将来的な分院別分析の対象となります。現在は本院（メイン）の情報を入力してください。</p>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="space-y-2 pt-4 border-t border-slate-100">
                 <Label htmlFor="hero_title">キャッチコピー（HP表示用）</Label>
                 <Input id="hero_title" value={settings?.hero_title || ""} onChange={(e) => updateField("hero_title", e.target.value)} />
               </div>

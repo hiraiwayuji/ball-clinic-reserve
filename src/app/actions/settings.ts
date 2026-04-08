@@ -29,6 +29,14 @@ export type ClinicSettings = {
   target_new_patients?: number;
   target_sns_tasks?: number;
   target_repeat_rate?: number;
+  // New clinic info
+  phone_number?: string;
+  address?: string;
+  market_area?: string;
+  target_generation?: string;
+  doctor_count?: number;
+  staff_count?: number;
+  branch_count?: number;
 };
 
 
@@ -97,6 +105,13 @@ export async function updateClinicSettings(settings: Partial<ClinicSettings>) {
     target_persona: settings.target_persona,
     video_tone: settings.video_tone,
     analysis_keywords: settings.analysis_keywords,
+    phone_number: settings.phone_number,
+    address: settings.address,
+    market_area: settings.market_area,
+    target_generation: settings.target_generation,
+    doctor_count: settings.doctor_count,
+    staff_count: settings.staff_count,
+    branch_count: settings.branch_count,
     updated_at: new Date().toISOString()
   };
 
