@@ -232,22 +232,30 @@ export default function ExpensesPage() {
   const handleSaveEdit = async () => {
     if (!editingRow || !date) return;
     setIsSavingEdit(true);
-    try {
-      await updateExpense(editingRow.id, {
-        expense_date: editingRow.expense_date,
-        category: editingRow.category,
-        description: editingRow.description,
-        amount: editingRow.amount,
-        memo: editingRow.memo,
-      });
-      toast.success("更新しました");
+    const res = await updateExpense(editingRow.id, {
+      expense_date: editingRow.expense_date,
+      category: editingRow.category,
+      description: editingRow.description,
+      amount: editingRow.amount,
+      memo: editingRow.memo,
+    });
+    setIsSavingEdit(false);
+    if (res.success) {
+      const newDate = new Date(editingRow.expense_date + "T00:00:00");
+      const movedToOtherDay = editingRow.expense_date !== format(date, "yyyy-MM-dd");
+      toast.success(movedToOtherDay
+        ? `更新しました（${editingRow.expense_date} の経費に移動しました）`
+        : "更新しました"
+      );
       setEditingRow(null);
-      // 日付が変わる場合があるので現在の表示月をrefetch
-      fetchExpenses(date);
-    } catch (err: any) {
-      toast.error("更新に失敗しました: " + (err.message || ""));
-    } finally {
-      setIsSavingEdit(false);
+      if (movedToOtherDay) {
+        // 保存先の日付に移動して表示
+        setDate(newDate);
+      } else {
+        fetchExpenses(date);
+      }
+    } else {
+      toast.error(res.error || "更新に失敗しました");
     }
   };
 
