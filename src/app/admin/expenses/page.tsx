@@ -317,17 +317,18 @@ export default function ExpensesPage() {
             </h1>
             <p className="text-muted-foreground mt-2">AIレシート読み取りで経費を効率化</p>
           </div>
-          <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
+          <div className="flex items-center gap-3 flex-wrap sm:flex-nowrap p-3 bg-slate-50 rounded-xl border border-slate-200">
+            <span className="text-sm font-bold text-slate-500 mr-2 border-r pr-3">こちらの入力も必要ですか？</span>
             <Link href="/admin/sales">
-              <Button variant="outline" size="sm" className="border-emerald-200 text-emerald-700 hover:bg-emerald-50">
-                <Plus className="w-4 h-4 mr-2" />
-                売上入力へ
+              <Button size="lg" className="bg-emerald-600 hover:bg-emerald-700 text-white shadow-lg shadow-emerald-200/50 flex items-center gap-2 group">
+                <Plus className="w-5 h-5 group-hover:scale-110 transition-transform" />
+                <span className="text-base font-black">売上入力</span>
               </Button>
             </Link>
             <Link href="/admin/insurance">
-              <Button variant="outline" size="sm" className="border-blue-200 text-blue-700 hover:bg-blue-50">
-                <Banknote className="w-4 h-4 mr-2" />
-                保険入金へ
+              <Button size="lg" className="bg-blue-600 hover:bg-blue-700 text-white shadow-lg shadow-blue-200/50 flex items-center gap-2 group">
+                <Banknote className="w-5 h-5 group-hover:scale-110 transition-transform" />
+                <span className="text-base font-black">保険入金</span>
               </Button>
             </Link>
           </div>

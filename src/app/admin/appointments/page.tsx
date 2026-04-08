@@ -176,24 +176,24 @@ export default function AdminWeeklyGridPage() {
             defaultTime={selectedAddTime}
             onSuccess={() => setRefreshKey(k => k + 1)}
           />
-          <Link href="/admin/waitlist">
-            <Button
-              variant="outline"
-              size="sm"
-              className="border-orange-200 text-orange-700 hover:bg-orange-50"
-            >
-              <CalendarDays className="w-4 h-4 mr-1 sm:mr-2" />
-              <span className="hidden sm:inline">キャンセル待ち</span>
-              <span className="sm:hidden">C待ち</span>
-            </Button>
-          </Link>
-          <Link href="/admin/holidays" className="ml-auto sm:ml-0">
-            <Button variant="outline" size="sm">
-              <Settings className="w-4 h-4 mr-1 sm:mr-2" />
-              <span className="hidden sm:inline">休診日設定</span>
-              <span className="sm:hidden">休診日</span>
-            </Button>
-          </Link>
+          <div className="flex items-center gap-2 p-1.5 bg-slate-50 rounded-xl border border-slate-200">
+            <Link href="/admin/waitlist">
+              <Button
+                variant="default"
+                size="sm"
+                className="bg-orange-600 hover:bg-orange-700 text-white shadow-sm flex items-center gap-2"
+              >
+                <CalendarDays className="w-4 h-4" />
+                <span className="font-bold">キャンセル待ち</span>
+              </Button>
+            </Link>
+            <Link href="/admin/holidays">
+              <Button variant="outline" size="sm" className="border-slate-300 text-slate-600 hover:bg-white hover:text-blue-600 hover:border-blue-300 transition-all">
+                <Settings className="w-4 h-4 mr-1.5" />
+                <span className="font-bold">休診日設定</span>
+              </Button>
+            </Link>
+          </div>
         </div>
       </div>
 

@@ -576,11 +576,11 @@ export default function EvaluationPage() {
           {/* 分析ボタン */}
           <Link href="/admin/analytics">
              <Button
-               variant="outline"
-               className="border-indigo-300 text-indigo-700 hover:bg-indigo-50"
+               variant="default"
+               className="bg-indigo-600 hover:bg-indigo-700 text-white shadow-lg shadow-indigo-100 flex items-center gap-2"
              >
-               <TrendingUp className="w-4 h-4 mr-2" />
-               詳細分析へ
+               <TrendingUp className="w-4 h-4" />
+               <span className="font-bold">さらに詳しく分析する</span>
              </Button>
           </Link>
 
