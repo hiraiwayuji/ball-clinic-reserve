@@ -313,7 +313,7 @@ export default function ExpensesPage() {
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
           <div>
             <h1 className="text-3xl font-bold tracking-tight text-slate-900 border-l-4 border-emerald-600 pl-3">
-              経費入力
+              売上記帳
             </h1>
             <p className="text-muted-foreground mt-2">AIレシート読み取りで経費を効率化</p>
           </div>

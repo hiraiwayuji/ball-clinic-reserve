@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/select";
 import { sendAppointmentReminders, sendBirthdayCoupons, runMonthlyLottery, sendWelcomeQuestionnaire, sendWomenOnlyCampaign } from "@/app/actions/line-marketing";
 import { ClipboardList } from "lucide-react";
+import Link from "next/link";
 
 export default function MarketingDashboardPage() {
   const [loadingAction, setLoadingAction] = useState<string | null>(null);
@@ -156,6 +157,15 @@ export default function MarketingDashboardPage() {
             />
           )}
         </div>
+      </div>
+      
+      <div className="flex justify-end">
+        <Link href="/admin/tasks">
+          <Button variant="outline" className="text-slate-600 border-slate-200 hover:bg-slate-50">
+            <ClipboardList className="w-4 h-4 mr-2 text-indigo-500" />
+            SNSタスク管理を表示
+          </Button>
+        </Link>
       </div>
 
       {actionResult && actionResult.type !== "error" && (

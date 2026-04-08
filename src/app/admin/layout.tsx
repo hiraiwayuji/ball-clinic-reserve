@@ -32,21 +32,16 @@ export default async function AdminLayout({
             </Link>
             <div className="h-6 w-px bg-slate-200 mx-2 hidden md:block" />
             <span className="text-sm font-medium text-slate-500 hidden md:block">予約管理システム</span>
-            <nav className="hidden md:flex gap-4 text-sm">
-              <Link href="/admin/dashboard" className="text-blue-600 font-medium">ダッシュボード</Link>
+            <nav className="hidden lg:flex gap-5 text-sm items-center">
+              <Link href="/admin/dashboard" className="text-slate-600 hover:text-blue-600 font-medium">ダッシュボード</Link>
               <Link href="/admin/appointments" className="text-slate-600 hover:text-blue-600">予約一覧</Link>
               <Link href="/admin/customers" className="text-slate-600 hover:text-blue-600">顧客管理</Link>
-              <Link href="/admin/sales" className="text-slate-600 hover:text-blue-600">売上入力</Link>
-              <Link href="/admin/insurance" className="text-slate-600 hover:text-blue-600">保険入金</Link>
-              <Link href="/admin/expenses" className="text-slate-600 hover:text-blue-600">経費</Link>
+              <Link href="/admin/expenses" className="px-3 py-1 bg-slate-100 rounded-md text-slate-700 hover:bg-slate-200 transition-colors font-bold">売上記帳</Link>
               <Link href="/admin/evaluation" className="text-slate-600 hover:text-blue-600">経営評価</Link>
-              <Link href="/admin/analytics" className="text-slate-600 hover:text-blue-600 font-semibold text-indigo-600">分析</Link>
-              <Link href="/admin/waitlist" className="text-slate-600 hover:text-blue-600">C待ち</Link>
-              <Link href="/admin/holidays" className="text-slate-600 hover:text-blue-600">休診日</Link>
-              <Link href="/admin/tasks" className="text-slate-600 hover:text-blue-600">SNSタスク</Link>
               <Link href="/admin/marketing" className="text-slate-600 hover:text-blue-600">LINE・販促</Link>
-              <Link href="/admin/settings" className="text-slate-600 hover:text-blue-600 border-l pl-4 border-slate-300">設定</Link>
-              <Link href="/" className="text-slate-600 hover:text-blue-600 text-xs ml-4 border-l pl-4 border-slate-300" target="_blank">
+              <Link href="/admin/holidays" className="text-slate-600 hover:text-blue-600">休診日</Link>
+              <Link href="/admin/settings" className="text-slate-400 hover:text-blue-600 ml-2">設定</Link>
+              <Link href="/" className="text-slate-400 hover:text-blue-600 text-xs ml-2 border-l pl-4" target="_blank">
                 サイトを表示
               </Link>
             </nav>
