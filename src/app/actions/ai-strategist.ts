@@ -285,8 +285,11 @@ export async function generateDailySnsTasks(dateStr: string) {
 
     revalidatePath("/admin/tasks");
     return { success: true };
-  } catch (error) {
+  } catch (error: any) {
     console.error("Error generating daily SNS tasks:", error);
-    return { success: false, error: "AIタスクの生成に失敗しました" };
+    return { 
+      success: false, 
+      error: error.message || "AIタスクの生成中に予期せぬエラーが発生しました" 
+    };
   }
 }
