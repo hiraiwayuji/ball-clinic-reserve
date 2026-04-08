@@ -194,3 +194,72 @@ export async function generateWeeklyBlogProposal(clinicContext: string) {
     return { success: false, error: "生成に失敗しました" };
   }
 }
+
+export async function generateDailySnsTasks(dateStr: string) {
+  const { clinicId } = await checkAdminAuth();
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) return { success: false, error: "APIキーが設定されていません" };
+
+  try {
+    const { getBusinessContext } = await import("./sales");
+    const bizContext = await getBusinessContext();
+    const settings = await getClinicSettings();
+    const supabase = await getSupabase();
+
+    const genAI = new GoogleGenerativeAI(apiKey);
+    const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash-lite-preview-02-05" });
+
+    const prompt = `
+      あなたは接骨院の「SNS集客・マーケティング軍師AI」です。
+      以下のクリニック情報を踏まえ、指定された日付（${dateStr}）に実行すべきSNSタスクを5つ提案してください。
+      
+      【クリニックの現状】
+      ${bizContext.success ? bizContext.context : "取得失敗"}
+      
+      【SNS設定・ターゲット】
+      ターゲット: ${settings?.target_persona || "一般"}
+      トーン: ${settings?.video_tone || "親密"}
+      キーワード: ${settings?.analysis_keywords?.join(", ") || "なし"}
+      
+      【重要：タスクの出力形式と内容】
+      1. タスクは今日実行して効果が高いものを5つ選んでください。
+      2. 各タスクには、InstagramやX、Googleビジネスプロフィール等、どこで、何をすべきか明確な「タイトル」を付けてください。
+      3. 各タスクに必ず「見本（モデル内容）」を含めてください。
+      4. 「見本」には、具体的にどのような投稿文にすべきか（キャッチコピー、内容、ハッシュタグ例など）を詳細に書いてください。
+      
+      出力は以下のJSON形式のみで返してください（Markdown不要、コードブロック不要）。
+      [
+        {
+          "title": "タスクの短いタイトル",
+          "priority": "high",
+          "reference_content": "具体的な投稿の見本・構成案・キャッチコピーなど"
+        },
+        ...
+      ]
+      ※priorityは 'high', 'medium', 'low' のいずれか。
+    `;
+
+    const result = await model.generateContent(prompt);
+    const responseText = result.response.text().trim().replace(/^```json/, '').replace(/```$/, '');
+    const dailyTasks = JSON.parse(responseText);
+
+    const insertData = dailyTasks.map((t: any) => ({
+      clinic_id: clinicId,
+      task_date: dateStr,
+      task_name: t.title,
+      title: t.title,
+      status: 'pending',
+      priority: t.priority,
+      reference_content: t.reference_content
+    }));
+
+    const { error } = await supabase.from("daily_tasks").insert(insertData);
+    if (error) throw error;
+
+    revalidatePath("/admin/tasks");
+    return { success: true };
+  } catch (error) {
+    console.error("Error generating daily SNS tasks:", error);
+    return { success: false, error: "AIタスクの生成に失敗しました" };
+  }
+}

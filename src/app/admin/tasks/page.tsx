@@ -3,9 +3,11 @@
 import { useState, useEffect, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { toast } from "sonner";
-import { CheckCircle2, Circle, Plus, Trash2, AlertCircle, Calendar, ChevronLeft, ChevronRight } from "lucide-react";
+import { CheckCircle2, Circle, Plus, Trash2, AlertCircle, Calendar, ChevronLeft, ChevronRight, Sparkles, Wand2, Lightbulb } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { generateDailySnsTasks } from "@/app/actions/ai-strategist";
 import { format, addDays, subDays } from "date-fns";
 import { ja } from "date-fns/locale";
 
@@ -34,6 +36,8 @@ export default function TasksPage() {
   const [newTitle, setNewTitle] = useState("");
   const [newPriority, setNewPriority] = useState("medium");
   const [showForm, setShowForm] = useState(false);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [selectedReference, setSelectedReference] = useState<any>(null);
   const [clinicId, setClinicId] = useState<string | null>(null);
 
   const dateStr = format(selectedDate, "yyyy-MM-dd");
@@ -101,6 +105,19 @@ export default function TasksPage() {
   const total = tasks.length;
   const progress = total > 0 ? Math.round((completed / total) * 100) : 0;
 
+  const handleGenerateAI = async () => {
+    if (isGenerating) return;
+    setIsGenerating(true);
+    const res = await generateDailySnsTasks(dateStr);
+    if (res.success) {
+      toast.success("AIが5つのタスクを提案しました！");
+      fetchTasks();
+    } else {
+      toast.error(res.error || "生成に失敗しました");
+    }
+    setIsGenerating(false);
+  };
+
   return (
     <div className="space-y-6 pb-12">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
@@ -110,9 +127,19 @@ export default function TasksPage() {
           </h1>
           <p className="text-muted-foreground mt-2">日別のSNS・マーケティングタスクを管理します</p>
         </div>
-        <Button onClick={() => setShowForm(v => !v)} className="bg-rose-600 hover:bg-rose-700">
-          <Plus className="w-4 h-4 mr-2" />タスクを追加
-        </Button>
+        <div className="flex gap-2">
+          <Button 
+            onClick={handleGenerateAI} 
+            disabled={isGenerating}
+            className="bg-indigo-600 hover:bg-indigo-700 text-white shadow-lg shadow-indigo-200"
+          >
+            {isGenerating ? <Wand2 className="w-4 h-4 mr-2 animate-spin" /> : <Sparkles className="w-4 h-4 mr-2" />}
+            AIにタスクを提案させる
+          </Button>
+          <Button onClick={() => setShowForm(v => !v)} variant="outline" className="border-rose-200 text-rose-600 hover:bg-rose-50">
+            <Plus className="w-4 h-4 mr-2" />手動で追加
+          </Button>
+        </div>
       </div>
 
       {/* 日付ナビゲーション */}
@@ -217,6 +244,17 @@ export default function TasksPage() {
                         {priority.label}
                       </span>
                     )}
+                    {task.reference_content && (
+                      <Button 
+                        variant="ghost" 
+                        size="sm" 
+                        className="text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50 p-1 h-auto"
+                        onClick={() => setSelectedReference(task)}
+                      >
+                        <Lightbulb className="w-4 h-4 mr-1" />
+                        <span className="text-[10px] font-bold">見本を表示</span>
+                      </Button>
+                    )}
                     <button onClick={() => deleteTask(task.id)} className="shrink-0 text-slate-300 hover:text-rose-500 transition-colors">
                       <Trash2 className="w-4 h-4" />
                     </button>
@@ -227,6 +265,34 @@ export default function TasksPage() {
           )}
         </CardContent>
       </Card>
+
+      {/* 見本表示ダイアログ */}
+      <Dialog open={!!selectedReference} onOpenChange={() => setSelectedReference(null)}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Sparkles className="w-5 h-5 text-indigo-500" />
+              投稿の見本・アイデア
+            </DialogTitle>
+            <DialogDescription>
+               AIが提案するこのタスクの具体的な構成案です。
+            </DialogDescription>
+          </DialogHeader>
+          {selectedReference && (
+            <div className="mt-4 p-6 bg-slate-50 border rounded-xl overflow-auto max-h-[60vh]">
+              <h3 className="font-bold text-slate-900 mb-2 truncate">【{selectedReference.title}】</h3>
+              <div className="whitespace-pre-wrap text-sm leading-relaxed text-slate-700">
+                {selectedReference.reference_content}
+              </div>
+            </div>
+          )}
+          <div className="mt-4 flex justify-end">
+            <Button onClick={() => setSelectedReference(null)} className="bg-slate-900">
+              閉じる
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
