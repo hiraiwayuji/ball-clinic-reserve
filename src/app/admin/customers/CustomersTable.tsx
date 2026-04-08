@@ -34,6 +34,9 @@ type Customer = {
   gender: string | null;
   age_group: string | null;
   guardian_name: string | null;
+  city_name: string | null;
+  birth_date: string | null;
+  referral_source: string | null;
 };
 
 const GENDER_LABEL: Record<string, string> = { male: "男性", female: "女性", other: "その他" };
@@ -136,9 +139,9 @@ function EditableRow({ customer }: { customer: Customer }) {
           className="flex items-center gap-1 text-[11px] text-slate-500 hover:text-blue-600 hover:bg-blue-50 px-2 py-1 rounded-lg transition-colors"
         >
           <ClipboardList className="w-3 h-3" />
-          {customer.birth_month ? `${customer.birth_month}月` : "—"}
-          {customer.gender ? ` / ${GENDER_LABEL[customer.gender] ?? customer.gender}` : ""}
-          {customer.age_group ? ` / ${customer.age_group}` : ""}
+          {customer.city_name ? `${customer.city_name} / ` : ""}
+          {customer.gender ? `${GENDER_LABEL[customer.gender] ?? customer.gender} / ` : ""}
+          {customer.referral_source ? `${customer.referral_source}` : "分析データ"}
         </button>
         <QuestionnaireDialog
           open={qOpen}
@@ -150,6 +153,9 @@ function EditableRow({ customer }: { customer: Customer }) {
             birth_month: customer.birth_month,
             gender: customer.gender,
             age_group: customer.age_group,
+            city_name: customer.city_name,
+            birth_date: customer.birth_date,
+            referral_source: customer.referral_source,
           }}
         />
       </TableCell>

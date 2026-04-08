@@ -93,7 +93,7 @@ export async function getWeeklyBlogProposals() {
   }
 }
 
-export async function generateAnalyticsComment(comparisonJson: string) {
+export async function generateAnalyticsComment(comparisonJson: string, customerDataJson?: string) {
   await checkAdminAuth();
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) return { success: false, error: "APIキーが設定されていません" };
@@ -102,15 +102,18 @@ export async function generateAnalyticsComment(comparisonJson: string) {
     const genAI = new GoogleGenerativeAI(apiKey);
     const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
-    const prompt = `あなたは接骨院の経営参謀AIです。以下の期間比較データを見て、院長への経営コメントを日本語で生成してください。
+    const prompt = `あなたは接骨院の経営参謀AIです。以下の期間比較データおよび顧客属性データを見て、院長への経営コメントを日本語で生成してください。
 
 【比較データ（JSON）】
 ${comparisonJson}
 
+【顧客属性データ（JSON）】
+${customerDataJson || "なし"}
+
 【出力ルール】
 - 200文字以内で簡潔に
 - 良かった点を1〜2つ具体的に褒める（数字を使う）
-- 今後伸ばすべきポイントを1つ提案する
+- 顧客層（年代・性別・来院経路）の傾向に基づいた具体的な集客施策を1つ提案する
 - 院長を「ぼーるくん」と呼ぶ
 - 箇条書きではなく自然な会話文で書く`;
 

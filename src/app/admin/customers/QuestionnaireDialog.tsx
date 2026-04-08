@@ -20,6 +20,17 @@ const GENDERS = [
   { key: "other", label: "その他" },
 ];
 
+const REFERRAL_SOURCES = [
+  "紹介",
+  "Instagram",
+  "YouTube",
+  "Google",
+  "チラシ",
+  "看板",
+  "ホームページ",
+  "その他",
+];
+
 interface Props {
   open: boolean;
   onOpenChange: (v: boolean) => void;
@@ -30,6 +41,9 @@ interface Props {
     birth_month: number | null;
     gender: string | null;
     age_group: string | null;
+    city_name: string | null;
+    birth_date: string | null;
+    referral_source: string | null;
   };
 }
 
@@ -38,6 +52,9 @@ export function QuestionnaireDialog({ open, onOpenChange, customerId, customerNa
   const [birthMonth, setBirthMonth] = useState<number | null>(initialData.birth_month);
   const [gender, setGender] = useState<string | null>(initialData.gender);
   const [ageGroup, setAgeGroup] = useState<string | null>(initialData.age_group);
+  const [cityName, setCityName] = useState(initialData.city_name ?? "");
+  const [birthDate, setBirthDate] = useState(initialData.birth_date ?? "");
+  const [referralSource, setReferralSource] = useState(initialData.referral_source ?? "");
   const [isPending, startTransition] = useTransition();
 
   const handleSave = () => {
@@ -48,6 +65,9 @@ export function QuestionnaireDialog({ open, onOpenChange, customerId, customerNa
           birth_month: birthMonth,
           gender,
           age_group: ageGroup,
+          city_name: cityName.trim() || null,
+          birth_date: birthDate || null,
+          referral_source: referralSource || null,
         });
         toast.success("アンケート情報を保存しました");
         onOpenChange(false);
@@ -110,7 +130,7 @@ export function QuestionnaireDialog({ open, onOpenChange, customerId, customerNa
                   key={g.key}
                   type="button"
                   onClick={() => setGender(gender === g.key ? null : g.key)}
-                  className={`h-10 rounded-xl text-sm font-bold transition-all border ${
+                  className={`h-9 rounded-lg text-xs font-bold transition-all border ${
                     gender === g.key
                       ? "bg-blue-600 text-white border-blue-500"
                       : "bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100"
@@ -124,14 +144,14 @@ export function QuestionnaireDialog({ open, onOpenChange, customerId, customerNa
 
           {/* 年代 */}
           <div className="space-y-1.5">
-            <label className="text-xs font-bold text-slate-600">年代</label>
+            <label className="text-xs font-bold text-slate-600">年代（目安）</label>
             <div className="grid grid-cols-3 gap-2">
               {AGE_GROUPS.map(a => (
                 <button
                   key={a}
                   type="button"
                   onClick={() => setAgeGroup(ageGroup === a ? null : a)}
-                  className={`h-10 rounded-xl text-sm font-bold transition-all border ${
+                  className={`h-9 rounded-lg text-xs font-bold transition-all border ${
                     ageGroup === a
                       ? "bg-blue-600 text-white border-blue-500"
                       : "bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100"
@@ -141,6 +161,57 @@ export function QuestionnaireDialog({ open, onOpenChange, customerId, customerNa
                 </button>
               ))}
             </div>
+          </div>
+
+          {/* 市町村 */}
+          <div className="space-y-1.5">
+            <label className="text-xs font-bold text-slate-600">お住まいの地域（市町村）</label>
+            <input
+              type="text"
+              value={cityName}
+              onChange={e => setCityName(e.target.value)}
+              placeholder="〇〇市、〇〇町"
+              className="w-full h-9 border border-slate-200 rounded-lg px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+            />
+          </div>
+
+          {/* 生年月日 */}
+          <div className="space-y-1.5">
+            <label className="text-xs font-bold text-slate-600">生年月日（正確な年齢分析用）</label>
+            <input
+              type="date"
+              value={birthDate}
+              onChange={e => setBirthDate(e.target.value)}
+              className="w-full h-9 border border-slate-200 rounded-lg px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+            />
+          </div>
+
+          {/* 来院経路 */}
+          <div className="space-y-1.5">
+            <label className="text-xs font-bold text-slate-600">来院のきっかけ</label>
+            <div className="grid grid-cols-2 gap-1.5">
+              {REFERRAL_SOURCES.map(src => (
+                <button
+                  key={src}
+                  type="button"
+                  onClick={() => setReferralSource(referralSource === src ? "" : src)}
+                  className={`h-9 rounded-lg text-xs font-bold transition-all border ${
+                    referralSource === src
+                      ? "bg-amber-500 text-white border-amber-400 shadow-sm"
+                      : "bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100"
+                  }`}
+                >
+                  {src}
+                </button>
+              ))}
+            </div>
+            {referralSource === "その他" && (
+                <input
+                    type="text"
+                    placeholder="具体的に記入（知人の紹介など）"
+                    className="w-full h-9 border border-slate-200 rounded-lg px-3 text-xs focus:outline-none focus:ring-2 focus:ring-blue-400 mt-1"
+                />
+            )}
           </div>
 
           <Button

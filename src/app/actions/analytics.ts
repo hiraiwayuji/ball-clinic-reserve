@@ -47,6 +47,13 @@ export type YearlyTrendPoint = {
   visits: number;
   newPatients: number;
 };
+export type CustomerAnalytics = {
+  gender: Record<string, number>;
+  ageGroups: Record<string, number>;
+  cities: Record<string, number>;
+  sources: Record<string, number>;
+  total: number;
+};
 
 function pct(a: number, b: number) {
   if (b === 0) return a > 0 ? 100 : 0;
@@ -197,4 +204,62 @@ export async function getWeekdayBreakdown(year: number, month: number) {
     counts[jstDay]++;
   });
   return days.map((day, i) => ({ day, count: counts[i] }));
+}
+
+export async function getCustomerAnalytics(year: number, month: number): Promise<CustomerAnalytics> {
+  const { clinicId } = await checkAdminAuth();
+  const supabase = await createClient();
+
+  const monthStr = `${year}-${String(month).padStart(2, "0")}`;
+  const startDate = `${monthStr}-01`;
+  const daysInMonth = new Date(year, month, 0).getDate();
+  const endDate = `${monthStr}-${String(daysInMonth).padStart(2, "0")}`;
+
+  // Fetch customers created in this month
+  const { data: customers } = await supabase
+    .from("customers")
+    .select("gender, birth_date, city_name, referral_source")
+    .eq("clinic_id", clinicId)
+    .gte("created_at", `${startDate}T00:00:00+09:00`)
+    .lte("created_at", `${endDate}T23:59:59+09:00`);
+
+  const results: CustomerAnalytics = {
+    gender: {},
+    ageGroups: { "20歳未満": 0, "20-30代": 0, "40-50代": 0, "60歳以上": 0, "不明": 0 },
+    cities: {},
+    sources: {},
+    total: customers?.length || 0
+  };
+
+  (customers ?? []).forEach(c => {
+    // Gender
+    const g = c.gender || "不明";
+    results.gender[g] = (results.gender[g] ?? 0) + 1;
+
+    // City
+    const city = c.city_name || "その他/不明";
+    results.cities[city] = (results.cities[city] ?? 0) + 1;
+
+    // Referral Source
+    const src = c.referral_source || "その他/不明";
+    results.sources[src] = (results.sources[src] ?? 0) + 1;
+
+    // Age calculation
+    if (c.birth_date) {
+      const birth = new Date(c.birth_date);
+      const today = new Date();
+      let age = today.getFullYear() - birth.getFullYear();
+      const m = today.getMonth() - birth.getMonth();
+      if (m < 0 || (m === 0 && today.getDate() < birth.getDate())) age--;
+
+      if (age < 20) results.ageGroups["20歳未満"]++;
+      else if (age < 40) results.ageGroups["20-30代"]++;
+      else if (age < 60) results.ageGroups["40-50代"]++;
+      else results.ageGroups["60歳以上"]++;
+    } else {
+      results.ageGroups["不明"]++;
+    }
+  });
+
+  return results;
 }

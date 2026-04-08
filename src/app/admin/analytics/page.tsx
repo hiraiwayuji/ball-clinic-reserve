@@ -4,14 +4,18 @@ import { useState, useEffect, useCallback, useTransition } from "react";
 import {
   LineChart, Line, BarChart, Bar, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
-  ComposedChart, Area, RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis,
+  ComposedChart, Area,
 } from "recharts";
 import {
-  getComparisonData, getYearlyTrend, getMonthAnalytics, getWeekdayBreakdown,
-  type ComparisonResult, type YearlyTrendPoint, type MonthAnalytics,
+  getComparisonData, getYearlyTrend, getWeekdayBreakdown, getCustomerAnalytics,
+  type ComparisonResult, type YearlyTrendPoint, type CustomerAnalytics,
 } from "@/app/actions/analytics";
 import { generateAnalyticsComment } from "@/app/actions/ai-strategist";
-import { TrendingUp, TrendingDown, Minus, Users, Banknote, ReceiptText, ChartBar, Calendar, Sparkles, Loader2 } from "lucide-react";
+import { 
+  TrendingUp, TrendingDown, Minus, Users, Banknote, 
+  ReceiptText, ChartBar, Calendar, Sparkles, Loader2 
+} from "lucide-react";
+import { Button } from "@/components/ui/button";
 
 // ========= ユーティリティ =========
 const yen = (n: number) => `¥${Math.abs(n).toLocaleString()}`;
@@ -116,20 +120,24 @@ export default function AnalyticsPage() {
   const [weekday, setWeekday] = useState<{ day: string; count: number }[]>([]);
   const [trendYear, setTrendYear] = useState(THIS_YEAR);
   const [loading, setLoading] = useState(true);
+  const [customerData, setCustomerData] = useState<CustomerAnalytics | null>(null);
+  const [activeTab, setActiveTab] = useState<"performance" | "customers">("performance");
   const [aiComment, setAiComment] = useState<string | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
 
   const load = useCallback(() => {
     setLoading(true);
     startTransition(async () => {
-      const [comp, tr, wd] = await Promise.all([
+      const [comp, tr, wd, cust] = await Promise.all([
         getComparisonData(yearA, monthA, yearB, monthB),
         getYearlyTrend(trendYear),
         getWeekdayBreakdown(yearA, monthA),
+        getCustomerAnalytics(yearA, monthA),
       ]);
       setComparison(comp);
       setTrend(tr);
       setWeekday(wd);
+      setCustomerData(cust);
       setLoading(false);
     });
   }, [yearA, monthA, yearB, monthB, trendYear]);
@@ -162,7 +170,10 @@ export default function AnalyticsPage() {
     if (!comparison) return;
     setAiLoading(true);
     setAiComment(null);
-    const res = await generateAnalyticsComment(JSON.stringify(comparison));
+    const res = await generateAnalyticsComment(
+      JSON.stringify(comparison),
+      customerData ? JSON.stringify(customerData) : undefined
+    );
     if (res.success) setAiComment(res.comment ?? null);
     else setAiComment("生成に失敗しました。もう一度お試しください。");
     setAiLoading(false);
@@ -178,6 +189,17 @@ export default function AnalyticsPage() {
     { name: "自費", value: a.revenue.cash },
     { name: "保険", value: a.revenue.insurance },
   ] : [];
+
+  // 顧客属性データ変換
+  const genderData = customerData ? Object.entries(customerData.gender).map(([name, value]) => ({ name, value })) : [];
+  const ageData = customerData ? Object.entries(customerData.ageGroups).map(([name, value]) => ({ name, value })) : [];
+  const sourceData = customerData ? Object.entries(customerData.sources).map(([name, value]) => ({ name, value })) : [];
+  const cityData = customerData 
+    ? Object.entries(customerData.cities)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 5)
+        .map(([name, value]) => ({ name, value })) 
+    : [];
 
   return (
     <div className="max-w-7xl mx-auto space-y-6 pb-16">
@@ -244,11 +266,27 @@ export default function AnalyticsPage() {
         </div>
       </div>
 
+      {/* タブ切り替え */}
+      <div className="flex border-b border-slate-200">
+        <button
+          onClick={() => setActiveTab("performance")}
+          className={`px-6 py-3 text-sm font-bold transition-colors border-b-2 ${activeTab === "performance" ? "border-indigo-600 text-indigo-700" : "border-transparent text-slate-500 hover:text-slate-700"}`}
+        >
+          経営実績・トレンド
+        </button>
+        <button
+          onClick={() => setActiveTab("customers")}
+          className={`px-6 py-3 text-sm font-bold transition-colors border-b-2 ${activeTab === "customers" ? "border-indigo-600 text-indigo-700" : "border-transparent text-slate-500 hover:text-slate-700"}`}
+        >
+          新規顧客属性分析
+        </button>
+      </div>
+
       {loading && (
         <div className="text-center py-16 text-slate-400 text-sm animate-pulse">データ読み込み中...</div>
       )}
 
-      {!loading && comparison && a && b && d && (
+      {!loading && activeTab === "performance" && comparison && a && b && d && (
         <>
           {/* KPIカード */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -409,60 +447,202 @@ export default function AnalyticsPage() {
               </ResponsiveContainer>
             </div>
           </div>
+
+          {/* 年間トレンド */}
+          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5 space-y-4">
+            <div className="flex items-center justify-between flex-wrap gap-3">
+              <h2 className="font-bold text-slate-800">年間トレンド</h2>
+              <div className="flex items-center gap-2">
+                <Calendar className="w-4 h-4 text-slate-400" />
+                <select
+                  value={trendYear}
+                  onChange={(e) => setTrendYear(Number(e.target.value))}
+                  className="border border-slate-200 rounded-lg px-2 py-1.5 text-sm text-slate-800 bg-white"
+                >
+                  {[THIS_YEAR - 1, THIS_YEAR].map((y) => (
+                    <option key={y} value={y}>{y}年</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {/* 売上・経費・利益 */}
+            <div>
+              <p className="text-xs text-slate-500 font-semibold mb-2">売上 / 経費 / 利益（月次）</p>
+              <ResponsiveContainer width="100%" height={260}>
+                <ComposedChart data={trend}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                  <XAxis dataKey="month" tick={{ fontSize: 12 }} />
+                  <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => `${(v / 10000).toFixed(0)}万`} />
+                  <Tooltip formatter={(v: any) => yen(v)} />
+                  <Legend />
+                  <Area type="monotone" dataKey="revenue" name="売上" fill="#ede9fe" stroke="#6366f1" strokeWidth={2} />
+                  <Line type="monotone" dataKey="expenses" name="経費" stroke="#f43f5e" strokeWidth={2} dot={false} />
+                  <Line type="monotone" dataKey="profit" name="利益" stroke="#10b981" strokeWidth={2} dot={{ r: 3 }} />
+                </ComposedChart>
+              </ResponsiveContainer>
+            </div>
+
+            {/* 来院数トレンド */}
+            <div>
+              <p className="text-xs text-slate-500 font-semibold mb-2">来院数 / 新規患者数（月次）</p>
+              <ResponsiveContainer width="100%" height={200}>
+                <ComposedChart data={trend}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                  <XAxis dataKey="month" tick={{ fontSize: 12 }} />
+                  <YAxis tick={{ fontSize: 12 }} />
+                  <Tooltip />
+                  <Legend />
+                  <Bar dataKey="visits" name="来院数合計" fill="#c7d2fe" radius={[4, 4, 0, 0]} />
+                  <Line type="monotone" dataKey="newPatients" name="新規患者" stroke="#6366f1" strokeWidth={2} dot={{ r: 3 }} />
+                </ComposedChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
         </>
       )}
 
-      {/* 年間トレンド */}
-      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5 space-y-4">
-        <div className="flex items-center justify-between flex-wrap gap-3">
-          <h2 className="font-bold text-slate-800">年間トレンド</h2>
-          <div className="flex items-center gap-2">
-            <Calendar className="w-4 h-4 text-slate-400" />
-            <select
-              value={trendYear}
-              onChange={(e) => setTrendYear(Number(e.target.value))}
-              className="border border-slate-200 rounded-lg px-2 py-1.5 text-sm text-slate-800 bg-white"
-            >
-              {[THIS_YEAR - 1, THIS_YEAR].map((y) => (
-                <option key={y} value={y}>{y}年</option>
-              ))}
-            </select>
-          </div>
-        </div>
+      {!loading && activeTab === "customers" && customerData && (
+        <div className="space-y-6">
+            {/* KPIサマリー */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-6 text-center">
+                    <p className="text-xs font-bold text-slate-500 mb-1 uppercase tracking-widest">対象期間の新規患者数</p>
+                    <p className="text-4xl font-black text-indigo-600">{customerData.total}<span className="text-lg font-bold ml-1">名</span></p>
+                </div>
+                <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-6 text-center">
+                    <p className="text-xs font-bold text-slate-500 mb-1 uppercase tracking-widest">主要な来院経路</p>
+                    <p className="text-2xl font-black text-slate-800">
+                        {sourceData.length > 0 ? sourceData.sort((a,b) => b.value - a.value)[0].name : "データなし"}
+                    </p>
+                    <p className="text-xs text-slate-400 font-medium">最多の流入元</p>
+                </div>
+                <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-6 text-center">
+                    <p className="text-xs font-bold text-slate-500 mb-1 uppercase tracking-widest">主要エリア</p>
+                    <p className="text-2xl font-black text-slate-800">
+                        {cityData.length > 0 ? cityData[0].name : "データなし"}
+                    </p>
+                    <p className="text-xs text-slate-400 font-medium">上位の市町村</p>
+                </div>
+            </div>
 
-        {/* 売上・経費・利益 */}
-        <div>
-          <p className="text-xs text-slate-500 font-semibold mb-2">売上 / 経費 / 利益（月次）</p>
-          <ResponsiveContainer width="100%" height={260}>
-            <ComposedChart data={trend}>
-              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-              <XAxis dataKey="month" tick={{ fontSize: 12 }} />
-              <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => `${(v / 10000).toFixed(0)}万`} />
-              <Tooltip formatter={(v: any) => yen(v)} />
-              <Legend />
-              <Area type="monotone" dataKey="revenue" name="売上" fill="#ede9fe" stroke="#6366f1" strokeWidth={2} />
-              <Line type="monotone" dataKey="expenses" name="経費" stroke="#f43f5e" strokeWidth={2} dot={false} />
-              <Line type="monotone" dataKey="profit" name="利益" stroke="#10b981" strokeWidth={2} dot={{ r: 3 }} />
-            </ComposedChart>
-          </ResponsiveContainer>
-        </div>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                {/* 性別比 */}
+                <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-6">
+                  <h2 className="font-bold text-slate-800 mb-4 flex items-center gap-2">
+                    <div className="w-1.5 h-6 bg-rose-400 rounded-full" />
+                    性別比
+                  </h2>
+                  <div className="h-[260px]">
+                    {genderData.length > 0 ? (
+                        <ResponsiveContainer width="100%" height="100%">
+                            <PieChart>
+                                <Pie 
+                                    data={genderData} 
+                                    cx="50%" cy="45%" 
+                                    outerRadius={80} 
+                                    dataKey="value" 
+                                    label={({ name, value }) => `${name === 'male' ? '男性' : name === 'female' ? '女性' : name}: ${value}名`}
+                                >
+                                    {genderData.map((entry, i) => (
+                                        <Cell key={i} fill={entry.name === 'male' ? '#3b82f6' : entry.name === 'female' ? '#f43f5e' : '#94a3b8'} />
+                                    ))}
+                                </Pie>
+                                <Tooltip />
+                                <Legend verticalAlign="bottom" height={36}/>
+                            </PieChart>
+                        </ResponsiveContainer>
+                    ) : <div className="h-full flex items-center justify-center text-slate-400 text-sm">データなし</div>}
+                  </div>
+                </div>
 
-        {/* 来院数トレンド */}
-        <div>
-          <p className="text-xs text-slate-500 font-semibold mb-2">来院数 / 新規患者数（月次）</p>
-          <ResponsiveContainer width="100%" height={200}>
-            <ComposedChart data={trend}>
-              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-              <XAxis dataKey="month" tick={{ fontSize: 12 }} />
-              <YAxis tick={{ fontSize: 12 }} />
-              <Tooltip />
-              <Legend />
-              <Bar dataKey="visits" name="来院数合計" fill="#c7d2fe" radius={[4, 4, 0, 0]} />
-              <Line type="monotone" dataKey="newPatients" name="新規患者" stroke="#6366f1" strokeWidth={2} dot={{ r: 3 }} />
-            </ComposedChart>
-          </ResponsiveContainer>
+                {/* 年代分布 */}
+                <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-6">
+                  <h2 className="font-bold text-slate-800 mb-4 flex items-center gap-2">
+                    <div className="w-1.5 h-6 bg-indigo-400 rounded-full" />
+                    年代分布
+                  </h2>
+                  <div className="h-[260px]">
+                    {ageData.length > 0 ? (
+                        <ResponsiveContainer width="100%" height="100%">
+                            <BarChart data={ageData} layout="vertical" margin={{ left: 40, right: 30 }}>
+                                <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f1f5f9" />
+                                <XAxis type="number" hide />
+                                <YAxis type="category" dataKey="name" tick={{ fontSize: 12, fontWeight: 'bold' }} />
+                                <Tooltip cursor={{fill: 'transparent'}} />
+                                <Bar dataKey="value" name="人数" fill="#6366f1" radius={[0, 4, 4, 0]} barSize={24} />
+                            </BarChart>
+                        </ResponsiveContainer>
+                    ) : <div className="h-full flex items-center justify-center text-slate-400 text-sm">データなし</div>}
+                  </div>
+                </div>
+
+                {/* 来院経路 */}
+                <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-6">
+                  <h2 className="font-bold text-slate-800 mb-4 flex items-center gap-2">
+                    <div className="w-1.5 h-6 bg-amber-400 rounded-full" />
+                    来院のきっかけ（流入元）
+                  </h2>
+                  <div className="h-[260px]">
+                    {sourceData.length > 0 ? (
+                        <ResponsiveContainer width="100%" height="100%">
+                            <PieChart>
+                                <Pie 
+                                    data={sourceData} 
+                                    cx="50%" cy="45%" 
+                                    innerRadius={50} outerRadius={84} paddingAngle={2}
+                                    dataKey="value" 
+                                    label={({ name, value }) => `${name}: ${value}`}
+                                >
+                                    {sourceData.map((_, i) => (
+                                        <Cell key={i} fill={EXPENSE_COLORS[i % EXPENSE_COLORS.length]} />
+                                    ))}
+                                </Pie>
+                                <Tooltip />
+                                <Legend verticalAlign="bottom" height={36}/>
+                            </PieChart>
+                        </ResponsiveContainer>
+                    ) : <div className="h-full flex items-center justify-center text-slate-400 text-sm">データなし</div>}
+                  </div>
+                </div>
+
+                {/* 市町村分布 */}
+                <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-6">
+                  <h2 className="font-bold text-slate-800 mb-4 flex items-center gap-2">
+                    <div className="w-1.5 h-6 bg-emerald-400 rounded-full" />
+                    居住地分布（市町村 TOP5）
+                  </h2>
+                  <div className="h-[260px]">
+                    {cityData.length > 0 ? (
+                        <ResponsiveContainer width="100%" height="100%">
+                            <BarChart data={cityData} margin={{ top: 10, right: 10, left: 10, bottom: 0 }}>
+                                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                                <XAxis dataKey="name" tick={{ fontSize: 11, fontWeight: 'bold' }} />
+                                <YAxis hide />
+                                <Tooltip />
+                                <Bar dataKey="value" name="人数" fill="#10b981" radius={[4, 4, 0, 0]} barSize={40} />
+                            </BarChart>
+                        </ResponsiveContainer>
+                    ) : <div className="h-full flex items-center justify-center text-slate-400 text-sm">データなし</div>}
+                  </div>
+                </div>
+            </div>
+            <div className="bg-amber-50 rounded-2xl p-6 border border-amber-100 flex gap-4">
+                <div className="w-12 h-12 bg-amber-500 rounded-full flex items-center justify-center shrink-0 shadow-lg shadow-amber-200">
+                    <Sparkles className="w-6 h-6 text-white" />
+                </div>
+                <div>
+                    <h4 className="font-bold text-amber-800 text-lg mb-1">軍師からの戦略アドバイス</h4>
+                    <p className="text-sm text-amber-900 leading-relaxed mb-4">
+                        グラフを見て気になる点はありますか？例えば「Instagramからの流入が多いけれど20代が少ない」といった傾向があれば、投稿内容のターゲットを調整するチャンスです。
+                    </p>
+                    <Button onClick={handleGenerateComment} variant="outline" className="bg-white border-amber-300 text-amber-700 hover:bg-amber-100">
+                        顧客属性に基づいた詳細分析を依頼する
+                    </Button>
+                </div>
+            </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }

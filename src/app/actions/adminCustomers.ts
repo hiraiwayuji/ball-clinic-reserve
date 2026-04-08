@@ -19,6 +19,9 @@ type CustomerWithStats = {
   gender: string | null;
   age_group: string | null;
   guardian_name: string | null;
+  city_name: string | null;
+  birth_date: string | null;
+  referral_source: string | null;
 };
 
 export async function getCustomers(): Promise<CustomerWithStats[]> {
@@ -39,6 +42,9 @@ export async function getCustomers(): Promise<CustomerWithStats[]> {
         gender,
         age_group,
         guardian_name,
+        city_name,
+        birth_date,
+        referral_source,
         appointments (
           id,
           start_time,
@@ -80,6 +86,9 @@ export async function getCustomers(): Promise<CustomerWithStats[]> {
         gender: c.gender ?? null,
         age_group: c.age_group ?? null,
         guardian_name: c.guardian_name ?? null,
+        city_name: c.city_name ?? null,
+        birth_date: c.birth_date ?? null,
+        referral_source: c.referral_source ?? null,
       };
     });
 
@@ -97,6 +106,9 @@ export async function updateCustomerQuestionnaire(
     birth_month?: number | null;
     gender?: string | null;
     age_group?: string | null;
+    city_name?: string | null;
+    birth_date?: string | null;
+    referral_source?: string | null;
   }
 ) {
   const { clinicId } = await checkAdminAuth();
