@@ -176,6 +176,17 @@ export default function AdminWeeklyGridPage() {
             defaultTime={selectedAddTime}
             onSuccess={() => setRefreshKey(k => k + 1)}
           />
+          <Link href="/admin/waitlist">
+            <Button
+              variant="outline"
+              size="sm"
+              className="border-orange-200 text-orange-700 hover:bg-orange-50"
+            >
+              <CalendarDays className="w-4 h-4 mr-1 sm:mr-2" />
+              <span className="hidden sm:inline">キャンセル待ち</span>
+              <span className="sm:hidden">C待ち</span>
+            </Button>
+          </Link>
           <Link href="/admin/holidays" className="ml-auto sm:ml-0">
             <Button variant="outline" size="sm">
               <Settings className="w-4 h-4 mr-1 sm:mr-2" />

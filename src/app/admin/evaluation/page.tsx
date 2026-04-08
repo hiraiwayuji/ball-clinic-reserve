@@ -14,6 +14,7 @@ import { getMonthlyEvaluation, saveEvaluationTargets, saveAiSuggestion, getMonth
 import { getBusinessContext } from "@/app/actions/sales";
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import Link from "next/link";
 
 // --- Radar Chart Component (SVG based) ---
 const RadarChart = ({ data }: { data: { label: string, value: number, max: number }[] }) => {
@@ -571,6 +572,17 @@ export default function EvaluationPage() {
             <Search className="w-4 h-4 mr-2" />
             数字の根拠を確認・修正
           </Button>
+
+          {/* 分析ボタン */}
+          <Link href="/admin/analytics">
+             <Button
+               variant="outline"
+               className="border-indigo-300 text-indigo-700 hover:bg-indigo-50"
+             >
+               <TrendingUp className="w-4 h-4 mr-2" />
+               詳細分析へ
+             </Button>
+          </Link>
 
           <Dialog open={isEditModalOpen} onOpenChange={setIsEditModalOpen}>
             <DialogTrigger>

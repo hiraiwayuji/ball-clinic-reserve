@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Calendar as CalendarIcon, Plus, Trash2, Loader2, Receipt, Tag, AlertCircle, Save, Camera, Sparkles, Pencil, Check, X } from "lucide-react";
+import { Calendar as CalendarIcon, Plus, Trash2, Loader2, Receipt, Tag, AlertCircle, Save, Camera, Sparkles, Pencil, Check, X, Banknote } from "lucide-react";
 import { addExpense, getExpenses, deleteExpense, addPendingExpense, updateExpense, getMonthDetailedExpenses } from "@/app/actions/sales";
 import { createClient } from "@/lib/supabase/client";
 import { toast } from "sonner";
@@ -310,11 +310,29 @@ export default function ExpensesPage() {
 
   return (
     <div className="space-y-6 container mx-auto py-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-900">経費入力</h1>
-          <p className="text-slate-500">備品購入・光熱費などの経費を記録します</p>
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+          <div>
+            <h1 className="text-3xl font-bold tracking-tight text-slate-900 border-l-4 border-emerald-600 pl-3">
+              経費入力
+            </h1>
+            <p className="text-muted-foreground mt-2">AIレシート読み取りで経費を効率化</p>
+          </div>
+          <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
+            <Link href="/admin/sales">
+              <Button variant="outline" size="sm" className="border-emerald-200 text-emerald-700 hover:bg-emerald-50">
+                <Plus className="w-4 h-4 mr-2" />
+                売上入力へ
+              </Button>
+            </Link>
+            <Link href="/admin/insurance">
+              <Button variant="outline" size="sm" className="border-blue-200 text-blue-700 hover:bg-blue-50">
+                <Banknote className="w-4 h-4 mr-2" />
+                保険入金へ
+              </Button>
+            </Link>
+          </div>
         </div>
+      <div className="flex items-center justify-between">
         <div className="flex gap-2">
           <Link href="/admin/expenses/triage">
             <Button variant="outline" className="flex items-center gap-2">
@@ -612,17 +630,29 @@ export default function ExpensesPage() {
                                 </span>
                               </TableCell>
                               <TableCell>
-                                <div className="flex items-center gap-2">
+                                <div className="flex items-center gap-3">
                                   <div className="font-medium text-sm">{expense.description || "-"}</div>
                                   {expense.image_url && (
-                                    <a href={expense.image_url} target="_blank" rel="noopener noreferrer" className="shrink-0">
-                                      <div className="relative w-8 h-8 rounded border border-slate-200 overflow-hidden bg-slate-100 hover:opacity-80 transition-opacity">
-                                        <Image src={expense.image_url} alt="領収書" fill className="object-cover" />
+                                    <div className="relative group shrink-0">
+                                      <a 
+                                        href={expense.image_url} 
+                                        target="_blank" 
+                                        rel="noopener noreferrer" 
+                                        className="flex items-center gap-1.5 px-2 py-1 rounded bg-emerald-50 border border-emerald-100 text-emerald-600 hover:bg-emerald-100 transition-colors"
+                                      >
+                                        <Receipt className="w-4 h-4" />
+                                        <span className="text-[10px] font-bold">写真を確認</span>
+                                      </a>
+                                      {/* ホバープレビュー（簡易実装） */}
+                                      <div className="invisible group-hover:visible absolute bottom-full left-0 mb-2 z-50 p-1 bg-white border border-slate-200 shadow-xl rounded-lg w-40 h-40 transition-all opacity-0 group-hover:opacity-100">
+                                        <div className="relative w-full h-full rounded overflow-hidden">
+                                          <Image src={expense.image_url} alt="領収書プレビュー" fill className="object-cover" />
+                                        </div>
                                       </div>
-                                    </a>
+                                    </div>
                                   )}
                                 </div>
-                                {expense.memo && <div className="text-xs text-slate-400">{expense.memo}</div>}
+                                {expense.memo && <div className="text-xs text-slate-400 mt-0.5">{expense.memo}</div>}
                               </TableCell>
                               <TableCell className="text-right font-bold text-slate-700">¥{expense.amount.toLocaleString()}</TableCell>
                               <TableCell className="text-right">
