@@ -47,13 +47,16 @@ export default function ExpensesPage() {
   const [cameraOpen, setCameraOpen] = useState(false);
   const [editingRow, setEditingRow] = useState<EditingState | null>(null);
   const [isSavingEdit, setIsSavingEdit] = useState(false);
+  const [formExpenseDate, setFormExpenseDate] = useState<string>("");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
 
   useEffect(() => {
-    setDate(new Date());
+    const today = new Date();
+    setDate(today);
+    setFormExpenseDate(format(today, "yyyy-MM-dd"));
   }, []);
 
   const fetchExpenses = async (d: Date) => {
@@ -76,16 +79,14 @@ export default function ExpensesPage() {
     e.preventDefault();
     if (!date) return;
     const formData = new FormData(e.currentTarget);
-    // expense_date field in form takes priority; fallback to header date
-    if (!formData.get("expense_date")) {
-      formData.set("expense_date", format(date, "yyyy-MM-dd"));
-    }
+    formData.set("expense_date", formExpenseDate || format(date, "yyyy-MM-dd"));
 
     startTransition(async () => {
       const res = await addExpense(formData);
       if (res.success) {
         toast.success("経費を登録しました");
         (e.target as HTMLFormElement).reset();
+        setFormExpenseDate(format(date, "yyyy-MM-dd"));
         fetchExpenses(date);
       } else {
         toast.error(res.error || "エラーが発生しました");
@@ -99,7 +100,7 @@ export default function ExpensesPage() {
 
     const formData = new FormData(form);
     const triageData = {
-      expense_date: (formData.get("expense_date") as string) || format(date, "yyyy-MM-dd"),
+      expense_date: formExpenseDate || format(date, "yyyy-MM-dd"),
       category: formData.get("category"),
       description: formData.get("description"),
       amount: parseInt(formData.get("amount") as string) || 0,
@@ -146,7 +147,7 @@ export default function ExpensesPage() {
         if (json.amount) (form.elements.namedItem("amount") as HTMLInputElement).value = String(json.amount);
         if (json.description) (form.elements.namedItem("description") as HTMLInputElement).value = json.description;
         if (json.memo) (form.elements.namedItem("memo") as HTMLInputElement).value = json.memo;
-        if (json.expense_date) (form.elements.namedItem("expense_date") as HTMLInputElement).value = json.expense_date;
+        if (json.expense_date) setFormExpenseDate(json.expense_date);
         if (json.category) {
           const sel = form.elements.namedItem("category") as HTMLSelectElement;
           const opt = Array.from(sel.options).find(o => o.value === json.category);
@@ -379,10 +380,11 @@ export default function ExpensesPage() {
                   id="expense_date"
                   name="expense_date"
                   type="date"
-                  defaultValue={format(date, "yyyy-MM-dd")}
+                  value={formExpenseDate}
+                  onChange={(e) => setFormExpenseDate(e.target.value)}
                   className="w-full border border-slate-200 rounded-md px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
                 />
-                <p className="text-xs text-slate-400">レシート読み取り時に自動入力されます</p>
+                <p className="text-xs text-slate-400">レシート読み取り時に自動入力。手動でも変更できます</p>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="category">カテゴリ</Label>
