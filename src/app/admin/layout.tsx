@@ -39,7 +39,6 @@ export default async function AdminLayout({
               <Link href="/admin/expenses" className="px-3 py-1 bg-slate-100 rounded-md text-slate-700 hover:bg-slate-200 transition-colors font-bold">売上記帳</Link>
               <Link href="/admin/evaluation" className="text-slate-600 hover:text-blue-600">経営評価</Link>
               <Link href="/admin/marketing" className="text-slate-600 hover:text-blue-600">LINE・販促</Link>
-              <Link href="/admin/holidays" className="text-slate-600 hover:text-blue-600">休診日</Link>
               <Link href="/admin/settings" className="text-slate-400 hover:text-blue-600 ml-2">設定</Link>
               <Link href="/" className="text-slate-400 hover:text-blue-600 text-xs ml-2 border-l pl-4" target="_blank">
                 サイトを表示
