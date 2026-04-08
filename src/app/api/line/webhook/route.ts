@@ -7,11 +7,17 @@ const channelAccessToken = process.env.LINE_CHANNEL_ACCESS_TOKEN || "";
 const client = new line.messagingApi.MessagingApiClient({ channelAccessToken });
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
+// webhookはサーバーサイドのみで動くため、必ずservice_roleキーを使用してRLSをバイパス
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
 
 function getSupabase() {
-  if (!supabaseUrl || !supabaseKey) return null;
-  return createClient(supabaseUrl, supabaseKey);
+  if (!supabaseUrl) return null;
+  const key = supabaseServiceKey || supabaseAnonKey;
+  if (!key) return null;
+  return createClient(supabaseUrl, key, {
+    auth: { persistSession: false }
+  });
 }
 
 // Supabaseにデバッグログを保存（fsの代替）
@@ -102,6 +108,60 @@ export async function POST(req: NextRequest) {
       if (event.type !== "message" || event.message?.type !== "text") continue;
 
       let userMessage: string = event.message.text.trim();
+      const replyToken: string = event.replyToken;
+
+      // 電話番号下4桁による紐づけ（アンケート完了後フロー）
+      if (/^\d{4}$/.test(userMessage)) {
+        const sb = getSupabase();
+        if (sb) {
+          // 既に同じLINEで紐づけ済みか確認
+          const { data: alreadyLinked } = await sb.from("customers").select("id, name").eq("line_user_id", lineUserId).maybeSingle();
+          if (alreadyLinked) {
+            await replyMessage(replyToken, [{ type: "text", text: `${alreadyLinked.name}さんはすでに紐づけ済みです 😊` }]);
+            continue;
+          }
+
+          // 電話番号末尾4桁で照合（ハイフンあり・なし・国際形式すべて対応）
+          // 未紐づけ優先、なければ紐づけ済みも候補にする
+          const { data: allMatches } = await sb
+            .from("customers")
+            .select("id, name, phone, line_user_id")
+            .or(`phone.like.%${userMessage},phone.like.%-${userMessage}`);
+
+          // 未紐づけのみに絞る
+          const unlinked = (allMatches || []).filter(c => !c.line_user_id);
+
+          if (unlinked.length === 1) {
+            // 1件一致 → 紐づけ
+            const { error: updateErr } = await sb.from("customers").update({ line_user_id: lineUserId }).eq("id", unlinked[0].id);
+            if (updateErr) {
+              console.error("LINE link update error:", updateErr);
+              await replyMessage(replyToken, [{ type: "text", text: "システムエラーが発生しました。受付スタッフにお申し付けください。" }]);
+            } else {
+              await replyMessage(replyToken, [{ type: "text", text: `${unlinked[0].name}さん、紐づけが完了しました！✅\n予約リマインダーや誕生月クーポンをLINEでお届けします 🎉` }]);
+            }
+          } else if (unlinked.length > 1) {
+            // 複数一致 → 下6桁で再試行を促す
+            await replyMessage(replyToken, [{ type: "text", text: "同じ末尾の番号が複数見つかりました。\n下4桁ではなく下6桁を送ってもう一度お試しください。\n解決しない場合は受付スタッフにお申し付けください。" }]);
+          } else if ((allMatches || []).length === 1) {
+            // 既に別LINEで紐づけ済み → 上書き
+            const existing = allMatches![0];
+            const { error: updateErr } = await sb.from("customers").update({ line_user_id: lineUserId }).eq("id", existing.id);
+            if (updateErr) {
+              console.error("LINE link overwrite error:", updateErr);
+              await replyMessage(replyToken, [{ type: "text", text: "システムエラーが発生しました。受付スタッフにお申し付けください。" }]);
+            } else {
+              await replyMessage(replyToken, [{ type: "text", text: `${existing.name}さん、LINEアカウントを更新しました！✅` }]);
+            }
+          } else {
+            // 見つからない
+            console.log(`4桁照合失敗: message=${userMessage}, matches=${JSON.stringify(allMatches)}`);
+            await replyMessage(replyToken, [{ type: "text", text: "電話番号が見つかりませんでした。\n・下4桁が正しいかご確認ください\n・ハイフンなしの数字4桁のみ送ってください\n・ご不明な場合は受付スタッフまで 😊" }]);
+          }
+        }
+        continue;
+      }
+
       const prefixOptions = ["予約番号:", "予約番号："];
       for (const prefix of prefixOptions) {
         if (userMessage.startsWith(prefix)) {
@@ -111,13 +171,23 @@ export async function POST(req: NextRequest) {
       }
       userMessage = userMessage.toUpperCase();
 
-      const replyToken: string = event.replyToken;
-
       // フォローイベント（友だち追加時の挨拶）
       if (event.type === "follow") {
+        // 既に紐づけ済みか確認
+        const sb = getSupabase();
+        if (sb) {
+          const { data: existing } = await sb.from("customers").select("id, name").eq("line_user_id", lineUserId).maybeSingle();
+          if (existing) {
+            await replyMessage(replyToken, [{
+              type: "text",
+              text: `${existing.name}さん、おかえりなさい！\nご予約・お問い合わせはいつでもどうぞ 😊`,
+            }]);
+            continue;
+          }
+        }
         await replyMessage(replyToken, [{
           type: "text",
-          text: "ご登録ありがとうございます！\n予約後に発行された「予約番号（英数字8文字）」を送信してください（そのまま送信、または『予約番号:●●●』のように送信してください）。予約内容の確認をお送りします。",
+          text: "ご登録ありがとうございます！\n予約後に発行された「予約番号（英数字8文字）」を送信してください（そのまま送信、または『予約番号:●●●』のように送信してください）。\n\n紐づけ完了後は、予約リマインダーなどをお送りします 🏥",
         }]);
         continue;
       }
@@ -140,7 +210,7 @@ export async function POST(req: NextRequest) {
 
       const { data: appointments, error } = await supabase
         .from("appointments")
-        .select(`id, start_time, status, is_first_visit, customers ( name, phone )`)
+        .select(`id, start_time, status, is_first_visit, customer_id, customers ( id, name, phone, line_user_id )`)
         .in("status", ["pending", "confirmed", "waiting"])
         .order("created_at", { ascending: false });
 
@@ -161,7 +231,7 @@ export async function POST(req: NextRequest) {
         continue;
       }
 
-      const customer = apt.customers as { name?: string; phone?: string } | null;
+      const customer = apt.customers as { id?: string; name?: string; phone?: string; line_user_id?: string } | null;
       const startTime = new Date(apt.start_time);
       const dateStr = startTime.toLocaleDateString("ja-JP", {
         year: "numeric", month: "long", day: "numeric", weekday: "short", timeZone: "Asia/Tokyo",
@@ -175,11 +245,19 @@ export async function POST(req: NextRequest) {
         apt.status === "waiting"   ? "🕐 キャンセル待ち" : "⏳ 確認待ち";
       const visitLabel = apt.is_first_visit ? "初診" : "再診";
 
-      // LINE User ID をDBに保存
-      if (lineUserId && customer) {
+      // LINE User ID を customer_id で直接紐づけ（電話番号照合より確実）
+      let linkMessage = "";
+      if (lineUserId && apt.customer_id) {
         const sb = getSupabase();
         if (sb) {
-          await sb.from("customers").update({ line_user_id: lineUserId }).ilike("phone", customer.phone || "");
+          if (customer?.line_user_id && customer.line_user_id !== lineUserId) {
+            // 別のLINEアカウントが既に紐づいている場合は上書き
+            await sb.from("customers").update({ line_user_id: lineUserId }).eq("id", apt.customer_id);
+            linkMessage = "\n\n✅ LINEアカウントを紐づけました。次回から予約リマインダーをお送りします。";
+          } else if (!customer?.line_user_id) {
+            await sb.from("customers").update({ line_user_id: lineUserId }).eq("id", apt.customer_id);
+            linkMessage = "\n\n✅ LINEアカウントを紐づけました。次回から予約リマインダーをお送りします。";
+          }
         }
       }
 
@@ -196,7 +274,7 @@ export async function POST(req: NextRequest) {
           apt.status === "waiting"
             ? "キャンセル待ちとして登録されています。空きが出た際にこちらよりご連絡いたします。"
             : "ご予約ありがとうございます。当日のご来院をお待ちしております 🙏",
-        ].join("\n"),
+        ].join("\n") + linkMessage,
       }]);
     }
 

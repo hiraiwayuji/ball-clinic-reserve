@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useTransition } from "react";
+import { useState, useEffect, useTransition, useRef } from "react";
 import { format } from "date-fns";
 import { ja } from "date-fns/locale";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Calendar as CalendarIcon, Plus, Trash2, Loader2, Coins, User } from "lucide-react";
+import { Calendar as CalendarIcon, Plus, Trash2, Loader2, Coins, User, UserPlus } from "lucide-react";
 import { addCashSale, getCashSales, deleteCashSale } from "@/app/actions/sales";
 import { toast } from "sonner";
 
@@ -17,6 +17,8 @@ export default function SalesPage() {
   const [sales, setSales] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [isPending, startTransition] = useTransition();
+  const [isFirstVisit, setIsFirstVisit] = useState(false);
+  const formRef = useRef<HTMLFormElement>(null);
 
   useEffect(() => {
     setDate(new Date());
@@ -43,23 +45,21 @@ export default function SalesPage() {
     if (!date) return;
     const formData = new FormData(e.currentTarget);
     formData.set("sale_date", format(date, "yyyy-MM-dd"));
+    formData.set("is_first_visit", String(isFirstVisit));
 
     startTransition(async () => {
       try {
-        console.log("送信開始", Object.fromEntries(formData));
         const res = await addCashSale(formData);
-        console.log("結果:", res);
         if (res.success) {
-          toast.success("登録しました");
-          (e.target as HTMLFormElement).reset();
+          toast.success(isFirstVisit ? "登録しました（新患）" : "登録しました");
+          formRef.current?.reset();
+          setIsFirstVisit(false);
           fetchSales(date);
         } else {
           toast.error(res.error || "エラーが発生しました");
-          alert("エラー: " + res.error);
         }
       } catch(err) {
-        console.error("例外:", err);
-        alert("例外: " + err);
+        toast.error("通信エラーが発生しました");
       }
     });
   };
@@ -76,6 +76,7 @@ export default function SalesPage() {
   };
 
   const totalAmount = sales.reduce((sum, s) => sum + s.treatment_fee, 0);
+  const newPatientCount = sales.filter(s => s.is_first_visit).length;
 
   if (!date) {
     return <div className="p-8 text-center text-slate-500">読み込み中...</div>;
@@ -110,12 +111,12 @@ export default function SalesPage() {
             <CardDescription>{format(date, "M月d日 (E)", { locale: ja })} の売上</CardDescription>
           </CardHeader>
           <CardContent>
-            <form onSubmit={handleSubmit} className="space-y-4">
+            <form ref={formRef} onSubmit={handleSubmit} className="space-y-4">
               <div className="space-y-2">
                 <Label htmlFor="customer_name">お名前</Label>
                 <div className="relative">
                   <User className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
-                  <Input id="customer_name" name="customer_name" placeholder="山田 太郎" className="pl-9" required />
+                  <Input id="customer_name" name="customer_name" placeholder="やまだ たろう" className="pl-9" required lang="ja" autoComplete="off" />
                 </div>
               </div>
               <div className="space-y-2">
@@ -129,6 +130,19 @@ export default function SalesPage() {
                 <Label htmlFor="memo">備考（オプション）</Label>
                 <Input id="memo" name="memo" placeholder="自費施術, 物販等" />
               </div>
+              {/* 新患トグル */}
+              <button
+                type="button"
+                onClick={() => setIsFirstVisit(v => !v)}
+                className={`w-full flex items-center justify-center gap-2 py-3 rounded-lg border-2 font-bold text-sm transition-all ${
+                  isFirstVisit
+                    ? "bg-amber-400 border-amber-500 text-white shadow-md"
+                    : "bg-slate-100 border-slate-300 text-slate-600 hover:bg-slate-200 hover:border-slate-400"
+                }`}
+              >
+                <UserPlus className="w-4 h-4" />
+                {isFirstVisit ? "✓ 新患（タップで解除）" : "新患の場合はここをタップ"}
+              </button>
               <Button type="submit" className="w-full bg-blue-600 hover:bg-blue-700 h-10" disabled={isPending}>
                 {isPending ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Plus className="w-4 h-4 mr-2" />}
                 登録する
@@ -144,9 +158,17 @@ export default function SalesPage() {
               <CardTitle>本日（{format(date, "M/d")}）の売上一覧</CardTitle>
               <CardDescription>{sales.length} 件の記録があります</CardDescription>
             </div>
-            <div className="text-right">
-              <p className="text-xs text-slate-500 font-medium">本日合計</p>
-              <p className="text-2xl font-bold text-blue-600">¥{totalAmount.toLocaleString()}</p>
+            <div className="flex gap-4 items-end">
+              {newPatientCount > 0 && (
+                <div className="text-right">
+                  <p className="text-xs text-amber-600 font-medium">新患</p>
+                  <p className="text-2xl font-bold text-amber-600">{newPatientCount}名</p>
+                </div>
+              )}
+              <div className="text-right">
+                <p className="text-xs text-slate-500 font-medium">本日合計</p>
+                <p className="text-2xl font-bold text-blue-600">¥{totalAmount.toLocaleString()}</p>
+              </div>
             </div>
           </CardHeader>
           <CardContent>
@@ -157,7 +179,7 @@ export default function SalesPage() {
                     <TableHead>お名前</TableHead>
                     <TableHead>備考</TableHead>
                     <TableHead className="text-right">金額</TableHead>
-                    <TableHead className="w-[100px]"></TableHead>
+                    <TableHead className="w-[80px]"></TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -180,7 +202,14 @@ export default function SalesPage() {
                   ) : (
                     sales.map((sale) => (
                       <TableRow key={sale.id} className="hover:bg-slate-50/50 transition-colors">
-                        <TableCell className="font-medium">{sale.customer_name}</TableCell>
+                        <TableCell className="font-medium">
+                          <div className="flex items-center gap-2">
+                            {sale.customer_name}
+                            {sale.is_first_visit && (
+                              <span className="text-xs bg-amber-100 text-amber-700 font-bold px-1.5 py-0.5 rounded">新患</span>
+                            )}
+                          </div>
+                        </TableCell>
                         <TableCell className="text-slate-500 text-sm">{sale.memo || "-"}</TableCell>
                         <TableCell className="text-right font-bold text-slate-700">¥{sale.treatment_fee.toLocaleString()}</TableCell>
                         <TableCell className="text-right text-slate-100 group">

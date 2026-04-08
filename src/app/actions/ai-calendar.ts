@@ -16,7 +16,7 @@ export async function extractEventsFromImage(base64Image: string, calendarId: st
 
   try {
     const genAI = new GoogleGenerativeAI(apiKey);
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
     // 画像データ（base64）の整形
     // data:image/png;base64,xxxx -> xxxx

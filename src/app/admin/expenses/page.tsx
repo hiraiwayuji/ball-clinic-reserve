@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useTransition } from "react";
+import { useState, useEffect, useTransition, useRef } from "react";
 import { format } from "date-fns";
 import { ja } from "date-fns/locale";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -8,8 +8,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Calendar as CalendarIcon, Plus, Trash2, Loader2, Receipt, Tag, AlertCircle, Save } from "lucide-react";
-import { addExpense, getExpenses, deleteExpense, addPendingExpense } from "@/app/actions/sales";
+import { Calendar as CalendarIcon, Plus, Trash2, Loader2, Receipt, Tag, AlertCircle, Save, Camera, Sparkles, Pencil, Check, X } from "lucide-react";
+import { addExpense, getExpenses, deleteExpense, addPendingExpense, updateExpense } from "@/app/actions/sales";
 import { toast } from "sonner";
 import Link from "next/link";
 
@@ -27,12 +27,30 @@ const EXPENSE_CATEGORIES = [
   "その他",
 ];
 
+type EditingState = {
+  id: string;
+  expense_date: string;
+  category: string;
+  description: string;
+  amount: number;
+  memo: string;
+};
+
 export default function ExpensesPage() {
   const [date, setDate] = useState<Date | null>(null);
   const [expenses, setExpenses] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [isPending, startTransition] = useTransition();
   const [isSavingPending, setIsSavingPending] = useState(false);
+  const [isReading, setIsReading] = useState(false);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [cameraOpen, setCameraOpen] = useState(false);
+  const [editingRow, setEditingRow] = useState<EditingState | null>(null);
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const formRef = useRef<HTMLFormElement>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
 
   useEffect(() => {
     setDate(new Date());
@@ -58,7 +76,10 @@ export default function ExpensesPage() {
     e.preventDefault();
     if (!date) return;
     const formData = new FormData(e.currentTarget);
-    formData.set("expense_date", format(date, "yyyy-MM-dd"));
+    // expense_date field in form takes priority; fallback to header date
+    if (!formData.get("expense_date")) {
+      formData.set("expense_date", format(date, "yyyy-MM-dd"));
+    }
 
     startTransition(async () => {
       const res = await addExpense(formData);
@@ -75,10 +96,10 @@ export default function ExpensesPage() {
   const handleSavePending = async (e: React.MouseEvent) => {
     const form = (e.target as HTMLElement).closest('form');
     if (!form || !date) return;
-    
+
     const formData = new FormData(form);
     const triageData = {
-      expense_date: format(date, "yyyy-MM-dd"),
+      expense_date: (formData.get("expense_date") as string) || format(date, "yyyy-MM-dd"),
       category: formData.get("category"),
       description: formData.get("description"),
       amount: parseInt(formData.get("amount") as string) || 0,
@@ -108,6 +129,128 @@ export default function ExpensesPage() {
     }
   };
 
+  // Geminiにbase64画像を送って結果をフォームに反映する共通処理
+  const analyzeAndFill = async (base64: string, mimeType: string, objectUrl?: string) => {
+    setIsReading(true);
+    if (objectUrl) setPreviewUrl(objectUrl);
+    try {
+      const res = await fetch("/api/read-receipt", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ base64, mimeType }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "読み取り失敗");
+      const form = formRef.current;
+      if (form) {
+        if (json.amount) (form.elements.namedItem("amount") as HTMLInputElement).value = String(json.amount);
+        if (json.description) (form.elements.namedItem("description") as HTMLInputElement).value = json.description;
+        if (json.memo) (form.elements.namedItem("memo") as HTMLInputElement).value = json.memo;
+        if (json.expense_date) (form.elements.namedItem("expense_date") as HTMLInputElement).value = json.expense_date;
+        if (json.category) {
+          const sel = form.elements.namedItem("category") as HTMLSelectElement;
+          const opt = Array.from(sel.options).find(o => o.value === json.category);
+          if (opt) sel.value = json.category;
+        }
+      }
+      toast.success("レシートを読み取りました。内容を確認してください。");
+    } catch (err: any) {
+      toast.error("読み取りに失敗しました: " + (err.message || ""));
+    } finally {
+      setIsReading(false);
+    }
+  };
+
+  // ファイル選択から読み取り
+  const handleImageRead = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const objectUrl = URL.createObjectURL(file);
+    const base64 = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve((reader.result as string).split(",")[1]);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+    await analyzeAndFill(base64, file.type, objectUrl);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
+  // PCカメラを起動
+  const handleOpenCamera = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+      streamRef.current = stream;
+      setCameraOpen(true);
+      setTimeout(() => {
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          videoRef.current.play();
+        }
+      }, 100);
+    } catch {
+      toast.error("カメラへのアクセスが許可されていません。ブラウザの設定を確認してください。");
+    }
+  };
+
+  // PCカメラで撮影
+  const handleCapture = async () => {
+    const video = videoRef.current;
+    if (!video) return;
+    const canvas = document.createElement("canvas");
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    canvas.getContext("2d")!.drawImage(video, 0, 0);
+    const dataUrl = canvas.toDataURL("image/jpeg", 0.9);
+    const base64 = dataUrl.split(",")[1];
+    streamRef.current?.getTracks().forEach(t => t.stop());
+    streamRef.current = null;
+    setCameraOpen(false);
+    await analyzeAndFill(base64, "image/jpeg", dataUrl);
+  };
+
+  // カメラを閉じる
+  const handleCloseCamera = () => {
+    streamRef.current?.getTracks().forEach(t => t.stop());
+    streamRef.current = null;
+    setCameraOpen(false);
+  };
+
+  // 編集開始
+  const handleStartEdit = (expense: any) => {
+    setEditingRow({
+      id: expense.id,
+      expense_date: expense.expense_date,
+      category: expense.category || "",
+      description: expense.description || "",
+      amount: expense.amount,
+      memo: expense.memo || "",
+    });
+  };
+
+  // 編集保存
+  const handleSaveEdit = async () => {
+    if (!editingRow || !date) return;
+    setIsSavingEdit(true);
+    try {
+      await updateExpense(editingRow.id, {
+        expense_date: editingRow.expense_date,
+        category: editingRow.category,
+        description: editingRow.description,
+        amount: editingRow.amount,
+        memo: editingRow.memo,
+      });
+      toast.success("更新しました");
+      setEditingRow(null);
+      // 日付が変わる場合があるので現在の表示月をrefetch
+      fetchExpenses(date);
+    } catch (err: any) {
+      toast.error("更新に失敗しました: " + (err.message || ""));
+    } finally {
+      setIsSavingEdit(false);
+    }
+  };
+
   const totalAmount = expenses.reduce((sum, e) => sum + e.amount, 0);
 
   if (!date) {
@@ -130,10 +273,10 @@ export default function ExpensesPage() {
           </Link>
           <div className="flex items-center gap-2 bg-white p-2 border rounded-lg shadow-sm">
             <CalendarIcon className="w-5 h-5 text-emerald-600" />
-            <input 
-              type="date" 
-              className="border-none focus:ring-0 text-sm font-medium" 
-              value={format(date, "yyyy-MM-dd")} 
+            <input
+              type="date"
+              className="border-none focus:ring-0 text-sm font-medium"
+              value={format(date, "yyyy-MM-dd")}
               onChange={(e) => setDate(new Date(e.target.value))}
             />
           </div>
@@ -151,7 +294,88 @@ export default function ExpensesPage() {
             <CardDescription>{format(date, "M月d日 (E)", { locale: ja })} の経費</CardDescription>
           </CardHeader>
           <CardContent>
-            <form onSubmit={handleSubmit} className="space-y-4">
+            {/* 画像読み取りエリア */}
+            <div className="mb-4 space-y-2">
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={handleImageRead}
+              />
+
+              {/* カメラビュー */}
+              {cameraOpen && (
+                <div className="relative rounded-xl overflow-hidden border-2 border-emerald-400 bg-black">
+                  <video ref={videoRef} className="w-full max-h-56 object-cover" muted playsInline />
+                  <div className="flex gap-2 p-2 bg-black/60 absolute bottom-0 left-0 right-0">
+                    <button
+                      type="button"
+                      onClick={handleCapture}
+                      className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg bg-emerald-500 hover:bg-emerald-600 text-white font-bold text-sm transition-colors"
+                    >
+                      <Camera className="w-4 h-4" /> 撮影する
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleCloseCamera}
+                      className="px-4 py-2.5 rounded-lg bg-white/20 text-white text-sm font-bold hover:bg-white/30 transition-colors"
+                    >
+                      閉じる
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* 読み取り中 */}
+              {isReading && (
+                <div className="flex items-center justify-center gap-2 py-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-700 text-sm font-bold">
+                  <Loader2 className="w-4 h-4 animate-spin" /> AIが読み取り中...
+                </div>
+              )}
+
+              {/* プレビュー */}
+              {previewUrl && !isReading && !cameraOpen && (
+                <div className="relative">
+                  <img src={previewUrl} alt="レシート" className="w-full max-h-36 object-contain rounded-xl border border-slate-200 bg-slate-50" />
+                  <button type="button" onClick={() => setPreviewUrl(null)} className="absolute top-1 right-1 bg-white rounded-full w-5 h-5 flex items-center justify-center text-slate-400 hover:text-slate-600 border border-slate-200 text-xs shadow">✕</button>
+                </div>
+              )}
+
+              {/* 2ボタン */}
+              {!cameraOpen && !isReading && (
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={handleOpenCamera}
+                    className="flex items-center justify-center gap-1.5 py-3 rounded-xl border-2 border-blue-300 bg-blue-50 text-blue-700 font-bold text-xs hover:bg-blue-100 transition-colors"
+                  >
+                    <Camera className="w-4 h-4" /> PCカメラで撮影
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="flex items-center justify-center gap-1.5 py-3 rounded-xl border-2 border-emerald-300 bg-emerald-50 text-emerald-700 font-bold text-xs hover:bg-emerald-100 transition-colors"
+                  >
+                    <Sparkles className="w-4 h-4" /> 画像から読み取り
+                  </button>
+                </div>
+              )}
+            </div>
+
+            <form ref={formRef} onSubmit={handleSubmit} className="space-y-4">
+              {/* 日付（OCRで自動入力、手動でも変更可） */}
+              <div className="space-y-2">
+                <Label htmlFor="expense_date">経費の日付</Label>
+                <input
+                  id="expense_date"
+                  name="expense_date"
+                  type="date"
+                  defaultValue={format(date, "yyyy-MM-dd")}
+                  className="w-full border border-slate-200 rounded-md px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
+                />
+                <p className="text-xs text-slate-400">レシート読み取り時に自動入力されます</p>
+              </div>
               <div className="space-y-2">
                 <Label htmlFor="category">カテゴリ</Label>
                 <div className="relative">
@@ -183,15 +407,15 @@ export default function ExpensesPage() {
                 <Label htmlFor="memo">備考（オプション）</Label>
                 <Input id="memo" name="memo" placeholder="領収書あり" />
               </div>
-              
+
               <div className="flex flex-col gap-2 pt-2">
                 <Button type="submit" className="w-full bg-emerald-600 hover:bg-emerald-700 h-10" disabled={isPending || isSavingPending}>
                   {isPending ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Plus className="w-4 h-4 mr-2" />}
                   正式に登録する
                 </Button>
-                <Button 
-                  type="button" 
-                  variant="outline" 
+                <Button
+                  type="button"
+                  variant="outline"
                   className="w-full h-10 border-amber-200 text-amber-700 hover:bg-amber-50"
                   onClick={handleSavePending}
                   disabled={isPending || isSavingPending}
@@ -217,16 +441,15 @@ export default function ExpensesPage() {
             </div>
           </CardHeader>
           <CardContent>
-            {/* ... (Table content remains similar) */}
             <div className="rounded-md border border-slate-100 overflow-hidden">
               <Table>
                 <TableHeader className="bg-slate-50/50">
                   <TableRow>
+                    <TableHead className="w-[100px]">日付</TableHead>
                     <TableHead>カテゴリ</TableHead>
                     <TableHead>内容</TableHead>
-                    <TableHead>備考</TableHead>
                     <TableHead className="text-right">金額</TableHead>
-                    <TableHead className="w-[80px]"></TableHead>
+                    <TableHead className="w-[100px]"></TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -247,28 +470,122 @@ export default function ExpensesPage() {
                       </TableCell>
                     </TableRow>
                   ) : (
-                    expenses.map((expense) => (
-                      <TableRow key={expense.id} className="hover:bg-slate-50/50 transition-colors">
-                        <TableCell>
-                          <span className="text-xs bg-emerald-50 text-emerald-700 px-2 py-1 rounded-full font-medium">
-                            {expense.category}
-                          </span>
-                        </TableCell>
-                        <TableCell className="font-medium">{expense.description || "-"}</TableCell>
-                        <TableCell className="text-slate-500 text-sm">{expense.memo || "-"}</TableCell>
-                        <TableCell className="text-right font-bold text-slate-700">¥{expense.amount.toLocaleString()}</TableCell>
-                        <TableCell className="text-right">
-                          <Button 
-                            variant="ghost" 
-                            size="icon" 
-                            className="text-slate-300 hover:text-rose-500 hover:bg-rose-50 transition-all rounded-full"
-                            onClick={() => handleDelete(expense.id)}
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </Button>
-                        </TableCell>
-                      </TableRow>
-                    ))
+                    expenses.map((expense) => {
+                      const isEditing = editingRow?.id === expense.id;
+                      return (
+                        <TableRow key={expense.id} className={`transition-colors ${isEditing ? "bg-emerald-50" : "hover:bg-slate-50/50"}`}>
+                          {isEditing ? (
+                            <>
+                              {/* 編集モード */}
+                              <TableCell>
+                                <input
+                                  type="date"
+                                  value={editingRow!.expense_date}
+                                  onChange={(e) => setEditingRow(r => r ? { ...r, expense_date: e.target.value } : r)}
+                                  className="w-full border border-emerald-300 rounded px-1.5 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                                />
+                              </TableCell>
+                              <TableCell>
+                                <select
+                                  value={editingRow!.category}
+                                  onChange={(e) => setEditingRow(r => r ? { ...r, category: e.target.value } : r)}
+                                  className="w-full border border-emerald-300 rounded px-1.5 py-1 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                                >
+                                  <option value="">未分類</option>
+                                  {EXPENSE_CATEGORIES.map(cat => (
+                                    <option key={cat} value={cat}>{cat}</option>
+                                  ))}
+                                </select>
+                              </TableCell>
+                              <TableCell>
+                                <div className="space-y-1">
+                                  <input
+                                    type="text"
+                                    value={editingRow!.description}
+                                    onChange={(e) => setEditingRow(r => r ? { ...r, description: e.target.value } : r)}
+                                    placeholder="内容"
+                                    className="w-full border border-emerald-300 rounded px-1.5 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                                  />
+                                  <input
+                                    type="text"
+                                    value={editingRow!.memo}
+                                    onChange={(e) => setEditingRow(r => r ? { ...r, memo: e.target.value } : r)}
+                                    placeholder="備考"
+                                    className="w-full border border-slate-200 rounded px-1.5 py-1 text-xs text-slate-500 focus:outline-none focus:ring-1 focus:ring-emerald-400"
+                                  />
+                                </div>
+                              </TableCell>
+                              <TableCell className="text-right">
+                                <input
+                                  type="number"
+                                  value={editingRow!.amount}
+                                  onChange={(e) => setEditingRow(r => r ? { ...r, amount: parseInt(e.target.value) || 0 } : r)}
+                                  className="w-24 border border-emerald-300 rounded px-1.5 py-1 text-xs text-right font-bold focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                                />
+                              </TableCell>
+                              <TableCell className="text-right">
+                                <div className="flex items-center justify-end gap-1">
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="w-7 h-7 text-emerald-600 hover:bg-emerald-100"
+                                    onClick={handleSaveEdit}
+                                    disabled={isSavingEdit}
+                                  >
+                                    {isSavingEdit ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+                                  </Button>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="w-7 h-7 text-slate-400 hover:bg-slate-100"
+                                    onClick={() => setEditingRow(null)}
+                                  >
+                                    <X className="w-3.5 h-3.5" />
+                                  </Button>
+                                </div>
+                              </TableCell>
+                            </>
+                          ) : (
+                            <>
+                              {/* 通常表示 */}
+                              <TableCell className="text-xs text-slate-500 whitespace-nowrap">
+                                {expense.expense_date}
+                              </TableCell>
+                              <TableCell>
+                                <span className="text-xs bg-emerald-50 text-emerald-700 px-2 py-1 rounded-full font-medium">
+                                  {expense.category || "未分類"}
+                                </span>
+                              </TableCell>
+                              <TableCell>
+                                <div className="font-medium text-sm">{expense.description || "-"}</div>
+                                {expense.memo && <div className="text-xs text-slate-400">{expense.memo}</div>}
+                              </TableCell>
+                              <TableCell className="text-right font-bold text-slate-700">¥{expense.amount.toLocaleString()}</TableCell>
+                              <TableCell className="text-right">
+                                <div className="flex items-center justify-end gap-1">
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="w-7 h-7 text-slate-300 hover:text-emerald-600 hover:bg-emerald-50 transition-all rounded-full"
+                                    onClick={() => handleStartEdit(expense)}
+                                  >
+                                    <Pencil className="w-3.5 h-3.5" />
+                                  </Button>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="w-7 h-7 text-slate-300 hover:text-rose-500 hover:bg-rose-50 transition-all rounded-full"
+                                    onClick={() => handleDelete(expense.id)}
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </Button>
+                                </div>
+                              </TableCell>
+                            </>
+                          )}
+                        </TableRow>
+                      );
+                    })
                   )}
                 </TableBody>
               </Table>

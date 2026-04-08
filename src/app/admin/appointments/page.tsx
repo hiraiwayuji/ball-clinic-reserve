@@ -10,11 +10,12 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
-  ChevronLeft, ChevronRight, Calendar, Settings, Loader2, Plus, User, CalendarDays,
+  ChevronLeft, ChevronRight, Calendar, Settings, Loader2, Plus, User, CalendarDays, Search,
 } from "lucide-react";
 import Link from "next/link";
 import { EditAppointmentDialog } from "@/components/admin/EditAppointmentDialog";
 import { AddAppointmentDialog } from "@/components/admin/AddAppointmentDialog";
+import { PatientSearchPanel } from "@/components/admin/PatientSearchPanel";
 import { ADMIN_TIME_SLOTS as TIME_SLOTS } from "@/lib/time-slots";
 
 export default function AdminWeeklyGridPage() {
@@ -29,6 +30,7 @@ export default function AdminWeeklyGridPage() {
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [selectedAddDate, setSelectedAddDate] = useState<Date | undefined>();
   const [selectedAddTime, setSelectedAddTime] = useState("");
+  const [isSearchPanelOpen, setIsSearchPanelOpen] = useState(false);
 
   const weekStart = useMemo(() => {
     if (!currentDate) return startOfWeek(new Date(), { weekStartsOn: 1 });
@@ -157,6 +159,16 @@ export default function AdminWeeklyGridPage() {
           </p>
         </div>
         <div className="flex items-center gap-2 w-full sm:w-auto">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setIsSearchPanelOpen(true)}
+            className="border-blue-200 text-blue-700 hover:bg-blue-50"
+          >
+            <Search className="w-4 h-4 mr-1 sm:mr-2" />
+            <span className="hidden sm:inline">患者検索・予測</span>
+            <span className="sm:hidden">検索</span>
+          </Button>
           <AddAppointmentDialog
             open={isAddDialogOpen}
             onOpenChange={setIsAddDialogOpen}
@@ -629,6 +641,13 @@ export default function AdminWeeklyGridPage() {
           }}
         />
       )}
+
+      {/* Patient search panel */}
+      <PatientSearchPanel
+        open={isSearchPanelOpen}
+        onOpenChange={setIsSearchPanelOpen}
+        onRefresh={() => setRefreshKey(k => k + 1)}
+      />
     </div>
   );
 }

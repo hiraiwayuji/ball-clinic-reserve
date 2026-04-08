@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useParams } from "next/navigation";
-import { ChevronLeft, ChevronRight, Plus, X, Pencil, Trash2, Check, Clock, User, CalendarDays, Settings2, Palette } from "lucide-react";
+import { ChevronLeft, ChevronRight, Plus, X, Pencil, Trash2, Check, Clock, User, CalendarDays, Settings2, Palette, Bell, BellOff, MapPin, ListChecks } from "lucide-react";
 import {
   getEvents,
   createEvent,
@@ -12,9 +12,12 @@ import {
   updateCalendarMembers,
   bulkUpdateEventMemberName,
   type CalendarEvent,
+  type CalendarEventItem,
   type CalendarMember,
 } from "@/app/actions/family-calendar";
 import { cn } from "@/lib/utils";
+import { usePushNotification } from "@/hooks/usePushNotification";
+import { toast } from "sonner";
 
 // ─── カラープリセット ───────────────────────────────────
 const COLOR_PRESETS = [
@@ -47,14 +50,33 @@ function formatTime(iso: string) {
 }
 
 type ModalMode = "create" | "edit" | "view" | "settings";
+type ViewMode = "month" | "week" | "day";
+type EditScope = "all" | "single";
 interface Form {
   title: string; description: string; date: string;
   startTime: string; endTime: string; endDate: string; isAllDay: boolean; isMultiDay: boolean; memberName: string;
+  location: string;
+  items: CalendarEventItem[];
+}
+
+function getWeekDays(dateStr: string): string[] {
+  const [sy, sm, sd] = dateStr.split("-").map(Number);
+  const dow = new Date(sy, sm - 1, sd).getDay(); // 0=Sun
+  return Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(sy, sm - 1, sd - dow + i);
+    return toLocalDateStr(d);
+  });
+}
+
+function addOneHour(time: string): string {
+  const [h, m] = time.split(":").map(Number);
+  return `${String((h + 1) % 24).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
 }
 
 const blankForm = (date = toLocalDateStr(new Date()), defaultMember = "家族"): Form => ({
   title: "", description: "", date,
   startTime: "09:00", endTime: "10:00", endDate: date, isAllDay: false, isMultiDay: false, memberName: defaultMember,
+  location: "", items: [],
 });
 
 export default function FamilyCalendarPage() {
@@ -62,7 +84,8 @@ export default function FamilyCalendarPage() {
   const calendarId = params?.calendarId as string;
   const today = new Date();
 
-  const [current, setCurrent] = useState(new Date(today.getFullYear(), today.getMonth(), 1));
+  const [viewMode, setViewMode] = useState<ViewMode>("month");
+  const [anchorDate, setAnchorDate] = useState<Date>(today);
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [calendarName, setCalendarName] = useState("ファミリーカレンダー");
@@ -74,9 +97,41 @@ export default function FamilyCalendarPage() {
   const [selectMode, setSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkTagModal, setBulkTagModal] = useState(false);
+  const [daySheet, setDaySheet] = useState<string | null>(null); // "YYYY-MM-DD" (月表示のみ)
+  // 複数日イベントの編集スコープ選択
+  const [scopePicker, setScopePicker] = useState<{ event: CalendarEvent; fromDate: string } | null>(null);
+  // 「この日のみ」編集モード：保存時に元イベントを分割する
+  const [singleDayEdit, setSingleDayEdit] = useState<{ originalEvent: CalendarEvent; fromDate: string } | null>(null);
 
-  const year = current.getFullYear();
-  const month = current.getMonth();
+  const year = anchorDate.getFullYear();
+  const month = anchorDate.getMonth();
+
+  function navPrev() {
+    if (viewMode === "month") setAnchorDate(new Date(year, month - 1, 1));
+    else if (viewMode === "week") setAnchorDate(new Date(year, month, anchorDate.getDate() - 7));
+    else setAnchorDate(new Date(year, month, anchorDate.getDate() - 1));
+  }
+  function navNext() {
+    if (viewMode === "month") setAnchorDate(new Date(year, month + 1, 1));
+    else if (viewMode === "week") setAnchorDate(new Date(year, month, anchorDate.getDate() + 7));
+    else setAnchorDate(new Date(year, month, anchorDate.getDate() + 1));
+  }
+  function switchView(v: ViewMode) {
+    setViewMode(v);
+    setDaySheet(null);
+  }
+  function getNavTitle() {
+    if (viewMode === "month") return { main: `${month + 1}月`, sub: String(year) };
+    if (viewMode === "week") {
+      const w = getWeekDays(toLocalDateStr(anchorDate));
+      const [fy, fm, fd] = w[0].split("-").map(Number);
+      const [, lm, ld] = w[6].split("-").map(Number);
+      return { main: `${fm}/${fd}〜${lm}/${ld}`, sub: String(fy) };
+    }
+    return { main: `${month + 1}月${anchorDate.getDate()}日（${WEEKDAYS[anchorDate.getDay()]}）`, sub: String(year) };
+  }
+
+  const { state: pushState, isProcessing: pushProcessing, subscribe: subscribePush, unsubscribe: unsubscribePush } = usePushNotification(calendarId);
 
   function getMember(name?: string | null) {
     return members.find((m) => m.name === name) ?? members[0] ?? COLOR_PRESETS[4];
@@ -95,12 +150,23 @@ export default function FamilyCalendarPage() {
   const fetchEvents = useCallback(async () => {
     if (!calendarId) return;
     setLoading(true);
-    const start = new Date(year, month, 1).toISOString();
-    const end = new Date(year, month + 1, 0, 23, 59, 59).toISOString();
-    const data = await getEvents(calendarId, start, end);
+    const y = anchorDate.getFullYear(), mo = anchorDate.getMonth(), d = anchorDate.getDate();
+    let startD: Date, endD: Date;
+    if (viewMode === "month") {
+      startD = new Date(y, mo, 1);
+      endD = new Date(y, mo + 1, 0, 23, 59, 59);
+    } else if (viewMode === "week") {
+      const dow = anchorDate.getDay();
+      startD = new Date(y, mo, d - dow);
+      endD = new Date(startD.getFullYear(), startD.getMonth(), startD.getDate() + 6, 23, 59, 59);
+    } else {
+      startD = new Date(y, mo, d, 0, 0, 0);
+      endD = new Date(y, mo, d + 1, 23, 59, 59); // 翌日分も取得
+    }
+    const data = await getEvents(calendarId, startD.toISOString(), endD.toISOString());
     setEvents(data);
     setLoading(false);
-  }, [calendarId, year, month]);
+  }, [calendarId, viewMode, anchorDate]);
 
   useEffect(() => { fetchEvents(); }, [fetchEvents]);
 
@@ -120,10 +186,30 @@ export default function FamilyCalendarPage() {
     });
   }
 
+  function eventsForDayStr(dateStr: string, applyFilter = false) {
+    return events.filter((e) => {
+      if (applyFilter && filter && e.member_name !== filter) return false;
+      return toJSTDateStr(e.start_time) === dateStr;
+    });
+  }
+
   // モーダル操作
   function openCreate(date: string) { setForm(blankForm(date, members[0]?.name || "家族")); setModal({ mode: "create", date }); }
-  function openView(e: CalendarEvent) { setModal({ mode: "view", event: e }); }
-  function openEdit(e: CalendarEvent) {
+  function openView(e: CalendarEvent, fromDate?: string) { setModal({ mode: "view", event: e, date: fromDate }); }
+
+  function openEdit(e: CalendarEvent, fromDate?: string) {
+    const startDateStr = toJSTDateStr(e.start_time);
+    const endDateStr = toJSTDateStr(e.end_time);
+    const isMultiDay = startDateStr !== endDateStr;
+    // 複数日イベントかつ編集元の日が分かる場合はスコープ選択を出す
+    if (isMultiDay && fromDate) {
+      setScopePicker({ event: e, fromDate });
+      return;
+    }
+    applyEditForm(e);
+  }
+
+  function applyEditForm(e: CalendarEvent) {
     const s = new Date(e.start_time), en = new Date(e.end_time);
     const startDateStr = toJSTDateStr(e.start_time);
     const endDateStr = toJSTDateStr(e.end_time);
@@ -135,7 +221,23 @@ export default function FamilyCalendarPage() {
       endTime: `${String(en.getHours()).padStart(2,"0")}:${String(en.getMinutes()).padStart(2,"0")}`,
       endDate: endDateStr,
       isAllDay: e.is_all_day, isMultiDay: multiDay, memberName: e.member_name ?? "家族",
+      location: e.location ?? "", items: e.items ? [...e.items] : [],
     });
+    setSingleDayEdit(null);
+    setModal({ mode: "edit", event: e });
+  }
+
+  function applyEditFormSingleDay(e: CalendarEvent, fromDate: string) {
+    const s = new Date(e.start_time), en = new Date(e.end_time);
+    setForm({
+      title: e.title, description: e.description ?? "",
+      date: fromDate, endDate: fromDate,
+      startTime: `${String(s.getHours()).padStart(2,"0")}:${String(s.getMinutes()).padStart(2,"0")}`,
+      endTime: `${String(en.getHours()).padStart(2,"0")}:${String(en.getMinutes()).padStart(2,"0")}`,
+      isAllDay: e.is_all_day, isMultiDay: false, memberName: e.member_name ?? "家族",
+      location: e.location ?? "", items: e.items ? [...e.items] : [],
+    });
+    setSingleDayEdit({ originalEvent: e, fromDate });
     setModal({ mode: "edit", event: e });
   }
 
@@ -153,12 +255,79 @@ export default function FamilyCalendarPage() {
       : `${endDateTarget}T${form.endTime}:00+09:00`;
     const payload = {
       title: form.title, description: form.description || null,
+      location: form.location || null,
+      items: form.items.length > 0 ? form.items : null,
       start_time: startIso, end_time: endIso,
       is_all_day: form.isAllDay, color: member.color,
       member_name: form.memberName, is_recurring: false, recurrence_rule: null,
     };
-    if (modal?.mode === "create") await createEvent(calendarId, payload);
-    else if (modal?.mode === "edit" && modal.event) await updateEvent(modal.event.id, payload);
+
+    let res: { success: boolean; error?: string };
+
+    if (singleDayEdit) {
+      // ─── この日のみ編集：新規1日イベント作成 + 元イベント分割 ───
+      res = await createEvent(calendarId, payload);
+      if (res.success) {
+        const orig = singleDayEdit.originalEvent;
+        const fd = singleDayEdit.fromDate;
+        const origStart = toJSTDateStr(orig.start_time);
+        const origEnd = toJSTDateStr(orig.end_time);
+        const s = new Date(orig.start_time), en = new Date(orig.end_time);
+        const hhmm = (d: Date) => `${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`;
+        const shift = (dateStr: string, days: number) => {
+          const [y, m, d] = dateStr.split("-").map(Number);
+          return toLocalDateStr(new Date(y, m - 1, d + days));
+        };
+
+        if (origStart === fd && origEnd === fd) {
+          // 元々1日イベント → 削除
+          await deleteEvent(orig.id);
+        } else if (origStart === fd) {
+          // 先頭日 → 開始日を翌日に
+          const newStart = shift(fd, 1);
+          await updateEvent(orig.id, {
+            start_time: orig.is_all_day ? `${newStart}T00:00:00+09:00` : `${newStart}T${hhmm(s)}:00+09:00`,
+          });
+        } else if (origEnd === fd) {
+          // 末尾日 → 終了日を前日に
+          const newEnd = shift(fd, -1);
+          await updateEvent(orig.id, {
+            end_time: orig.is_all_day ? `${newEnd}T23:59:59+09:00` : `${newEnd}T${hhmm(en)}:00+09:00`,
+          });
+        } else {
+          // 中間日 → 元イベントを前半に縮め、後半を新規作成
+          const dayBefore = shift(fd, -1);
+          const dayAfter = shift(fd, 1);
+          await updateEvent(orig.id, {
+            end_time: orig.is_all_day ? `${dayBefore}T23:59:59+09:00` : `${dayBefore}T${hhmm(en)}:00+09:00`,
+          });
+          await createEvent(calendarId, {
+            title: orig.title, description: orig.description ?? null,
+            location: orig.location ?? null, items: orig.items ?? null,
+            start_time: orig.is_all_day ? `${dayAfter}T00:00:00+09:00` : `${dayAfter}T${hhmm(s)}:00+09:00`,
+            end_time: orig.end_time,
+            is_all_day: orig.is_all_day, color: orig.color,
+            member_name: orig.member_name ?? null, is_recurring: false, recurrence_rule: null,
+          });
+        }
+      }
+    } else if (modal?.mode === "create") {
+      res = await createEvent(calendarId, payload);
+    } else if (modal?.mode === "edit" && modal.event) {
+      res = await updateEvent(modal.event.id, payload);
+    } else {
+      res = { success: false, error: "不明なモード" };
+    }
+
+    if (!res.success) {
+      toast.error(res.error || "保存に失敗しました");
+      setSaving(false);
+      return;
+    }
+
+    const wasSingleDay = !!singleDayEdit;
+    setSingleDayEdit(null);
+    toast.success(wasSingleDay ? "この日のみ変更しました" : modal?.mode === "create" ? "予定を追加しました" : "予定を更新しました");
     await fetchEvents();
     setSaving(false);
     setModal(null);
@@ -169,6 +338,18 @@ export default function FamilyCalendarPage() {
     await deleteEvent(id);
     await fetchEvents();
     setModal(null);
+    // 日別シートが開いていた場合はそのまま残す
+  }
+
+  async function handleToggleItem(ev: CalendarEvent, idx: number) {
+    if (!ev.items) return;
+    const newItems = ev.items.map((item, i) => i === idx ? { ...item, checked: !item.checked } : item);
+    await updateEvent(ev.id, { items: newItems });
+    await fetchEvents();
+    // Update modal event reference
+    if (modal?.mode === "view" && modal.event?.id === ev.id) {
+      setModal({ mode: "view", event: { ...ev, items: newItems } });
+    }
   }
 
   async function handleBulkTagChange(newMemberName: string) {
@@ -194,7 +375,7 @@ export default function FamilyCalendarPage() {
     try {
       const result = await updateCalendarMembers(calendarId, newMembers);
       if (!result.success) {
-        alert("保存に失敗しました: " + (result.error ?? "不明なエラー"));
+        toast.error("保存に失敗しました: " + (result.error ?? "不明なエラー"));
         return;
       }
       // 一括変更チェックが入っているメンバーの既存予定を更新
@@ -207,7 +388,7 @@ export default function FamilyCalendarPage() {
       await fetchEvents();
       setModal(null);
     } catch (e) {
-      alert("保存中にエラーが発生しました。再度お試しください。");
+      toast.error("保存中にエラーが発生しました。再度お試しください。");
     } finally {
       setSaving(false);
     }
@@ -217,166 +398,506 @@ export default function FamilyCalendarPage() {
     <div className="min-h-screen bg-slate-950 text-white">
 
       {/* ヘッダー */}
-      <header className="sticky top-0 z-30 bg-slate-900/90 backdrop-blur border-b border-slate-800 px-3 py-2.5 flex items-center gap-2">
-        <CalendarDays className="w-5 h-5 text-violet-400 shrink-0" />
-        <span className="font-bold text-sm flex-1 truncate">{calendarName}</span>
-        <div className="flex gap-1 overflow-x-auto scrollbar-none pr-2">
+      <header className="sticky top-0 z-30 bg-slate-900/95 backdrop-blur border-b border-slate-800">
+        {/* 上段：タイトル・ボタン */}
+        <div className="px-3 py-2 flex items-center gap-2">
+          <CalendarDays className="w-5 h-5 text-violet-400 shrink-0" />
+          <span className="font-bold text-sm flex-1 truncate">{calendarName}</span>
+          {/* 通知ベルボタン */}
+          {pushState !== "unsupported" && (
+            <button
+              onClick={pushState === "subscribed" ? unsubscribePush : subscribePush}
+              disabled={pushProcessing || pushState === "loading" || pushState === "denied"}
+              title={
+                pushState === "subscribed" ? "通知をオフにする" :
+                pushState === "denied" ? "ブラウザで通知が拒否されています" :
+                "予定追加の通知を受け取る"
+              }
+              className={`w-8 h-8 rounded-lg border flex items-center justify-center shrink-0 transition-colors ${
+                pushState === "subscribed"
+                  ? "bg-violet-600 border-violet-500"
+                  : pushState === "denied"
+                  ? "bg-slate-800 border-slate-700 opacity-40 cursor-not-allowed"
+                  : "bg-slate-800 border-slate-700 hover:bg-slate-700"
+              }`}
+            >
+              {pushState === "subscribed"
+                ? <Bell className="w-4 h-4 text-white" />
+                : <BellOff className="w-4 h-4 text-slate-400" />
+              }
+            </button>
+          )}
+          <button onClick={() => setModal({ mode: "settings" })}
+            className="w-8 h-8 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center shrink-0">
+            <Settings2 className="w-4 h-4 text-slate-400" />
+          </button>
+        </div>
+
+        {/* 下段：ビュー切替タブ（大きく・目立つ） */}
+        <div className="flex border-t border-slate-800">
+          {([
+            { v: "month" as ViewMode, label: "月表示", sub: "カレンダー" },
+            { v: "week"  as ViewMode, label: "週表示", sub: "7日間リスト" },
+            { v: "day"   as ViewMode, label: "日表示", sub: "タイムライン" },
+          ]).map(({ v, label, sub }) => (
+            <button key={v} onClick={() => switchView(v)}
+              className={`flex-1 py-2.5 flex flex-col items-center gap-0.5 border-b-2 transition-colors ${
+                viewMode === v
+                  ? "border-violet-500 bg-violet-950/30"
+                  : "border-transparent hover:bg-slate-800/50"
+              }`}>
+              <span className={`text-sm font-black leading-none ${viewMode === v ? "text-violet-400" : "text-slate-400"}`}>
+                {label}
+              </span>
+              <span className={`text-[9px] leading-none ${viewMode === v ? "text-violet-500/70" : "text-slate-600"}`}>
+                {sub}
+              </span>
+            </button>
+          ))}
+        </div>
+
+        {/* メンバーフィルター */}
+        <div className="flex gap-1.5 overflow-x-auto scrollbar-none px-3 py-2 border-t border-slate-800/60">
           <button onClick={() => setFilter(null)}
-            className={`px-2 py-0.5 rounded-full text-xs font-bold transition whitespace-nowrap ${!filter ? "bg-violet-500 text-white" : "bg-slate-800 text-slate-400"}`}>
+            className={`px-3 py-1 rounded-full text-xs font-bold transition whitespace-nowrap ${!filter ? "bg-violet-500 text-white" : "bg-slate-800 text-slate-400"}`}>
             全員
           </button>
           {members.map((m) => (
             <button key={m.name} onClick={() => setFilter(filter === m.name ? null : m.name)}
-              className={`px-2 py-0.5 rounded-full text-xs font-bold transition whitespace-nowrap ${filter === m.name ? `${m.bg} text-white` : "bg-slate-800 text-slate-400"}`}>
+              className={`px-3 py-1 rounded-full text-xs font-bold transition whitespace-nowrap ${filter === m.name ? `${m.bg} text-white` : "bg-slate-800 text-slate-400"}`}>
               {m.name}
             </button>
           ))}
         </div>
-        <button onClick={() => setModal({ mode: "settings" })}
-          className="w-8 h-8 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center shrink-0">
-          <Settings2 className="w-4 h-4 text-slate-400" />
-        </button>
       </header>
 
-      {/* 月ナビ */}
-      <div className="flex items-center justify-between px-4 pt-4 pb-2">
-        <button onClick={() => setCurrent(new Date(year, month - 1, 1))}
-          className="w-14 h-14 rounded-2xl bg-slate-800 hover:bg-slate-700 flex items-center justify-center transition shadow-lg">
-          <ChevronLeft className="w-7 h-7" />
-        </button>
-        <div className="text-center">
-          <p className="text-3xl font-black tracking-tighter">{month + 1}<span className="text-slate-400 text-base font-normal ml-1">月</span></p>
-          <p className="text-sm text-slate-500 font-bold tracking-widest">{year}</p>
-        </div>
-        <button onClick={() => setCurrent(new Date(year, month + 1, 1))}
-          className="w-14 h-14 rounded-2xl bg-slate-800 hover:bg-slate-700 flex items-center justify-center transition shadow-lg">
-          <ChevronRight className="w-7 h-7" />
-        </button>
-      </div>
+      {/* ナビ */}
+      {(() => {
+        const { main, sub } = getNavTitle();
+        return (
+          <div className="flex items-center justify-between px-4 pt-3 pb-2">
+            <button onClick={navPrev}
+              className="w-12 h-12 rounded-2xl bg-slate-800 hover:bg-slate-700 flex items-center justify-center transition shadow-lg">
+              <ChevronLeft className="w-6 h-6" />
+            </button>
+            <div className="text-center">
+              <p className="text-2xl font-black tracking-tight">{main}</p>
+              <p className="text-xs text-slate-500 font-bold tracking-widest">{sub}</p>
+            </div>
+            <button onClick={navNext}
+              className="w-12 h-12 rounded-2xl bg-slate-800 hover:bg-slate-700 flex items-center justify-center transition shadow-lg">
+              <ChevronRight className="w-6 h-6" />
+            </button>
+          </div>
+        );
+      })()}
 
-      {/* 曜日 */}
-      <div className="grid grid-cols-7 px-2 mb-1">
-        {WEEKDAYS.map((d, i) => (
-          <div key={d} className={`text-center text-xs font-bold py-1 ${i===0?"text-red-400":i===6?"text-blue-400":"text-slate-500"}`}>{d}</div>
-        ))}
-      </div>
-
-      {/* グリッド */}
-      {loading ? (
-        <div className="flex items-center justify-center h-48">
-          <div className="w-7 h-7 border-2 border-violet-500 border-t-transparent rounded-full animate-spin" />
+      {/* ─── 月表示 ─── */}
+      {viewMode === "month" && (<>
+        {/* 曜日ヘッダー */}
+        <div className="grid grid-cols-7 px-2 mb-1">
+          {WEEKDAYS.map((d, i) => (
+            <div key={d} className={`text-center text-xs font-bold py-1 ${i===0?"text-red-400":i===6?"text-blue-400":"text-slate-500"}`}>{d}</div>
+          ))}
         </div>
-      ) : (
-        <div className="grid grid-cols-7 gap-px bg-slate-800 mx-2 rounded-2xl overflow-hidden">
-          {cells.map((day, idx) => {
-            if (!day) return <div key={idx} className="bg-slate-950 h-20" />;
-            const isToday = day === today.getDate() && month === today.getMonth() && year === today.getFullYear();
-            const dow = (firstDay + day - 1) % 7;
-            const dayEvents = eventsForDay(day);
-            const dateStr = `${year}-${String(month+1).padStart(2,"0")}-${String(day).padStart(2,"0")}`;
-            return (
-              <div key={idx} onClick={() => openCreate(dateStr)}
-                className="bg-slate-900 h-20 p-1 cursor-pointer hover:bg-slate-800 transition group relative">
-                <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold mb-0.5 mx-auto ${isToday ? "bg-violet-500 text-white" : dow===0 ? "text-red-400" : dow===6 ? "text-blue-400" : "text-slate-300"}`}>
-                  {day}
+        {/* グリッド */}
+        {loading ? (
+          <div className="flex items-center justify-center h-48">
+            <div className="w-7 h-7 border-2 border-violet-500 border-t-transparent rounded-full animate-spin" />
+          </div>
+        ) : (
+          <div className="grid grid-cols-7 gap-px bg-slate-800 mx-2 rounded-2xl overflow-hidden">
+            {cells.map((day, idx) => {
+              if (!day) return <div key={idx} className="bg-slate-950 h-20" />;
+              const isToday = day === today.getDate() && month === today.getMonth() && year === today.getFullYear();
+              const dow = (firstDay + day - 1) % 7;
+              const dayEvents = eventsForDay(day);
+              const dateStr = `${year}-${String(month+1).padStart(2,"0")}-${String(day).padStart(2,"0")}`;
+              return (
+                <div key={idx} onClick={() => setDaySheet(dateStr)}
+                  className="bg-slate-900 h-20 p-1 cursor-pointer hover:bg-slate-800 transition group relative">
+                  <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold mb-0.5 mx-auto ${isToday ? "bg-violet-500 text-white" : dow===0 ? "text-red-400" : dow===6 ? "text-blue-400" : "text-slate-300"}`}>
+                    {day}
+                  </div>
+                  <div className="space-y-0.5 overflow-hidden">
+                    {dayEvents.slice(0, 2).map((e) => {
+                      const m = getMember(e.member_name);
+                      const isMatch = e.member_name === "試合" || e.title.includes("🔴");
+                      return (
+                        <div key={e.id} onClick={(ev) => { ev.stopPropagation(); openView(e); }}
+                          className={`${isMatch ? "bg-red-600 text-white" : `${m.light} ${m.text}`} text-[9px] font-bold truncate rounded-sm px-1 leading-4 cursor-pointer shadow-sm ${isMatch ? "ring-1 ring-red-400" : ""}`}>
+                          {isMatch && "🔴 "}{e.title}
+                        </div>
+                      );
+                    })}
+                    {dayEvents.length > 2 && <div className="text-[9px] text-slate-500 px-1">+{dayEvents.length - 2}</div>}
+                  </div>
+                  <Plus className="absolute bottom-1 right-1 w-3 h-3 text-slate-600 opacity-0 group-hover:opacity-100 transition" />
                 </div>
-                <div className="space-y-0.5 overflow-hidden">
-                  {dayEvents.slice(0, 2).map((e) => {
-                    const m = getMember(e.member_name);
-                    const isMatch = e.member_name === "試合" || e.title.includes("🔴");
-                    return (
-                      <div key={e.id} onClick={(ev) => { ev.stopPropagation(); openView(e); }}
-                        className={`${isMatch ? "bg-red-600 text-white" : `${m.light} ${m.text}`} text-[9px] font-bold truncate rounded-sm px-1 leading-4 cursor-pointer shadow-sm ${isMatch ? "ring-1 ring-red-400" : ""}`}>
-                        {isMatch && "🔴 "}{e.title}
+              );
+            })}
+          </div>
+        )}
+        {/* 今月一覧 */}
+        <div className="px-4 py-5 pb-32">
+          <div className="flex items-center justify-between mb-3">
+            <p className="text-xs font-bold text-slate-500 uppercase tracking-widest">今月の予定</p>
+            <button onClick={() => { setSelectMode(!selectMode); setSelectedIds(new Set()); }}
+              className={`text-xs font-bold px-3 py-1 rounded-full transition ${selectMode ? "bg-violet-500 text-white" : "bg-slate-800 text-slate-400"}`}>
+              {selectMode ? "キャンセル" : "選択する"}
+            </button>
+          </div>
+          {selectMode && selectedIds.size > 0 && (
+            <div className="mb-3 flex items-center gap-2 bg-violet-900/30 border border-violet-700/40 rounded-xl px-4 py-2">
+              <span className="text-xs text-violet-300 flex-1">{selectedIds.size}件選択中</span>
+              <button onClick={() => setBulkTagModal(true)}
+                className="text-xs font-bold bg-violet-500 hover:bg-violet-400 text-white px-4 py-1.5 rounded-full transition">
+                タグを変更
+              </button>
+            </div>
+          )}
+          {events.filter(e => !filter || e.member_name === filter).length === 0 ? (
+            <p className="text-slate-600 text-sm text-center py-6">予定なし</p>
+          ) : (
+            <div className="space-y-2">
+              {events.filter(e => !filter || e.member_name === filter).map((e) => {
+                const m = getMember(e.member_name);
+                const s = new Date(e.start_time);
+                const isSelected = selectedIds.has(e.id);
+                return (
+                  <div key={e.id}
+                    onClick={() => {
+                      if (selectMode) { const next = new Set(selectedIds); isSelected ? next.delete(e.id) : next.add(e.id); setSelectedIds(next); }
+                      else openView(e);
+                    }}
+                    className={cn("flex items-center gap-3 rounded-2xl p-4 cursor-pointer transition border shadow-sm",
+                      isSelected ? "bg-violet-900/40 border-violet-600"
+                      : (e.member_name === "試合" || e.title.includes("🔴")) ? "bg-red-950/20 border-red-900/50 hover:bg-slate-800"
+                      : "bg-slate-900 border-slate-800 hover:bg-slate-800")}>
+                    {selectMode && (
+                      <div className={`w-5 h-5 rounded-full border-2 shrink-0 flex items-center justify-center transition ${isSelected ? "bg-violet-500 border-violet-500" : "border-slate-600"}`}>
+                        {isSelected && <Check className="w-3 h-3 text-white stroke-[3]" />}
                       </div>
-                    );
-                  })}
-                  {dayEvents.length > 2 && <div className="text-[9px] text-slate-500 px-1">+{dayEvents.length - 2}</div>}
+                    )}
+                    <div className={cn("w-2 h-12 rounded-full shrink-0", m.bg)} />
+                    <div className="flex-1 min-w-0">
+                      <p className="font-bold text-base truncate flex items-center gap-2">
+                        {(e.member_name === "試合" || e.title.includes("🔴")) && <span className="text-red-500 text-lg">🔴</span>}
+                        {e.title}
+                      </p>
+                      <p className="text-xs text-slate-400 font-medium">
+                        {s.getMonth()+1}/{s.getDate()}（{WEEKDAYS[s.getDay()]}）
+                        {!e.is_all_day && ` ${formatTime(e.start_time)}〜${formatTime(e.end_time)}`}
+                      </p>
+                    </div>
+                    {e.member_name && <span className={cn("text-xs font-black px-3 py-1 rounded-full shrink-0", m.light, m.text)}>{e.member_name}</span>}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </>)}
+
+      {/* ─── 週表示 ─── */}
+      {viewMode === "week" && (
+        <div className="px-3 py-3 pb-28 space-y-5">
+          {loading ? (
+            <div className="flex items-center justify-center h-48">
+              <div className="w-7 h-7 border-2 border-violet-500 border-t-transparent rounded-full animate-spin" />
+            </div>
+          ) : getWeekDays(toLocalDateStr(anchorDate)).map((dateStr) => {
+            const [wy, wm, wd] = dateStr.split("-").map(Number);
+            const dow = new Date(wy, wm - 1, wd).getDay();
+            const dayEvts = eventsForDayStr(dateStr).filter(e => !filter || e.member_name === filter)
+              .sort((a, b) => {
+                if (a.is_all_day && !b.is_all_day) return -1;
+                if (!a.is_all_day && b.is_all_day) return 1;
+                return new Date(a.start_time).getTime() - new Date(b.start_time).getTime();
+              });
+            const isToday = dateStr === toLocalDateStr(today);
+            const isAnchor = dateStr === toLocalDateStr(anchorDate);
+            return (
+              <div key={dateStr}>
+                {/* 日ヘッダー */}
+                <div className="flex items-center gap-2 mb-2">
+                  <button onClick={() => { setAnchorDate(new Date(wy, wm - 1, wd)); switchView("day"); }}
+                    className={`w-10 h-10 rounded-full flex flex-col items-center justify-center shrink-0 transition ${isToday ? "bg-violet-500" : isAnchor ? "bg-slate-700 ring-2 ring-violet-500" : "bg-slate-800 hover:bg-slate-700"}`}>
+                    <span className={`text-[9px] font-bold leading-none ${isToday ? "text-white/70" : dow === 0 ? "text-red-400" : dow === 6 ? "text-blue-400" : "text-slate-500"}`}>{WEEKDAYS[dow]}</span>
+                    <span className={`text-sm font-black leading-tight ${isToday ? "text-white" : dow === 0 ? "text-red-400" : dow === 6 ? "text-blue-400" : "text-slate-200"}`}>{wd}</span>
+                  </button>
+                  <div className={`flex-1 h-px ${isToday ? "bg-violet-700" : "bg-slate-800"}`} />
+                  <button onClick={() => openCreate(dateStr)} className="text-slate-600 hover:text-violet-400 transition active:scale-90">
+                    <Plus className="w-4 h-4" />
+                  </button>
                 </div>
-                <Plus className="absolute bottom-1 right-1 w-3 h-3 text-slate-600 opacity-0 group-hover:opacity-100 transition" />
+                {/* イベント */}
+                {dayEvts.length === 0 ? (
+                  <div className="ml-12 text-xs text-slate-700 py-1 italic">予定なし</div>
+                ) : (
+                  <div className="ml-12 space-y-1.5">
+                    {dayEvts.map((ev) => {
+                      const mbr = getMember(ev.member_name);
+                      const isMatch = ev.member_name === "試合" || ev.title.includes("🔴");
+                      return (
+                        <div key={ev.id} onClick={() => openView(ev, dateStr)}
+                          className={cn("flex items-stretch rounded-xl border overflow-hidden cursor-pointer transition active:scale-[0.98]",
+                            isMatch ? "bg-red-950/30 border-red-900/50" : "bg-slate-800 border-slate-700 hover:bg-slate-750")}>
+                          <div className={cn("w-1 shrink-0", isMatch ? "bg-red-500" : mbr.bg)} />
+                          <div className="flex items-center gap-2 px-2.5 py-2 flex-1 min-w-0">
+                            <div className="text-center min-w-[38px] shrink-0">
+                              {ev.is_all_day ? <span className="text-[9px] font-bold text-slate-400">終日</span> : (
+                                <>
+                                  <p className="text-xs font-black text-white tabular-nums leading-none">{formatTime(ev.start_time)}</p>
+                                  <p className="text-[9px] text-slate-500">〜{formatTime(ev.end_time)}</p>
+                                </>
+                              )}
+                            </div>
+                            <div className="w-px self-stretch bg-slate-700 shrink-0" />
+                            <div className="flex-1 min-w-0">
+                              <p className="font-bold text-sm text-white truncate">{isMatch && "🔴 "}{ev.title}</p>
+                              {ev.location && <p className="text-[10px] text-slate-400 truncate">📍 {ev.location}</p>}
+                              {ev.items && ev.items.length > 0 && <p className="text-[9px] text-slate-500">☑ {ev.items.filter(i=>i.checked).length}/{ev.items.length}</p>}
+                            </div>
+                            {ev.member_name && <span className={cn("text-[9px] font-bold px-1.5 py-0.5 rounded-full shrink-0", mbr.light, mbr.text)}>{ev.member_name}</span>}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             );
           })}
         </div>
       )}
 
-      {/* 今月一覧 */}
-      <div className="px-4 py-5 pb-32">
-        <div className="flex items-center justify-between mb-3">
-          <p className="text-xs font-bold text-slate-500 uppercase tracking-widest">今月の予定</p>
-          <button
-            onClick={() => { setSelectMode(!selectMode); setSelectedIds(new Set()); }}
-            className={`text-xs font-bold px-3 py-1 rounded-full transition ${selectMode ? "bg-violet-500 text-white" : "bg-slate-800 text-slate-400"}`}
-          >
-            {selectMode ? "キャンセル" : "選択する"}
-          </button>
-        </div>
-
-        {/* 選択モード時のアクションバー */}
-        {selectMode && selectedIds.size > 0 && (
-          <div className="mb-3 flex items-center gap-2 bg-violet-900/30 border border-violet-700/40 rounded-xl px-4 py-2">
-            <span className="text-xs text-violet-300 flex-1">{selectedIds.size}件選択中</span>
-            <button
-              onClick={() => setBulkTagModal(true)}
-              className="text-xs font-bold bg-violet-500 hover:bg-violet-400 text-white px-4 py-1.5 rounded-full transition"
-            >
-              タグを変更
-            </button>
-          </div>
-        )}
-
-        {events.filter(e => !filter || e.member_name === filter).length === 0 ? (
-          <p className="text-slate-600 text-sm text-center py-6">予定なし</p>
-        ) : (
-          <div className="space-y-2">
-            {events.filter(e => !filter || e.member_name === filter).map((e) => {
-              const m = getMember(e.member_name);
-              const s = new Date(e.start_time);
-              const isSelected = selectedIds.has(e.id);
-              return (
-                <div key={e.id}
-                  onClick={() => {
-                    if (selectMode) {
-                      const next = new Set(selectedIds);
-                      isSelected ? next.delete(e.id) : next.add(e.id);
-                      setSelectedIds(next);
-                    } else {
-                      openView(e);
-                    }
-                  }}
-                  className={cn(
-                    "flex items-center gap-3 rounded-2xl p-4 cursor-pointer transition border shadow-sm",
-                    isSelected
-                      ? "bg-violet-900/40 border-violet-600"
-                      : (e.member_name === "試合" || e.title.includes("🔴"))
-                        ? "bg-red-950/20 border-red-900/50 hover:bg-slate-800"
-                        : "bg-slate-900 border-slate-800 hover:bg-slate-800"
-                  )}>
-                  {selectMode && (
-                    <div className={`w-5 h-5 rounded-full border-2 shrink-0 flex items-center justify-center transition ${isSelected ? "bg-violet-500 border-violet-500" : "border-slate-600"}`}>
-                      {isSelected && <Check className="w-3 h-3 text-white stroke-[3]" />}
-                    </div>
-                  )}
-                  <div className={cn("w-2 h-12 rounded-full shrink-0", m.bg)} />
-                  <div className="flex-1 min-w-0">
-                    <p className="font-bold text-base truncate flex items-center gap-2">
-                      {(e.member_name === "試合" || e.title.includes("🔴")) && <span className="text-red-500 text-lg">🔴</span>}
-                      {e.title}
-                    </p>
-                    <p className="text-xs text-slate-400 font-medium">
-                      {s.getMonth()+1}/{s.getDate()}（{WEEKDAYS[s.getDay()]}）
-                      {!e.is_all_day && ` ${formatTime(e.start_time)}〜${formatTime(e.end_time)}`}
-                    </p>
-                  </div>
-                  {e.member_name && (
-                    <span className={cn("text-xs font-black px-3 py-1 rounded-full shrink-0", m.light, m.text)}>{e.member_name}</span>
-                  )}
+      {/* ─── 日表示 ─── */}
+      {viewMode === "day" && (() => {
+        const dateStr = toLocalDateStr(anchorDate);
+        const tomorrow = new Date(anchorDate.getFullYear(), anchorDate.getMonth(), anchorDate.getDate() + 1);
+        const tomorrowStr = toLocalDateStr(tomorrow);
+        const allDayEvts = events.filter(e => e.is_all_day && toJSTDateStr(e.start_time) === dateStr && (!filter || e.member_name === filter));
+        const timedEvts = events.filter(e => !e.is_all_day && toJSTDateStr(e.start_time) === dateStr && (!filter || e.member_name === filter))
+          .sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime());
+        const tomorrowEvts = events.filter(e => toJSTDateStr(e.start_time) === tomorrowStr && (!filter || e.member_name === filter))
+          .sort((a, b) => {
+            if (a.is_all_day && !b.is_all_day) return -1;
+            if (!a.is_all_day && b.is_all_day) return 1;
+            return new Date(a.start_time).getTime() - new Date(b.start_time).getTime();
+          });
+        const nowHour = new Date().getHours();
+        return (
+          <div className="px-4 py-4 pb-28">
+            {loading ? (
+              <div className="flex items-center justify-center h-48">
+                <div className="w-7 h-7 border-2 border-violet-500 border-t-transparent rounded-full animate-spin" />
+              </div>
+            ) : (<>
+              {/* 終日 */}
+              {allDayEvts.length > 0 && (
+                <div className="mb-4 space-y-1.5">
+                  <p className="text-[10px] font-bold text-slate-500 mb-1">終日</p>
+                  {allDayEvts.map(ev => {
+                    const mbr = getMember(ev.member_name);
+                    return (
+                      <div key={ev.id} onClick={() => openView(ev, dateStr)}
+                        className={cn("flex items-center gap-2 rounded-xl px-3 py-2.5 cursor-pointer transition", mbr.light)}>
+                        <span className={cn("font-bold text-sm flex-1 truncate", mbr.text)}>{ev.title}</span>
+                        {ev.member_name && <span className={cn("text-[9px] font-bold px-1.5 py-0.5 rounded-full shrink-0", mbr.light, mbr.text)}>{ev.member_name}</span>}
+                      </div>
+                    );
+                  })}
                 </div>
-              );
-            })}
+              )}
+              {/* タイムライン */}
+              <div className="space-y-0">
+                {Array.from({ length: 18 }, (_, i) => i + 6).map((hour) => {
+                  const hourEvts = timedEvts.filter(e => new Date(e.start_time).getHours() === hour);
+                  const isNowHour = hour === nowHour && dateStr === toLocalDateStr(today);
+                  return (
+                    <div key={hour} className="flex gap-3 min-h-[52px]">
+                      <div className="w-10 pt-1 text-right shrink-0">
+                        <span className={`text-xs font-bold tabular-nums ${isNowHour ? "text-violet-400" : "text-slate-700"}`}>{String(hour).padStart(2,"0")}:00</span>
+                      </div>
+                      <div className={`flex-1 border-t pt-1 pb-1 space-y-1.5 relative ${isNowHour ? "border-violet-500/60" : "border-slate-800"}`}>
+                        {hourEvts.map(ev => {
+                          const mbr = getMember(ev.member_name);
+                          const isMatch = ev.member_name === "試合" || ev.title.includes("🔴");
+                          return (
+                            <div key={ev.id} onClick={() => openView(ev, dateStr)}
+                              className={cn("rounded-xl overflow-hidden cursor-pointer transition active:scale-[0.98] flex items-stretch border",
+                                isMatch ? "bg-red-950/30 border-red-900/50" : "bg-slate-800 border-slate-700 hover:bg-slate-750")}>
+                              <div className={cn("w-1 shrink-0", isMatch ? "bg-red-500" : mbr.bg)} />
+                              <div className="px-2.5 py-2 flex-1 min-w-0">
+                                <p className="font-bold text-sm text-white truncate">{isMatch && "🔴 "}{ev.title}</p>
+                                <p className="text-[10px] text-slate-400">{formatTime(ev.start_time)}〜{formatTime(ev.end_time)}</p>
+                                {ev.location && <p className="text-[10px] text-slate-500 truncate">📍 {ev.location}</p>}
+                                {ev.items && ev.items.length > 0 && <p className="text-[9px] text-slate-500">☑ {ev.items.filter(i=>i.checked).length}/{ev.items.length}</p>}
+                              </div>
+                              {ev.member_name && <span className={cn("text-[9px] font-bold px-2 self-center shrink-0 mr-2 py-0.5 rounded-full", mbr.light, mbr.text)}>{ev.member_name}</span>}
+                            </div>
+                          );
+                        })}
+                        {hourEvts.length === 0 && (
+                          <button onClick={() => {
+                            const t = `${String(hour).padStart(2,"0")}:00`;
+                            setForm({ ...blankForm(dateStr, members[0]?.name || "家族"), startTime: t, endTime: addOneHour(t) });
+                            setModal({ mode: "create", date: dateStr });
+                          }} className="w-full h-7 text-slate-700 hover:text-violet-500 hover:bg-slate-900 rounded-lg transition text-xs text-left px-2 opacity-0 hover:opacity-100">
+                            ＋
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              {/* ─── 明日のプレビュー ─── */}
+              <div className="mt-6">
+                {/* 区切り線 */}
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="h-px flex-1 bg-slate-800" />
+                  <button
+                    onClick={() => { setAnchorDate(tomorrow); }}
+                    className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 px-4 py-1.5 rounded-full transition active:scale-95"
+                  >
+                    <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
+                    <span className="text-xs font-black text-slate-300">
+                      明日 {tomorrow.getMonth()+1}/{tomorrow.getDate()}（{WEEKDAYS[tomorrow.getDay()]}）
+                    </span>
+                  </button>
+                  <div className="h-px flex-1 bg-slate-800" />
+                </div>
+
+                {tomorrowEvts.length === 0 ? (
+                  <p className="text-center text-slate-600 text-sm py-4 italic">明日の予定はありません</p>
+                ) : (
+                  <div className="space-y-2">
+                    {tomorrowEvts.map((ev) => {
+                      const mbr = getMember(ev.member_name);
+                      const isMatch = ev.member_name === "試合" || ev.title.includes("🔴");
+                      return (
+                        <div key={ev.id}
+                          onClick={() => { setAnchorDate(tomorrow); openView(ev, tomorrowStr); }}
+                          className={cn(
+                            "flex items-stretch rounded-2xl border overflow-hidden cursor-pointer transition active:scale-[0.98]",
+                            isMatch ? "bg-red-950/20 border-red-900/40" : "bg-slate-900 border-slate-700 hover:bg-slate-800"
+                          )}
+                        >
+                          <div className={cn("w-1.5 shrink-0 opacity-60", isMatch ? "bg-red-500" : mbr.bg)} />
+                          <div className="flex items-center gap-3 px-3 py-3 flex-1 min-w-0">
+                            <div className="text-center min-w-[44px] shrink-0">
+                              {ev.is_all_day ? (
+                                <span className="text-[10px] font-bold text-slate-500">終日</span>
+                              ) : (
+                                <>
+                                  <p className="text-sm font-black text-slate-300 tabular-nums leading-none">{formatTime(ev.start_time)}</p>
+                                  <p className="text-[10px] text-slate-600 tabular-nums">〜{formatTime(ev.end_time)}</p>
+                                </>
+                              )}
+                            </div>
+                            <div className="w-px self-stretch bg-slate-800" />
+                            <div className="flex-1 min-w-0">
+                              <p className="font-bold text-sm text-slate-300 truncate">{isMatch && "🔴 "}{ev.title}</p>
+                              {ev.location && <p className="text-xs text-slate-500 truncate">📍 {ev.location}</p>}
+                              {ev.items && ev.items.length > 0 && (
+                                <p className="text-[10px] text-slate-600">☑ {ev.items.filter(i => i.checked).length}/{ev.items.length}</p>
+                              )}
+                            </div>
+                            {ev.member_name && (
+                              <span className={cn("text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 opacity-70", mbr.light, mbr.text)}>
+                                {ev.member_name}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* 追加ボタン */}
+              <div className="mt-4">
+                <button onClick={() => openCreate(dateStr)}
+                  className="w-full bg-violet-600 hover:bg-violet-500 active:scale-95 text-white font-black py-4 rounded-2xl flex items-center justify-center gap-2 transition shadow-xl shadow-violet-900/20">
+                  <Plus className="w-5 h-5 stroke-[3]" />この日に予定を追加
+                </button>
+              </div>
+            </>)}
           </div>
-        )}
-      </div>
+        );
+      })()}
+
+      {/* ─── 編集スコープ選択シート ─── */}
+      {scopePicker && (() => {
+        const ev = scopePicker.event;
+        const fd = scopePicker.fromDate;
+        const [, fm, fdDay] = fd.split("-").map(Number);
+        const startStr = toJSTDateStr(ev.start_time);
+        const endStr = toJSTDateStr(ev.end_time);
+        const [, sm2, sd2] = startStr.split("-").map(Number);
+        const [, em2, ed2] = endStr.split("-").map(Number);
+        const m = getMember(ev.member_name);
+        return (
+          <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center"
+            onClick={(e) => { if (e.target === e.currentTarget) setScopePicker(null); }}>
+            <div className="bg-slate-900 w-full sm:max-w-md rounded-t-3xl sm:rounded-2xl border border-slate-700 overflow-hidden shadow-2xl">
+              {/* ヘッダー */}
+              <div className="flex items-center justify-between px-5 pt-5 pb-4 border-b border-slate-800">
+                <div>
+                  <p className="text-xs text-slate-500 mb-1">編集の範囲を選択</p>
+                  <div className="flex items-center gap-2">
+                    <div className={`w-3 h-3 rounded-full ${m.bg}`} />
+                    <h2 className="text-base font-black truncate">{ev.title}</h2>
+                  </div>
+                  <p className="text-xs text-slate-400 mt-1">
+                    {sm2}/{sd2}（{WEEKDAYS[new Date(ev.start_time).getDay()]}）〜{em2}/{ed2}（{WEEKDAYS[new Date(ev.end_time).getDay()]}）
+                  </p>
+                </div>
+                <button onClick={() => setScopePicker(null)} className="w-8 h-8 rounded-xl bg-slate-800 flex items-center justify-center border border-slate-700">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="p-4 space-y-3">
+                {/* この日のみ */}
+                <button
+                  onClick={() => { applyEditFormSingleDay(ev, fd); setScopePicker(null); }}
+                  className="w-full text-left bg-violet-950/40 hover:bg-violet-900/50 border-2 border-violet-700 rounded-2xl p-4 transition active:scale-[0.98]"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-full bg-violet-600 flex items-center justify-center shrink-0">
+                      <CalendarDays className="w-5 h-5 text-white" />
+                    </div>
+                    <div>
+                      <p className="font-black text-white">{fm}/{fdDay}（{WEEKDAYS[new Date(+ev.start_time.slice(0,4), +fd.split("-")[1]-1, fdDay).getDay()]}）のみ変更</p>
+                      <p className="text-xs text-slate-400 mt-0.5">この日だけ別の予定として保存。他の日は変わりません</p>
+                    </div>
+                  </div>
+                </button>
+
+                {/* 全日程 */}
+                <button
+                  onClick={() => { applyEditForm(ev); setScopePicker(null); }}
+                  className="w-full text-left bg-slate-800 hover:bg-slate-750 border border-slate-700 rounded-2xl p-4 transition active:scale-[0.98]"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-full bg-slate-700 flex items-center justify-center shrink-0">
+                      <ChevronRight className="w-5 h-5 text-slate-300" />
+                    </div>
+                    <div>
+                      <p className="font-black text-white">全日程を変更</p>
+                      <p className="text-xs text-slate-400 mt-0.5">{sm2}/{sd2}〜{em2}/{ed2} の予定すべてを変更します</p>
+                    </div>
+                  </div>
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* 一括タグ変更モーダル */}
       {bulkTagModal && (
@@ -407,6 +928,179 @@ export default function FamilyCalendarPage() {
         </div>
       )}
 
+      {/* ─── 日別ボトムシート ─── */}
+      {daySheet && (() => {
+        const sheetEvents = eventsForDayStr(daySheet);
+        const [sy, sm, sd] = daySheet.split("-").map(Number);
+        const sheetDate = new Date(sy, sm - 1, sd);
+        const dow = sheetDate.getDay();
+        const isToday = daySheet === toLocalDateStr(today);
+        return (
+          <div
+            className="fixed inset-0 bg-black/60 backdrop-blur-sm z-40 flex items-end sm:items-center justify-center"
+            onClick={(e) => { if (e.target === e.currentTarget) setDaySheet(null); }}
+          >
+            <div className="bg-slate-900 w-full sm:max-w-md rounded-t-3xl sm:rounded-2xl border border-slate-700 shadow-2xl flex flex-col max-h-[80dvh]">
+
+              {/* ヘッダー */}
+              <div className="flex items-center justify-between px-5 pt-5 pb-4 border-b border-slate-800 shrink-0">
+                <div>
+                  <p className="text-xs text-slate-500 font-bold tracking-widest">{sy}年 {sm}月</p>
+                  <h2 className="text-2xl font-black flex items-center gap-2">
+                    <span className={dow === 0 ? "text-red-400" : dow === 6 ? "text-blue-400" : "text-white"}>
+                      {sd}日（{WEEKDAYS[dow]}）
+                    </span>
+                    {isToday && <span className="text-xs font-bold bg-violet-500 text-white px-2 py-0.5 rounded-full">今日</span>}
+                  </h2>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => { openCreate(daySheet); }}
+                    className="h-9 px-4 rounded-xl bg-violet-600 hover:bg-violet-500 text-white font-bold text-sm flex items-center gap-1.5 transition active:scale-95"
+                  >
+                    <Plus className="w-4 h-4" />
+                    追加
+                  </button>
+                  <button
+                    onClick={() => setDaySheet(null)}
+                    className="w-9 h-9 rounded-xl bg-slate-800 hover:bg-slate-700 flex items-center justify-center transition border border-slate-700"
+                  >
+                    <X className="w-4 h-4 text-slate-300" />
+                  </button>
+                </div>
+              </div>
+
+              {/* 週ストリップ */}
+              <div className="flex gap-1 px-4 py-2 shrink-0 border-b border-slate-800">
+                {getWeekDays(daySheet).map((d) => {
+                  const [wy, wm, wd] = d.split("-").map(Number);
+                  const isSelected = d === daySheet;
+                  const isTodayDay = d === toLocalDateStr(today);
+                  const dayEvts = eventsForDayStr(d);
+                  const dow = new Date(wy, wm - 1, wd).getDay();
+                  return (
+                    <button key={d} onClick={() => setDaySheet(d)}
+                      className={`flex flex-col items-center flex-1 py-1.5 rounded-xl transition active:scale-95 ${isSelected ? "bg-violet-600" : "bg-slate-800 hover:bg-slate-700"}`}>
+                      <span className={`text-[9px] font-bold ${isSelected ? "text-white/70" : dow === 0 ? "text-red-400" : dow === 6 ? "text-blue-400" : "text-slate-500"}`}>
+                        {WEEKDAYS[dow]}
+                      </span>
+                      <span className={`text-sm font-black leading-tight ${isSelected ? "text-white" : isTodayDay ? "text-violet-400" : "text-slate-200"}`}>
+                        {wd}
+                      </span>
+                      <div className={`w-1.5 h-1.5 rounded-full mt-0.5 ${dayEvts.length > 0 ? (isSelected ? "bg-white/70" : "bg-violet-400") : "bg-transparent"}`} />
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* イベントリスト */}
+              <div className="overflow-y-auto flex-1 px-4 py-3 space-y-2">
+                {sheetEvents.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-10 text-slate-600">
+                    <CalendarDays className="w-12 h-12 mb-3 opacity-30" />
+                    <p className="text-sm font-semibold">この日の予定はありません</p>
+                    <button
+                      onClick={() => openCreate(daySheet)}
+                      className="mt-4 text-violet-400 text-sm underline underline-offset-2"
+                    >
+                      予定を追加する
+                    </button>
+                  </div>
+                ) : (
+                  sheetEvents
+                    .sort((a, b) => {
+                      if (a.is_all_day && !b.is_all_day) return -1;
+                      if (!a.is_all_day && b.is_all_day) return 1;
+                      return new Date(a.start_time).getTime() - new Date(b.start_time).getTime();
+                    })
+                    .map((ev) => {
+                      const m = getMember(ev.member_name);
+                      const isMatch = ev.member_name === "試合" || ev.title.includes("🔴");
+                      return (
+                        <div
+                          key={ev.id}
+                          onClick={() => openView(ev, daySheet!)}
+                          className={cn(
+                            "flex items-stretch gap-0 rounded-2xl border overflow-hidden cursor-pointer transition active:scale-[0.98] shadow-sm",
+                            isMatch
+                              ? "bg-red-950/30 border-red-900/50 hover:bg-red-950/50"
+                              : "bg-slate-800 border-slate-700 hover:bg-slate-750"
+                          )}
+                        >
+                          {/* カラーバー */}
+                          <div className={cn("w-1.5 shrink-0", isMatch ? "bg-red-500" : m.bg)} />
+                          <div className="flex items-center gap-3 px-3 py-3 flex-1 min-w-0">
+                            {/* 時間 */}
+                            <div className="text-center min-w-[44px]">
+                              {ev.is_all_day ? (
+                                <span className="text-[10px] font-bold text-slate-400">終日</span>
+                              ) : (
+                                <>
+                                  <p className="text-sm font-black text-white tabular-nums leading-none">{formatTime(ev.start_time)}</p>
+                                  <p className="text-[10px] text-slate-500 tabular-nums">〜{formatTime(ev.end_time)}</p>
+                                </>
+                              )}
+                            </div>
+                            {/* 区切り */}
+                            <div className="w-px self-stretch bg-slate-700" />
+                            {/* タイトル・タグ */}
+                            <div className="flex-1 min-w-0">
+                              <p className="font-bold text-[15px] text-white truncate">
+                                {isMatch && "🔴 "}{ev.title}
+                              </p>
+                              {(ev.description || ev.location) && (
+                                <p className="text-xs text-slate-400 truncate mt-0.5">
+                                  {ev.location ? `📍 ${ev.location}` : ev.description}
+                                </p>
+                              )}
+                              {ev.items && ev.items.length > 0 && (
+                                <p className="text-[10px] text-slate-500 mt-0.5">
+                                  ☑ {ev.items.filter(i => i.checked).length}/{ev.items.length}
+                                </p>
+                              )}
+                            </div>
+                            {ev.member_name && (
+                              <span className={cn("text-[10px] font-black px-2 py-0.5 rounded-full shrink-0", m.light, m.text)}>
+                                {ev.member_name}
+                              </span>
+                            )}
+                            {/* 編集アイコン */}
+                            <div className="flex gap-1 shrink-0">
+                              <button
+                                onClick={(e) => { e.stopPropagation(); openEdit(ev, daySheet!); }}
+                                className="w-8 h-8 rounded-lg bg-slate-700 hover:bg-slate-600 flex items-center justify-center transition"
+                              >
+                                <Pencil className="w-3.5 h-3.5 text-slate-300" />
+                              </button>
+                              <button
+                                onClick={(e) => { e.stopPropagation(); handleDelete(ev.id); }}
+                                className="w-8 h-8 rounded-lg bg-red-900/40 hover:bg-red-900/60 flex items-center justify-center transition"
+                              >
+                                <Trash2 className="w-3.5 h-3.5 text-red-400" />
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })
+                )}
+              </div>
+
+              {/* フッター */}
+              <div className="px-4 pb-6 pt-3 border-t border-slate-800 shrink-0">
+                <button
+                  onClick={() => openCreate(daySheet)}
+                  className="w-full bg-violet-600 hover:bg-violet-500 active:scale-95 text-white font-black py-4 rounded-2xl flex items-center justify-center gap-2 transition shadow-xl shadow-violet-900/20 text-base"
+                >
+                  <Plus className="w-5 h-5 stroke-[3]" />
+                  この日に予定を追加
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* FAB */}
       <button onClick={() => openCreate(toLocalDateStr(today))}
         className="fixed bottom-6 right-5 w-14 h-14 bg-violet-500 hover:bg-violet-400 active:scale-95 rounded-2xl shadow-lg shadow-violet-900/50 flex items-center justify-center z-20 transition">
@@ -432,7 +1126,7 @@ export default function FamilyCalendarPage() {
                     <div className="flex items-start justify-between mb-4">
                       <h2 className="text-xl font-black flex-1 pr-3 leading-snug">{ev.title}</h2>
                       <div className="flex gap-2">
-                        <button onClick={() => openEdit(ev)} className="w-9 h-9 rounded-xl bg-slate-800 hover:bg-slate-700 flex items-center justify-center transition border border-slate-700">
+                        <button onClick={() => openEdit(ev, modal.date)} className="w-9 h-9 rounded-xl bg-slate-800 hover:bg-slate-700 flex items-center justify-center transition border border-slate-700">
                           <Pencil className="w-4 h-4 text-slate-300" />
                         </button>
                         <button onClick={() => handleDelete(ev.id)} className="w-9 h-9 rounded-xl bg-red-900/40 hover:bg-red-900/60 flex items-center justify-center transition border border-red-900/20">
@@ -472,6 +1166,29 @@ export default function FamilyCalendarPage() {
                       {ev.description && (
                         <p className="text-slate-400 bg-slate-800 rounded-xl p-3 leading-relaxed border border-slate-700">{ev.description}</p>
                       )}
+                      {ev.location && (
+                        <div className="flex items-center gap-2 text-slate-300">
+                          <MapPin className="w-4 h-4 text-slate-500 shrink-0" />
+                          <span className="text-sm">{ev.location}</span>
+                        </div>
+                      )}
+                      {ev.items && ev.items.length > 0 && (
+                        <div className="bg-slate-800 rounded-xl p-3 border border-slate-700 space-y-2">
+                          <p className="text-[10px] font-bold text-slate-500 flex items-center gap-1 mb-2">
+                            <ListChecks className="w-3 h-3" />持ち物リスト
+                          </p>
+                          {ev.items.map((item, idx) => (
+                            <button key={idx} type="button"
+                              onClick={() => handleToggleItem(ev, idx)}
+                              className="w-full flex items-center gap-3 text-left hover:bg-slate-700/50 rounded-lg px-1 py-1 transition">
+                              <div className={`w-5 h-5 rounded border-2 shrink-0 flex items-center justify-center transition ${item.checked ? "bg-violet-500 border-violet-500" : "border-slate-600"}`}>
+                                {item.checked && <Check className="w-3 h-3 text-white stroke-[3]" />}
+                              </div>
+                              <span className={`text-sm ${item.checked ? "line-through text-slate-500" : "text-slate-200"}`}>{item.text}</span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   </div>
                 </>
@@ -482,7 +1199,16 @@ export default function FamilyCalendarPage() {
             {(modal.mode === "create" || modal.mode === "edit") && (
               <>
                 <div className="flex items-center justify-between p-5 border-b border-slate-800">
-                  <h2 className="text-lg font-black">{modal.mode === "create" ? "予定を追加" : "予定を編集"}</h2>
+                  <div>
+                    <h2 className="text-lg font-black">
+                      {modal.mode === "create" ? "予定を追加" : singleDayEdit ? "この日のみ編集" : "予定を編集"}
+                    </h2>
+                    {singleDayEdit && (
+                      <p className="text-xs text-violet-400 mt-0.5">
+                        {singleDayEdit.fromDate.replace(/-/g, "/")} のみ変更
+                      </p>
+                    )}
+                  </div>
                   <button onClick={() => setModal(null)} className="w-8 h-8 rounded-xl bg-slate-800 hover:bg-slate-700 flex items-center justify-center transition border border-slate-700">
                     <X className="w-4 h-4" />
                   </button>
@@ -535,7 +1261,7 @@ export default function FamilyCalendarPage() {
                           <Clock className="w-3 h-3 inline mr-1" />開始時間
                         </label>
                         <input type="time" value={form.startTime}
-                          onChange={e => setForm({...form, startTime: e.target.value})}
+                          onChange={e => { const s = e.target.value; setForm({...form, startTime: s, endTime: addOneHour(s)}); }}
                           className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-3 text-white focus:outline-none focus:border-violet-500 text-sm" />
                       </div>
                       {!form.isMultiDay && (
@@ -588,6 +1314,47 @@ export default function FamilyCalendarPage() {
                     <textarea value={form.description} onChange={e => setForm({...form, description: e.target.value})}
                       placeholder="会場、持ち物など..." rows={3}
                       className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white placeholder:text-slate-600 focus:outline-none focus:border-violet-500 text-sm resize-none" />
+                  </div>
+
+                  {/* 場所 */}
+                  <div>
+                    <label className="text-xs font-bold text-slate-400 block mb-1.5 flex items-center gap-1">
+                      <MapPin className="w-3 h-3" />場所（任意）
+                    </label>
+                    <input value={form.location} onChange={e => setForm({...form, location: e.target.value})}
+                      placeholder="例: 〇〇体育館、駅前公園..."
+                      className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white placeholder:text-slate-600 focus:outline-none focus:border-violet-500 text-sm" />
+                  </div>
+
+                  {/* 持ち物リスト */}
+                  <div>
+                    <label className="text-xs font-bold text-slate-400 block mb-1.5 flex items-center gap-1">
+                      <ListChecks className="w-3 h-3" />持ち物リスト（任意）
+                    </label>
+                    <div className="space-y-2">
+                      {form.items.map((item, idx) => (
+                        <div key={idx} className="flex items-center gap-2">
+                          <button type="button"
+                            onClick={() => setForm({...form, items: form.items.map((it, i) => i === idx ? {...it, checked: !it.checked} : it)})}
+                            className={`w-5 h-5 rounded border-2 shrink-0 flex items-center justify-center transition ${item.checked ? "bg-violet-500 border-violet-500" : "border-slate-600"}`}>
+                            {item.checked && <Check className="w-3 h-3 text-white stroke-[3]" />}
+                          </button>
+                          <input value={item.text}
+                            onChange={e => setForm({...form, items: form.items.map((it, i) => i === idx ? {...it, text: e.target.value} : it)})}
+                            className={`flex-1 bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-violet-500 ${item.checked ? "line-through text-slate-500" : ""}`} />
+                          <button type="button"
+                            onClick={() => setForm({...form, items: form.items.filter((_, i) => i !== idx)})}
+                            className="w-7 h-7 rounded-lg bg-red-900/30 hover:bg-red-900/50 flex items-center justify-center text-red-400 transition">
+                            <X className="w-3 h-3" />
+                          </button>
+                        </div>
+                      ))}
+                      <button type="button"
+                        onClick={() => setForm({...form, items: [...form.items, { text: "", checked: false }]})}
+                        className="w-full flex items-center gap-2 px-3 py-2 rounded-lg border border-dashed border-slate-700 text-slate-500 hover:text-slate-300 hover:border-slate-500 transition text-sm">
+                        <Plus className="w-3.5 h-3.5" />項目を追加
+                      </button>
+                    </div>
                   </div>
                 </div>
 

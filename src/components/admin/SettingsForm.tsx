@@ -24,14 +24,12 @@ export default function SettingsForm({ initialSettings }: { initialSettings: Cli
       const res = await updateClinicSettings(settings);
       if (res.success) {
         toast.success("設定を保存しました");
-        alert("✅ 設定を保存しました！");
         router.refresh();
       } else {
         toast.error(res.error || "保存に失敗しました");
-        alert("保存失敗: " + res.error);
       }
     } catch (err) {
-      alert("例外エラー: " + err);
+      toast.error("例外エラーが発生しました");
     } finally {
       setIsSaving(false);
     }
@@ -49,8 +47,8 @@ export default function SettingsForm({ initialSettings }: { initialSettings: Cli
       }),
     });
     const data = await res.json();
-    if (data.success) alert("送信成功！スマホを確認してください！");
-    else alert("失敗: " + data.error);
+    if (data.success) toast.success("送信成功！スマホを確認してください！");
+    else toast.error("失敗: " + data.error);
   };
 
   const updateField = (field: keyof ClinicSettings, value: any) => {

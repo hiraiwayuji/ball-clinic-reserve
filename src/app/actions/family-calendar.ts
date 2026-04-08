@@ -2,6 +2,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { createClient as createAdminClient } from "@supabase/supabase-js";
+import { sendPushToCalendar } from "@/lib/push-notify";
 
 async function getSupabase() {
   return await createClient();
@@ -28,11 +29,15 @@ export type CalendarMember = {
   border?: string;
 };
 
+export type CalendarEventItem = { text: string; checked: boolean };
+
 export type CalendarEvent = {
   id: string;
   calendar_id: string;
   title: string;
   description?: string | null;
+  location?: string | null;
+  items?: CalendarEventItem[] | null;
   start_time: string;
   end_time: string;
   is_all_day: boolean;
@@ -117,6 +122,17 @@ export async function createEvent(calendarId: string, event: Omit<CalendarEvent,
   try {
     const { data, error } = await supabase.from("calendar_events").insert([{ ...event, calendar_id: calendarId }]).select().single();
     if (error) return { success: false, error: error.message };
+
+    // Web Push 通知を非同期で送信（失敗しても予定追加は成功扱い）
+    const dateLabel = event.start_time ? event.start_time.slice(0, 10).replace(/-/g, "/") : "";
+    const timeLabel = !event.is_all_day && event.start_time ? ` ${event.start_time.slice(11, 16)}〜` : " 終日";
+    sendPushToCalendar(calendarId, {
+      title: `📅 ${event.member_name || "家族"}が予定を追加`,
+      body: `${event.title}（${dateLabel}${timeLabel}）`,
+      url: `/family`,
+      tag: `event-${data.id}`,
+    }).catch((err) => console.error("[Push] createEvent notify error:", err));
+
     return { success: true, event: data };
   } catch (e: unknown) { return { success: false, error: e instanceof Error ? e.message : "Unknown error" }; }
 }

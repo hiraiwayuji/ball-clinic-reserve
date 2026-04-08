@@ -11,13 +11,14 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { format, parse, isValid } from "date-fns";
 import { ja } from "date-fns/locale";
 import { CalendarIcon, ArrowLeft, CheckCircle2, Phone, MapPin, MessageCircle } from "lucide-react";
-import { cn } from "@/lib/utils";
+
 import Image from "next/image";
 import { createClient } from "@/lib/supabase/client";
 import { createReservation, getDailyAvailability } from "@/app/actions/reserve";
 import { getClinicHolidays, type ClinicHoliday } from "@/app/actions/holidays";
 import { useSearchParams } from "next/navigation";
 import { getTimeSlots, isDateWithinAllowedRange } from "@/lib/time-slots";
+import { toast } from "sonner";
 
 function ReserveContent() {
   const searchParams = useSearchParams();
@@ -29,11 +30,9 @@ function ReserveContent() {
     return isValid(parsed) ? parsed : undefined;
   })() : undefined;
 
-  const [mounted, setMounted] = useState(false);
   const [date, setDate] = useState<Date | undefined>(undefined);
 
   useEffect(() => {
-    setMounted(true);
     if (initialDate) setDate(initialDate);
   }, []);
 
@@ -46,6 +45,7 @@ function ReserveContent() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
   const [isWaitingResult, setIsWaitingResult] = useState(false);
+  const [requiresQuestionnaire, setRequiresQuestionnaire] = useState(false);
   const [clinicHolidays, setClinicHolidays] = useState<ClinicHoliday[]>([]);
 
   useEffect(() => {
@@ -88,14 +88,19 @@ function ReserveContent() {
     e.preventDefault();
     if (!date || !time) return;
 
+    if (!name.trim()) {
+      toast.error("お名前を入力してください");
+      return;
+    }
+
     if (visitType === "new" && !phone) {
-      alert("初診の場合は電話番号の入力が必要です。");
+      toast.error("初診の場合は電話番号の入力が必要です");
       return;
     }
 
     const availableSlots = getTimeSlots(date);
     if (!availableSlots.includes(time)) {
-      alert("選択された時間は予約できません。");
+      toast.error("選択された時間は予約できません。別の時間を選択してください");
       return;
     }
 
@@ -116,10 +121,11 @@ function ReserveContent() {
         setIsWaitingResult(result.isWaiting || false);
         setIsSuccess(true);
       } else {
-        alert(result.error || "エラーが発生しました");
+        if ((result as any).requiresQuestionnaire || (result as any).requiresQuestionnaire) setRequiresQuestionnaire(true);
+        toast.error(result.error || "エラーが発生しました");
       }
     } catch (error) {
-      alert("送信エラーが発生しました");
+      toast.error("送信エラーが発生しました。しばらく経ってから再度お試しください");
     } finally {
       setIsSubmitting(false);
     }
@@ -169,7 +175,7 @@ function ReserveContent() {
 
   if (!date || !time) {
     return (
-      <div className="min-h-screen bg-[#0F172A] flex flex-col items-center justify-center p-4">
+      <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center p-4 gap-4">
         <div className="max-w-md w-full bg-white/5 backdrop-blur-2xl p-10 rounded-[3rem] shadow-2xl border border-white/10 text-center">
           <div className="relative w-48 h-20 mx-auto mb-8">
             <Image src="/images/logo-white.png" alt="ボール接骨院" fill className="object-contain" />
@@ -180,12 +186,24 @@ function ReserveContent() {
             <Link href="/reserve/calendar">カレンダーで空きを確認</Link>
           </Button>
         </div>
+        {/* 初めての方向け */}
+        <div className="max-w-md w-full bg-white/5 border border-white/10 rounded-[2rem] p-6 text-center space-y-3">
+          <p className="text-blue-100/50 text-xs font-bold uppercase tracking-widest">初めてオンライン予約をご希望の方</p>
+          <p className="text-white font-bold text-sm">アンケートにご協力ください</p>
+          <p className="text-blue-100/40 text-xs">お名前・電話番号・誕生月などをご登録いただくと、LINE登録後にオンライン予約が可能になります。誕生月クーポンなどの特典もご利用いただけます。</p>
+          <Link
+            href="/questionnaire"
+            className="inline-flex w-full items-center justify-center bg-white/10 hover:bg-white/20 border border-white/20 text-white font-bold py-3 px-4 rounded-2xl transition-all gap-2 text-sm"
+          >
+            📋 アンケートに回答して登録する
+          </Link>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-[#0F172A] text-slate-200">
+    <div className="min-h-screen bg-slate-900 text-slate-200" data-dark-page>
       <div className="relative max-w-4xl mx-auto py-12 px-4 md:px-8">
         <div className="flex flex-col items-center mb-12">
           <div className="relative w-56 h-24 mb-4">
@@ -325,9 +343,26 @@ function ReserveContent() {
                   <p>こちらは仮予約です。院長がLINEにて確認後、予約確定のご連絡をいたします。</p>
                 </div>
 
-                <Button type="submit" disabled={!visitType || isSubmitting} className="w-full h-20 text-xl font-black rounded-3xl bg-blue-600 hover:bg-blue-500 text-white disabled:opacity-40">
+                <Button type="submit" disabled={!visitType || !name.trim() || isSubmitting} className="w-full h-20 text-xl font-black rounded-3xl bg-blue-600 hover:bg-blue-500 text-white disabled:opacity-40">
                   {isSubmitting ? "送信中..." : "仮予約を申し込む"}
                 </Button>
+
+                {requiresQuestionnaire && (
+                  <div className="p-5 bg-blue-500/10 border border-blue-500/30 rounded-2xl space-y-4">
+                    <p className="text-blue-200 font-bold text-sm">
+                      初めてオンライン予約をご希望の方は、先にアンケートへのご回答をお願いします
+                    </p>
+                    <p className="text-blue-100/60 text-xs leading-relaxed">
+                      アンケートにご回答いただくとすぐにオンライン予約が可能になります。1分程度で完了します。
+                    </p>
+                    <Link
+                      href="/questionnaire"
+                      className="inline-flex w-full items-center justify-center bg-blue-600 hover:bg-blue-500 text-white font-bold py-4 px-4 rounded-2xl transition-all gap-2 text-sm"
+                    >
+                      📋 アンケートに回答して予約に進む
+                    </Link>
+                  </div>
+                )}
               </form>
             </div>
           </div>

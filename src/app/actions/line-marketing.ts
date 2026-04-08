@@ -104,7 +104,7 @@ export async function sendAppointmentReminders(testLineId: string | null = null)
 
        // --- 実際の送信処理 ---
        const settings = await getClinicSettings();
-       const channelToken = settings?.line_channel_access_token || await getLineAccessToken();
+       const channelToken = settings?.line_channel_access_token || await getLineAccessToken() || process.env.LINE_CHANNEL_ACCESS_TOKEN;
        const targetId = effectiveTestId || customer.line_user_id;
 
        if (channelToken && targetId) {
@@ -143,7 +143,7 @@ export async function sendAppointmentReminders(testLineId: string | null = null)
       const dummyMsg = `テストユーザー様\n\nこんにちは！ボール接骨院です。\n本日 12:00 から予約を頂いております。(テスト配信)`;
       debugLogs.push(`【テスト送信】\n${dummyMsg}`);
       
-      const channelToken = await getLineAccessToken();
+      const channelToken = await getLineAccessToken() || process.env.LINE_CHANNEL_ACCESS_TOKEN;
       if (channelToken && effectiveTestId) {
          try {
            const res = await fetch('https://api.line.me/v2/bot/message/push', {
@@ -182,91 +182,249 @@ export async function sendAppointmentReminders(testLineId: string | null = null)
 }
 
 /**
- * 2. 指定した誕生月の顧客にクーポンを「送信」するモック処理
+ * 2. 指定した誕生月の顧客にクーポンを送信
  */
 export async function sendBirthdayCoupons(month: number) {
   await checkAdminAuth();
   const supabase = await getSupabase();
-  // 指定した誕生月のデータを取得
+
   const { data: customers, error } = await supabase
     .from("customers")
     .select("name, birth_month, line_user_id")
-    .eq("birth_month", month);
+    .eq("birth_month", month)
+    .not("line_user_id", "is", null);
 
-  if (error) {
-    throw new Error("顧客データの取得に失敗しました: " + error.message);
-  }
+  if (error) throw new Error("顧客データの取得に失敗しました: " + error.message);
 
-  const sentTo = [];
+  const channelToken = await getLineAccessToken() || process.env.LINE_CHANNEL_ACCESS_TOKEN;
+  const sentTo: string[] = [];
+  const skipped: string[] = [];
+  const debugLogs: string[] = [];
 
   for (const customer of customers || []) {
-    sentTo.push(customer.name);
+    if (!customer.line_user_id) { skipped.push(customer.name); continue; }
+
+    const msg =
+      `🎂 ${customer.name}様、お誕生月おめでとうございます！\n\n` +
+      `いつもボール接骨院をご利用いただきありがとうございます😊\n\n` +
+      `今月のお誕生月にちなんで\n` +
+      `━━━━━━━━━━\n` +
+      `　誕生月割引クーポン 💝\n` +
+      `　　施術料金 500円OFF\n` +
+      `━━━━━━━━━━\n` +
+      `をプレゼントします！\n\n` +
+      `有効期限：今月末まで\n` +
+      `ご来院時にスタッフへこのメッセージをご提示ください📱\n\n` +
+      `素敵な誕生月をお過ごしください🌸\nボール接骨院`;
+
+    debugLogs.push(`【${customer.name}様】\n${msg}`);
+
+    if (channelToken) {
+      try {
+        const res = await fetch("https://api.line.me/v2/bot/message/push", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${channelToken}` },
+          body: JSON.stringify({ to: customer.line_user_id, messages: [{ type: "text", text: msg }] }),
+        });
+        if (res.ok) {
+          sentTo.push(customer.name);
+          debugLogs[debugLogs.length - 1] += "\n(→ 送信: 成功)";
+        } else {
+          const err = await res.json();
+          debugLogs[debugLogs.length - 1] += `\n(→ 送信失敗: ${JSON.stringify(err)})`;
+        }
+      } catch (e) {
+        debugLogs[debugLogs.length - 1] += `\n(→ エラー: ${e})`;
+      }
+    } else {
+      sentTo.push(customer.name);
+      debugLogs[debugLogs.length - 1] += "\n(→ シミュレーションのみ)";
+    }
   }
 
-  // DBのデータがない場合のフォールバック（デモ表示用）
-  if (sentTo.length === 0) {
-    sentTo.push(`テスト患者A (${month}月生)`);
-    sentTo.push(`テスト患者B (${month}月生)`);
-    sentTo.push(`テスト患者C (${month}月生)`);
-  }
-
-  return {
-    success: true,
-    count: sentTo.length,
-    sentTo: sentTo
-  };
+  return { success: true, count: sentTo.length, sentTo, skipped, debugLogs };
 }
 
 /**
- * 3. 毎月の10%抽選会を「実施」するモック処理
+ * 2b. 女性限定キャンペーン送信
+ */
+export async function sendWomenOnlyCampaign(campaignMessage: string) {
+  await checkAdminAuth();
+  const supabase = await getSupabase();
+
+  const { data: customers, error } = await supabase
+    .from("customers")
+    .select("name, gender, line_user_id")
+    .eq("gender", "female")
+    .not("line_user_id", "is", null);
+
+  if (error) throw new Error("顧客データの取得に失敗しました: " + error.message);
+
+  const channelToken = await getLineAccessToken() || process.env.LINE_CHANNEL_ACCESS_TOKEN;
+  const sentTo: string[] = [];
+  const debugLogs: string[] = [];
+
+  for (const customer of customers || []) {
+    if (!customer.line_user_id) continue;
+
+    const msg = campaignMessage
+      ? campaignMessage.replace("{name}", customer.name)
+      : `${customer.name}様\n\n女性限定キャンペーンのお知らせです！\n\nボール接骨院では女性患者様限定の特別キャンペーンを実施中です✨\n\n詳しくはスタッフまでお気軽にお問い合わせください😊\nボール接骨院`;
+
+    debugLogs.push(`【${customer.name}様】\n${msg}`);
+
+    if (channelToken) {
+      try {
+        const res = await fetch("https://api.line.me/v2/bot/message/push", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${channelToken}` },
+          body: JSON.stringify({ to: customer.line_user_id, messages: [{ type: "text", text: msg }] }),
+        });
+        if (res.ok) {
+          sentTo.push(customer.name);
+          debugLogs[debugLogs.length - 1] += "\n(→ 送信: 成功)";
+        } else {
+          const err = await res.json();
+          debugLogs[debugLogs.length - 1] += `\n(→ 送信失敗: ${JSON.stringify(err)})`;
+        }
+      } catch (e) {
+        debugLogs[debugLogs.length - 1] += `\n(→ エラー: ${e})`;
+      }
+    } else {
+      sentTo.push(customer.name);
+      debugLogs[debugLogs.length - 1] += "\n(→ シミュレーションのみ)";
+    }
+  }
+
+  return { success: true, count: sentTo.length, sentTo, debugLogs };
+}
+
+/**
+ * 3. 来院済み・LINE連携済み患者を対象にした抽選会
+ *    当選者にはLINEでクーポンメッセージを送信する
  */
 export async function runMonthlyLottery() {
   await checkAdminAuth();
   const supabase = await getSupabase();
-  // 全顧客の中の一部を対象とする（デモとして最大50件）
-  const { data: customers, error } = await supabase
-    .from("customers")
-    .select("name, line_user_id")
-    .limit(50);
+
+  // LINE連携済み かつ 来院実績あり（confirmed）の顧客を取得
+  const { data: appointments, error } = await supabase
+    .from("appointments")
+    .select("customers(id, name, line_user_id)")
+    .eq("status", "confirmed")
+    .not("customers", "is", null);
 
   if (error) {
-    throw new Error("顧客データの取得に失敗しました: " + error.message);
+    throw new Error("来院データの取得に失敗しました: " + error.message);
   }
 
-  let baseCustomers = customers || [];
+  // 重複排除・LINE未連携を除外
+  const seen = new Set<string>();
+  const eligibleCustomers: { id: string; name: string; line_user_id: string }[] = [];
 
-  // 顧客データが空の場合はダミーを30人生成する
-  if (baseCustomers.length === 0) {
-    for (let i = 1; i <= 30; i++) {
-       baseCustomers.push({ name: `テスト患者${i}`, line_user_id: `dummy_${i}` });
+  for (const apt of appointments || []) {
+    const c = Array.isArray(apt.customers) ? apt.customers[0] : apt.customers;
+    if (c && c.line_user_id && !seen.has(c.id)) {
+      seen.add(c.id);
+      eligibleCustomers.push(c as { id: string; name: string; line_user_id: string });
     }
   }
 
-  const totalCount = baseCustomers.length;
-  const winners = [];
+  const totalCount = eligibleCustomers.length;
+  const winners: string[] = [];
+  const losers: string[] = [];
 
-  // 各顧客に対して 10% (=0.1) の確率で当選判定
-  for (const customer of baseCustomers) {
-    const randomValue = Math.random(); // 0.0 ~ 1.0
-    if (randomValue <= 0.10) {
-       winners.push(customer.name);
-       // LINEで「当たり」メッセージを送信する処理
+  const channelToken = await getLineAccessToken() || process.env.LINE_CHANNEL_ACCESS_TOKEN;
+
+  for (const customer of eligibleCustomers) {
+    const isWinner = Math.random() <= 0.10;
+
+    if (isWinner) {
+      winners.push(customer.name);
+      const winMsg =
+        `🎉 やったー！当たり！！\n\n` +
+        `いつもボール接骨院をご利用いただきありがとうございます😊\n\n` +
+        `今月の来院者限定抽選で【当選】しました🎊\n\n` +
+        `次回ご来院時に施術料金から\n` +
+        `━━━━━━━━━━\n` +
+        `　　500円引き 🙌\n` +
+        `━━━━━━━━━━\n` +
+        `させていただきます！\n\n` +
+        `有効期限は今月末まで。\n` +
+        `スタッフにこのメッセージを見せてください📱\n\n` +
+        `また身体のメンテナンス、お待ちしてます💪\nボール接骨院`;
+
+      if (channelToken) {
+        try {
+          await fetch("https://api.line.me/v2/bot/message/push", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${channelToken}`,
+            },
+            body: JSON.stringify({
+              to: customer.line_user_id,
+              messages: [{ type: "text", text: winMsg }],
+            }),
+          });
+        } catch (e) {
+          console.error(`LINE送信エラー（当選）${customer.name}:`, e);
+        }
+      }
     } else {
-       // LINEで「はずれ」メッセージを送信する処理
+      losers.push(customer.name);
+      const loseMsg =
+        `いつもボール接骨院へのご来院ありがとうございます！\n\n` +
+        `今月の来院者限定抽選の結果は…\n\n` +
+        `残念、今回はハズレでした😭\n\n` +
+        `でも来月またチャレンジできますよ！\n` +
+        `身体のケア、引き続き一緒に頑張りましょう💪\n\n` +
+        `またのご来院をお待ちしています🙏\nボール接骨院`;
+
+      if (channelToken) {
+        try {
+          await fetch("https://api.line.me/v2/bot/message/push", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${channelToken}`,
+            },
+            body: JSON.stringify({
+              to: customer.line_user_id,
+              messages: [{ type: "text", text: loseMsg }],
+            }),
+          });
+        } catch (e) {
+          console.error(`LINE送信エラー（落選）${customer.name}:`, e);
+        }
+      }
     }
   }
 
-  // 確率の問題で1人も当たらない場合を見栄え良くするため、強制的に1人だけは当てる
-  if (winners.length === 0 && totalCount > 0) {
-      winners.push(baseCustomers[0].name);
+  // 対象者が0人の場合
+  if (totalCount === 0) {
+    return {
+      success: true,
+      target: "来院済み・LINE連携済みの患者",
+      totalCount: 0,
+      winnerCount: 0,
+      winners: [],
+      note: "対象者がいません。患者さんにLINEで予約番号を送ってもらうと紐づきが増えます。",
+    };
+  }
+
+  // 確率の都合で誰も当たらなかった場合は1名強制当選
+  if (winners.length === 0 && eligibleCustomers.length > 0) {
+    const lucky = eligibleCustomers[Math.floor(Math.random() * eligibleCustomers.length)];
+    winners.push(lucky.name);
   }
 
   return {
     success: true,
-    target: "全員",
-    totalCount: totalCount,
+    target: "来院済み・LINE連携済みの患者",
+    totalCount,
     winnerCount: winners.length,
-    winners: winners
+    winners,
   };
 }
 

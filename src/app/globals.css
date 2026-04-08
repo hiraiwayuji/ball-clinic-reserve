@@ -127,3 +127,11 @@
     @apply font-sans;
   }
 }
+
+/* 黒基調ページはhtml/bodyも黒背景にしてオーバースクロール時の白抜けを防ぐ */
+html:has([data-dark-page]) {
+  background-color: #0f172a;
+}
+body:has([data-dark-page]) {
+  background-color: #0f172a;
+}

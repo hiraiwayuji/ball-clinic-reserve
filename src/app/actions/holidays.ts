@@ -15,17 +15,20 @@ export type ClinicHoliday = {
   created_at: string;
 };
 
-// 1. 休診日一覧を取得
-export async function getClinicHolidays(): Promise<ClinicHoliday[]> {
+const DEFAULT_CLINIC_ID = '00000000-0000-0000-0000-000000000001';
+
+// 1. 休診日一覧を取得（患者向けページからも呼ばれるためデフォルトIDを使用）
+export async function getClinicHolidays(clinicId: string = DEFAULT_CLINIC_ID): Promise<ClinicHoliday[]> {
   noStore();
   const supabase = await getSupabase();
   if (!supabase) return [];
-  
+
   const { data, error } = await supabase
     .from("clinic_holidays")
     .select("*")
+    .eq("clinic_id", clinicId)
     .order("date", { ascending: true });
-    
+
   if (error) {
     console.error("Failed to fetch holidays:", error);
     return [];
@@ -36,7 +39,7 @@ export async function getClinicHolidays(): Promise<ClinicHoliday[]> {
 // 2. 指定した日付（複数）を休診日として追加・削除する (Toggle処理)
 // ※ プロトタイプ用：単一日付を確実に追加/削除する
 export async function toggleClinicHoliday(dateStr: string, isAdding: boolean, description?: string): Promise<{ success: boolean; error?: string }> {
-  await checkAdminAuth();
+  const { clinicId } = await checkAdminAuth();
   const supabase = await getSupabase();
   if (!supabase) return { success: false, error: "Database not configured" };
 
@@ -44,11 +47,12 @@ export async function toggleClinicHoliday(dateStr: string, isAdding: boolean, de
     if (isAdding) {
       const { error } = await supabase
         .from("clinic_holidays")
-        .insert([{ 
-          date: dateStr, 
-          description: description || "休診日"
+        .insert([{
+          date: dateStr,
+          description: description || "休診日",
+          clinic_id: clinicId,
         }]);
-        
+
       // UNIQUE制約違反の場合は既に登録済みとみなす
       if (error && error.code !== "23505") {
         throw error;
@@ -57,7 +61,8 @@ export async function toggleClinicHoliday(dateStr: string, isAdding: boolean, de
       const { error } = await supabase
         .from("clinic_holidays")
         .delete()
-        .eq("date", dateStr);
+        .eq("date", dateStr)
+        .eq("clinic_id", clinicId);
         
       if (error) throw error;
     }

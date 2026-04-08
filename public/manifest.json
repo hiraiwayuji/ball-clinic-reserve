@@ -1,0 +1,26 @@
+{
+  "name": "ボール接骨院 ファミリーカレンダー",
+  "short_name": "家族カレンダー",
+  "description": "家族みんなで使える共有カレンダー",
+  "theme_color": "#3b82f6",
+  "background_color": "#ffffff",
+  "display": "standalone",
+  "orientation": "portrait",
+  "start_url": "/family",
+  "scope": "/",
+  "lang": "ja",
+  "icons": [
+    {
+      "src": "/images/logo_symbol_main_black.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/images/logo_symbol_main_black.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

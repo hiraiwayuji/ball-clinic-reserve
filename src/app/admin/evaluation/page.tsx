@@ -1,16 +1,16 @@
 "use client";
 
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { 
-  TrendingUp, Users, Target, MessageSquare, 
-  CheckCircle2, AlertCircle, Calendar, Sparkles, Star,
-  Award, ArrowUpRight, Loader2, Save
+import {
+  TrendingUp, Users, Target, MessageSquare,
+  Calendar, Sparkles, Star,
+  Award, ArrowUpRight, Loader2, Save, Search, Pencil, Trash2, Check, X, ChevronDown, ChevronUp
 } from "lucide-react";
 import { useState, useMemo, useEffect, useCallback } from "react";
-import { getMonthlyEvaluation, saveEvaluationTargets, saveAiSuggestion } from "@/app/actions/evaluation";
+import { getMonthlyEvaluation, saveEvaluationTargets, saveAiSuggestion, getMonthDetailedBreakdown, updateCashSale, deleteCashSaleRecord, type MonthDetailedBreakdown, type DailySaleRow } from "@/app/actions/evaluation";
 import { getBusinessContext } from "@/app/actions/sales";
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
@@ -24,9 +24,7 @@ const RadarChart = ({ data }: { data: { label: string, value: number, max: numbe
 
   const points = data.map((d, i) => {
     const angle = i * angleStep - Math.PI / 2;
-    // maxが0の場合は0にする
     const safeMax = d.max === 0 ? 1 : d.max;
-    // valueがmaxを超えないようにする（最大100%の表示）
     const r = (Math.min(d.value, safeMax) / safeMax) * radius;
     return {
       x: center + r * Math.cos(angle),
@@ -36,15 +34,11 @@ const RadarChart = ({ data }: { data: { label: string, value: number, max: numbe
     };
   });
 
-  const pathData = `M ${points.map(p => `${p.x},${p.y}`).join(' L ')} Z`;
-
-  // Grid levels
   const gridLevels = [0.2, 0.4, 0.6, 0.8, 1];
 
   return (
     <div className="relative w-full aspect-square max-w-[400px] mx-auto flex items-center justify-center">
       <svg width="100%" height="100%" viewBox={`0 0 ${size} ${size}`} className="overflow-visible">
-        {/* Grids */}
         {gridLevels.map((level, idx) => (
           <polygon
             key={idx}
@@ -53,53 +47,28 @@ const RadarChart = ({ data }: { data: { label: string, value: number, max: numbe
               const r = radius * level;
               return `${center + r * Math.cos(angle)},${center + r * Math.sin(angle)}`;
             }).join(' ')}
-            fill="none"
-            stroke="#e2e8f0"
-            strokeWidth="1"
+            fill="none" stroke="#e2e8f0" strokeWidth="1"
           />
         ))}
-
-        {/* Axis Lines */}
         {data.map((_, i) => {
           const angle = i * angleStep - Math.PI / 2;
           return (
-            <line
-              key={i}
-              x1={center}
-              y1={center}
-              x2={center + radius * Math.cos(angle)}
-              y2={center + radius * Math.sin(angle)}
-              stroke="#e2e8f0"
-              strokeWidth="1"
+            <line key={i} x1={center} y1={center}
+              x2={center + radius * Math.cos(angle)} y2={center + radius * Math.sin(angle)}
+              stroke="#e2e8f0" strokeWidth="1"
             />
           );
         })}
-
-        {/* Data Area */}
         {points.length > 0 && (
-          <polygon
-            points={points.map(p => `${p.x},${p.y}`).join(' ')}
-            fill="rgba(16, 185, 129, 0.2)"
-            stroke="#10b981"
-            strokeWidth="3"
+          <polygon points={points.map(p => `${p.x},${p.y}`).join(' ')}
+            fill="rgba(16, 185, 129, 0.2)" stroke="#10b981" strokeWidth="3"
             className="transition-all duration-1000"
           />
         )}
-
-        {/* Labels */}
         {data.map((d, i) => (
-          <text
-            key={i}
-            x={points[i].labelX}
-            y={points[i].labelY}
-            textAnchor="middle"
-            className="text-[10px] font-bold fill-slate-500"
-          >
-            {d.label}
-          </text>
+          <text key={i} x={points[i].labelX} y={points[i].labelY} textAnchor="middle"
+            className="text-[10px] font-bold fill-slate-500">{d.label}</text>
         ))}
-
-        {/* Data Points */}
         {points.map((p, i) => (
           <circle key={i} cx={p.x} cy={p.y} r="4" fill="#10b981" />
         ))}
@@ -108,19 +77,350 @@ const RadarChart = ({ data }: { data: { label: string, value: number, max: numbe
   );
 };
 
+// --- 明細パネル ---
+function DetailPanel({ year, month, onClose }: { year: number; month: number; onClose: () => void }) {
+  const [data, setData] = useState<MonthDetailedBreakdown | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [tab, setTab] = useState<"sales" | "insurance" | "visits">("sales");
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editValues, setEditValues] = useState<{ customer_name: string; treatment_fee: string; memo: string }>({ customer_name: "", treatment_fee: "", memo: "" });
+  const [saving, setSaving] = useState(false);
+  const [visitView, setVisitView] = useState<"daily" | "detail">("daily");
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    const res = await getMonthDetailedBreakdown(year, month);
+    if (res.success && res.data) setData(res.data);
+    else toast.error(res.error ?? "取得失敗");
+    setLoading(false);
+  }, [year, month]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const startEdit = (row: DailySaleRow) => {
+    setEditingId(row.id);
+    setEditValues({ customer_name: row.customer_name, treatment_fee: String(row.treatment_fee), memo: row.memo });
+  };
+
+  const saveEdit = async (id: string) => {
+    setSaving(true);
+    const res = await updateCashSale(id, {
+      customer_name: editValues.customer_name,
+      treatment_fee: parseInt(editValues.treatment_fee, 10),
+      memo: editValues.memo,
+    });
+    if (res.success) { toast.success("更新しました"); setEditingId(null); load(); }
+    else toast.error(res.error ?? "更新失敗");
+    setSaving(false);
+  };
+
+  const deleteRow = async (id: string) => {
+    if (!confirm("この売上を削除しますか？")) return;
+    const res = await deleteCashSaleRecord(id);
+    if (res.success) { toast.success("削除しました"); load(); }
+    else toast.error(res.error ?? "削除失敗");
+  };
+
+  const toggleCashSaleVisit = async (id: string, current: boolean) => {
+    const res = await updateCashSale(id, { is_first_visit: !current });
+    if (res.success) { toast.success("更新しました"); load(); }
+    else toast.error(res.error ?? "更新失敗");
+  };
+
+  const fmtDate = (d: string) => {
+    const dt = new Date(d);
+    const jst = new Date(dt.getTime() + (d.includes("+") ? 0 : 9 * 60 * 60 * 1000));
+    return `${jst.getMonth() + 1}/${jst.getDate()}(${["日","月","火","水","木","金","土"][jst.getDay()]})`;
+  };
+
+  const fmtDateTime = (d: string) => {
+    const dt = new Date(d);
+    const jst = new Date(dt.getTime());
+    return new Date(jst).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo", month: "numeric", day: "numeric", weekday: "short", hour: "2-digit", minute: "2-digit" });
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex">
+      <div className="fixed inset-0 bg-black/40" onClick={onClose} />
+      <div className="relative ml-auto w-full max-w-2xl h-full bg-white shadow-2xl flex flex-col overflow-hidden">
+        {/* Header */}
+        <div className="px-6 py-4 border-b flex items-center justify-between bg-slate-900 text-white shrink-0">
+          <div>
+            <h2 className="font-bold text-lg">{year}年{month}月 数字の根拠・明細</h2>
+            <p className="text-slate-400 text-xs mt-0.5">確認・編集できます</p>
+          </div>
+          <button onClick={onClose} className="text-slate-400 hover:text-white transition-colors">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* Tabs */}
+        <div className="flex border-b shrink-0">
+          {([
+            { key: "sales", label: `自費売上`, sub: data ? `¥${data.cashTotal.toLocaleString()} / ${data.cashSales.length}件` : "" },
+            { key: "insurance", label: "保険入金", sub: data ? `¥${data.insuranceTotal.toLocaleString()} / ${data.insurancePayments.length}件` : "" },
+            { key: "visits", label: "来院履歴", sub: data ? `${data.appointments.length}件` : "" },
+          ] as const).map((t) => (
+            <button key={t.key} onClick={() => setTab(t.key)}
+              className={`flex-1 py-3 text-sm font-bold transition-colors border-b-2 ${tab === t.key ? "border-emerald-500 text-emerald-700" : "border-transparent text-slate-500 hover:text-slate-700"}`}
+            >
+              {t.label}
+              {t.sub && <span className="block text-xs font-normal text-slate-400">{t.sub}</span>}
+            </button>
+          ))}
+        </div>
+
+        {/* Body */}
+        <div className="flex-1 overflow-y-auto">
+          {loading ? (
+            <div className="flex justify-center items-center h-40 text-slate-400"><Loader2 className="w-6 h-6 animate-spin" /></div>
+          ) : !data ? (
+            <div className="p-6 text-slate-400 text-sm text-center">データ取得失敗</div>
+          ) : tab === "sales" ? (
+            <div>
+              {data.cashSales.length === 0 ? (
+                <div className="p-6 text-center text-slate-400 text-sm">この月の自費売上データはありません</div>
+              ) : (
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="bg-slate-50 text-xs text-slate-500 font-bold uppercase">
+                      <th className="px-4 py-2 text-left">日付</th>
+                      <th className="px-4 py-2 text-left">患者名</th>
+                      <th className="px-4 py-2 text-right">金額</th>
+                      <th className="px-4 py-2 text-left">備考</th>
+                      <th className="px-4 py-2" />
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-50">
+                    {data.cashSales.map((row) => (
+                      <tr key={row.id} className={`hover:bg-slate-50 ${editingId === row.id ? "bg-yellow-50" : ""}`}>
+                        {editingId === row.id ? (
+                          <>
+                            <td className="px-4 py-2 text-slate-500 text-xs whitespace-nowrap">{fmtDate(row.sale_date)}</td>
+                            <td className="px-4 py-2">
+                              <input value={editValues.customer_name} onChange={(e) => setEditValues(v => ({ ...v, customer_name: e.target.value }))}
+                                className="w-full border rounded px-2 py-1 text-sm" />
+                            </td>
+                            <td className="px-4 py-2">
+                              <input type="number" value={editValues.treatment_fee} onChange={(e) => setEditValues(v => ({ ...v, treatment_fee: e.target.value }))}
+                                className="w-24 border rounded px-2 py-1 text-sm text-right" />
+                            </td>
+                            <td className="px-4 py-2">
+                              <input value={editValues.memo} onChange={(e) => setEditValues(v => ({ ...v, memo: e.target.value }))}
+                                className="w-full border rounded px-2 py-1 text-sm" />
+                            </td>
+                            <td className="px-4 py-2">
+                              <div className="flex gap-1">
+                                <button onClick={() => saveEdit(row.id)} disabled={saving}
+                                  className="p-1 rounded bg-emerald-500 hover:bg-emerald-600 text-white transition-colors">
+                                  <Check className="w-3.5 h-3.5" />
+                                </button>
+                                <button onClick={() => setEditingId(null)}
+                                  className="p-1 rounded bg-slate-200 hover:bg-slate-300 text-slate-600 transition-colors">
+                                  <X className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            </td>
+                          </>
+                        ) : (
+                          <>
+                            <td className="px-4 py-2 text-slate-500 text-xs whitespace-nowrap">{fmtDate(row.sale_date)}</td>
+                            <td className="px-4 py-2 font-medium text-slate-800">{row.customer_name}</td>
+                            <td className="px-4 py-2 text-right font-bold text-slate-900">¥{row.treatment_fee.toLocaleString()}</td>
+                            <td className="px-4 py-2 text-xs text-slate-400">{row.memo}</td>
+                            <td className="px-4 py-2">
+                              <div className="flex gap-1">
+                                <button onClick={() => startEdit(row)}
+                                  className="p-1 rounded text-slate-400 hover:text-blue-500 hover:bg-blue-50 transition-colors">
+                                  <Pencil className="w-3.5 h-3.5" />
+                                </button>
+                                <button onClick={() => deleteRow(row.id)}
+                                  className="p-1 rounded text-slate-400 hover:text-red-500 hover:bg-red-50 transition-colors">
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            </td>
+                          </>
+                        )}
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    <tr className="bg-slate-50 font-bold">
+                      <td className="px-4 py-3 text-xs text-slate-500" colSpan={2}>合計 {data.cashSales.length}件</td>
+                      <td className="px-4 py-3 text-right text-emerald-700">¥{data.cashTotal.toLocaleString()}</td>
+                      <td colSpan={2} />
+                    </tr>
+                  </tfoot>
+                </table>
+              )}
+            </div>
+          ) : tab === "insurance" ? (
+            <div>
+              {data.insurancePayments.length === 0 ? (
+                <div className="p-6 text-center text-slate-400 text-sm">この月の保険入金データはありません</div>
+              ) : (
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="bg-slate-50 text-xs text-slate-500 font-bold uppercase">
+                      <th className="px-4 py-2 text-left">保険種別</th>
+                      <th className="px-4 py-2 text-right">金額</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-50">
+                    {data.insurancePayments.map((row) => (
+                      <tr key={row.id} className="hover:bg-slate-50">
+                        <td className="px-4 py-3 font-medium text-slate-800">{row.insurance_name}</td>
+                        <td className="px-4 py-3 text-right font-bold text-slate-900">¥{row.amount.toLocaleString()}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    <tr className="bg-slate-50 font-bold">
+                      <td className="px-4 py-3 text-xs text-slate-500">{data.insurancePayments.length}件</td>
+                      <td className="px-4 py-3 text-right text-blue-700">¥{data.insuranceTotal.toLocaleString()}</td>
+                    </tr>
+                  </tfoot>
+                </table>
+              )}
+              <p className="px-4 pb-4 text-xs text-slate-400">※保険入金の編集は「保険入金」メニューから行ってください</p>
+            </div>
+          ) : (
+            <div>
+              {/* サブタブ */}
+              <div className="flex border-b px-4 gap-4 text-sm shrink-0">
+                {(["daily", "detail"] as const).map(v => (
+                  <button key={v} onClick={() => setVisitView(v)}
+                    className={`py-2 font-medium border-b-2 transition-colors ${visitView === v ? "border-slate-900 text-slate-900" : "border-transparent text-slate-400 hover:text-slate-600"}`}>
+                    {v === "daily" ? "日別集計" : "明細一覧"}
+                  </button>
+                ))}
+              </div>
+
+              {data.cashSales.length === 0 ? (
+                <div className="p-6 text-center text-slate-400 text-sm">この月の来院データはありません</div>
+              ) : visitView === "daily" ? (() => {
+                // 日別集計
+                const byDate: Record<string, { total: number; first: number }> = {};
+                for (const row of data.cashSales) {
+                  if (!byDate[row.sale_date]) byDate[row.sale_date] = { total: 0, first: 0 };
+                  byDate[row.sale_date].total++;
+                  if (row.is_first_visit) byDate[row.sale_date].first++;
+                }
+                const days = Object.keys(byDate).sort();
+                const avg = days.length > 0 ? (data.cashSales.length / days.length).toFixed(1) : "0";
+                const maxCount = Math.max(...days.map(d => byDate[d].total), 1);
+                return (
+                  <div>
+                    {/* 平均バナー */}
+                    <div className="mx-4 mt-3 mb-2 p-3 bg-emerald-50 rounded-lg flex items-center justify-between">
+                      <span className="text-xs text-emerald-700 font-medium">1日平均来院数</span>
+                      <span className="text-2xl font-bold text-emerald-600">{avg}<span className="text-sm font-normal ml-1">人/日</span></span>
+                      <span className="text-xs text-slate-400">（{days.length}営業日 / 合計{data.cashSales.length}人）</span>
+                    </div>
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="bg-slate-50 text-xs text-slate-500 font-bold">
+                          <th className="px-4 py-2 text-left">日付</th>
+                          <th className="px-4 py-2 text-right">来院数</th>
+                          <th className="px-4 py-2 text-right">初診</th>
+                          <th className="px-4 py-2 w-24">グラフ</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-50">
+                        {days.map(d => (
+                          <tr key={d} className="hover:bg-slate-50">
+                            <td className="px-4 py-2 text-slate-700 whitespace-nowrap">{fmtDate(d)}</td>
+                            <td className="px-4 py-2 text-right font-bold text-slate-900">{byDate[d].total}人</td>
+                            <td className="px-4 py-2 text-right text-amber-600 text-xs">{byDate[d].first > 0 ? `初診${byDate[d].first}` : "—"}</td>
+                            <td className="px-4 py-2">
+                              <div className="flex items-center gap-1">
+                                <div className="h-4 rounded bg-emerald-400 transition-all" style={{ width: `${(byDate[d].total / maxCount) * 72}px` }} />
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                      <tfoot>
+                        <tr className="bg-slate-50 text-xs text-slate-500 font-bold">
+                          <td className="px-4 py-3">合計 {days.length}日</td>
+                          <td className="px-4 py-3 text-right">{data.cashSales.length}人</td>
+                          <td className="px-4 py-3 text-right text-amber-600">{data.cashSales.filter((s: any) => s.is_first_visit).length}名</td>
+                          <td />
+                        </tr>
+                      </tfoot>
+                    </table>
+                  </div>
+                );
+              })() : (
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="bg-slate-50 text-xs text-slate-500 font-bold uppercase">
+                      <th className="px-4 py-2 text-left">日付</th>
+                      <th className="px-4 py-2 text-left">患者名</th>
+                      <th className="px-4 py-2 text-center">初診</th>
+                      <th className="px-4 py-2 text-center">編集</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-50">
+                    {data.cashSales.map((row: any) => (
+                      <tr key={row.id} className="hover:bg-slate-50">
+                        <td className="px-4 py-2.5 text-xs text-slate-500 whitespace-nowrap">{fmtDate(row.sale_date)}</td>
+                        <td className="px-4 py-2.5 font-medium text-slate-800">
+                          {editingId === row.id ? (
+                            <input className="border rounded px-2 py-1 text-sm w-full" value={editValues.customer_name}
+                              onChange={e => setEditValues(v => ({ ...v, customer_name: e.target.value }))} autoFocus />
+                          ) : row.customer_name}
+                        </td>
+                        <td className="px-4 py-2.5 text-center">
+                          <button onClick={() => toggleCashSaleVisit(row.id, row.is_first_visit ?? false)}
+                            className={`px-2 py-0.5 rounded-full text-xs font-bold transition-colors ${row.is_first_visit ? "bg-amber-100 text-amber-700 hover:bg-amber-200" : "bg-slate-100 text-slate-500 hover:bg-slate-200"}`}>
+                            {row.is_first_visit ? "初診" : "再診"}
+                          </button>
+                        </td>
+                        <td className="px-4 py-2.5 text-center">
+                          {editingId === row.id ? (
+                            <div className="flex gap-1 justify-center">
+                              <button onClick={async () => { setSaving(true); const res = await updateCashSale(row.id, { customer_name: editValues.customer_name }); if (res.success) { toast.success("更新しました"); setEditingId(null); load(); } else toast.error(res.error ?? "更新失敗"); setSaving(false); }} disabled={saving} className="text-emerald-600 hover:text-emerald-700"><Check className="w-4 h-4" /></button>
+                              <button onClick={() => setEditingId(null)} className="text-slate-400 hover:text-slate-600"><X className="w-4 h-4" /></button>
+                            </div>
+                          ) : (
+                            <button onClick={() => { setEditingId(row.id); setEditValues({ customer_name: row.customer_name, treatment_fee: String(row.treatment_fee), memo: row.memo }); }} className="text-slate-400 hover:text-slate-600"><Pencil className="w-3.5 h-3.5" /></button>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    <tr className="bg-slate-50 font-bold text-xs text-slate-500">
+                      <td className="px-4 py-3" colSpan={2}>合計 {data.cashSales.length}件（初診 {data.cashSales.filter((s: any) => s.is_first_visit).length}名）</td>
+                      <td colSpan={2} />
+                    </tr>
+                  </tfoot>
+                </table>
+              )}
+              <p className="px-4 py-3 text-xs text-slate-400">※自費売上に基づきます</p>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function EvaluationPage() {
   const [activeYear, setActiveYear] = useState(new Date().getFullYear());
   const [activeMonth, setActiveMonth] = useState(new Date().getMonth() + 1);
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState<any>(null);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [isDetailOpen, setIsDetailOpen] = useState(false);
   const [isGeneratingAi, setIsGeneratingAi] = useState(false);
 
-  // Month selector options
   const monthOptions = useMemo(() => {
     const opts = [];
     const current = new Date();
-    for (let i = 0; i < 6; i++) {
+    for (let i = 0; i < 12; i++) {
       const d = new Date(current.getFullYear(), current.getMonth() - i, 1);
       opts.push({ year: d.getFullYear(), month: d.getMonth() + 1 });
     }
@@ -138,15 +438,12 @@ export default function EvaluationPage() {
     setLoading(false);
   }, [activeYear, activeMonth]);
 
-  useEffect(() => {
-    fetchData();
-  }, [fetchData]);
+  useEffect(() => { fetchData(); }, [fetchData]);
 
   const handleSaveMetrics = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const formData = new FormData(e.currentTarget);
     formData.append("month", `${activeYear}-${activeMonth.toString().padStart(2, '0')}-01`);
-
     const res = await saveEvaluationTargets(formData);
     if (res.success) {
       toast.success("目標と評価を保存しました");
@@ -160,39 +457,30 @@ export default function EvaluationPage() {
   const handleGenerateAi = async () => {
     setIsGeneratingAi(true);
     try {
-      // Get full context
-      const contextRes = await getBusinessContext();
-      if (!contextRes.success) throw new Error("コンテキストの取得に失敗");
-
-      const prompt = `
-あなたは治療院コンサルタント「経営軍師AI」です。
-以下のデータに基づき、${activeMonth}月の月間経営評価と来月への戦略を2〜3つの具体的なアクションプラン（短文箇条書き）を含む、150文字程度の短い形式で提案してください。
-
-${contextRes.context}
-`;
+      // Build prompt from already-loaded evaluation data
+      const metricsText = (metrics || []).map((m: any) =>
+        `・${m.name}: 実績 ${m.actual.toLocaleString()}${m.unit} / 目標 ${m.target.toLocaleString()}${m.unit}（達成率 ${m.score}%）`
+      ).join("\n");
+      const prompt = `${activeYear}年${activeMonth}月の経営評価と来月への戦略を2〜3つの具体的なアクションプラン（短文箇条書き）で150文字程度にまとめてください。\n\n【今月の実績】\n${metricsText}`;
 
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          messages: [{ role: "user", content: prompt }]
-        })
+        body: JSON.stringify({ message: prompt })
       });
-
-      if (!response.ok) throw new Error("APIレスポンスエラー");
-      
       const responseData = await response.json();
+      if (!response.ok) {
+        throw new Error(responseData.error || "APIレスポンスエラー");
+      }
       const aiText = responseData.response || "提案を生成できませんでした。";
-
-      // Save to DB
       const monthStr = `${activeYear}-${activeMonth.toString().padStart(2, "0")}-01`;
       await saveAiSuggestion(monthStr, aiText);
       toast.success("AI提案を生成しました");
-      fetchData();
-
-    } catch (error) {
+      // Update local state immediately without waiting for re-fetch
+      setData((prev: any) => prev ? { ...prev, evalData: { ...prev.evalData, ai_suggestions: aiText } } : prev);
+    } catch (error: any) {
       console.error(error);
-      toast.error("AI提案の生成に失敗しました");
+      toast.error(`AI提案の生成に失敗しました: ${error?.message || ""}`);
     } finally {
       setIsGeneratingAi(false);
     }
@@ -208,8 +496,6 @@ ${contextRes.context}
 
   const { targets, evalData, metrics } = data || {};
 
-  // Construct radar data from metrics
-  // Map internal metrics to Radar metrics conceptually
   const radarData = [
     { label: "売上", value: metrics?.[1]?.score || 0, max: 100 },
     { label: "集客", value: metrics?.[0]?.score || 0, max: 100 },
@@ -221,7 +507,6 @@ ${contextRes.context}
 
   const totalScore = Math.round(radarData.reduce((acc, curr) => acc + curr.value, 0) / radarData.length);
 
-  // Icon mapping helper
   const renderIcon = (index: number) => {
     if (index === 0) return <Users className="w-5 h-5 text-blue-600" />;
     if (index === 1) return <TrendingUp className="w-5 h-5 text-emerald-600" />;
@@ -246,20 +531,22 @@ ${contextRes.context}
     return "bg-slate-500";
   };
 
-
   return (
     <div className="space-y-8 animate-in fade-in pb-12">
+      {/* 明細パネル */}
+      {isDetailOpen && (
+        <DetailPanel year={activeYear} month={activeMonth} onClose={() => { setIsDetailOpen(false); fetchData(); }} />
+      )}
+
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
           <h1 className="text-3xl font-bold tracking-tight text-slate-900 border-l-4 border-emerald-600 pl-3">
             月間経営評価レポート
           </h1>
-          <p className="text-muted-foreground mt-2">
-            視覚的分析によるクリニックの健康診断
-          </p>
+          <p className="text-muted-foreground mt-2">視覚的分析によるクリニックの健康診断</p>
         </div>
-        <div className="flex items-center gap-2">
-          <select 
+        <div className="flex items-center gap-2 flex-wrap">
+          <select
             className="bg-white border rounded-md px-3 py-2 text-sm"
             value={`${activeYear}-${activeMonth}`}
             onChange={(e) => {
@@ -274,10 +561,22 @@ ${contextRes.context}
               </option>
             ))}
           </select>
-          
+
+          {/* 数字の根拠ボタン */}
+          <Button
+            variant="outline"
+            onClick={() => setIsDetailOpen(true)}
+            className="border-amber-300 text-amber-700 hover:bg-amber-50"
+          >
+            <Search className="w-4 h-4 mr-2" />
+            数字の根拠を確認・修正
+          </Button>
+
           <Dialog open={isEditModalOpen} onOpenChange={setIsEditModalOpen}>
             <DialogTrigger>
-              <Button variant="outline" type="button"><Star className="w-4 h-4 mr-2" />手動指標・目標の編集</Button>
+              <span className="inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 border border-input bg-background hover:bg-accent hover:text-accent-foreground h-10 px-4 py-2 cursor-pointer">
+                <Star className="w-4 h-4 mr-2" />目標・手動指標の編集
+              </span>
             </DialogTrigger>
             <DialogContent className="sm:max-w-[500px]">
               <DialogHeader>
@@ -312,9 +611,9 @@ ${contextRes.context}
                 </div>
                 <div className="space-y-2">
                   <Label>自己評価・振り返りコメント</Label>
-                  <textarea 
-                    name="self_evaluation" 
-                    defaultValue={evalData?.self_evaluation} 
+                  <textarea
+                    name="self_evaluation"
+                    defaultValue={evalData?.self_evaluation}
                     className="flex min-h-[80px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
                   />
                 </div>
@@ -325,12 +624,34 @@ ${contextRes.context}
         </div>
       </div>
 
+      {/* 指標サマリー（クリックで明細へ） */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        {(metrics || []).map((m: any, i: number) => (
+          <button
+            key={i}
+            onClick={() => setIsDetailOpen(true)}
+            className="bg-white rounded-xl border border-slate-100 shadow-sm p-4 text-left hover:border-amber-300 hover:shadow-md transition-all group"
+          >
+            <div className={`flex items-center gap-2 ${getMetricColor(i)} text-xs font-bold mb-2`}>
+              {renderIcon(i)}{m.name}
+            </div>
+            <div className="text-2xl font-black text-slate-900">
+              {m.unit === "円" ? `¥${m.actual.toLocaleString()}` : `${m.actual.toLocaleString()}${m.unit}`}
+            </div>
+            <div className="text-xs text-slate-400 mt-0.5">目標: {m.unit === "円" ? `¥${m.target.toLocaleString()}` : `${m.target}${m.unit}`}</div>
+            <div className="mt-2 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+              <div className={`h-full ${getMetricBg(i)} transition-all`} style={{ width: `${m.score}%` }} />
+            </div>
+            <div className="text-[10px] text-amber-600 mt-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
+              クリックして根拠を確認・修正 →
+            </div>
+          </button>
+        ))}
+      </div>
+
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        
-        {/* --- Left: Score Cards --- */}
+        {/* --- Left: Score & Radar --- */}
         <div className="lg:col-span-2 space-y-8">
-          
-          {/* Main Score & Radar */}
           <Card className="shadow-lg border-emerald-100 overflow-hidden bg-gradient-to-br from-white to-emerald-50/30">
             <div className="grid grid-cols-1 md:grid-cols-2">
               <div className="p-8 flex flex-col items-center justify-center border-b md:border-b-0 md:border-r border-emerald-100">
@@ -338,10 +659,11 @@ ${contextRes.context}
                 <div className="relative flex items-center justify-center">
                   <svg className="w-48 h-48">
                     <circle cx="96" cy="96" r="88" fill="none" stroke="#f1f5f9" strokeWidth="12" />
-                    <circle 
-                      cx="96" cy="96" r="88" fill="none" stroke={totalScore >= 80 ? "#10b981" : totalScore >= 60 ? "#f59e0b" : "#ef4444"}
-                      strokeWidth="12" strokeDasharray={2 * Math.PI * 88} 
-                      strokeDashoffset={2 * Math.PI * 88 * (1 - totalScore/100)}
+                    <circle
+                      cx="96" cy="96" r="88" fill="none"
+                      stroke={totalScore >= 80 ? "#10b981" : totalScore >= 60 ? "#f59e0b" : "#ef4444"}
+                      strokeWidth="12" strokeDasharray={2 * Math.PI * 88}
+                      strokeDashoffset={2 * Math.PI * 88 * (1 - totalScore / 100)}
                       strokeLinecap="round"
                       className="transition-all duration-1000 ease-out rotate-[-90deg] origin-center"
                     />
@@ -356,48 +678,14 @@ ${contextRes.context}
                   <span>{totalScore >= 80 ? "Excellent Progress" : totalScore >= 60 ? "Good" : "Needs Improvement"}</span>
                 </div>
               </div>
-
               <div className="p-8 h-full flex items-center justify-center min-h-[400px]">
                 <RadarChart data={radarData} />
               </div>
             </div>
           </Card>
-
-          {/* Individual Metrics */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {(metrics || []).map((m: any, i: number) => (
-              <Card key={i} className="shadow-sm border-slate-200">
-                <CardContent className="p-5">
-                  <div className="flex justify-between items-start">
-                    <div className="flex gap-3 items-center">
-                      <div className={`p-2 rounded-lg bg-slate-50 ${getMetricColor(i)}`}>
-                        {renderIcon(i)}
-                      </div>
-                      <span className="font-bold text-slate-700">{m.name}</span>
-                    </div>
-                    <div className="text-right">
-                      <span className="text-2xl font-black text-slate-900">{m.score}%</span>
-                    </div>
-                  </div>
-                  <div className="mt-4">
-                    <div className="flex justify-between text-xs text-slate-500 mb-1.5">
-                      <span>実数: {m.actual.toLocaleString()} {m.unit}</span>
-                      <span>目標: {m.target.toLocaleString()} {m.unit}</span>
-                    </div>
-                    <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
-                      <div 
-                        className={`h-full transition-all duration-1000 ${getMetricBg(i)}`} 
-                        style={{ width: `${m.score}%` }}
-                      ></div>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
         </div>
 
-        {/* --- Right: Reports & Actions --- */}
+        {/* --- Right --- */}
         <div className="space-y-6">
           <Card className="shadow-md border-slate-200 overflow-hidden">
             <CardHeader className="bg-slate-900 text-white pb-6">
@@ -414,13 +702,13 @@ ${contextRes.context}
                 <h2 className="text-5xl font-black text-slate-900 tracking-tighter">{evalData?.google_rating || "0.0"}</h2>
                 <div className="space-y-1">
                   <div className="flex gap-0.5">
-                    {[1,2,3,4,5].map(s => <Star key={s} className={`w-4 h-4 ${s <= (evalData?.google_rating || 0) ? "text-amber-400 fill-amber-400" : "text-slate-300"}`} />)}
+                    {[1, 2, 3, 4, 5].map(s => <Star key={s} className={`w-4 h-4 ${s <= (evalData?.google_rating || 0) ? "text-amber-400 fill-amber-400" : "text-slate-300"}`} />)}
                   </div>
                   <p className="text-[10px] font-bold text-slate-500 uppercase">{evalData?.google_review_count || 0} NEW REVIEWS THIS MONTH</p>
                 </div>
               </div>
               <div className="bg-emerald-50 text-emerald-800 p-4 rounded-xl text-xs font-medium border border-emerald-100">
-                口コミ数は「手動入力」から更新できます。
+                口コミ数は「目標・手動指標の編集」から更新できます。
               </div>
             </CardContent>
           </Card>
@@ -442,8 +730,7 @@ ${contextRes.context}
                   <p className="text-slate-500 italic">まだAI提案が生成されていません。</p>
                 )}
               </div>
-              
-              <Button 
+              <Button
                 onClick={handleGenerateAi}
                 disabled={isGeneratingAi}
                 className="w-full bg-slate-900 hover:bg-slate-800 mt-2"
@@ -456,25 +743,23 @@ ${contextRes.context}
 
           <Card className="shadow-sm border-slate-200">
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-bold">自己評価コメント (自動保存有)</CardTitle>
+              <CardTitle className="text-sm font-bold">自己評価コメント</CardTitle>
             </CardHeader>
             <CardContent>
               <form onSubmit={handleSaveMetrics}>
-                {/* 隠しフィールド */}
                 <input type="hidden" name="target_patients" value={targets?.target_patients || 0} />
                 <input type="hidden" name="target_income" value={targets?.target_income || 0} />
                 <input type="hidden" name="target_sns_tasks" value={targets?.target_sns_tasks || 0} />
                 <input type="hidden" name="target_new_patients" value={targets?.target_new_patients || 0} />
                 <input type="hidden" name="google_review_count" value={evalData?.google_review_count || 0} />
                 <input type="hidden" name="google_rating" value={evalData?.google_rating || 0} />
-                
-                <textarea 
+                <textarea
                   name="self_evaluation"
                   className="w-full min-h-[100px] p-3 text-xs border rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none bg-slate-50 mb-2"
                   placeholder="院長としての振り返りを記入..."
                   defaultValue={evalData?.self_evaluation}
                 />
-                <Button size="sm" type="submit" variant="secondary" className="w-full"><Save className="w-4 h-4 mr-2"/>自己評価を保存</Button>
+                <Button size="sm" type="submit" variant="secondary" className="w-full"><Save className="w-4 h-4 mr-2" />自己評価を保存</Button>
               </form>
             </CardContent>
           </Card>

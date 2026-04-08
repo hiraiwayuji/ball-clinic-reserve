@@ -19,25 +19,22 @@ export default function SettingsEditor({ initialSettings }: { initialSettings: C
   
     const handleSave = async () => {
     if (!settings) {
-      alert("settings が null です");
+      toast.error("設定が読み込まれていません");
       return;
     }
     setIsSaving(true);
     try {
-      console.log("保存開始:", settings);
       const result = await updateClinicSettings(settings);
-      console.log("保存結果:", result);
       if (result.success) {
         toast.success("設定を保存しました");
-        alert("保存に成功しました！");
         router.push("/admin/settings");
         router.refresh();
       } else {
-        alert("保存失敗: " + result.error);
+        toast.error("保存失敗: " + result.error);
       }
     } catch (err) {
       console.error("保存エラー:", err);
-      alert("例外エラー: " + err);
+      toast.error("例外エラーが発生しました");
     } finally {
       setIsSaving(false);
     }
@@ -54,8 +51,8 @@ export default function SettingsEditor({ initialSettings }: { initialSettings: C
       }),
     });
     const data = await res.json();
-    if (data.success) alert("送信成功！スマホを確認してください！");
-    else alert("失敗: " + data.error);
+    if (data.success) toast.success("送信成功！スマホを確認してください！");
+    else toast.error("失敗: " + data.error);
   };
 
   const updateField = (field: keyof ClinicSettings, value: any) => {

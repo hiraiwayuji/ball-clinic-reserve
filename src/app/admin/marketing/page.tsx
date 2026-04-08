@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Gift, BellElectric, Trophy, MessageCircle, ArrowRight, Loader2, CheckCircle2 } from "lucide-react";
+import { Gift, BellElectric, Trophy, MessageCircle, Loader2, CheckCircle2, Sparkles } from "lucide-react";
 import {
   Select,
   SelectContent,
@@ -12,7 +12,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { sendAppointmentReminders, sendBirthdayCoupons, runMonthlyLottery, sendWelcomeQuestionnaire } from "@/app/actions/line-marketing";
+import { sendAppointmentReminders, sendBirthdayCoupons, runMonthlyLottery, sendWelcomeQuestionnaire, sendWomenOnlyCampaign } from "@/app/actions/line-marketing";
 import { ClipboardList } from "lucide-react";
 
 export default function MarketingDashboardPage() {
@@ -21,6 +21,7 @@ export default function MarketingDashboardPage() {
   const [selectedMonth, setSelectedMonth] = useState<string>(new Date().getMonth() + 1 + "");
   const [testMode, setTestMode] = useState(true);
   const [testLineId, setTestLineId] = useState("");
+  const [womenMessage, setWomenMessage] = useState("");
 
   // 設定の読み込み
   useEffect(() => {
@@ -80,8 +81,25 @@ export default function MarketingDashboardPage() {
       const result = await runMonthlyLottery();
       setActionResult({ 
         type: "lottery", 
-        message: `今月の抽選会を実施しました！（送信数: ${result.totalCount}通, 当たり: ${result.winnerCount}名）`,
-        data: { winners: result.winners }
+        message: `今月の来院者限定抽選会を実施しました！（対象: ${result.totalCount}名, 当選: ${result.winnerCount}名）`,
+        data: { winners: result.winners, target: result.target, note: (result as any).note }
+      });
+    } catch (e: any) {
+      setActionResult({ type: "error", message: e.message || "エラーが発生しました" });
+    } finally {
+      setLoadingAction(null);
+    }
+  };
+
+  const handleSendWomenCampaign = async () => {
+    setLoadingAction("women");
+    try {
+      const result = await sendWomenOnlyCampaign(womenMessage);
+      setActionResult({
+        type: "women",
+        message: `女性患者さん（${result.count}名）へキャンペーンメッセージを送信しました！`,
+        data: result.sentTo,
+        debugLogs: result.debugLogs,
       });
     } catch (e: any) {
       setActionResult({ type: "error", message: e.message || "エラーが発生しました" });
@@ -151,11 +169,14 @@ export default function MarketingDashboardPage() {
                 <span className="font-bold">対象者:</span> {actionResult.data.join(", ")}
               </p>
             )}
-            {actionResult.type === "lottery" && actionResult.data.winners && (
+            {actionResult.type === "lottery" && actionResult.data && (
               <>
-                <p className="text-xs mt-2 opacity-80"><span className="font-bold">対象者:</span> {actionResult.data.target}</p>
-                {actionResult.data.winners.length > 0 && (
-                   <p className="text-xs mt-1 opacity-80 break-words leading-relaxed"><span className="font-bold">当選者:</span> {actionResult.data.winners.join(", ")}</p>
+                <p className="text-xs mt-2 opacity-80"><span className="font-bold">対象:</span> {actionResult.data.target}</p>
+                {actionResult.data.note && (
+                  <p className="text-xs mt-1 text-amber-700">{actionResult.data.note}</p>
+                )}
+                {actionResult.data.winners && actionResult.data.winners.length > 0 && (
+                  <p className="text-xs mt-1 opacity-80 break-words leading-relaxed"><span className="font-bold">当選者:</span> {actionResult.data.winners.join(", ")}</p>
                 )}
               </>
             )}
@@ -285,16 +306,19 @@ export default function MarketingDashboardPage() {
             <div className="w-10 h-10 rounded-full bg-amber-100 flex items-center justify-center text-amber-600 mb-2">
               <Trophy className="h-5 w-5" />
             </div>
-            <CardTitle>毎月抽選会 (確率10%)</CardTitle>
+            <CardTitle>来院者限定 抽選会 (確率10%)</CardTitle>
             <CardDescription>
-              全患者に対してランダムで「10%の確率で当たる500円OFF抽選」をLINE配信します。
+              来院済み＆LINE連携済みの患者さん限定で抽選。当選者には500円OFFクーポンをLINEで自動送信します。
             </CardDescription>
           </CardHeader>
           <CardContent className="text-sm bg-slate-50 p-4 mx-6 rounded my-2 text-slate-600">
-            <p><strong>自動文章例:</strong></p>
-            <p className="mt-1 opacity-80">「今月の運試し！タップして抽選に挑戦しよう！【当たりが出たら500円OFF🙌】」</p>
+            <p><strong>当選メッセージ例:</strong></p>
+            <p className="mt-1 opacity-80">「🎉 やったー！当たり！！ 次回ご来院時に施術料金から500円引きさせていただきます！」</p>
+            <p className="mt-2"><strong>落選メッセージ例:</strong></p>
+            <p className="mt-1 opacity-80">「残念、今回はハズレでした😭 でも来月またチャレンジできますよ！」</p>
             <div className="mt-3 flex gap-2 w-full justify-center">
                <Badge variant="outline" className="border-amber-300 text-amber-700 bg-amber-50">当たり確率: 10%</Badge>
+               <Badge variant="outline" className="border-blue-300 text-blue-700 bg-blue-50">来院済み限定</Badge>
             </div>
           </CardContent>
           <CardFooter className="pt-4 border-t mt-auto">
@@ -310,6 +334,36 @@ export default function MarketingDashboardPage() {
           </CardFooter>
         </Card>
 
+      </div>
+
+      {/* 女性限定キャンペーン */}
+      <div className="mt-6">
+        <h2 className="text-lg font-bold text-slate-800 mb-3 flex items-center gap-2">
+          <Sparkles className="w-5 h-5 text-pink-500" />
+          女性限定キャンペーン送信
+        </h2>
+        <Card className="border-t-4 border-t-pink-400">
+          <CardContent className="pt-5 space-y-4">
+            <p className="text-sm text-slate-600">
+              性別が「女性」に設定されていてLINE登録済みの患者さんへ一斉送信します。<br />
+              メッセージを空欄にするとデフォルト文章が使われます。<code className="bg-slate-100 px-1 rounded text-xs">{"{name}"}</code> で患者名に置き換わります。
+            </p>
+            <textarea
+              value={womenMessage}
+              onChange={(e) => setWomenMessage(e.target.value)}
+              placeholder={`例：{name}様\n\n女性限定！よもぎ蒸しモニター募集中✨\n今月中にご来院の女性患者さま限定で特別価格でご利用いただけます。\nご希望の方はスタッフまでお声がけください😊\nボール接骨院`}
+              className="w-full min-h-[120px] border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800 resize-y"
+            />
+            <Button
+              className="bg-pink-500 hover:bg-pink-600 text-white"
+              onClick={handleSendWomenCampaign}
+              disabled={loadingAction !== null}
+            >
+              {loadingAction === "women" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
+              {loadingAction === "women" ? "送信中..." : "女性患者さんへ送信"}
+            </Button>
+          </CardContent>
+        </Card>
       </div>
     </div>
   );

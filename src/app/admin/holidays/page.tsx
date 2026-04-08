@@ -96,7 +96,15 @@ export default function AdminHolidaysPage() {
             <CardDescription>休診にする日をクリックして赤くしてください。</CardDescription>
           </CardHeader>
           <CardContent className="flex justify-center">
-            <div className={`transition-opacity ${saving ? "opacity-50 pointer-events-none" : "opacity-100"}`}>
+            <div className={`relative transition-opacity ${saving ? "opacity-50 pointer-events-none" : "opacity-100"}`}>
+              {saving && (
+                <div className="absolute inset-0 flex items-center justify-center z-10">
+                  <div className="flex items-center gap-2 bg-white/90 backdrop-blur-sm rounded-full px-4 py-2 shadow-md text-sm text-slate-600 font-medium">
+                    <Loader2 className="w-4 h-4 animate-spin text-blue-500" />
+                    保存中...
+                  </div>
+                </div>
+              )}
               <Calendar
                 mode="multiple"
                 selected={selectedDates}
@@ -111,7 +119,7 @@ export default function AdminHolidaysPage() {
                 }}
               />
             </div>
-          </CardContent>
+            </CardContent>
         </Card>
 
         <Card>

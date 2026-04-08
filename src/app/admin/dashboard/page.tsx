@@ -11,6 +11,8 @@ import { ja } from "date-fns/locale";
 import { createClient } from "@/lib/supabase/client";
 import AIMemo from "@/components/admin/AIMemo";
 import BlogProposal from "@/components/admin/BlogProposal";
+import { PatientSearchPanel } from "@/components/admin/PatientSearchPanel";
+import { toast } from "sonner";
 
 export default function DashboardPrototype() {
   const [activeTab, setActiveTab] = useState('youtube');
@@ -18,6 +20,8 @@ export default function DashboardPrototype() {
   const [data, setData] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
   const [currentDate, setCurrentDate] = useState<Date | null>(null);
+  const [patientPanelOpen, setPatientPanelOpen] = useState(false);
+  const [selectedPatientId, setSelectedPatientId] = useState<string | null>(null);
 
   useEffect(() => {
     setCurrentDate(new Date());
@@ -79,11 +83,13 @@ export default function DashboardPrototype() {
     try {
       const newStatus = currentStatus === 'completed' ? 'pending' : 'completed';
       const supabase = createClient();
-      await supabase.from('daily_tasks').update({ status: newStatus }).eq('id', id);
+      const { error } = await supabase.from('daily_tasks').update({ status: newStatus }).eq('id', id);
+      if (error) throw error;
       const res = await getTodayDashboardData();
       if (res.success) setData(res.data);
+      toast.success(newStatus === 'completed' ? 'タスクを完了にしました' : 'タスクを未完了に戻しました');
     } catch(e) {
-      console.error(e);
+      toast.error('タスクの更新に失敗しました');
     }
   };
 
@@ -122,8 +128,11 @@ export default function DashboardPrototype() {
     );
   }
 
-  const monthlyProgress = data && data.monthlyRevenue && data.targetIncome 
-    ? Math.min(100, Math.round((data.monthlyRevenue.total / data.targetIncome) * 100)) 
+  const monthlyProgress = data && data.monthlyRevenue && data.targetIncome
+    ? Math.min(100, Math.round((data.monthlyRevenue.total / data.targetIncome) * 100))
+    : 0;
+  const snsProgress = data?.targetSnsTasks > 0
+    ? Math.min(100, Math.round((data.monthlySnsDone / data.targetSnsTasks) * 100))
     : 0;
   const todayTarget = data?.targetIncome ? Math.round(data.targetIncome / 30) : 50000;
   const todayProgress = data ? Math.min(100, Math.round((data.todaySales / todayTarget) * 100)) : 0;
@@ -180,6 +189,24 @@ export default function DashboardPrototype() {
               <div className="mt-2 flex gap-2">
                 <span className="text-[10px] bg-blue-50 text-blue-700 px-2 py-0.5 rounded">自費: ¥{data?.monthlyRevenue?.cash?.toLocaleString() || 0}</span>
                 <span className="text-[10px] bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded">保険: ¥{data?.monthlyRevenue?.insurance?.toLocaleString() || 0}</span>
+              </div>
+            </div>
+
+            {/* SNSタスク進捗 */}
+            <div>
+              <div className="flex justify-between items-end mb-2">
+                <span className="text-sm font-medium text-slate-600">今月のSNSタスク進捗</span>
+                <span className="text-2xl font-bold text-slate-900">{snsProgress}<span className="text-sm text-slate-500 font-normal">%</span></span>
+              </div>
+              <div className="h-3 w-full bg-slate-100 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-rose-500 rounded-full transition-all duration-1000"
+                  style={{ width: `${snsProgress}%` }}
+                />
+              </div>
+              <div className="flex justify-between mt-2 text-xs text-slate-500">
+                <span>目標: {data?.targetSnsTasks || '---'}件</span>
+                <span className="font-bold text-slate-700">完了: {data?.monthlySnsDone || 0}件</span>
               </div>
             </div>
 
@@ -270,7 +297,18 @@ export default function DashboardPrototype() {
                       </div>
                       <div className="w-[calc(100%-4rem)] md:w-[calc(50%-2.5rem)] bg-white p-3 rounded-lg border border-slate-100 shadow-sm group-hover:border-blue-200 transition-colors">
                         <div className="flex justify-between items-start mb-1">
-                          <span className="font-bold text-slate-800 text-sm truncate mr-1">{res.name} 様</span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (res.customer_id) {
+                                setSelectedPatientId(res.customer_id);
+                                setPatientPanelOpen(true);
+                              }
+                            }}
+                            className="font-bold text-blue-700 text-sm truncate mr-1 hover:underline text-left"
+                          >
+                            {res.name} 様
+                          </button>
                           <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium shrink-0 ${res.type === '初診' ? 'bg-amber-100 text-amber-800' : 'bg-green-100 text-green-800'}`}>
                             {res.type}
                           </span>
@@ -286,52 +324,56 @@ export default function DashboardPrototype() {
               </Link>
             </div>
 
-            {/* AI タスク */}
-            <div className="space-y-4">
+            {/* AI タスク プレビュー */}
+            <div className="space-y-3">
               <div className="flex justify-between items-center">
                 <h4 className="text-sm font-bold text-slate-700 flex items-center gap-2">
-                  <Sparkles className="w-4 h-4 text-amber-500" /> 今日の推奨タスク
+                  <Sparkles className="w-4 h-4 text-amber-500" /> 今日のSNSタスク
                 </h4>
+                <Link href="/admin/tasks" className="text-xs text-amber-600 hover:underline font-medium">すべて見る →</Link>
               </div>
-              <div className="bg-gradient-to-br from-amber-50 to-orange-50 rounded-xl p-4 border border-amber-100/50 shadow-inner">
-                {(!data?.dailyTasks || data.dailyTasks.length === 0) ? (
-                  <div className="text-sm text-slate-500 text-center py-4">
-                    本日のタスクは登録されていません。<br/>
-                    AIアシスタントに相談してタスクを生成できます。
+
+              {(!data?.dailyTasks || data.dailyTasks.length === 0) ? (
+                <Link href="/admin/tasks">
+                  <div className="bg-gradient-to-br from-amber-50 to-orange-50 rounded-xl p-5 border border-amber-100 text-center hover:border-amber-300 transition-colors cursor-pointer">
+                    <Sparkles className="w-8 h-8 text-amber-400 mx-auto mb-2" />
+                    <p className="text-sm font-medium text-amber-800">本日のタスクを追加する</p>
+                    <p className="text-xs text-amber-600/70 mt-1">AIが提案するSNSタスクを管理できます</p>
                   </div>
-                ) : (
-                  <ul className="space-y-3">
-                    {data.dailyTasks.map((task: any) => (
-                      <li key={task.id} className={`flex flex-col gap-2 bg-white/80 p-3 rounded-lg text-sm transition-all ${task.status === 'completed' ? 'opacity-60 bg-slate-100 shadow-none' : 'shadow-sm'}`}>
-                        <div className="flex gap-3">
-                          <button 
-                            onClick={() => toggleTaskStatus(task.id, task.status)}
-                            className={`mt-0.5 shrink-0 w-5 h-5 rounded border flex items-center justify-center transition-colors ${task.status === 'completed' ? 'bg-green-500 border-green-500 text-white' : 'border-slate-300 bg-white'}`}
-                          >
-                            {task.status === 'completed' && <CheckCircle2 className="w-3.5 h-3.5" />}
-                          </button>
-                          <div className="flex-1">
-                            <div className="flex items-start gap-2">
-                              {task.priority === 'high' && task.status !== 'completed' && <AlertCircle className="w-4 h-4 text-rose-500 shrink-0 mt-0.5" />}
-                              <span className={task.status === 'completed' ? 'line-through text-slate-500' : 'text-slate-700 font-medium'}>
-                                {task.task_name}
-                              </span>
-                            </div>
-                            {task.description && (
-                              <p className="text-xs text-slate-500 mt-1 ml-6">{task.description}</p>
-                            )}
-                          </div>
-                        </div>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-                <Link href="/admin/marketing">
-                  <Button className="w-full mt-4 bg-amber-500 hover:bg-amber-600 text-white shadow-sm border-none">
-                    タスク一覧・管理画面へ
-                  </Button>
                 </Link>
-              </div>
+              ) : (
+                <div className="space-y-2">
+                  {/* 最大3件プレビュー */}
+                  {data.dailyTasks.slice(0, 3).map((task: any) => (
+                    <Link key={task.id} href="/admin/tasks">
+                      <div className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer hover:shadow-sm transition-all ${task.status === 'completed' ? 'bg-slate-50 border-slate-100 opacity-60' : 'bg-white border-amber-100 hover:border-amber-300'}`}>
+                        <div className={`shrink-0 w-5 h-5 rounded-full border-2 flex items-center justify-center ${task.status === 'completed' ? 'bg-amber-400 border-amber-400' : 'border-amber-300'}`}>
+                          {task.status === 'completed' && <CheckCircle2 className="w-3 h-3 text-white" />}
+                        </div>
+                        <span className={`text-sm flex-1 ${task.status === 'completed' ? 'line-through text-slate-400' : 'text-slate-700 font-medium'}`}>
+                          {task.title || task.task_name}
+                        </span>
+                        {task.priority === 'high' && task.status !== 'completed' && (
+                          <AlertCircle className="w-4 h-4 text-rose-500 shrink-0" />
+                        )}
+                      </div>
+                    </Link>
+                  ))}
+                  {/* 残り件数 or 全件完了 */}
+                  {data.dailyTasks.length > 3 && (
+                    <Link href="/admin/tasks">
+                      <div className="text-center text-xs text-amber-600 hover:underline py-1 cursor-pointer">
+                        他 {data.dailyTasks.length - 3} 件を見る
+                      </div>
+                    </Link>
+                  )}
+                  <Link href="/admin/tasks">
+                    <Button variant="outline" size="sm" className="w-full mt-1 border-amber-200 text-amber-700 hover:bg-amber-50 text-xs">
+                      <Sparkles className="w-3 h-3 mr-1" />タスク管理・追加はこちら
+                    </Button>
+                  </Link>
+                </div>
+              )}
             </div>
 
           </CardContent>
@@ -366,6 +408,13 @@ export default function DashboardPrototype() {
         </Card>
 
       </div>
+
+      <PatientSearchPanel
+        open={patientPanelOpen}
+        onOpenChange={setPatientPanelOpen}
+        initialPatientId={selectedPatientId}
+        onRefresh={() => {}}
+      />
     </div>
   );
 }

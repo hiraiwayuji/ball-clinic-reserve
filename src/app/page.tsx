@@ -5,29 +5,28 @@ import Image from "next/image";
 
 export default function Home() {
   return (
-    <div className="min-h-screen bg-slate-50">
+    <div className="min-h-screen bg-slate-900" data-dark-page>
       {/* Header */}
-      <header className="bg-white sticky top-0 z-50 shadow-sm">
+      <header className="bg-slate-900/95 backdrop-blur sticky top-0 z-50 border-b border-zinc-800">
         <div className="container mx-auto px-4 h-16 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <Link href="/" className="flex items-center gap-2">
+            <Link href="/">
               <div className="relative w-40 h-12">
-                <Image 
-                  src="/images/logo_main_mini_black.png" 
-                  alt="ボール接骨院" 
-                  fill 
+                <Image
+                  src="/images/logo_main_mini_white.png"
+                  alt="ボール接骨院"
+                  fill
                   className="object-contain"
                 />
               </div>
-              <span className="text-xl font-bold text-slate-900">ボール接骨院</span>
             </Link>
           </div>
-          <nav className="hidden md:flex gap-6 text-sm font-medium text-slate-600">
-            <Link href="#about" className="hover:text-blue-600 transition">当院について</Link>
-            <Link href="#services" className="hover:text-blue-600 transition">施術メニュー</Link>
-            <a href="https://maps.app.goo.gl/y8zBCQGFiWgS4SXv6" target="_blank" rel="noopener noreferrer" className="hover:text-blue-600 transition">アクセス</a>
+          <nav className="hidden md:flex gap-6 text-sm font-medium text-slate-400">
+            <Link href="#about" className="hover:text-white transition">当院について</Link>
+            <Link href="#services" className="hover:text-white transition">施術メニュー</Link>
+            <a href="https://maps.app.goo.gl/y8zBCQGFiWgS4SXv6" target="_blank" rel="noopener noreferrer" className="hover:text-white transition">アクセス</a>
           </nav>
-          <Button asChild className="bg-blue-600 hover:bg-blue-700">
+          <Button asChild className="bg-blue-600 hover:bg-blue-700 text-white">
             <Link href="/reserve/calendar">Web予約</Link>
           </Button>
         </div>
@@ -35,34 +34,32 @@ export default function Home() {
 
       <main>
         {/* Hero Section */}
-        <section className="relative bg-blue-900 text-white py-24 px-4 overflow-hidden">
-          <div className="absolute inset-0 bg-gradient-to-r from-blue-900 to-blue-800 opacity-90"></div>
-          {/* 装飾用の背景パターン */}
-          <div className="absolute inset-0 pattern-dots text-white/[0.05] pointer-events-none"></div>
-          
+        <section className="relative bg-gradient-to-br from-slate-950 via-blue-950 to-slate-900 text-white py-24 px-4 overflow-hidden">
+          <div className="absolute inset-0 bg-gradient-to-r from-blue-900/40 to-slate-900/60"></div>
+
           <div className="container mx-auto relative z-10 max-w-4xl text-center">
             <h1 className="text-4xl md:text-6xl font-extrabold tracking-tight mb-6 leading-tight">
               痛み根本改善、<br className="md:hidden" />
-              <span className="text-blue-300">パフォーマンス向上</span>をサポート
+              <span className="text-blue-400">パフォーマンス向上</span>をサポート
             </h1>
-            <p className="text-lg md:text-xl text-blue-100 mb-10 max-w-2xl mx-auto leading-relaxed">
+            <p className="text-lg md:text-xl text-slate-300 mb-10 max-w-2xl mx-auto leading-relaxed">
               プロスポーツ経験のある院長が、一人ひとりの身体の状態に合わせた最適なトータルボディケアを提供します。
             </p>
             <div className="flex flex-col sm:flex-row gap-4 justify-center">
-              <Button asChild size="lg" className="bg-white text-blue-900 hover:bg-blue-50 text-lg h-14 px-8 shadow-lg">
+              <Button asChild size="lg" className="bg-blue-600 hover:bg-blue-700 text-white text-lg h-14 px-8 shadow-lg">
                 <Link href="/reserve/calendar">
                   <CalendarDays className="mr-2 h-5 w-5" />
                   今すぐWeb予約する
                 </Link>
               </Button>
-              <a href="tel:088-635-5344" className="flex items-center justify-center gap-2 border-2 border-white text-white text-lg h-14 px-8 rounded-md hover:bg-white/10">
-                  <Phone className="h-5 w-5" />
-                  088-635-5344
-                </a>
-              <Link href="/check" className="flex items-center justify-center gap-2 border border-white/50 text-white/80 text-sm h-10 px-6 rounded-md hover:bg-white/10">
+              <a href="tel:088-635-5344" className="flex items-center justify-center gap-2 border-2 border-white/30 text-white text-lg h-14 px-8 rounded-md hover:bg-white/10 transition">
+                <Phone className="h-5 w-5" />
+                088-635-5344
+              </a>
+              <Link href="/check" className="flex items-center justify-center gap-2 border border-white/20 text-white/70 text-sm h-10 px-6 rounded-md hover:bg-white/10 transition">
                 予約を確認する
               </Link>
-              <Link href="/cancel" className="flex items-center justify-center gap-2 border border-white/50 text-white/80 text-sm h-10 px-6 rounded-md hover:bg-white/10">
+              <Link href="/cancel" className="flex items-center justify-center gap-2 border border-white/20 text-white/70 text-sm h-10 px-6 rounded-md hover:bg-white/10 transition">
                 予約のキャンセルはこちら
               </Link>
             </div>
@@ -70,42 +67,42 @@ export default function Home() {
         </section>
 
         {/* Info Section */}
-        <section className="py-16 bg-white">
+        <section className="py-16 bg-slate-900">
           <div className="container mx-auto px-4">
             <div className="grid md:grid-cols-3 gap-8 max-w-5xl mx-auto">
               {/* Box 1 */}
-              <div className="flex flex-col items-center text-center p-6 rounded-2xl bg-slate-50 border border-slate-100 shadow-sm transition-transform hover:-translate-y-1">
-                <div className="w-12 h-12 bg-blue-100 text-blue-600 rounded-xl flex items-center justify-center mb-4">
+              <div className="flex flex-col items-center text-center p-6 rounded-2xl bg-white/5 border border-white/10 shadow-sm transition-transform hover:-translate-y-1">
+                <div className="w-12 h-12 bg-blue-500/20 text-blue-400 rounded-xl flex items-center justify-center mb-4">
                   <Clock className="w-6 h-6" />
                 </div>
-                <h3 className="text-lg font-bold mb-2">営業時間</h3>
-                <p className="text-slate-600 text-sm">
+                <h3 className="text-lg font-bold mb-2 text-white">営業時間</h3>
+                <p className="text-slate-400 text-sm">
                   月・火・木・金: 12:00 ～ 23:00 (最終受付 22:30)<br />
                   土: 10:00 ～ 18:00 (最終受付 17:30)<br />
-                  <span className="text-red-500 font-medium">※水・日・祝日は休診</span>
+                  <span className="text-red-400 font-medium">※水・日・祝日は休診</span>
                 </p>
               </div>
 
               {/* Box 2 */}
-              <div className="flex flex-col items-center text-center p-6 rounded-2xl bg-slate-50 border border-slate-100 shadow-sm transition-transform hover:-translate-y-1">
-                <div className="w-12 h-12 bg-blue-100 text-blue-600 rounded-xl flex items-center justify-center mb-4">
+              <div className="flex flex-col items-center text-center p-6 rounded-2xl bg-white/5 border border-white/10 shadow-sm transition-transform hover:-translate-y-1">
+                <div className="w-12 h-12 bg-blue-500/20 text-blue-400 rounded-xl flex items-center justify-center mb-4">
                   <MapPin className="w-6 h-6" />
                 </div>
-                <h3 className="text-lg font-bold mb-2">アクセス</h3>
-                <p className="text-slate-600 text-sm">
+                <h3 className="text-lg font-bold mb-2 text-white">アクセス</h3>
+                <p className="text-slate-400 text-sm">
                   徳島県板野郡藍住町<br />
                   駐車場5台完備<br />
-                  <a href="https://maps.app.goo.gl/y8zBCQGFiWgS4SXv6" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline mt-1 inline-block">詳細な地図を見る</a>
+                  <a href="https://maps.app.goo.gl/y8zBCQGFiWgS4SXv6" target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline mt-1 inline-block">詳細な地図を見る</a>
                 </p>
               </div>
 
               {/* Box 3 */}
-              <div className="flex flex-col items-center text-center p-6 rounded-2xl bg-slate-50 border border-slate-100 shadow-sm transition-transform hover:-translate-y-1">
-                <div className="w-12 h-12 bg-blue-100 text-blue-600 rounded-xl flex items-center justify-center mb-4">
+              <div className="flex flex-col items-center text-center p-6 rounded-2xl bg-white/5 border border-white/10 shadow-sm transition-transform hover:-translate-y-1">
+                <div className="w-12 h-12 bg-blue-500/20 text-blue-400 rounded-xl flex items-center justify-center mb-4">
                   <CalendarDays className="w-6 h-6" />
                 </div>
-                <h3 className="text-lg font-bold mb-2">予約について</h3>
-                <p className="text-slate-600 text-sm">
+                <h3 className="text-lg font-bold mb-2 text-white">予約について</h3>
+                <p className="text-slate-400 text-sm">
                   当院は予約優先制です。<br />
                   24時間受付のWeb予約、<br />
                   またはお電話でご予約ください。
@@ -118,14 +115,14 @@ export default function Home() {
       </main>
 
       {/* Footer */}
-      <footer className="bg-slate-900 text-slate-400 py-12 border-t border-slate-800">
+      <footer className="bg-slate-950 text-slate-400 py-12 border-t border-zinc-800">
         <div className="container mx-auto px-4 text-center">
           <div className="flex items-center justify-center gap-3 mb-6">
             <div className="relative w-8 h-8">
-              <Image 
-                src="/images/logo-white.png" 
-                alt="ボール接骨院" 
-                fill 
+              <Image
+                src="/images/logo-white.png"
+                alt="ボール接骨院"
+                fill
                 className="object-contain"
               />
             </div>
@@ -138,9 +135,3 @@ export default function Home() {
     </div>
   );
 }
-
-
-
-
-
-

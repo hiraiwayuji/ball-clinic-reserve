@@ -1,11 +1,19 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
+import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { revalidatePath } from "next/cache";
 import { checkAdminAuth } from "./auth";
 
 async function getSupabase() {
   return await createClient();
+}
+
+function getAdminSupabase() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) return null;
+  return createSupabaseClient(url, key);
 }
 
 
@@ -216,23 +224,21 @@ export async function sendLineConfirmation(appointmentId: string) {
 
 // 予約の削除アクション
 export async function deleteAppointment(appointmentId: string) {
-  const { clinicId } = await checkAdminAuth();
+  await checkAdminAuth();
   try {
-    const supabase = await getSupabase();
-    if (supabase) {
-      const { error } = await supabase
-        .from("appointments")
-        .delete()
-        .eq("id", appointmentId);
+    const supabase = getAdminSupabase() || await getSupabase();
+    const { error } = await supabase
+      .from("appointments")
+      .delete()
+      .eq("id", appointmentId);
 
-      if (error) {
-        console.error("Failed to delete appointment:", error);
-        return { success: false, error: "予約の削除に失敗しました" };
-      }
-      
-      revalidatePath("/admin/appointments");
-      revalidatePath("/admin");
+    if (error) {
+      console.error("Failed to delete appointment:", error);
+      return { success: false, error: "予約の削除に失敗しました" };
     }
+
+    revalidatePath("/admin/appointments");
+    revalidatePath("/admin");
     return { success: true };
   } catch (err) {
     console.error(err);

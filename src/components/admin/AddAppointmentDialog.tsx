@@ -3,8 +3,7 @@
 import { useEffect, useState } from "react";
 import { format } from "date-fns";
 import { ja } from "date-fns/locale";
-import { CalendarIcon, Plus } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { CalendarIcon, Plus, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
 import { Input } from "@/components/ui/input";
@@ -12,7 +11,6 @@ import { Label } from "@/components/ui/label";
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
@@ -20,18 +18,15 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { createManualReservation } from "@/app/actions/adminReserve";
 import { toast } from "sonner";
-
 import { getTimeSlots } from "@/lib/time-slots";
 
-// 静的なTIME_SLOTSを削除
-
-export function AddAppointmentDialog({ 
+export function AddAppointmentDialog({
   onSuccess,
   open: externalOpen,
   onOpenChange: externalOnOpenChange,
   defaultDate,
-  defaultTime
-}: { 
+  defaultTime,
+}: {
   onSuccess?: () => void;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
@@ -51,7 +46,6 @@ export function AddAppointmentDialog({
   const [recurringWeeks, setRecurringWeeks] = useState<string>("1");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // ダイアログが開いた時に初期値をセットする
   useEffect(() => {
     if (open) {
       if (defaultDate) setDate(defaultDate);
@@ -65,9 +59,7 @@ export function AddAppointmentDialog({
       toast.error("日付と時間を選択してください");
       return;
     }
-
     setIsSubmitting(true);
-    
     try {
       const formData = new FormData(e.currentTarget);
       formData.append("date", format(date, "yyyy-MM-dd"));
@@ -76,52 +68,73 @@ export function AddAppointmentDialog({
       formData.append("recurringWeeks", recurringWeeks);
 
       const result = await createManualReservation(formData);
-      
       if (result.success) {
-        toast.success(Number(recurringWeeks) > 1 ? `${recurringWeeks}週分の予約を追加しました` : "予約を追加しました");
+        toast.success(
+          Number(recurringWeeks) > 1
+            ? `${recurringWeeks}週分の予約を追加しました`
+            : "予約を追加しました"
+        );
         setOpen(false);
-        // フォームをリセット
         setDate(undefined);
         setTime("");
         setVisitType("new");
         setRecurringWeeks("1");
-        
-        // 親コンポーネントに変更を通知
-        if (onSuccess) onSuccess();
+        onSuccess?.();
       } else {
         toast.error(result.error || "エラーが発生しました");
       }
-    } catch (error) {
+    } catch {
       toast.error("通信エラーが発生しました");
     } finally {
       setIsSubmitting(false);
     }
   };
 
+  const selectClass =
+    "flex h-11 w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring";
+
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger className="inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 bg-blue-600 text-primary-foreground shadow-sm hover:bg-blue-700 h-9 px-4 py-2">
+      <DialogTrigger className="inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 bg-blue-600 text-white shadow-sm hover:bg-blue-700 h-9 px-4 py-2">
         <Plus className="w-4 h-4 mr-2" />
         新規予約を追加
       </DialogTrigger>
-      <DialogContent className="sm:max-w-[500px]">
-        <DialogHeader>
-          <DialogTitle>新規予約の手動追加</DialogTitle>
-          <DialogDescription>
-            電話や直接訪問で受けた予約情報を以下のフォームからシステムに登録します。
-          </DialogDescription>
+
+      <DialogContent className="w-full max-w-lg mx-auto max-h-[92dvh] overflow-y-auto p-0 gap-0 rounded-2xl">
+        {/* Header */}
+        <DialogHeader className="px-5 pt-5 pb-4 border-b sticky top-0 bg-white z-10">
+          <div className="flex items-start justify-between gap-2">
+            <div>
+              <DialogTitle className="text-base font-bold">新規予約の手動追加</DialogTitle>
+              <p className="text-sm text-slate-500 mt-0.5">電話・直接受付の予約を登録します</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setOpen(false)}
+              className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors shrink-0"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
         </DialogHeader>
-        
-        <form onSubmit={handleSubmit} className="space-y-4 mt-4">
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label>予約日 <span className="text-red-500">*</span></Label>
+
+        <form onSubmit={handleSubmit}>
+          <div className="px-5 py-4 space-y-4">
+            {/* 予約日 */}
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">
+                予約日 <span className="text-red-500">*</span>
+              </Label>
               <Popover>
-                <PopoverTrigger className="inline-flex items-center whitespace-nowrap rounded-md text-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 border border-input bg-background shadow-sm hover:bg-accent hover:text-accent-foreground h-9 px-4 py-2 w-full justify-start text-left font-normal">
-                  <CalendarIcon className="mr-2 h-4 w-4" />
-                  {date ? format(date, "yyyy/MM/dd (E)", { locale: ja }) : <span className="text-muted-foreground">選択</span>}
+                <PopoverTrigger className="flex items-center w-full h-11 rounded-md border border-input bg-transparent px-3 text-sm shadow-sm hover:bg-accent transition-colors text-left">
+                  <CalendarIcon className="mr-2 h-4 w-4 text-slate-400 shrink-0" />
+                  {date ? (
+                    format(date, "yyyy年M月d日（E）", { locale: ja })
+                  ) : (
+                    <span className="text-muted-foreground">日付を選択</span>
+                  )}
                 </PopoverTrigger>
-                <PopoverContent className="w-auto p-0">
+                <PopoverContent className="w-auto p-0 z-[200]" align="start" side="bottom" sideOffset={4}>
                   <Calendar
                     mode="single"
                     selected={date}
@@ -132,97 +145,127 @@ export function AddAppointmentDialog({
                 </PopoverContent>
               </Popover>
             </div>
-            
-            <div className="space-y-2">
-              <Label>時間 <span className="text-red-500">*</span></Label>
-              <select 
-                value={time} 
-                onChange={(e) => setTime(e.target.value)}
-                className="flex h-10 w-full items-center justify-between rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
-              >
-                {!date ? (
-                  <option value="" disabled>先に日付を選択</option>
-                ) : getTimeSlots(date, true).length === 0 ? (
-                  <option value="" disabled>休診日です</option>
-                ) : (
-                  <option value="" disabled>時間を選択</option>
-                )}
-                
-                {date && getTimeSlots(date, true).map((t) => (
-                  <option key={t} value={t}>{t}</option>
+
+            {/* 時間 + 所要時間 */}
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">
+                  時間 <span className="text-red-500">*</span>
+                </Label>
+                <select value={time} onChange={(e) => setTime(e.target.value)} className={selectClass}>
+                  {!date ? (
+                    <option value="" disabled>先に日付を選択</option>
+                  ) : getTimeSlots(date, true).length === 0 ? (
+                    <option value="" disabled>休診日</option>
+                  ) : (
+                    <option value="" disabled>時間を選択</option>
+                  )}
+                  {date && getTimeSlots(date, true).map((t) => (
+                    <option key={t} value={t}>{t}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="space-y-1.5">
+                <Label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">
+                  所要時間
+                </Label>
+                <select name="duration" defaultValue="30" className={selectClass}>
+                  <option value="30">30分</option>
+                  <option value="60">60分</option>
+                  <option value="90">90分</option>
+                  <option value="120">120分</option>
+                  <option value="150">150分</option>
+                  <option value="180">180分</option>
+                </select>
+              </div>
+            </div>
+
+            {/* 患者名 */}
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">
+                患者名 <span className="text-red-500">*</span>
+              </Label>
+              <Input name="name" required placeholder="山田 太郎" className="h-11" />
+            </div>
+
+            {/* 電話番号 */}
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">
+                電話番号 <span className="text-red-500">*</span>
+              </Label>
+              <Input name="phone" type="tel" required placeholder="090-0000-0000" className="h-11" />
+            </div>
+
+            {/* 初診/再診 */}
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">
+                初診 / 再診
+              </Label>
+              <div className="flex gap-2">
+                {["new", "return"].map((v) => (
+                  <button
+                    key={v}
+                    type="button"
+                    onClick={() => setVisitType(v)}
+                    className={`flex-1 h-11 rounded-lg border text-sm font-semibold transition-all ${
+                      visitType === v
+                        ? v === "new"
+                          ? "bg-amber-500 border-amber-500 text-white"
+                          : "bg-blue-600 border-blue-600 text-white"
+                        : "border-slate-200 text-slate-600 hover:bg-slate-50"
+                    }`}
+                  >
+                    {v === "new" ? "初診" : "再診"}
+                  </button>
                 ))}
-              </select>
-            </div>
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="name">患者名 <span className="text-red-500">*</span></Label>
-            <Input id="name" name="name" required placeholder="山田 太郎" />
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="phone">電話番号 <span className="text-red-500">*</span></Label>
-            <Input id="phone" name="phone" type="tel" required placeholder="090-0000-0000" />
-          </div>
-
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label>所要時間 <span className="text-red-500">*</span></Label>
-              <select 
-                name="duration"
-                defaultValue="30"
-                className="flex h-10 w-full items-center justify-between rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
-              >
-                <option value="30">30分</option>
-                <option value="60">1時間 (60分)</option>
-                <option value="90">1時間30分</option>
-                <option value="120">2時間</option>
-                <option value="150">2時間30分</option>
-                <option value="180">3時間</option>
-              </select>
+              </div>
             </div>
 
-            <div className="space-y-2">
-              <Label>初診/再診 <span className="text-red-500">*</span></Label>
-              <select 
-                value={visitType}
-                onChange={(e) => setVisitType(e.target.value)}
-                required
-                className="flex h-10 w-full items-center justify-between rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
-              >
-                <option value="new">初診</option>
-                <option value="return">再診</option>
-              </select>
-            </div>
-
-            <div className="space-y-2">
-              <Label>繰り返し設定</Label>
-              <select 
+            {/* 繰り返し */}
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">
+                繰り返し設定
+              </Label>
+              <select
                 value={recurringWeeks}
                 onChange={(e) => setRecurringWeeks(e.target.value)}
-                className="flex h-10 w-full items-center justify-between rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                className={selectClass}
               >
-                <option value="1">今回のみ (繰り返しなし)</option>
-                <option value="2">2週連続 (毎週)</option>
-                <option value="3">3週連続 (毎週)</option>
-                <option value="4">4週連続 (毎週)</option>
-                <option value="8">8週連続 (約2ヶ月)</option>
-                <option value="12">12週連続 (約3ヶ月)</option>
+                <option value="1">今回のみ（繰り返しなし）</option>
+                <option value="2">2週連続（毎週）</option>
+                <option value="3">3週連続（毎週）</option>
+                <option value="4">4週連続（毎週）</option>
+                <option value="8">8週連続（約2ヶ月）</option>
+                <option value="12">12週連続（約3ヶ月）</option>
               </select>
+            </div>
+
+            {/* メモ */}
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">
+                メモ（症状など）
+              </Label>
+              <Input name="symptoms" placeholder="例: 腰痛（電話予約）" className="h-11" />
             </div>
           </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="symptoms">メモ（症状など）</Label>
-            <Input id="symptoms" name="symptoms" placeholder="例: 腰痛（電話予約）" />
-          </div>
-
-          <div className="flex justify-end space-x-2 pt-4 border-t">
-            <Button type="button" variant="outline" onClick={() => setOpen(false)}>
-              キャンセル
-            </Button>
-            <Button type="submit" disabled={isSubmitting || !date || !time} className="bg-blue-600 hover:bg-blue-700">
+          {/* Footer */}
+          <div className="px-5 pb-5 pt-3 border-t sticky bottom-0 bg-white space-y-2">
+            <Button
+              type="submit"
+              disabled={isSubmitting || !date || !time}
+              className="w-full h-11 bg-blue-600 hover:bg-blue-700 rounded-xl font-bold"
+            >
               {isSubmitting ? "保存中..." : "予約を追加する"}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setOpen(false)}
+              className="w-full h-10 rounded-xl text-sm"
+            >
+              キャンセル
             </Button>
           </div>
         </form>

@@ -18,22 +18,22 @@ export async function addCashSale(formData: FormData) {
     const customerName = formData.get("customer_name") as string;
     const treatmentFee = parseInt(formData.get("treatment_fee") as string, 10);
     const memo = formData.get("memo") as string || "";
+    const isFirstVisit = formData.get("is_first_visit") === "true";
 
     if (!saleDate || !customerName || isNaN(treatmentFee)) {
       return { success: false, error: "必須項目を入力してください" };
     }
 
     const supabase = await getSupabase();
-    // clinic_idがまだ存在しない場合に備え、存在する場合のみ追加
-    const saleData: any = { 
-      sale_date: saleDate, 
-      customer_name: customerName, 
+    const saleData: any = {
+      sale_date: saleDate,
+      customer_name: customerName,
       treatment_fee: treatmentFee,
       memo,
+      is_first_visit: isFirstVisit,
       clinic_id: clinicId
     };
-    
-    // 他のテーブルでエラーが出る可能性があるため、一旦 clinic_id なしで試行
+
     const { error } = await supabase
       .from("cash_sales")
       .insert([saleData]);
@@ -58,7 +58,7 @@ export async function getCashSales(dateStr: string) {
       .from("cash_sales")
       .select("*")
       .eq("sale_date", dateStr)
-      .eq("clinic_id", '00000000-0000-0000-0000-000000000001');
+      .eq("clinic_id", clinicId);
 
     const { data, error } = await query
       .order("created_at", { ascending: true });
@@ -285,6 +285,33 @@ export async function getExpenses(dateStr: string) {
   }
 }
 
+export async function updateExpense(id: string, data: {
+  expense_date?: string;
+  category?: string;
+  description?: string;
+  amount?: number;
+  memo?: string;
+}) {
+  const { clinicId } = await checkAdminAuth();
+  try {
+    const supabase = await getSupabase();
+    const { error } = await supabase
+      .from("clinic_expenses")
+      .update(data)
+      .eq("id", id)
+      .eq("clinic_id", clinicId);
+
+    if (error) throw error;
+
+    revalidatePath("/admin/expenses");
+    revalidatePath("/admin/dashboard");
+    return { success: true };
+  } catch (error) {
+    console.error("Error updating expense:", error);
+    return { success: false, error: "更新に失敗しました" };
+  }
+}
+
 export async function deleteExpense(id: string) {
   const { clinicId } = await checkAdminAuth();
   try {
@@ -501,8 +528,11 @@ export async function getTodayDashboardData() {
           start_time,
           status,
           is_first_visit,
+          customer_id,
           customers (
-            name
+            id,
+            name,
+            phone
           )
         `)
         .eq("clinic_id", clinicId)
@@ -519,16 +549,35 @@ export async function getTodayDashboardData() {
 
     // 4. Monthly Target
     let targetIncome = 1500000;
+    let targetSnsTasks = 0;
     try {
       const { data: target } = await supabase
         .from("clinic_targets")
-        .select("target_income")
+        .select("target_income, target_sns_tasks")
         .eq("clinic_id", clinicId)
         .eq("month", `${year}-${month.toString().padStart(2, '0')}-01`)
         .maybeSingle();
       if (target?.target_income) targetIncome = target.target_income;
+      if (target?.target_sns_tasks) targetSnsTasks = target.target_sns_tasks;
     } catch (e) {
       console.error("[DASHBOARD_LOG] Error fetching target:", e);
+    }
+
+    // 4b. Monthly SNS Tasks (completed this month)
+    let monthlySnsDone = 0;
+    try {
+      const firstDay = `${year}-${month.toString().padStart(2, '0')}-01`;
+      const lastDay = new Date(year, month, 0).getDate();
+      const lastDayStr = `${year}-${month.toString().padStart(2, '0')}-${lastDay.toString().padStart(2, '0')}`;
+      const { data: snsDone } = await supabase
+        .from("daily_tasks")
+        .select("id", { count: "exact" })
+        .gte("task_date", firstDay)
+        .lte("task_date", lastDayStr)
+        .eq("status", "completed");
+      monthlySnsDone = snsDone?.length ?? 0;
+    } catch (e) {
+      console.error("[DASHBOARD_LOG] Error fetching SNS tasks:", e);
     }
 
     // 5. Monthly Expenses
@@ -578,10 +627,14 @@ export async function getTodayDashboardData() {
         appointments: appointments.map((a: any) => ({
           time: new Date(a.start_time).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Tokyo' }),
           name: (a.customers as any)?.name || "不明",
+          phone: (a.customers as any)?.phone || "",
+          customer_id: a.customer_id || null,
           type: a.is_first_visit ? "初診" : "再診",
           status: a.status
         })),
         targetIncome,
+        targetSnsTasks,
+        monthlySnsDone,
         aiSuggestions,
         dailyTasks
       }

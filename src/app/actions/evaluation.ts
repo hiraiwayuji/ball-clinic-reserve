@@ -71,20 +71,19 @@ export async function getMonthlyEvaluation(year: number, month: number) {
     const revenueRes = await getMonthlyTotalRevenue(year, month);
     const actualIncome = revenueRes.success && revenueRes.data ? revenueRes.data.total : 0;
 
-    // Actual Patients
-    const startOfMonth = `${firstDayStr}T00:00:00+09:00`;
+    // 来院数・新患数は自費売上（cash_sales）から集計
     const lastDay = new Date(year, month, 0).getDate();
-    const endOfMonth = `${monthStr}-${lastDay.toString().padStart(2, '0')}T23:59:59+09:00`;
+    const endDateStr = `${monthStr}-${lastDay.toString().padStart(2, '0')}`;
 
-    const { data: appts } = await supabase
-      .from("appointments")
+    const { data: allSales } = await supabase
+      .from("cash_sales")
       .select("id, is_first_visit")
-      .gte("start_time", startOfMonth)
-      .lte("start_time", endOfMonth)
-      .neq("status", "cancelled");
+      .eq("clinic_id", clinicId)
+      .gte("sale_date", firstDayStr)
+      .lte("sale_date", endDateStr);
 
-    const actualPatients = appts ? appts.length : 0;
-    const actualNewPatients = appts ? appts.filter((a) => a.is_first_visit).length : 0;
+    const actualPatients = allSales ? allSales.length : 0;
+    const actualNewPatients = allSales ? allSales.filter(s => s.is_first_visit).length : 0;
 
     // Actual SNS Tasks (Count completed daily_tasks for the month)
     const { data: snsTasks } = await supabase
@@ -180,6 +179,155 @@ export async function saveEvaluationTargets(formData: FormData) {
     console.error("Error saving evaluation targets:", error);
     return { success: false, error: "保存に失敗しました" };
   }
+}
+
+// --- 明細データ取得・修正 ---
+
+export type DailySaleRow = {
+  id: string;
+  sale_date: string;
+  customer_name: string;
+  treatment_fee: number;
+  memo: string;
+  is_first_visit?: boolean;
+};
+
+export type InsuranceRow = {
+  id: string;
+  payment_month: string;
+  insurance_name: string;
+  amount: number;
+};
+
+export type AppointmentRow = {
+  id: string;
+  start_time: string;
+  customer_name: string;
+  customer_id: string | null;
+  is_first_visit: boolean;
+  status: string;
+};
+
+export type MonthDetailedBreakdown = {
+  cashSales: DailySaleRow[];
+  insurancePayments: InsuranceRow[];
+  appointments: AppointmentRow[];
+  cashTotal: number;
+  insuranceTotal: number;
+};
+
+export async function getMonthDetailedBreakdown(year: number, month: number): Promise<{ success: boolean; data?: MonthDetailedBreakdown; error?: string }> {
+  const { clinicId } = await checkAdminAuth();
+  try {
+    const supabase = await getSupabase();
+    const monthStr = `${year}-${String(month).padStart(2, "0")}`;
+    const startDate = `${monthStr}-01`;
+    const daysInMonth = new Date(year, month, 0).getDate();
+    const endDate = `${monthStr}-${String(daysInMonth).padStart(2, "0")}`;
+
+    const [cashRes, insRes, apptRes] = await Promise.all([
+      supabase
+        .from("cash_sales")
+        .select("id, sale_date, customer_name, treatment_fee, memo, is_first_visit")
+        .eq("clinic_id", clinicId)
+        .gte("sale_date", startDate)
+        .lte("sale_date", endDate)
+        .order("sale_date", { ascending: true }),
+      supabase
+        .from("insurance_payments")
+        .select("id, payment_month, insurance_name, amount")
+        .eq("clinic_id", clinicId)
+        .eq("payment_month", startDate)
+        .order("insurance_name", { ascending: true }),
+      supabase
+        .from("appointments")
+        .select("id, start_time, is_first_visit, status, customer_id, customers(name)")
+        .eq("clinic_id", clinicId)
+        .gte("start_time", `${startDate}T00:00:00+09:00`)
+        .lte("start_time", `${endDate}T23:59:59+09:00`)
+        .neq("status", "cancelled")
+        .order("start_time", { ascending: true }),
+    ]);
+
+    const cashSales: DailySaleRow[] = (cashRes.data ?? []).map((r: any) => ({
+      id: r.id,
+      sale_date: r.sale_date,
+      customer_name: r.customer_name,
+      treatment_fee: r.treatment_fee,
+      memo: r.memo ?? "",
+      is_first_visit: r.is_first_visit ?? false,
+    }));
+
+    const insurancePayments: InsuranceRow[] = (insRes.data ?? []).map((r: any) => ({
+      id: r.id,
+      payment_month: r.payment_month,
+      insurance_name: r.insurance_name,
+      amount: r.amount,
+    }));
+
+    const appointments: AppointmentRow[] = (apptRes.data ?? []).map((r: any) => ({
+      id: r.id,
+      start_time: r.start_time,
+      customer_name: (r.customers as any)?.name ?? "不明",
+      customer_id: r.customer_id ?? null,
+      is_first_visit: r.is_first_visit,
+      status: r.status,
+    }));
+
+    return {
+      success: true,
+      data: {
+        cashSales,
+        insurancePayments,
+        appointments,
+        cashTotal: cashSales.reduce((s, r) => s + r.treatment_fee, 0),
+        insuranceTotal: insurancePayments.reduce((s, r) => s + r.amount, 0),
+      },
+    };
+  } catch (err) {
+    console.error("getMonthDetailedBreakdown error:", err);
+    return { success: false, error: "明細取得に失敗しました" };
+  }
+}
+
+export async function updateCashSale(id: string, patch: { customer_name?: string; treatment_fee?: number; memo?: string; is_first_visit?: boolean }) {
+  const { clinicId } = await checkAdminAuth();
+  const supabase = await getSupabase();
+  const { error } = await supabase.from("cash_sales").update(patch).eq("id", id).eq("clinic_id", clinicId);
+  if (error) return { success: false, error: error.message };
+  revalidatePath("/admin/evaluation");
+  revalidatePath("/admin/sales");
+  revalidatePath("/admin/dashboard");
+  return { success: true };
+}
+
+export async function deleteCashSaleRecord(id: string) {
+  const { clinicId } = await checkAdminAuth();
+  const supabase = await getSupabase();
+  const { error } = await supabase.from("cash_sales").delete().eq("id", id).eq("clinic_id", clinicId);
+  if (error) return { success: false, error: error.message };
+  revalidatePath("/admin/evaluation");
+  revalidatePath("/admin/sales");
+  revalidatePath("/admin/dashboard");
+  return { success: true };
+}
+
+export async function toggleFirstVisit(id: string, isFirstVisit: boolean) {
+  const { clinicId } = await checkAdminAuth();
+  const supabase = await getSupabase();
+  const { error } = await supabase.from("appointments").update({ is_first_visit: isFirstVisit }).eq("id", id).eq("clinic_id", clinicId);
+  if (error) return { success: false, error: error.message };
+  revalidatePath("/admin/evaluation");
+  return { success: true };
+}
+
+export async function updateCustomerName(customerId: string, name: string) {
+  const { clinicId } = await checkAdminAuth();
+  const supabase = await getSupabase();
+  const { error } = await supabase.from("customers").update({ name }).eq("id", customerId).eq("clinic_id", clinicId);
+  if (error) return { success: false, error: error.message };
+  revalidatePath("/admin/evaluation");
+  return { success: true };
 }
 
 // Ensure the evaluation metric exists and set AI suggestion text.

@@ -1,13 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import { createClient } from "@supabase/supabase-js";
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ calendarId: string }> }) {
   const { calendarId } = await params;
-  const supabase = await createClient();
-  const { data: events, error } = await supabase.from("calendar_events").select("*").eq("calendar_id", calendarId).order("start_time", { ascending: true });
+  const memberFilter = request.nextUrl.searchParams.get("member");
+  // 公開iCal用：認証不要で読める（カレンダーIDを知っている人だけがアクセス可能）
+  const supabase = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  );
+  let query = supabase.from("calendar_events").select("*").eq("calendar_id", calendarId).order("start_time", { ascending: true });
+  if (memberFilter) query = query.eq("member_name", memberFilter);
+  const { data: events, error } = await query;
   if (error || !events) return new NextResponse("Error", { status: 500 });
+  const calName = memberFilter ? `${memberFilter}スケジュール` : "ファミリーカレンダー";
   const fmt = (d: Date) => d.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "");
-  const lines = ["BEGIN:VCALENDAR","VERSION:2.0","PRODID:-//Ball Clinic//JA","CALSCALE:GREGORIAN","METHOD:PUBLISH","X-WR-CALNAME:ファミリーカレンダー","REFRESH-INTERVAL;VALUE=DURATION:PT1H"];
+  const lines = ["BEGIN:VCALENDAR","VERSION:2.0","PRODID:-//Ball Clinic//JA","CALSCALE:GREGORIAN","METHOD:PUBLISH",`X-WR-CALNAME:${calName}`,"REFRESH-INTERVAL;VALUE=DURATION:PT1H"];
   for (const event of events) {
     lines.push("BEGIN:VEVENT");
     lines.push("UID:" + event.id + "@ball-clinic-reserve");

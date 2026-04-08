@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { signUpAction } from "@/app/actions/auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -11,22 +12,29 @@ export default function AdminSetupPage() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const router = useRouter();
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setIsLoading(true);
     setError(null);
     setSuccess(null);
-    
+
     const formData = new FormData(e.currentTarget);
     const result = await signUpAction(formData);
-    
+
     if (result && result.error) {
       setError(result.error);
       setIsLoading(false);
     } else if (result && result.success) {
-      setSuccess(result.success);
-      setIsLoading(false);
+      if (result.autoLogin) {
+        // セッション確立済み → 管理画面へ直接遷移
+        router.push("/admin");
+        router.refresh();
+      } else {
+        setSuccess(result.success);
+        setIsLoading(false);
+      }
     }
   };
 
@@ -104,12 +112,16 @@ export default function AdminSetupPage() {
                 </label>
                 <div className="relative group">
                   <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500 group-focus-within:text-amber-400 transition-colors" />
-                  <Input 
-                    id="email" 
+                  <Input
+                    id="email"
                     name="email"
-                    type="email" 
-                    placeholder="admin@example.com" 
+                    type="email"
+                    placeholder="admin@example.com"
                     required
+                    autoCapitalize="off"
+                    autoCorrect="off"
+                    autoComplete="email"
+                    spellCheck={false}
                     className="pl-10 h-12 bg-white/5 border-white/10 text-white placeholder:text-slate-500 focus:border-amber-500/50 focus:ring-amber-500/20 rounded-xl transition-all"
                   />
                 </div>
@@ -122,12 +134,16 @@ export default function AdminSetupPage() {
                 </label>
                 <div className="relative group">
                   <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500 group-focus-within:text-amber-400 transition-colors" />
-                  <Input 
-                    id="password" 
+                  <Input
+                    id="password"
                     name="password"
-                    type="password" 
-                    placeholder="8文字以上を推奨" 
+                    type="password"
+                    placeholder="8文字以上を推奨"
                     required
+                    autoCapitalize="off"
+                    autoCorrect="off"
+                    autoComplete="new-password"
+                    spellCheck={false}
                     className="pl-10 h-12 bg-white/5 border-white/10 text-white placeholder:text-slate-500 focus:border-amber-500/50 focus:ring-amber-500/20 rounded-xl transition-all"
                   />
                 </div>
@@ -140,12 +156,16 @@ export default function AdminSetupPage() {
                 </label>
                 <div className="relative group">
                   <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500 group-focus-within:text-amber-400 transition-colors" />
-                  <Input 
-                    id="setupPassword" 
+                  <Input
+                    id="setupPassword"
                     name="setupPassword"
-                    type="password" 
-                    placeholder="SETUP_PASSWORD を入力" 
+                    type="password"
+                    placeholder="SETUP_PASSWORD を入力"
                     required
+                    autoCapitalize="off"
+                    autoCorrect="off"
+                    autoComplete="off"
+                    spellCheck={false}
                     className="pl-10 h-12 bg-white/5 border-white/10 text-white placeholder:text-slate-500 focus:border-amber-500/50 focus:ring-amber-500/20 rounded-xl transition-all"
                   />
                 </div>

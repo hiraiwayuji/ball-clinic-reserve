@@ -173,7 +173,7 @@ export async function createWaitlistReservation(formData: FormData) {
     }
   } catch (err) {
     console.error(err);
-    return { success: false, error: "予期せぬエラーが発生しました" };
+    return { success: false, error: "エラーが発生しました。お手数ですが、お電話（088-635-5344）またはLINEにてご予約ください。" };
   }
 }
 
@@ -304,7 +304,9 @@ export async function createReservation(formData: FormData) {
     const rawDate = formData.get("date") as string;
     const time = formData.get("time") as string;
     const name = formData.get("name") as string;
-    const phone = formData.get("phone") as string;
+    const rawPhone = formData.get("phone") as string;
+    // ハイフン・スペースを除去して正規化（アンケートDBと形式を統一）
+    const phone = rawPhone ? rawPhone.trim().replace(/[-\s]/g, "") : "";
     const visitType = formData.get("visitType") as string;
     const symptoms = formData.get("symptoms") as string;
     const isWaitlistIntent = formData.get("isWaitlistIntent") === "true";
@@ -334,83 +336,76 @@ export async function createReservation(formData: FormData) {
     if (supabase) {
       let customerId = null;
 
-      // 顧客の検索または作成処理
-      if (phone) {
-        // 電話番号がある場合はそれで照合・更新・作成
-        const { data: existingPhoneCustomer } = await supabase
-          .from("customers")
-          .select("id")
-          .eq("phone", phone)
-          .single();
+      const adminDb = getAdminSupabase() || supabase;
 
-        if (existingPhoneCustomer) {
-          customerId = existingPhoneCustomer.id;
-          // 名前の更新（必要に応じて）
-          await supabase.from("customers").update({ name }).eq("id", customerId);
+      // ── 顧客照合 ──
+      // LINE紐づけ済み or 顧客DB登録済みなら予約可能。
+      // 電話番号で照合 → 名前で照合 → 未登録ならアンケートへ誘導。
+      if (phone) {
+        const { data: existing } = await adminDb
+          .from("customers")
+          .select("id, name, booking_suspended, line_user_id")
+          .eq("phone", phone)
+          .maybeSingle();
+
+        if (existing) {
+          if (existing.booking_suspended) {
+            return { success: false, error: "現在、オンライン予約のご利用が停止されています。お電話またはLINEにてお問い合わせください。" };
+          }
+          customerId = existing.id;
+          if (existing.name !== name) {
+            await adminDb.from("customers").update({ name }).eq("id", customerId);
+          }
         } else {
-          const { data: newCustomer, error: insertErr } = await supabase
-            .from("customers")
-            .insert([{ 
-              name, 
-              phone,
-              clinic_id: DEFAULT_CLINIC_ID
-            }])
-            .select()
-            .single();
-          if (insertErr || !newCustomer) throw new Error("Customer creation failed");
-          customerId = newCustomer.id;
+          // 電話番号で見つからない場合 → アンケートへ誘導
+          return {
+            success: false,
+            error: "初めてオンライン予約をご希望の方は、先にアンケートへのご回答をお願いします。",
+            requiresQuestionnaire: true,
+          };
         }
       } else {
-        // 再診で電話番号が空の場合は名前で照合を試みる
-        const { data: existingNameCustomer, error: nameErr } = await supabase
+        // 電話番号なし（再診・名前のみ）→ 名前で照合
+        const { data: existing } = await adminDb
           .from("customers")
-          .select("id")
+          .select("id, booking_suspended, line_user_id")
           .eq("name", name)
-          .order('created_at', { ascending: false })
+          .order("created_at", { ascending: false })
           .limit(1)
-          .single();
-          
-        if (existingNameCustomer) {
-          customerId = existingNameCustomer.id;
+          .maybeSingle();
+
+        if (existing) {
+          if (existing.booking_suspended) {
+            return { success: false, error: "現在、オンライン予約のご利用が停止されています。お電話またはLINEにてお問い合わせください。" };
+          }
+          // LINE未紐づけ かつ 顧客DB登録済み → 予約は通す（スタッフが手動管理）
+          customerId = existing.id;
         } else {
-          const { data: newCustomer, error: insertErr } = await supabase
-            .from("customers")
-            .insert([{ 
-              name, 
-              phone: null,
-              clinic_id: DEFAULT_CLINIC_ID
-            }])
-            .select()
-            .single();
-          if (insertErr || !newCustomer) throw new Error("Customer creation failed");
-          customerId = newCustomer.id;
+          // 名前でも見つからない → アンケートへ誘導
+          return {
+            success: false,
+            error: "初めてオンライン予約をご希望の方は、先にアンケートへのご回答をお願いします。",
+            requiresQuestionnaire: true,
+          };
         }
       }
 
       const startDateTimeStr = `${rawDate}T${time}:00+09:00`;
 
-      const adminDb = getAdminSupabase() || supabase;
-
-      // オンライン予約停止チェック
-      const { data: customerData } = await adminDb
-        .from("customers")
-        .select("booking_suspended")
-        .eq("id", customerId)
-        .single();
-      if (customerData?.booking_suspended) {
-        return { success: false, error: "現在、オンライン予約のご利用が停止されています。お電話またはLINEにてお問い合わせください。" };
-      }
-
       // 1人1予約制限: 既に有効な予約がある場合はブロック
       const nowIso = new Date().toISOString();
       const { data: existingAppts } = await adminDb
         .from("appointments")
-        .select("id, start_time")
+        .select("id, start_time, status")
         .eq("customer_id", customerId)
         .in("status", ["pending", "confirmed", "waiting"])
         .gte("start_time", nowIso)
         .limit(1);
       if (existingAppts && existingAppts.length > 0) {
+        const existing = existingAppts[0];
+        if (existing.status === "waiting") {
+          return { success: false, error: "キャンセル待ちの登録があります。キャンセル待ちをキャンセルしてから新しい予約をお取りください。" };
+        }
         return { success: false, error: "すでに予約が入っています。既存の予約をキャンセルしてから新しい予約をお取りください。" };
       }
 
@@ -439,7 +434,7 @@ export async function createReservation(formData: FormData) {
       const endDate = new Date(jstDate.getTime() + durationMinutes * 60000);
       const endDateTimeStr = endDate.toISOString();
 
-      const { error: appointmentErr, data: appointmentData } = await supabase
+      const { error: appointmentErr, data: appointmentData } = await adminDb
         .from("appointments")
         .insert([{
           customer_id: customerId,
@@ -455,7 +450,7 @@ export async function createReservation(formData: FormData) {
 
       if (appointmentErr || !appointmentData) {
         console.error("Appointment insertion error:", appointmentErr);
-        return { success: false, error: "予約情報の登録に失敗しました" };
+        return { success: false, error: "予約の登録に失敗しました。時間をおいて再度お試しいただくか、お電話（088-635-5344）にてご予約ください。" };
       }
       
       const reservationNumber = appointmentData.id.split('-')[0].toUpperCase();
@@ -471,7 +466,7 @@ export async function createReservation(formData: FormData) {
     }
   } catch (err) {
     console.error(err);
-    return { success: false, error: "予期せぬエラーが発生しました" };
+    return { success: false, error: "エラーが発生しました。お手数ですが、お電話（088-635-5344）またはLINEにてご予約ください。" };
   }
 }
 
