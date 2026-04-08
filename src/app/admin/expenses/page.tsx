@@ -532,23 +532,23 @@ export default function ExpensesPage() {
                                 />
                               </TableCell>
                               <TableCell className="text-right">
-                                <div className="flex items-center justify-end gap-1">
+                                <div className="flex flex-col gap-1">
                                   <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    className="w-7 h-7 text-emerald-600 hover:bg-emerald-100"
+                                    size="sm"
+                                    className="h-7 px-3 text-xs bg-emerald-600 hover:bg-emerald-700 text-white"
                                     onClick={handleSaveEdit}
                                     disabled={isSavingEdit}
                                   >
-                                    {isSavingEdit ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+                                    {isSavingEdit ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <Check className="w-3 h-3 mr-1" />}
+                                    保存
                                   </Button>
                                   <Button
                                     variant="ghost"
-                                    size="icon"
-                                    className="w-7 h-7 text-slate-400 hover:bg-slate-100"
+                                    size="sm"
+                                    className="h-7 px-3 text-xs text-slate-400 hover:bg-slate-100"
                                     onClick={() => setEditingRow(null)}
                                   >
-                                    <X className="w-3.5 h-3.5" />
+                                    キャンセル
                                   </Button>
                                 </div>
                               </TableCell>
