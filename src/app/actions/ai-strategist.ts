@@ -207,7 +207,10 @@ export async function generateDailySnsTasks(dateStr: string) {
     const supabase = await getSupabase();
 
     const genAI = new GoogleGenerativeAI(apiKey);
-    const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash-lite-preview-02-05" });
+    const model = genAI.getGenerativeModel({ 
+      model: "gemini-2.0-flash",
+      generationConfig: { responseMimeType: "application/json" }
+    });
 
     const prompt = `
       あなたは接骨院の「SNS集客・マーケティング軍師AI」です。
@@ -240,8 +243,26 @@ export async function generateDailySnsTasks(dateStr: string) {
     `;
 
     const result = await model.generateContent(prompt);
-    const responseText = result.response.text().trim().replace(/^```json/, '').replace(/```$/, '');
-    const dailyTasks = JSON.parse(responseText);
+    const responseText = result.response.text().trim();
+    
+    let dailyTasks;
+    try {
+      // JSONモード（responseMimeType）を使用しているため直接パースを試みる
+      dailyTasks = JSON.parse(responseText);
+    } catch (parseErr) {
+      console.error("[AI_TASK_LOG] JSON parse failed, trying regex fallback", parseErr);
+      // 念のため正規表現での抽出も試みる
+      const jsonMatch = responseText.match(/\[[\s\S]*\]/);
+      if (jsonMatch) {
+        dailyTasks = JSON.parse(jsonMatch[0]);
+      } else {
+        throw new Error("AIの応答形式が正しくありません");
+      }
+    }
+
+    if (!Array.isArray(dailyTasks)) {
+      throw new Error("AIが配列形式で回答しませんでした");
+    }
 
     const insertData = dailyTasks.map((t: any) => ({
       clinic_id: clinicId,
@@ -254,7 +275,13 @@ export async function generateDailySnsTasks(dateStr: string) {
     }));
 
     const { error } = await supabase.from("daily_tasks").insert(insertData);
-    if (error) throw error;
+    if (error) {
+       console.error("[AI_TASK_LOG] Database insert error:", error);
+       if (error.code === '42703') {
+         throw new Error("データベースの更新（カラム追加）が反映されていない可能性があります。管理者へ連絡してください。");
+       }
+       throw error;
+    }
 
     revalidatePath("/admin/tasks");
     return { success: true };
