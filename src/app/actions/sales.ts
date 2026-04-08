@@ -238,6 +238,7 @@ export async function addExpense(formData: FormData) {
     const description = formData.get("description") as string || "";
     const amount = parseInt(formData.get("amount") as string, 10);
     const memo = formData.get("memo") as string || "";
+    const imageUrl = formData.get("image_url") as string || "";
 
     if (!expenseDate || !category || isNaN(amount)) {
       return { success: false, error: "必須項目を入力してください" };
@@ -252,6 +253,7 @@ export async function addExpense(formData: FormData) {
         description, 
         amount, 
         memo,
+        image_url: imageUrl,
         clinic_id: clinicId
       }]);
 
@@ -281,6 +283,31 @@ export async function getExpenses(dateStr: string) {
     return { success: true, data };
   } catch (error) {
     console.error("Error fetching expenses:", error);
+    return { success: false, error: "取得に失敗しました", data: [] };
+  }
+}
+
+export async function getMonthDetailedExpenses(year: number, month: number) {
+  const { clinicId } = await checkAdminAuth();
+  try {
+    const supabase = await getSupabase();
+    const monthStr = `${year}-${month.toString().padStart(2, '0')}`;
+    const startOfMonth = `${monthStr}-01`;
+    const endOfMonth = new Date(year, month, 0).toISOString().split('T')[0];
+
+    const { data, error } = await supabase
+      .from("clinic_expenses")
+      .select("*")
+      .eq("clinic_id", clinicId)
+      .gte("expense_date", startOfMonth)
+      .lte("expense_date", endOfMonth)
+      .order("expense_date", { ascending: true })
+      .order("created_at", { ascending: true });
+
+    if (error) throw error;
+    return { success: true, data };
+  } catch (error) {
+    console.error("Error fetching monthly detailed expenses:", error);
     return { success: false, error: "取得に失敗しました", data: [] };
   }
 }
@@ -716,6 +743,16 @@ export async function finalizePendingExpense(id: string, finalData: any) {
   try {
     const supabase = await getSupabase();
     
+    // 0. 元の保留データから画像URLを特定
+    const { data: pending } = await supabase
+      .from("pending_expenses")
+      .select("image_url")
+      .eq("id", id)
+      .single();
+    
+    // finalDataに新しいURLがある場合はそちらを優先
+    const imageUrl = finalData.image_url || pending?.image_url || "";
+
     // 1. Insert into formal clinic_expenses
     const { error: insertErr } = await supabase
       .from("clinic_expenses")
@@ -725,6 +762,7 @@ export async function finalizePendingExpense(id: string, finalData: any) {
         description: finalData.description,
         amount: finalData.amount,
         memo: finalData.memo,
+        image_url: imageUrl,
         clinic_id: clinicId
       }]);
 

@@ -8,8 +8,9 @@ import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Loader2, Receipt, Image as ImageIcon, Check, Ban, AlertCircle, Save } from "lucide-react";
+import { Loader2, Receipt, Image as ImageIcon, Check, Ban, AlertCircle, Save, ExternalLink } from "lucide-react";
 import { getPendingExpenses, finalizePendingExpense, updatePendingExpense } from "@/app/actions/sales";
+import Image from "next/image";
 import { toast } from "sonner";
 import Link from "next/link";
 
@@ -62,6 +63,7 @@ export default function ExpenseTriagePage() {
       amount: item.amount || 0,
       memo: item.memo || "",
       status: item.status,
+      image_url: item.image_url || null,
     });
   };
 
@@ -169,16 +171,34 @@ export default function ExpenseTriagePage() {
                                 value={editForm.description}
                                 onChange={(e) => setEditForm({ ...editForm, description: e.target.value })}
                               />
-                              {item.image_url && (
-                                <div className="text-xs flex items-center gap-1 text-slate-500">
-                                  <ImageIcon className="w-3 h-3" /> 画像あり
+                              {editForm.image_url && (
+                                <div className="space-y-2">
+                                  <div className="text-xs flex items-center gap-1 text-slate-500">
+                                    <ImageIcon className="w-3 h-3" /> 領収書写真
+                                  </div>
+                                  <div className="relative w-full h-32 rounded border overflow-hidden bg-slate-50 group">
+                                    <Image src={editForm.image_url} alt="領収書" fill className="object-contain" />
+                                    <a 
+                                      href={editForm.image_url} 
+                                      target="_blank" 
+                                      rel="noopener noreferrer"
+                                      className="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity"
+                                    >
+                                      <ExternalLink className="w-5 h-5 text-white" />
+                                    </a>
+                                  </div>
                                 </div>
                               )}
                             </div>
                           ) : (
                             <div className="space-y-1">
                               <p className="font-medium">{item.description || "(内容未入力)"}</p>
-                              {item.image_url && <ImageIcon className="w-4 h-4 text-emerald-500" />}
+                              {item.image_url && (
+                                <div className="flex items-center gap-2">
+                                  <ImageIcon className="w-4 h-4 text-emerald-500" />
+                                  <span className="text-[10px] text-slate-400">画像あり</span>
+                                </div>
+                              )}
                             </div>
                           )}
                         </TableCell>

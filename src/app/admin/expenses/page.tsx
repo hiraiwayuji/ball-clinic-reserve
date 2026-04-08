@@ -9,8 +9,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Calendar as CalendarIcon, Plus, Trash2, Loader2, Receipt, Tag, AlertCircle, Save, Camera, Sparkles, Pencil, Check, X } from "lucide-react";
-import { addExpense, getExpenses, deleteExpense, addPendingExpense, updateExpense } from "@/app/actions/sales";
+import { addExpense, getExpenses, deleteExpense, addPendingExpense, updateExpense, getMonthDetailedExpenses } from "@/app/actions/sales";
+import { createClient } from "@/lib/supabase/client";
 import { toast } from "sonner";
+import Image from "next/image";
 import Link from "next/link";
 
 const EXPENSE_CATEGORIES = [
@@ -48,6 +50,8 @@ export default function ExpensesPage() {
   const [editingRow, setEditingRow] = useState<EditingState | null>(null);
   const [isSavingEdit, setIsSavingEdit] = useState(false);
   const [formExpenseDate, setFormExpenseDate] = useState<string>("");
+  const [currentImageUrl, setCurrentImageUrl] = useState<string | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -61,8 +65,9 @@ export default function ExpensesPage() {
 
   const fetchExpenses = async (d: Date) => {
     setLoading(true);
-    const dateStr = format(d, "yyyy-MM-dd");
-    const res = await getExpenses(dateStr);
+    const year = d.getFullYear();
+    const month = d.getMonth() + 1;
+    const res = await getMonthDetailedExpenses(year, month);
     if (res.success) {
       setExpenses(res.data || []);
     }
@@ -87,6 +92,8 @@ export default function ExpensesPage() {
         toast.success("経費を登録しました");
         (e.target as HTMLFormElement).reset();
         setFormExpenseDate(format(date, "yyyy-MM-dd"));
+        setCurrentImageUrl(null);
+        setPreviewUrl(null);
         fetchExpenses(date);
       } else {
         toast.error(res.error || "エラーが発生しました");
@@ -108,7 +115,7 @@ export default function ExpensesPage() {
     };
 
     setIsSavingPending(true);
-    const res = await addPendingExpense(null, triageData);
+    const res = await addPendingExpense(currentImageUrl, triageData);
     setIsSavingPending(false);
 
     if (res.success) {
@@ -131,10 +138,44 @@ export default function ExpensesPage() {
   };
 
   // Geminiにbase64画像を送って結果をフォームに反映する共通処理
-  const analyzeAndFill = async (base64: string, mimeType: string, objectUrl?: string) => {
+  const analyzeAndFill = async (base64: string, mimeType: string, objectUrl?: string, file?: File) => {
     setIsReading(true);
+    setIsUploading(true);
     if (objectUrl) setPreviewUrl(objectUrl);
+    
     try {
+      // 1. Supabase Storageにアップロード
+      const supabase = createClient();
+      const fileName = `${Date.now()}-${Math.random().toString(36).substring(2, 9)}.jpg`;
+      const filePath = `receipts/${fileName}`;
+      
+      let uploadFile: any = file;
+      if (!uploadFile) {
+        // base64をBlobに変換
+        const byteCharacters = atob(base64);
+        const byteNumbers = new Array(byteCharacters.length);
+        for (let i = 0; i < byteCharacters.length; i++) {
+          byteNumbers[i] = byteCharacters.charCodeAt(i);
+        }
+        const byteArray = new Uint8Array(byteNumbers);
+        uploadFile = new Blob([byteArray], { type: mimeType });
+      }
+
+      const { data: uploadData, error: uploadErr } = await supabase.storage
+        .from("expense-receipts")
+        .upload(filePath, uploadFile);
+
+      if (uploadErr) {
+        console.error("Storage upload error:", uploadErr);
+        // アップロード失敗してもOCR自体は進める
+      } else {
+        const { data: { publicUrl } } = supabase.storage
+          .from("expense-receipts")
+          .getPublicUrl(filePath);
+        setCurrentImageUrl(publicUrl);
+      }
+
+      // 2. Geminiによる解析
       const res = await fetch("/api/read-receipt", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -159,6 +200,7 @@ export default function ExpensesPage() {
       toast.error("読み取りに失敗しました: " + (err.message || ""));
     } finally {
       setIsReading(false);
+      setIsUploading(false);
     }
   };
 
@@ -173,7 +215,7 @@ export default function ExpensesPage() {
       reader.onerror = reject;
       reader.readAsDataURL(file);
     });
-    await analyzeAndFill(base64, file.type, objectUrl);
+    await analyzeAndFill(base64, file.type, objectUrl, file);
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
@@ -337,11 +379,11 @@ export default function ExpensesPage() {
               )}
 
               {/* 読み取り中 */}
-              {isReading && (
+              {isReading || isUploading ? (
                 <div className="flex items-center justify-center gap-2 py-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-700 text-sm font-bold">
-                  <Loader2 className="w-4 h-4 animate-spin" /> AIが読み取り中...
+                  <Loader2 className="w-4 h-4 animate-spin" /> {isUploading ? "保存中..." : "AIが読み取り中..."}
                 </div>
-              )}
+              ) : null}
 
               {/* プレビュー */}
               {previewUrl && !isReading && !cameraOpen && (
@@ -352,7 +394,7 @@ export default function ExpensesPage() {
               )}
 
               {/* 2ボタン */}
-              {!cameraOpen && !isReading && (
+              {!cameraOpen && !isReading && !isUploading && (
                 <div className="grid grid-cols-2 gap-2">
                   <button
                     type="button"
@@ -418,6 +460,9 @@ export default function ExpensesPage() {
                 <Input id="memo" name="memo" placeholder="領収書あり" />
               </div>
 
+              {/* 画像URLを hidden で送信 */}
+              {currentImageUrl && <input type="hidden" name="image_url" value={currentImageUrl} />}
+
               <div className="flex flex-col gap-2 pt-2">
                 <Button type="submit" className="w-full bg-emerald-600 hover:bg-emerald-700 h-10" disabled={isPending || isSavingPending}>
                   {isPending ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Plus className="w-4 h-4 mr-2" />}
@@ -428,7 +473,7 @@ export default function ExpensesPage() {
                   variant="outline"
                   className="w-full h-10 border-amber-200 text-amber-700 hover:bg-amber-50"
                   onClick={handleSavePending}
-                  disabled={isPending || isSavingPending}
+                  disabled={isPending || isSavingPending || isUploading}
                 >
                   {isSavingPending ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
                   とりあえず保存（仕分け待ちへ）
@@ -442,11 +487,11 @@ export default function ExpensesPage() {
         <Card className="lg:col-span-2 shadow-sm border-slate-200">
           <CardHeader className="flex flex-row items-center justify-between">
             <div>
-              <CardTitle>本日（{format(date, "M/d")}）の確定済み経費</CardTitle>
+              <CardTitle>今月（{format(date, "M月")}）の確定済み経費</CardTitle>
               <CardDescription>{expenses.length} 件の記録があります</CardDescription>
             </div>
             <div className="text-right">
-              <p className="text-xs text-slate-500 font-medium">本日経費合計</p>
+              <p className="text-xs text-slate-500 font-medium">今月経費合計</p>
               <p className="text-2xl font-bold text-emerald-600">¥{totalAmount.toLocaleString()}</p>
             </div>
           </CardHeader>
@@ -567,7 +612,16 @@ export default function ExpensesPage() {
                                 </span>
                               </TableCell>
                               <TableCell>
-                                <div className="font-medium text-sm">{expense.description || "-"}</div>
+                                <div className="flex items-center gap-2">
+                                  <div className="font-medium text-sm">{expense.description || "-"}</div>
+                                  {expense.image_url && (
+                                    <a href={expense.image_url} target="_blank" rel="noopener noreferrer" className="shrink-0">
+                                      <div className="relative w-8 h-8 rounded border border-slate-200 overflow-hidden bg-slate-100 hover:opacity-80 transition-opacity">
+                                        <Image src={expense.image_url} alt="領収書" fill className="object-cover" />
+                                      </div>
+                                    </a>
+                                  )}
+                                </div>
                                 {expense.memo && <div className="text-xs text-slate-400">{expense.memo}</div>}
                               </TableCell>
                               <TableCell className="text-right font-bold text-slate-700">¥{expense.amount.toLocaleString()}</TableCell>
