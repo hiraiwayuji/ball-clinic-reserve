@@ -411,6 +411,8 @@ export default function MarketingDashboardPage() {
               {loadingAction === "area" ? "送信中..." : selectedCity ? `${selectedCity}の患者様へ` : "エリア選択"}
             </Button>
           </CardFooter>
+        </Card>
+
         {/* 7. 他院へのご紹介 */}
         <Card className="border-t-4 border-t-indigo-600 hover:shadow-md transition-shadow h-full flex flex-col bg-slate-50/30">
           <CardHeader className="pb-3">
@@ -440,7 +442,7 @@ export default function MarketingDashboardPage() {
                className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-[10px]"
              />
           </CardContent>
-          <CardFooter className="pt-2 mt-auto grid grid-cols-2 gap-2">
+          <CardFooter className="pt-2 mt-auto grid grid-cols-3 gap-2">
             <Link href="/presentation" target="_blank" className="w-full">
               <Button variant="outline" className="w-full text-[10px] h-8 border-indigo-200 text-indigo-700">
                 資料を見る
