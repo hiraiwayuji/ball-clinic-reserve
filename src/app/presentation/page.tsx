@@ -49,7 +49,7 @@ const SLIDES = [
           </div>
           <div className="flex items-center gap-2 bg-slate-900/50 px-4 py-2 rounded-full border border-slate-800">
             <Sparkles className="w-5 h-5 text-amber-500" />
-            <span className="text-sm font-bold">AI経営軍師</span>
+            <span className="text-sm font-bold">専属AI秘書</span>
           </div>
         </div>
       </div>
@@ -110,8 +110,8 @@ const SLIDES = [
           },
           {
             icon: <Sparkles className="w-8 h-8 text-amber-400 transition-transform group-hover:scale-110" />,
-            title: "経営軍師",
-            desc: "AIがデータを元に、具体的な「打ち手」をあなたに伴走して提案。",
+            title: "専属AI秘書",
+            desc: "24時間365日。AI秘書がスケジュールを管理し、最適な『打ち手』を提案。",
             color: "border-amber-500/30",
             bg: "bg-amber-500/5"
           }
@@ -173,27 +173,32 @@ const SLIDES = [
     )
   },
   {
-    title: "Slide 5: あなたの右腕「AI軍師」",
+    title: "Slide 5: あなたには、特別な「AI秘書」がつきます",
     content: (
       <div className="flex flex-col items-center space-y-8 max-w-4xl text-center">
-         <div className="w-16 h-16 bg-gradient-to-br from-violet-500 to-indigo-600 rounded-2xl flex items-center justify-center shadow-lg shadow-violet-500/20">
-            <Sparkles className="w-10 h-10 text-white" />
+         <div className="w-20 h-20 bg-gradient-to-br from-violet-500 via-indigo-600 to-fuchsia-500 rounded-3xl flex items-center justify-center shadow-2xl shadow-violet-500/40 animate-bounce">
+            <Sparkles className="w-12 h-12 text-white" />
          </div>
-         <h2 className="text-4xl font-black text-white">
-           「データの読み方」は<br />AIに任せてください
+         <h2 className="text-4xl md:text-5xl font-black text-white leading-tight">
+           24時間、あなたを支える<br />
+           <span className="text-transparent bg-clip-text bg-gradient-to-r from-violet-400 to-fuchsia-400">スペシャルな専属秘書。</span>
          </h2>
-         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-left w-full">
-            <div className="bg-slate-900 border border-violet-500/20 p-6 rounded-3xl">
-               <p className="text-xs font-bold text-violet-400 mb-2 uppercase tracking-widest">Case 01</p>
-               <p className="text-white font-medium italic">「今月は新患が少ないので、〇〇エリアのポスティングを強化しませんか？」</p>
+         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-left w-full mt-4">
+            <div className="bg-slate-900 border-2 border-violet-500/30 p-6 rounded-[32px] shadow-lg">
+               <p className="text-xs font-black text-violet-400 mb-2 uppercase tracking-widest flex items-center gap-2">
+                 <Clock className="w-3 h-3" /> Morning Briefing
+               </p>
+               <p className="text-white font-black text-lg">「おはようございます、先生。13時からの空き時間でYouTubeを撮りましょう！」</p>
             </div>
-            <div className="bg-slate-900 border border-indigo-500/20 p-6 rounded-3xl">
-               <p className="text-xs font-bold text-indigo-400 mb-2 uppercase tracking-widest">Case 02</p>
-               <p className="text-white font-medium italic">「〇〇先生の指名リピート率が低下しています。ヒアリングをおすすめします」</p>
+            <div className="bg-slate-900 border-2 border-indigo-500/30 p-6 rounded-[32px] shadow-lg">
+               <p className="text-xs font-black text-indigo-400 mb-2 uppercase tracking-widest flex items-center gap-2">
+                 <LineChart className="w-3 h-3" /> Realtime Analysis
+               </p>
+               <p className="text-white font-black text-lg">「〇〇エリアの集客が好調です。紹介キャンペーンの準備を始めませんか？」</p>
             </div>
          </div>
-         <p className="text-slate-400 font-bold border-t border-white/10 pt-6">
-           経営者はAIの提案を聞き、<br className="md:hidden" /> <span className="text-white underline font-black decoration-violet-500 decoration-4">「決める」</span> ことに集中できます。
+         <p className="text-slate-400 font-bold border-t border-white/10 pt-6 max-w-2xl mx-auto">
+           経営者はAI秘書のガイドに従い、<br className="md:hidden" /> <span className="text-white underline font-black decoration-violet-500 decoration-4">最速で「決める」</span> ことだけに集中できます。
          </p>
       </div>
     )
@@ -204,7 +209,7 @@ const SLIDES = [
       <div className="grid md:grid-cols-2 gap-8 max-w-5xl">
          {[
            { icon: <CreditCard className="w-6 h-6 text-violet-400" />, t: "経費写メ管理", desc: "領収書をスマホで撮るだけ。AIが自動で読み取り、集計・グラフ化。" },
-           { icon: <Calendar className="w-6 h-6 text-blue-400" />, t: "家族カレンダー", desc: "私生活の予定も一括管理。プライバシー完結機能で院内共有も安心。" },
+           { icon: <Video className="w-6 h-6 text-blue-400" />, t: "YouTube/SNS戦略", desc: "AI秘書が空き時間を分析し、最適な投稿タイミングとネタを提案。" },
            { icon: <ClipboardList className="w-6 h-6 text-emerald-400" />, t: "院内タスク管理", desc: "ルーチンワークを全スタッフで共有。ヌケ漏れをゼロにします。" },
            { icon: <Zap className="w-6 h-6 text-amber-400" />, t: "一括レセプト連携", desc: "既存のレセコンデータを吸い出し、マーケティングに即転用可能。" }
          ].map((item, i) => (
