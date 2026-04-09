@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Settings, Video, MapPin, Save, Loader2, MessageSquare, Instagram, Youtube, Twitter, Phone, Users, Building2, Target } from "lucide-react";
+import { Settings, Video, MapPin, Save, Loader2, MessageSquare, Instagram, Youtube, Twitter, Phone, Users, Building2, Target, Globe } from "lucide-react";
 import { updateClinicSettings, ClinicSettings } from "@/app/actions/settings";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
@@ -104,6 +104,13 @@ export default function SettingsForm({ initialSettings }: { initialSettings: Cli
                   <div className="space-y-2">
                     <Label htmlFor="clinic_name">院名</Label>
                     <Input id="clinic_name" value={settings?.clinic_name || ""} onChange={(e) => updateField("clinic_name", e.target.value)} />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="hp_url">ホームページURL（SEO診断用）</Label>
+                    <div className="relative">
+                      <Globe className="absolute left-3 top-3 w-4 h-4 text-slate-400" />
+                      <Input id="hp_url" className="pl-9" placeholder="https://..." value={settings?.hp_url || ""} onChange={(e) => updateField("hp_url", e.target.value)} />
+                    </div>
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="phone_number">電話番号</Label>

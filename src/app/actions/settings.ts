@@ -37,6 +37,7 @@ export type ClinicSettings = {
   doctor_count?: number;
   staff_count?: number;
   branch_count?: number;
+  hp_url?: string;
 };
 
 
@@ -112,6 +113,7 @@ export async function updateClinicSettings(settings: Partial<ClinicSettings>) {
     doctor_count: settings.doctor_count,
     staff_count: settings.staff_count,
     branch_count: settings.branch_count,
+    hp_url: settings.hp_url,
     updated_at: new Date().toISOString()
   };
 
