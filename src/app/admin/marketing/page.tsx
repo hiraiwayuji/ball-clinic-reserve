@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Gift, BellElectric, Trophy, MessageCircle, Loader2, CheckCircle2, Sparkles } from "lucide-react";
+import { Gift, BellElectric, Trophy, MessageCircle, Loader2, CheckCircle2, Sparkles, ClipboardList, MapIcon, MapPin, Globe, ArrowRight } from "lucide-react";
 import {
   Select,
   SelectContent,
@@ -13,8 +13,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { sendAppointmentReminders, sendBirthdayCoupons, runMonthlyLottery, sendWelcomeQuestionnaire, sendWomenOnlyCampaign, getMarketingStats, sendSegmentedCampaign } from "@/app/actions/line-marketing";
-import { generateSEOMeoAdvice } from "@/app/actions/ai-strategist";
-import { ClipboardList, MapIcon, MapPin, Globe, Search } from "lucide-react";
 import Link from "next/link";
 
 export default function MarketingDashboardPage() {
@@ -27,7 +25,6 @@ export default function MarketingDashboardPage() {
   const [areaMessage, setAreaMessage] = useState("");
   const [selectedCity, setSelectedCity] = useState<string | null>(null);
   const [stats, setStats] = useState<any>(null);
-  const [seoAdvice, setSeoAdvice] = useState<string | null>(null);
 
   // 初回読み込み
   useEffect(() => {
@@ -164,377 +161,239 @@ export default function MarketingDashboardPage() {
     }
   };
 
-  const handleGetSEOAdvice = async () => {
-    setLoadingAction("seo");
-    try {
-      const result = await generateSEOMeoAdvice();
-      if (result.success && result.advice) {
-        setSeoAdvice(result.advice);
-      } else {
-        setActionResult({ type: "error", message: result.error || "AI診断に失敗しました" });
-      }
-    } catch (e: any) {
-      setActionResult({ type: "error", message: e.message || "エラーが発生しました" });
-    } finally {
-      setLoadingAction(null);
-    }
-  };
-
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight flex items-center gap-2">
-          <MessageCircle className="h-8 w-8 text-green-500" />
-          LINE 自動配信・マーケティング
-        </h1>
-        <p className="text-slate-500 mt-1">
-          患者さんへの自動リマインドや、誕生日クーポン・抽選会などの販促メッセージを一括送信します。
-        </p>
+    <div className="space-y-6 pb-12">
+      <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight flex items-center gap-2">
+            <MessageCircle className="h-8 w-8 text-green-500" />
+            V-ARC 販促・LINE管理
+          </h1>
+          <p className="text-slate-500 mt-1">
+            患者さんへの自動リマインドや、各種キャンペーンを一括送信します。
+          </p>
+        </div>
         
-        <div className="mt-4 p-4 bg-white border border-slate-200 rounded-lg shadow-sm flex flex-col gap-3 md:flex-row md:items-center w-full max-w-2xl">
-          <div className="flex items-center gap-2 font-medium">
-            <input 
-              type="checkbox" 
-              id="testMode" 
-              checked={testMode} 
-              onChange={(e) => handleToggleTestMode(e.target.checked)}
-              className="w-4 h-4 text-blue-600 rounded border-slate-300 focus:ring-blue-500"
-            />
-            <label htmlFor="testMode" className="cursor-pointer">テスト配信用IDを記憶して自分だけに送信する</label>
-          </div>
-          {testMode && (
-            <input 
-              type="text" 
-              placeholder="あなたのLINEユーザーID (U3....)" 
-              value={testLineId}
-              onChange={(e) => handleChangeTestId(e.target.value)}
-              className="flex-1 border border-slate-300 rounded px-3 py-1.5 text-sm"
-            />
-          )}
+        <div className="flex flex-col sm:flex-row gap-3">
+          <Link href="/admin/marketing/seo">
+            <Button className="bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-700 hover:to-violet-700 text-white shadow-lg px-6 font-bold">
+              <Globe className="w-4 h-4 mr-2" />
+              SEO/MEO AI軍師診断
+              <ArrowRight className="w-4 h-4 ml-2" />
+            </Button>
+          </Link>
+          <Link href="/admin/tasks">
+            <Button variant="outline" className="border-slate-200">
+              <ClipboardList className="w-4 h-4 mr-2 text-indigo-500" />
+              SNSタスク
+            </Button>
+          </Link>
         </div>
       </div>
-      
-      <div className="flex justify-end">
-        <Link href="/admin/tasks">
-          <Button variant="outline" className="text-slate-600 border-slate-200 hover:bg-slate-50">
-            <ClipboardList className="w-4 h-4 mr-2 text-indigo-500" />
-            SNSタスク管理を表示
-          </Button>
-        </Link>
+
+      <div className="bg-white border border-slate-200 p-4 rounded-xl shadow-sm flex flex-col md:flex-row md:items-center gap-4">
+        <div className="flex items-center gap-2 text-sm font-bold text-slate-700">
+          <input 
+            type="checkbox" 
+            id="testMode" 
+            checked={testMode} 
+            onChange={(e) => handleToggleTestMode(e.target.checked)}
+            className="w-4 h-4 text-blue-600 rounded border-slate-300"
+          />
+          <label htmlFor="testMode">テスト送信モード（自分だけに届く）</label>
+        </div>
+        {testMode && (
+          <input 
+            type="text" 
+            placeholder="LINEユーザーID (U3....)" 
+            value={testLineId}
+            onChange={(e) => handleChangeTestId(e.target.value)}
+            className="flex-1 border bg-slate-50 border-slate-300 rounded-lg px-3 py-1.5 text-xs font-mono"
+          />
+        )}
       </div>
 
-      {actionResult && actionResult.type !== "error" && (
-        <div className="bg-green-50 border border-green-200 text-green-800 p-4 rounded-lg flex items-start gap-3 shadow-sm animate-in fade-in slide-in-from-top-4">
-          <CheckCircle2 className="h-5 w-5 text-green-600 shrink-0 mt-0.5" />
-          <div>
-            <h3 className="font-bold text-green-900">配信完了</h3>
-            <p className="text-sm mt-1">{actionResult.message}</p>
-            {actionResult.data && actionResult.data.length > 0 && actionResult.type !== "lottery" && (
-              <p className="text-xs mt-2 opacity-80 break-words leading-relaxed">
-                <span className="font-bold">対象者:</span> {actionResult.data.join(", ")}
-              </p>
-            )}
-            {actionResult.type === "lottery" && actionResult.data && (
-              <>
-                <p className="text-xs mt-2 opacity-80"><span className="font-bold">対象:</span> {actionResult.data.target}</p>
-                {actionResult.data.note && (
-                  <p className="text-xs mt-1 text-amber-700">{actionResult.data.note}</p>
-                )}
-                {actionResult.data.winners && actionResult.data.winners.length > 0 && (
-                  <p className="text-xs mt-1 opacity-80 break-words leading-relaxed"><span className="font-bold">当選者:</span> {actionResult.data.winners.join(", ")}</p>
-                )}
-              </>
-            )}
-            
-            {(actionResult as any).debugLogs && (actionResult as any).debugLogs.length > 0 && (
-              <div className="mt-4 p-3 bg-slate-900 text-green-400 rounded font-mono text-xs leading-relaxed overflow-auto max-h-60">
-                <div className="text-white border-b border-slate-700 pb-1 mb-2">▼ LINE送信内容（シミュレーション）</div>
-                {(actionResult as any).debugLogs.map((log: string, i: number) => (
-                  <div key={i} className="mb-4 whitespace-pre-wrap">{log}</div>
-                ))}
+      {actionResult && (
+        <div className={`p-4 rounded-lg flex items-start gap-3 shadow-sm animate-in fade-in slide-in-from-top-2 ${actionResult.type === "error" ? "bg-rose-50 border border-rose-200 text-rose-800" : "bg-green-50 border border-green-200 text-green-800"}`}>
+          {actionResult.type === "error" ? (
+             <div className="shrink-0 mt-0.5">⚠️</div>
+          ) : (
+             <CheckCircle2 className="h-5 w-5 text-green-600 shrink-0 mt-0.5" />
+          )}
+          <div className="flex-1">
+            <h3 className="font-bold">{actionResult.type === "error" ? "エラーが発生しました" : "配信完了"}</h3>
+            <p className="text-sm mt-0.5">{actionResult.message}</p>
+            {actionResult.debugLogs && actionResult.debugLogs.length > 0 && (
+              <div className="mt-4 p-3 bg-slate-900 text-green-400 rounded font-mono text-[10px] max-h-40 overflow-auto">
+                {actionResult.debugLogs.map((log, i) => <div key={i} className="mb-2">{log}</div>)}
               </div>
             )}
           </div>
-        </div>
-      )}
-      
-      {actionResult && actionResult.type === "error" && (
-        <div className="bg-rose-50 border border-rose-200 text-rose-800 p-4 rounded-lg shadow-sm">
-          <h3 className="font-bold">エラー</h3>
-          <p className="text-sm">{actionResult.message}</p>
+          <Button variant="ghost" size="sm" onClick={() => setActionResult(null)} className="shrink-0 -mt-1 opacity-50">×</Button>
         </div>
       )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         
-        {/* 0. 初回アンケート */}
-        <Card className="border-t-4 border-t-purple-500 hover:shadow-md transition-shadow">
-          <CardHeader>
+        {/* 1. 初診アンケート */}
+        <Card className="border-t-4 border-t-purple-500 hover:shadow-md transition-shadow h-full flex flex-col">
+          <CardHeader className="pb-3">
             <div className="w-10 h-10 rounded-full bg-purple-100 flex items-center justify-center text-purple-600 mb-2">
               <ClipboardList className="h-5 w-5" />
             </div>
-            <CardTitle>初診アンケート</CardTitle>
-            <CardDescription>
-              LINE初登録者や初診の患者さんへ、属性（性別・誕生月など）を尋ねるアンケートフォームを送信します。
+            <CardTitle className="text-lg">初診アンケート</CardTitle>
+            <CardDescription className="text-xs">
+              属性取得用フォームを送信します。
             </CardDescription>
           </CardHeader>
-          <CardContent className="text-sm bg-slate-50 p-4 mx-6 rounded my-2 text-slate-600">
-            <p><strong>自動文章例:</strong></p>
-            <p className="mt-1 opacity-80">「ご来院ありがとうございます！カルテ作成のため、こちらのリンクから簡単なアンケート（お名前・性別・誕生月 等）にご回答をお願いします🌱」</p>
+          <CardContent className="text-[11px] bg-slate-50 p-3 mx-4 rounded text-slate-500 flex-grow">
+            「ご来院ありがとうございます！カルテ作成のためアンケートにご回答をお願いします🌱」
           </CardContent>
-          <CardFooter className="pt-4 border-t mt-auto">
-            <Button 
-              className="w-full bg-purple-600 hover:bg-purple-700" 
-              onClick={handleSendQuestionnaire}
-              disabled={loadingAction !== null}
-            >
-              {loadingAction === "questionnaire" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ClipboardList className="mr-2 h-4 w-4" />}
-              {loadingAction === "questionnaire" ? "送信中..." : "アンケートを配信する"}
+          <CardFooter className="pt-4 mt-auto">
+            <Button className="w-full bg-purple-600 text-xs py-2" onClick={handleSendQuestionnaire} disabled={loadingAction !== null}>
+              {loadingAction === "questionnaire" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ClipboardList className="mr-2 h-4 w-4 text-[10px]" />}
+              {loadingAction === "questionnaire" ? "送信中..." : "アンケート配信"}
             </Button>
           </CardFooter>
         </Card>
 
-        {/* 1. 当日リマインド */}
-        <Card className="border-t-4 border-t-blue-500 hover:shadow-md transition-shadow">
-          <CardHeader>
+        {/* 2. 当日リマインド */}
+        <Card className="border-t-4 border-t-blue-500 hover:shadow-md transition-shadow h-full flex flex-col">
+          <CardHeader className="pb-3">
             <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 mb-2">
               <BellElectric className="h-5 w-5" />
             </div>
-            <CardTitle>当日リマインド送信</CardTitle>
-            <CardDescription>
-              本日の予約が入っている患者さんへ、忘れ防止のお知らせLINEを一斉送信します。
-              （※通常は毎朝8時に自動実行されます）
+            <CardTitle className="text-lg">当日リマインド</CardTitle>
+            <CardDescription className="text-xs">
+              本日の予約者へ忘れ防止LINE。
             </CardDescription>
           </CardHeader>
-          <CardContent className="text-sm bg-slate-50 p-4 mx-6 rounded my-2 text-slate-600">
-            <p><strong>自動文章例:</strong></p>
-            <p className="mt-1 opacity-80">「こんにちは！ボール接骨院です。本日ご予約の日となっております。お気を付けてお越しください！」</p>
+          <CardContent className="text-[11px] bg-slate-50 p-3 mx-4 rounded text-slate-500 flex-grow">
+            「本日ご予約日となっております。お気を付けてお越しください！」
           </CardContent>
-          <CardFooter className="pt-4 border-t">
-            <Button 
-              className="w-full bg-blue-600 hover:bg-blue-700" 
-              onClick={handleSendReminders}
-              disabled={loadingAction !== null}
-            >
-              {loadingAction === "reminders" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <MessageCircle className="mr-2 h-4 w-4" />}
+          <CardFooter className="pt-4 mt-auto">
+            <Button className="w-full bg-blue-600 text-xs py-2" onClick={handleSendReminders} disabled={loadingAction !== null}>
+              {loadingAction === "reminders" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <MessageCircle className="mr-2 h-4 w-4 text-[10px]" />}
               {loadingAction === "reminders" ? "送信中..." : "今すぐリマインド配信"}
             </Button>
           </CardFooter>
         </Card>
 
-        {/* 2. 誕生日クーポン */}
-        <Card className="border-t-4 border-t-rose-500 hover:shadow-md transition-shadow">
-          <CardHeader>
+        {/* 3. 誕生日クーポン */}
+        <Card className="border-t-4 border-t-rose-500 hover:shadow-md transition-shadow h-full flex flex-col">
+          <CardHeader className="pb-3">
             <div className="w-10 h-10 rounded-full bg-rose-100 flex items-center justify-center text-rose-600 mb-2">
               <Gift className="h-5 w-5" />
             </div>
-            <CardTitle>誕生日クーポン</CardTitle>
-            <CardDescription>
-              指定した月が誕生月の患者さんへ、特別割引クーポンを一斉送信します。
-              {stats && <Badge className="mt-2 bg-rose-50 text-rose-700 hover:bg-rose-100 border-rose-200">
-                今月の対象: {stats.birthdayThisMonth}名
-              </Badge>}
+            <CardTitle className="text-lg">誕生日クーポン</CardTitle>
+            <CardDescription className="text-xs">
+              誕生月の患者様へ特別優待。
             </CardDescription>
           </CardHeader>
-          <CardContent>
-            <div className="my-2 bg-slate-50 p-4 rounded text-sm text-slate-600 mb-4">
-               <p><strong>自動文章例:</strong></p>
-               <p className="mt-1 opacity-80">「お誕生日おめでとうございます🎉 ささやかですが、当院で使える【500円OFFクーポン】をプレゼントいたします！」</p>
-            </div>
+          <CardContent className="space-y-4 flex-grow">
             <div className="flex items-center gap-2">
-              <span className="text-sm font-medium">対象の月:</span>
-              <Select value={selectedMonth} onValueChange={(val) => { if (val) setSelectedMonth(val); }}>
-                <SelectTrigger className="w-[120px]">
-                  <SelectValue placeholder="月を選択" />
-                </SelectTrigger>
+              <Select value={selectedMonth} onValueChange={setSelectedMonth}>
+                <SelectTrigger className="h-8 text-xs flex-1"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   {Array.from({ length: 12 }).map((_, i) => (
-                    <SelectItem key={i + 1} value={`${i + 1}`}>{i + 1}月生まれ</SelectItem>
+                    <SelectItem key={i + 1} value={`${i + 1}`}>{i + 1}月</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
+              {stats && <Badge variant="secondary" className="text-[10px] bg-rose-50 text-rose-700">対象: {stats.birthdayThisMonth}名</Badge>}
             </div>
           </CardContent>
-          <CardFooter className="pt-4 border-t">
-            <Button 
-              className="w-full bg-rose-500 hover:bg-rose-600" 
-              onClick={handleSendBirthday}
-              disabled={loadingAction !== null}
-            >
-              {loadingAction === "birthday" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Gift className="mr-2 h-4 w-4" />}
-              {loadingAction === "birthday" ? "送信中..." : "クーポンを配信する"}
+          <CardFooter className="pt-4 mt-auto">
+            <Button className="w-full bg-rose-500 text-xs py-2" onClick={handleSendBirthday} disabled={loadingAction !== null}>
+              {loadingAction === "birthday" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Gift className="mr-2 h-4 w-4 text-[10px]" />}
+              {loadingAction === "birthday" ? "送信中..." : "クーポンを一斉配信"}
             </Button>
           </CardFooter>
         </Card>
 
-        {/* 3. 毎月10%抽選会 */}
-        <Card className="border-t-4 border-t-amber-500 hover:shadow-md transition-shadow">
-          <CardHeader>
+        {/* 4. 抽選会 */}
+        <Card className="border-t-4 border-t-amber-500 hover:shadow-md transition-shadow h-full flex flex-col">
+          <CardHeader className="pb-3">
             <div className="w-10 h-10 rounded-full bg-amber-100 flex items-center justify-center text-amber-600 mb-2">
               <Trophy className="h-5 w-5" />
             </div>
-            <CardTitle>来院者限定 抽選会 (確率10%)</CardTitle>
-            <CardDescription>
-              来院済み＆LINE連携済みの患者さん限定で抽選。当選者には500円OFFクーポンをLINEで自動送信します。
+            <CardTitle className="text-lg">来院者限定抽選会</CardTitle>
+            <CardDescription className="text-xs">
+              10%の確率で自動クーポン。
             </CardDescription>
           </CardHeader>
-          <CardContent className="text-sm bg-slate-50 p-4 mx-6 rounded my-2 text-slate-600">
-            <p><strong>当選メッセージ例:</strong></p>
-            <p className="mt-1 opacity-80">「🎉 やったー！当たり！！ 次回ご来院時に施術料金から500円引きさせていただきます！」</p>
-            <p className="mt-2"><strong>落選メッセージ例:</strong></p>
-            <p className="mt-1 opacity-80">「残念、今回はハズレでした😭 でも来月またチャレンジできますよ！」</p>
-            <div className="mt-3 flex gap-2 w-full justify-center">
-               <Badge variant="outline" className="border-amber-300 text-amber-700 bg-amber-50">当たり確率: 10%</Badge>
-               <Badge variant="outline" className="border-blue-300 text-blue-700 bg-blue-50">来院済み限定</Badge>
-            </div>
+          <CardContent className="text-[11px] bg-slate-50 p-3 mx-4 rounded text-amber-700 flex-grow">
+            来院履歴のある患者様を対象に今月の抽選を行います。
           </CardContent>
-          <CardFooter className="pt-4 border-t mt-auto">
-            <Button 
-              variant="outline"
-              className="w-full border-amber-500 text-amber-700 hover:bg-amber-50" 
-              onClick={handleRunLottery}
-              disabled={loadingAction !== null}
-            >
-              {loadingAction === "lottery" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Trophy className="mr-2 h-4 w-4" />}
-              {loadingAction === "lottery" ? "抽選処理中..." : "今月の抽選会を実施"}
+          <CardFooter className="pt-4 mt-auto">
+            <Button variant="outline" className="w-full border-amber-500 text-amber-700 text-xs py-2" onClick={handleRunLottery} disabled={loadingAction !== null}>
+              {loadingAction === "lottery" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Trophy className="mr-2 h-4 w-4 text-[10px]" />}
+              {loadingAction === "lottery" ? "処理中..." : "今月の抽選を実施"}
             </Button>
           </CardFooter>
         </Card>
 
-        {/* 4. SEO/MEO対策 AI診断 */}
-        <Card className="border-t-4 border-t-indigo-500 hover:shadow-md transition-shadow">
-          <CardHeader>
-            <div className="w-10 h-10 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-600 mb-2">
-              <Globe className="h-5 w-5" />
+        {/* 5. 女性限定キャンペーン */}
+        <Card className="border-t-4 border-t-pink-500 hover:shadow-md transition-shadow h-full flex flex-col">
+          <CardHeader className="pb-3">
+            <div className="w-10 h-10 rounded-full bg-pink-100 flex items-center justify-center text-pink-600 mb-2">
+              <Sparkles className="h-5 w-5" />
             </div>
-            <CardTitle>SEO / MEO対策（AI診断）</CardTitle>
-            <CardDescription>
-              Googleビジネスプロフィールや検索順位を上げるための具体的な施策を、Geminiが現在の院の状況から分析・提案します。
+            <CardTitle className="text-lg">女性限定施策</CardTitle>
+            <CardDescription className="text-xs">
+              女性患者様への一斉メッセージ。
             </CardDescription>
           </CardHeader>
-          <CardContent className="text-sm bg-slate-50 p-4 mx-6 rounded my-2 text-slate-600">
-             <div className="flex items-center gap-2 mb-2">
-               <Search className="w-4 h-4 text-indigo-400" />
-               <span className="font-bold text-indigo-700">Google視点の分析内容</span>
-             </div>
-             <ul className="text-xs space-y-1 list-disc list-inside opacity-80">
-               <li>検索キーワードの最適化アドバイス</li>
-               <li>MEO（Googleマップ）での露出アップ策</li>
-               <li>近隣競合に勝つためのWEB戦略</li>
-             </ul>
-          </CardContent>
-          <CardFooter className="pt-4 border-t mt-auto">
-            <Button 
-              className="w-full bg-indigo-600 hover:bg-indigo-700" 
-              onClick={handleGetSEOAdvice}
-              disabled={loadingAction !== null}
-            >
-              {loadingAction === "seo" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
-              {loadingAction === "seo" ? "Google視点で分析中..." : "AIによるSEO診断を開始"}
-            </Button>
-          </CardFooter>
-        </Card>
-
-      </div>
-
-      {/* SEO/MEO診断結果表示 */}
-      {seoAdvice && (
-        <div className="mt-6 animate-in fade-in slide-in-from-bottom-4">
-          <Card className="border-2 border-indigo-200">
-            <CardHeader className="bg-indigo-50 border-b pb-4">
-              <div className="flex justify-between items-center">
-                <CardTitle className="flex items-center text-lg text-indigo-700">
-                  <Sparkles className="w-5 h-5 mr-2" />
-                  AIによるSEO / MEO 診断結果
-                </CardTitle>
-                <Button variant="ghost" size="sm" onClick={() => setSeoAdvice(null)} className="text-slate-400 hover:text-slate-600">
-                  閉じる
-                </Button>
-              </div>
-            </CardHeader>
-            <CardContent className="pt-6">
-              <div className="prose prose-slate max-w-none text-sm text-slate-700 whitespace-pre-wrap">
-                {seoAdvice}
-              </div>
-            </CardContent>
-            <CardFooter className="bg-slate-50 border-t justify-center py-2">
-              <p className="text-[10px] text-slate-400">※この提案はAIの分析に基づいています。状況に応じて調整してください。</p>
-            </CardFooter>
-          </Card>
-        </div>
-      )}
-
-      {/* 女性限定キャンペーン */}
-      <div className="mt-6">
-        <h2 className="text-lg font-bold text-slate-800 mb-3 flex items-center gap-2">
-          <Sparkles className="w-5 h-5 text-pink-500" />
-          女性限定キャンペーン送信
-        </h2>
-        <Card className="border-t-4 border-t-pink-400">
-          <CardContent className="pt-5 space-y-4">
-            <p className="text-sm text-slate-600">
-              性別が「女性」に設定されていてLINE登録済みの患者さんへ一斉送信します。<br />
-              メッセージを空欄にするとデフォルト文章が使われます。<code className="bg-slate-100 px-1 rounded text-xs">{"{name}"}</code> で患者名に置き換わります。
-            </p>
+          <CardContent className="space-y-2 flex-grow">
             <textarea
               value={womenMessage}
               onChange={(e) => setWomenMessage(e.target.value)}
-              placeholder={`例：{name}様\n\n女性限定！よもぎ蒸しモニター募集中✨\n今月中にご来院の女性患者さま限定で特別価格でご利用いただけます。\nご希望の方はスタッフまでお声がけください😊\nボール接骨院`}
-              className="w-full min-h-[120px] border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800 resize-y"
+              placeholder="メッセージ内容（空欄でデフォルト）"
+              className="w-full h-24 border border-slate-200 rounded p-2 text-[10px] resize-none"
             />
-            <Button
-              className="bg-pink-500 hover:bg-pink-600 text-white"
-              onClick={handleSendWomenCampaign}
-              disabled={loadingAction !== null}
-            >
-              {loadingAction === "women" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
-              {loadingAction === "women" ? "送信中..." : `女性患者さん(${stats?.women || 0}名)へ送信`}
-            </Button>
           </CardContent>
+          <CardFooter className="pt-4 mt-auto">
+            <Button className="w-full bg-pink-500 text-xs py-2" onClick={handleSendWomenCampaign} disabled={loadingAction !== null}>
+              {loadingAction === "women" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4 text-[10px]" />}
+              {loadingAction === "women" ? "送信中..." : `女性(${stats?.women || 0}名)へ`}
+            </Button>
+          </CardFooter>
         </Card>
-      </div>
 
-      {/* エリア限定キャンペーン */}
-      <div className="mt-6">
-        <h2 className="text-lg font-bold text-slate-800 mb-3 flex items-center gap-2">
-          <MapIcon className="w-5 h-5 text-blue-500" />
-          エリア限定キャンペーン（地域密着）
-        </h2>
-        <Card className="border-t-4 border-t-blue-400">
-          <CardContent className="pt-5 space-y-4">
-            <p className="text-sm text-slate-600">
-              特定の地域にお住まいの患者さんへメッセージを送信します。<br />
-              地域のイベント、天候、店舗周辺のお知らせなどに。
-            </p>
-            
-            <div className="flex flex-wrap gap-2">
-               {stats && Object.entries(stats.cityStats).map(([city, count]) => (
-                 <button
-                   key={city}
-                   onClick={() => setSelectedCity(city)}
-                   className={`px-3 py-1.5 rounded-full text-xs font-bold transition ${selectedCity === city ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}
-                 >
-                   {city} ({count as number}名)
-                 </button>
-               ))}
+        {/* 6. エリア限定配信 */}
+        <Card className="border-t-4 border-t-blue-400 hover:shadow-md transition-shadow h-full flex flex-col">
+          <CardHeader className="pb-3">
+            <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 mb-2">
+              <MapIcon className="h-5 w-5" />
             </div>
-
-            <textarea
-              value={areaMessage}
-              onChange={(e) => setAreaMessage(e.target.value)}
-              placeholder={`例：{name}様\n\nボール接骨院です。明日、鳴門市周辺で大規模なイベントがあり、周辺道路の混雑が予想されます。ご来院の際はお気をつけてお越しください。`}
-              className="w-full min-h-[120px] border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800 resize-y"
-            />
-            <Button
-              className="bg-blue-600 hover:bg-blue-700 text-white"
-              onClick={handleSendAreaCampaign}
-              disabled={loadingAction !== null || !selectedCity}
-            >
-              {loadingAction === "area" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <MapPin className="mr-2 h-4 w-4" />}
-              {loadingAction === "area" ? "送信中..." : selectedCity ? `${selectedCity}の患者さんへ送信` : "エリアを選択してください"}
-            </Button>
+            <CardTitle className="text-lg">エリア限定配信</CardTitle>
+            <CardDescription className="text-xs">
+              地域を絞った特別なお知らせ。
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-2 flex-grow">
+             <div className="flex flex-wrap gap-1 max-h-20 overflow-auto py-1">
+                {stats && Object.entries(stats.cityStats).map(([city, count]) => (
+                  <button key={city} onClick={() => setSelectedCity(city)} className={`px-2 py-0.5 rounded-full text-[9px] font-bold transition ${selectedCity === city ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-500"}`}>
+                    {city} ({count as number})
+                  </button>
+                ))}
+             </div>
+             <textarea
+               value={areaMessage}
+               onChange={(e) => setAreaMessage(e.target.value)}
+               placeholder="地域限定の情報を入力..."
+               className="w-full h-12 border border-slate-200 rounded p-2 text-[10px] resize-none"
+             />
           </CardContent>
+          <CardFooter className="pt-4 mt-auto">
+            <Button className="w-full bg-blue-600 text-xs py-2" onClick={handleSendAreaCampaign} disabled={loadingAction !== null || !selectedCity}>
+              {loadingAction === "area" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <MapPin className="mr-2 h-4 w-4 text-[10px]" />}
+              {loadingAction === "area" ? "送信中..." : selectedCity ? `${selectedCity}の患者様へ` : "エリア選択"}
+            </Button>
+          </CardFooter>
         </Card>
+
       </div>
     </div>
   );

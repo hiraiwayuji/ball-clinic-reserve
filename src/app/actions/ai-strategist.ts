@@ -308,7 +308,7 @@ export async function generateSEOMeoAdvice() {
   try {
     const settings = await getClinicSettings();
     const genAI = new GoogleGenerativeAI(apiKey);
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash-latest" });
+    const model = genAI.getGenerativeModel({ model: "gemini-1.5-pro" });
 
     const context = settings ? `
       【クリニック基本情報】
