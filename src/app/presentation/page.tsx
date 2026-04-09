@@ -130,30 +130,36 @@ const SLIDES = [
     content: (
       <div className="flex flex-col md:flex-row gap-8 items-center max-w-5xl">
         <div className="flex-1 space-y-6 text-left">
-           <h2 className="text-4xl font-black text-white">
-             LINEは診察券であり、<br />
-             <span className="text-green-500">最強の広告</span> です。
+           <h2 className="text-4xl font-black text-white leading-tight">
+             LINE × SEO/MEO で<br />
+             <span className="text-green-500">最強の集客網</span> を構築。
            </h2>
-           <div className="space-y-4">
-              <div className="flex items-center gap-4 bg-slate-800/50 p-4 rounded-2xl border border-slate-700">
-                 <CheckCircle2 className="w-5 h-5 text-green-500 shrink-0" />
+           <div className="space-y-3">
+              <div className="flex items-center gap-4 bg-slate-800/50 p-3 rounded-2xl border border-slate-700">
+                 <div className="w-10 h-10 bg-green-500/10 rounded-xl flex items-center justify-center shrink-0">
+                    <MessageCircle className="w-5 h-5 text-green-500" />
+                 </div>
                  <div>
-                    <p className="font-bold text-white">誕生日クーポンの自動配信</p>
-                    <p className="text-xs text-slate-500">「おめでとう」の言葉が再診の最強のフックに。</p>
+                    <p className="font-black text-white text-sm">LINE自動マーケティング</p>
+                    <p className="text-[10px] text-slate-500 font-medium">誕生日、未送信者への自動アプローチ。リピート率を劇的に向上。</p>
                  </div>
               </div>
-              <div className="flex items-center gap-4 bg-slate-800/50 p-4 rounded-2xl border border-slate-700">
-                 <CheckCircle2 className="w-5 h-5 text-green-500 shrink-0" />
+              <div className="flex items-center gap-4 bg-slate-800/50 p-3 rounded-2xl border border-slate-700">
+                 <div className="w-10 h-10 bg-blue-500/10 rounded-xl flex items-center justify-center shrink-0">
+                    <LineChart className="w-5 h-5 text-blue-500" />
+                 </div>
                  <div>
-                    <p className="font-bold text-white">ターゲット属性別一斉送信</p>
-                    <p className="text-xs text-slate-500">女性限定、エリア限定など確実に刺さる情報を配信。</p>
+                    <p className="font-black text-white text-sm">SEO対策 (検索エンジン最適化)</p>
+                    <p className="text-[10px] text-slate-500 font-medium">AI秘書が「バズる記事」を自動構成。検索上位を狙い潜在顧客を教育。</p>
                  </div>
               </div>
-              <div className="flex items-center gap-4 bg-slate-800/50 p-4 rounded-2xl border border-slate-700">
-                 <CheckCircle2 className="w-5 h-5 text-green-500 shrink-0" />
+              <div className="flex items-center gap-4 bg-slate-800/50 p-3 rounded-2xl border border-slate-700">
+                 <div className="w-10 h-10 bg-amber-500/10 rounded-xl flex items-center justify-center shrink-0">
+                    <MapPin className="w-5 h-5 text-amber-500" />
+                 </div>
                  <div>
-                    <p className="font-bold text-white">24時間LINE予約受付</p>
-                    <p className="text-xs text-slate-500">スタッフの電話対応時間を大幅に削減。</p>
+                    <p className="font-black text-white text-sm">MEO対策 (Googleマップ上位表示)</p>
+                    <p className="text-[10px] text-slate-500 font-medium">口コミ返信支援と定期投稿。近隣の「今すぐ」患者様を院へ誘導。</p>
                  </div>
               </div>
            </div>
