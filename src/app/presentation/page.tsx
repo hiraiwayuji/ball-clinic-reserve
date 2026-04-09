@@ -11,6 +11,8 @@ import {
   Zap, 
   LineChart, 
   CreditCard, 
+  ShieldCheck,
+  CheckCircle2,
   Calendar,
   MousePointer2,
   ArrowRight,
