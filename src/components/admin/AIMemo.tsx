@@ -68,7 +68,7 @@ export default function AIMemo() {
       <CardHeader className="pb-3">
         <CardTitle className="flex items-center text-sm font-bold text-blue-700">
           <MessageSquare className="w-4 h-4 mr-2" />
-          軍師への伝言・メモ
+          AI秘書への申し送り・メモ
         </CardTitle>
         <CardDescription className="text-[10px]">戦略への反映やAIへの指示をメモとして保存できます</CardDescription>
       </CardHeader>
@@ -88,8 +88,8 @@ export default function AIMemo() {
                  </Button>
               )}
               <Button size="sm" className="bg-blue-600" onClick={handleSave} disabled={isSaving}>
-                {isSaving ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <Save className="w-4 h-4 mr-1" />}
-                軍師に託す
+                <Save className="w-4 h-4 mr-1" />
+                秘書に託す
               </Button>
             </div>
           </div>
@@ -113,14 +113,14 @@ export default function AIMemo() {
                 onClick={() => {
                   window.dispatchEvent(new CustomEvent("open-ai-chat", {
                     detail: {
-                      message: `【軍師メモに基づく相談】\n以下のメモ内容について、具体的に何をすべきか「壁打ち相手」になってアドバイスをください。\n\nメモ内容:\n${existingMemo?.content}`,
+                      message: `【AI秘書への相談】\n以下のメモ内容について、具体的に何をすべきかアドバイスをください。\n\nメモ内容:\n${existingMemo?.content}`,
                       autoSend: true
                     }
                   }));
                 }}
               >
                 <Sparkles className="w-4 h-4 mr-1" />
-                軍師と壁打ちする
+                秘書と相談する
               </Button>
             </div>
           </div>

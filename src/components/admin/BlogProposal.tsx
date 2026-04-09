@@ -51,9 +51,9 @@ export default function BlogProposal({ clinicContext }: BlogProposalProps) {
         <div>
           <CardTitle className="flex items-center text-sm font-bold text-rose-700">
             <Sparkles className="w-4 h-4 mr-2" />
-            今週のnote執筆提案
+            今週のnote執筆提案（AI秘書）
           </CardTitle>
-          <CardDescription className="text-[10px]">週に1回、経営状況からバズる記事を提案します</CardDescription>
+          <CardDescription className="text-[10px]">週に1回、最新の経営状況から「バズる」記事を秘書が提案します</CardDescription>
         </div>
         {!proposal && (
           <Button size="sm" variant="outline" className="h-7 text-[10px] border-rose-200 text-rose-700" onClick={handleGenerate} disabled={isPending}>

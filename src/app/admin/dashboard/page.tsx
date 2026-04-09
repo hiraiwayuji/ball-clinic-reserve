@@ -13,8 +13,10 @@ import AIMemo from "@/components/admin/AIMemo";
 import BlogProposal from "@/components/admin/BlogProposal";
 import { PatientSearchPanel } from "@/components/admin/PatientSearchPanel";
 import { getUpcomingBirthdays } from "@/app/actions/admin-marketing-actions";
-import { Cake, Sparkles as SparklesIcon } from "lucide-react";
+import { Cake, Sparkles as SparklesIcon, Star } from "lucide-react";
 import { toast } from "sonner";
+import confetti from "canvas-confetti";
+import AISecretaryBriefing from "@/components/admin/AISecretaryBriefing";
 
 export default function DashboardPrototype() {
   const [activeTab, setActiveTab] = useState('youtube');
@@ -94,7 +96,17 @@ export default function DashboardPrototype() {
       if (error) throw error;
       const res = await getTodayDashboardData();
       if (res.success) setData(res.data);
-      toast.success(newStatus === 'completed' ? 'タスクを完了にしました' : 'タスクを未完了に戻しました');
+      if (newStatus === 'completed') {
+        confetti({
+          particleCount: 150,
+          spread: 70,
+          origin: { y: 0.6 },
+          colors: ['#8b5cf6', '#6366f1', '#f59e0b', '#ec4899']
+        });
+        toast.success('タスクを完了にしました！');
+      } else {
+        toast.success('タスクを未完了に戻しました');
+      }
     } catch(e) {
       toast.error('タスクの更新に失敗しました');
     }
@@ -150,11 +162,11 @@ export default function DashboardPrototype() {
     <div className="space-y-8 animate-in fade-in pb-12">
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight text-slate-900 border-l-4 border-blue-600 pl-3">
-            接骨院管理ダッシュボード
+          <h1 className="text-3xl font-black tracking-tight text-slate-900 border-l-8 border-violet-600 pl-4">
+            V-ARC AI秘書 ダッシュボード
           </h1>
-          <p className="text-muted-foreground mt-2">
-            本日の予約状況、売上進捗、やるべきことを一元管理します。
+          <p className="text-slate-500 mt-2 font-medium">
+            本日の予約状況、売上進捗、そしてAI秘書からのアドバイスを一元管理します。
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -164,6 +176,15 @@ export default function DashboardPrototype() {
           </div>
         </div>
       </div>
+      
+      {/* AI秘書の朝のブリーフィング */}
+      {data && data.appointments && (
+        <AISecretaryBriefing 
+          appointments={data.appointments} 
+          onComplete={() => {}} 
+          tone="polite"
+        />
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         
@@ -304,18 +325,24 @@ export default function DashboardPrototype() {
                       </div>
                       <div className="w-[calc(100%-4rem)] md:w-[calc(50%-2.5rem)] bg-white p-3 rounded-lg border border-slate-100 shadow-sm group-hover:border-blue-200 transition-colors">
                         <div className="flex justify-between items-start mb-1">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              if (res.customer_id) {
-                                setSelectedPatientId(res.customer_id);
-                                setPatientPanelOpen(true);
-                              }
-                            }}
-                            className="font-bold text-blue-700 text-sm truncate mr-1 hover:underline text-left"
-                          >
-                            {res.name} 様
-                          </button>
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (res.customer_id) {
+                                  setSelectedPatientId(res.customer_id);
+                                  setPatientPanelOpen(true);
+                                }
+                              }}
+                              className="font-bold text-blue-700 text-sm truncate mr-1 hover:underline text-left"
+                            >
+                              {res.name} 様
+                            </button>
+                            {/* AI秘書による優先度マーク (仮: 初診や特定条件で表示) */}
+                            {(res.type === '初診' || i === 0) && (
+                              <Star className="w-3.5 h-3.5 text-amber-500 fill-amber-400 animate-pulse shrink-0" />
+                            )}
+                          </div>
                           <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium shrink-0 ${res.type === '初診' ? 'bg-amber-100 text-amber-800' : 'bg-green-100 text-green-800'}`}>
                             {res.type}
                           </span>
@@ -335,7 +362,7 @@ export default function DashboardPrototype() {
             <div className="space-y-3">
               <div className="flex justify-between items-center">
                 <h4 className="text-sm font-bold text-slate-700 flex items-center gap-2">
-                  <Sparkles className="w-4 h-4 text-amber-500" /> 今日のSNSタスク
+                  <Sparkles className="w-4 h-4 text-amber-500" /> AI秘書が提案する今日のタスク
                 </h4>
                 <Link href="/admin/tasks" className="text-xs text-amber-600 hover:underline font-medium">すべて見る →</Link>
               </div>
