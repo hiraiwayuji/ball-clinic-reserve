@@ -292,7 +292,7 @@ export default function MarketingDashboardPage() {
           </CardHeader>
           <CardContent className="space-y-4 flex-grow">
             <div className="flex items-center gap-2">
-              <Select value={selectedMonth} onValueChange={setSelectedMonth}>
+              <Select value={selectedMonth} onValueChange={(val) => { if (val) setSelectedMonth(val); }}>
                 <SelectTrigger className="h-8 text-xs flex-1"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   {Array.from({ length: 12 }).map((_, i) => (

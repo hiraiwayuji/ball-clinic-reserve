@@ -56,12 +56,12 @@ export default function CalendarPasswordGate({ calendarId, onVerified }: Props) 
           <div className="relative group">
             <KeyRound className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-500 group-focus-within:text-violet-400 transition-colors" />
             <input
-              type="password"
+              type="text"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder="合言葉を入力"
               autoFocus
-              className="w-full h-14 bg-slate-900 border border-slate-800 rounded-2xl pl-12 pr-4 text-white focus:outline-none focus:ring-2 focus:ring-violet-500/50 transition-shadow text-center tracking-widest placeholder:tracking-normal"
+              className="w-full h-14 bg-slate-900 border border-slate-800 rounded-2xl pl-12 pr-4 text-white focus:outline-none focus:ring-2 focus:ring-violet-500/50 transition-shadow text-center placeholder:tracking-normal"
             />
           </div>
           <Button
