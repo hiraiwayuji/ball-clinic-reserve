@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Gift, BellElectric, Trophy, MessageCircle, Loader2, CheckCircle2, Sparkles, ClipboardList, MapIcon, MapPin, Globe, ArrowRight } from "lucide-react";
+import { Gift, BellElectric, Trophy, MessageCircle, Loader2, CheckCircle2, Sparkles, ClipboardList, MapIcon, MapPin, Globe, ArrowRight, Share2, ExternalLink } from "lucide-react";
 import {
   Select,
   SelectContent,
@@ -12,7 +12,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { sendAppointmentReminders, sendBirthdayCoupons, runMonthlyLottery, sendWelcomeQuestionnaire, sendWomenOnlyCampaign, getMarketingStats, sendSegmentedCampaign } from "@/app/actions/line-marketing";
+import { sendAppointmentReminders, sendBirthdayCoupons, runMonthlyLottery, sendWelcomeQuestionnaire, sendWomenOnlyCampaign, getMarketingStats, sendSegmentedCampaign, sendReferralMessage } from "@/app/actions/line-marketing";
 import Link from "next/link";
 
 export default function MarketingDashboardPage() {
@@ -25,6 +25,7 @@ export default function MarketingDashboardPage() {
   const [areaMessage, setAreaMessage] = useState("");
   const [selectedCity, setSelectedCity] = useState<string | null>(null);
   const [stats, setStats] = useState<any>(null);
+  const [referralTargetId, setReferralTargetId] = useState("");
 
   // 初回読み込み
   useEffect(() => {
@@ -156,6 +157,23 @@ export default function MarketingDashboardPage() {
       });
     } catch (e: any) {
       setActionResult({ type: "error", message: e.message || "エラーが発生しました" });
+    } finally {
+      setLoadingAction(null);
+    }
+  };
+
+  const handleSendReferral = async () => {
+    const target = referralTargetId || testLineId;
+    if (!target) {
+      setActionResult({ type: "error", message: "紹介先のLINE IDを入力するか、テストIDを設定してください" });
+      return;
+    }
+    setLoadingAction("referral");
+    try {
+      const result = await sendReferralMessage(target);
+      setActionResult({ type: "referral", message: result.message });
+    } catch (e: any) {
+      setActionResult({ type: "error", message: e.message || "送信に失敗しました" });
     } finally {
       setLoadingAction(null);
     }
@@ -390,6 +408,46 @@ export default function MarketingDashboardPage() {
             <Button className="w-full bg-blue-600 text-xs py-2" onClick={handleSendAreaCampaign} disabled={loadingAction !== null || !selectedCity}>
               {loadingAction === "area" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <MapPin className="mr-2 h-4 w-4 text-[10px]" />}
               {loadingAction === "area" ? "送信中..." : selectedCity ? `${selectedCity}の患者様へ` : "エリア選択"}
+            </Button>
+          </CardFooter>
+        {/* 7. 他院へのご紹介 */}
+        <Card className="border-t-4 border-t-indigo-600 hover:shadow-md transition-shadow h-full flex flex-col bg-slate-50/30">
+          <CardHeader className="pb-3">
+            <div className="w-10 h-10 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-600 mb-2">
+              <Share2 className="h-5 w-5" />
+            </div>
+            <CardTitle className="text-lg">他院へのご紹介</CardTitle>
+            <CardDescription className="text-xs">
+              V-ARCを他院の先生へ紹介。
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3 flex-grow">
+             <div className="p-3 bg-white border border-indigo-100 rounded-lg space-y-2">
+                <p className="text-[10px] font-bold text-slate-500 flex items-center gap-1">
+                   <ExternalLink className="w-3 h-3" />
+                   紹介用URL
+                </p>
+                <code className="text-[9px] block bg-slate-100 p-1.5 rounded truncate text-indigo-600">
+                   {typeof window !== 'undefined' ? window.location.origin : ''}/presentation
+                </code>
+             </div>
+             <input 
+               type="text" 
+               placeholder="紹介先のLINE ID（空欄でテストID）" 
+               value={referralTargetId}
+               onChange={(e) => setReferralTargetId(e.target.value)}
+               className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-[10px]"
+             />
+          </CardContent>
+          <CardFooter className="pt-2 mt-auto grid grid-cols-2 gap-2">
+            <Link href="/presentation" target="_blank" className="w-full">
+              <Button variant="outline" className="w-full text-[10px] h-8 border-indigo-200 text-indigo-700">
+                資料を見る
+              </Button>
+            </Link>
+            <Button className="w-full bg-indigo-600 text-[10px] h-8" onClick={handleSendReferral} disabled={loadingAction !== null}>
+              {loadingAction === "referral" ? <Loader2 className="h-3 w-3 animate-spin" /> : <MessageCircle className="h-3 w-3 mr-1" />}
+              LINEで送る
             </Button>
           </CardFooter>
         </Card>

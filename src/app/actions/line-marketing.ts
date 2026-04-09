@@ -555,3 +555,49 @@ export async function sendWelcomeQuestionnaire() {
     sentTo: sentTo
   };
 }
+
+/**
+ * 5. 他院紹介用のプレゼン資料URLを送信する
+ */
+export async function sendReferralMessage(targetId: string, customMessage?: string) {
+  await checkAdminAuth();
+  
+  const presentationUrl = `${process.env.NEXT_PUBLIC_APP_URL || 'https://ball-clinic-reserve.vercel.app'}/presentation`;
+  
+  const defaultMsg = 
+    `【ご紹介】次世代接骨院DXツール「V-ARC」のご案内\n\n` +
+    `いつも大変お世話になっております。以前お話した、当院で導入している経営支援システム「V-ARC」の紹介資料をお送りします。\n\n` +
+    `現場の負担を減らしつつ、AIで経営分析ができる非常に画期的なツールです。お時間のある際にご一読いただけますと幸いです。\n\n` +
+    `▼ 紹介資料（Webスライド形式）\n` +
+    `${presentationUrl}\n\n` +
+    `ご興味があれば、デモ環境の案内も可能ですのでお気軽にご連絡ください！`;
+
+  const msg = customMessage || defaultMsg;
+  const channelToken = await getLineAccessToken() || process.env.LINE_CHANNEL_ACCESS_TOKEN;
+
+  if (channelToken && targetId) {
+    try {
+      const res = await fetch("https://api.line.me/v2/bot/message/push", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${channelToken}` },
+        body: JSON.stringify({ to: targetId, messages: [{ type: "text", text: msg }] }),
+      });
+      
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(`LINE送信失敗: ${JSON.stringify(err)}`);
+      }
+      
+      return { success: true, message: "紹介資料を送信しました！" };
+    } catch (e: any) {
+      throw new Error(`送信エラー: ${e.message}`);
+    }
+  } else {
+    // シミュレーション
+    console.log("【紹介資料送信シミュレーション】");
+    console.log(`宛先: ${targetId}`);
+    console.log(`内容: ${msg}`);
+    return { success: true, message: "（シミュレーション）紹介資料の送信を記録しました" };
+  }
+}
+
