@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import Link from "next/link";
 
 const SLIDES = [
   {
@@ -272,10 +273,12 @@ const SLIDES = [
             <h2 className="text-5xl font-black text-white mb-4">V-ARC Partners</h2>
             <p className="text-xl text-slate-400 font-medium">現場の声を製品に反映する「モニター院」を募集中です。</p>
          </div>
-         <div className="bg-violet-600 text-white font-black py-6 px-12 rounded-3xl shadow-2xl shadow-violet-900/40 text-2xl flex items-center gap-3">
-            まずはデモンストレーションから
-            <ArrowRight className="w-6 h-6" />
-         </div>
+          <Link href="/presentation/demo" className="block transform hover:scale-105 transition-transform">
+            <div className="bg-violet-600 text-white font-black py-6 px-12 rounded-3xl shadow-2xl shadow-violet-900/40 text-2xl flex items-center gap-3 cursor-pointer">
+              デモ画面を体験する
+              <ArrowRight className="w-6 h-6" />
+            </div>
+          </Link>
          <p className="text-slate-600 text-sm font-bold">
            ※本資料は紹介専用です。詳細な導入費用については個別にお問い合わせください。
          </p>
