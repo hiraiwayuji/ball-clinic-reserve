@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Gift, BellElectric, Trophy, MessageCircle, Loader2, CheckCircle2, Sparkles, ClipboardList, MapIcon, MapPin, Globe, ArrowRight, Share2, ExternalLink } from "lucide-react";
+import { Gift, BellElectric, Trophy, MessageCircle, Loader2, CheckCircle2, Sparkles, ClipboardList, MapIcon, MapPin, Globe, ArrowRight, Share2, ExternalLink, QrCode } from "lucide-react";
 import {
   Select,
   SelectContent,
@@ -26,6 +26,7 @@ export default function MarketingDashboardPage() {
   const [selectedCity, setSelectedCity] = useState<string | null>(null);
   const [stats, setStats] = useState<any>(null);
   const [referralTargetId, setReferralTargetId] = useState("");
+  const [showQr, setShowQr] = useState(false);
 
   // 初回読み込み
   useEffect(() => {
@@ -445,6 +446,10 @@ export default function MarketingDashboardPage() {
                 資料を見る
               </Button>
             </Link>
+            <Button variant="outline" className="w-full text-[10px] h-8 border-indigo-200 text-indigo-700" onClick={() => setShowQr(true)}>
+              <QrCode className="h-3 w-3 mr-1" />
+              QRコード
+            </Button>
             <Button className="w-full bg-indigo-600 text-[10px] h-8" onClick={handleSendReferral} disabled={loadingAction !== null}>
               {loadingAction === "referral" ? <Loader2 className="h-3 w-3 animate-spin" /> : <MessageCircle className="h-3 w-3 mr-1" />}
               LINEで送る
@@ -453,6 +458,29 @@ export default function MarketingDashboardPage() {
         </Card>
 
       </div>
+
+      {/* QRコードモーダル */}
+      {showQr && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-in fade-in">
+           <div className="bg-white rounded-3xl p-8 max-w-sm w-full text-center space-y-6 shadow-2xl scale-in-center">
+              <div className="flex justify-between items-center mb-2">
+                 <h3 className="font-black text-slate-800">紹介用QRコード</h3>
+                 <button onClick={() => setShowQr(false)} className="text-slate-400 hover:text-slate-600 font-bold text-xl">×</button>
+              </div>
+              <div className="bg-slate-50 p-6 rounded-2xl border-2 border-slate-100 flex items-center justify-center aspect-square">
+                 <img 
+                   src={`https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent((typeof window !== 'undefined' ? window.location.origin : '') + '/presentation')}`} 
+                   alt="Referral QR Code"
+                   className="w-full h-full"
+                 />
+              </div>
+              <p className="text-xs text-slate-500 font-medium">
+                相手の先生にスマホで読み取ってもらうと、<br />即座にプレゼン資料が表示されます。
+              </p>
+              <Button onClick={() => setShowQr(false)} className="w-full rounded-xl bg-slate-900">閉じる</Button>
+           </div>
+        </div>
+      )}
     </div>
   );
 }
