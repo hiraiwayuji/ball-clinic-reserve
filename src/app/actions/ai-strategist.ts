@@ -338,8 +338,8 @@ export async function generateSEOMeoAdvice() {
 
     const result = await model.generateContent(prompt);
     return { success: true, advice: result.response.text() };
-  } catch (error) {
+  } catch (error: any) {
     console.error("Error generating SEO/MEO advice:", error);
-    return { success: false, error: "AI診断に失敗しました" };
+    return { success: false, error: `AI診断に失敗しました: ${error.message || "原因不明のエラー"}` };
   }
 }
