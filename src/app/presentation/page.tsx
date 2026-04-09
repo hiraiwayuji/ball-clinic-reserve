@@ -11,11 +11,10 @@ import {
   Zap, 
   LineChart, 
   CreditCard, 
-  ShieldCheck,
-  CheckCircle2,
   Calendar,
   MousePointer2,
-  ArrowRight
+  ArrowRight,
+  ClipboardList
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
