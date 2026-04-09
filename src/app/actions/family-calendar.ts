@@ -62,20 +62,20 @@ const DEFAULT_MEMBERS: CalendarMember[] = [
 export async function ensureCalendarExists(
   id: string,
   name: string = "ファミリーカレンダー"
-): Promise<{ id: string; name: string; members?: CalendarMember[] } | null> {
+): Promise<{ id: string; name: string; members?: CalendarMember[]; hasPassword?: boolean } | null> {
   const supabase = getAdminSupabase();
   if (!supabase) return null;
   const { data: existing } = await supabase.from("calendars").select("*").eq("id", id).single();
   if (existing) {
     if (!existing.members) {
       await supabase.from("calendars").update({ members: DEFAULT_MEMBERS }).eq("id", id);
-      return { ...existing, members: DEFAULT_MEMBERS };
+      return { ...existing, members: DEFAULT_MEMBERS, hasPassword: !!existing.password };
     }
-    return existing;
+    return { ...existing, hasPassword: !!existing.password };
   }
   const { data, error } = await supabase.from("calendars").insert([{ id, name, members: DEFAULT_MEMBERS }]).select().single();
   if (error) { console.error("ensureCalendarExists error:", error); return null; }
-  return data;
+  return { ...data, hasPassword: false };
 }
 
 export async function updateCalendarMembers(id: string, members: CalendarMember[]): Promise<{ success: boolean; error?: string }> {
@@ -151,6 +151,39 @@ export async function deleteEvent(id: string): Promise<{ success: boolean; error
   const supabase = await getSupabase();
   try {
     const { error } = await supabase.from("calendar_events").delete().eq("id", id);
+    if (error) return { success: false, error: error.message };
+    return { success: true };
+  } catch (e: unknown) { return { success: false, error: e instanceof Error ? e.message : "Unknown error" }; }
+}
+
+/**
+ * カレンダーのパスワードを検証
+ */
+export async function verifyCalendarPassword(id: string, password: string): Promise<{ success: boolean }> {
+  const supabase = getAdminSupabase();
+  if (!supabase) return { success: false };
+  const { data, error } = await supabase
+    .from("calendars")
+    .select("password")
+    .eq("id", id)
+    .single();
+  
+  if (error || !data) return { success: false };
+  // 簡易的な文字列比較（ハッシュ化は今回はせず、利便性と実装速度を優先。必要に応じて後で強化可能）
+  return { success: data.password === password };
+}
+
+/**
+ * カレンダーのパスワードを更新
+ */
+export async function updateCalendarPassword(id: string, password: string | null): Promise<{ success: boolean; error?: string }> {
+  const supabase = getAdminSupabase();
+  if (!supabase) return { success: false, error: "Admin client unavailable" };
+  try {
+    const { error } = await supabase
+      .from("calendars")
+      .update({ password })
+      .eq("id", id);
     if (error) return { success: false, error: error.message };
     return { success: true };
   } catch (e: unknown) { return { success: false, error: e instanceof Error ? e.message : "Unknown error" }; }

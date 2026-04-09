@@ -2,7 +2,8 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useParams } from "next/navigation";
-import { ChevronLeft, ChevronRight, Plus, X, Pencil, Trash2, Check, Clock, User, CalendarDays, Settings2, Palette, Bell, BellOff, MapPin, ListChecks } from "lucide-react";
+import { ChevronLeft, ChevronRight, Plus, X, Pencil, Trash2, Check, Clock, User, CalendarDays, Settings2, Palette, Bell, BellOff, MapPin, ListChecks, Lock, Loader2, KeyRound } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import {
   getEvents,
   createEvent,
@@ -11,12 +12,15 @@ import {
   ensureCalendarExists,
   updateCalendarMembers,
   bulkUpdateEventMemberName,
+  verifyCalendarPassword,
+  updateCalendarPassword,
   type CalendarEvent,
   type CalendarEventItem,
   type CalendarMember,
 } from "@/app/actions/family-calendar";
 import { cn } from "@/lib/utils";
 import { usePushNotification } from "@/hooks/usePushNotification";
+import CalendarPasswordGate from "@/components/CalendarPasswordGate";
 import { toast } from "sonner";
 
 // ─── カラープリセット ───────────────────────────────────
@@ -99,6 +103,11 @@ export default function FamilyCalendarPage() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkTagModal, setBulkTagModal] = useState(false);
   const [daySheet, setDaySheet] = useState<string | null>(null); // "YYYY-MM-DD" (月表示のみ)
+  
+  // パスワード認証関連
+  const [hasPassword, setHasPassword] = useState(false);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [authLoading, setAuthLoading] = useState(true);
   // 複数日イベントの編集スコープ選択
   const [scopePicker, setScopePicker] = useState<{ event: CalendarEvent; fromDate: string } | null>(null);
   // 「この日のみ」編集モード：保存時に元イベントを分割する
@@ -154,9 +163,25 @@ export default function FamilyCalendarPage() {
   // カレンダー初期化
   useEffect(() => {
     if (!calendarId) return;
-    ensureCalendarExists(calendarId, "ファミリーカレンダー").then((cal) => {
+    ensureCalendarExists(calendarId, "ファミリーカレンダー").then(async (cal) => {
       if (cal?.name) setCalendarName(cal.name);
       if (cal?.members) setMembers(cal.members);
+      
+      const hasPwd = cal?.hasPassword ?? false;
+      setHasPassword(hasPwd);
+      
+      if (hasPwd) {
+        // 保存済みのパスワードで検証
+        const savedPwd = localStorage.getItem(`family_calendar_auth_${calendarId}`);
+        if (savedPwd) {
+          const res = await verifyCalendarPassword(calendarId, savedPwd);
+          if (res.success) setIsAuthenticated(true);
+          else localStorage.removeItem(`family_calendar_auth_${calendarId}`);
+        }
+      } else {
+        setIsAuthenticated(true);
+      }
+      setAuthLoading(false);
     });
   }, [calendarId]);
 
@@ -412,6 +437,18 @@ export default function FamilyCalendarPage() {
     } finally {
       setSaving(false);
     }
+  }
+
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex items-center justify-center">
+        <div className="w-8 h-8 border-4 border-violet-500 border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  if (hasPassword && !isAuthenticated) {
+    return <CalendarPasswordGate calendarId={calendarId} onVerified={() => setIsAuthenticated(true)} />;
   }
 
   return (
@@ -1443,7 +1480,19 @@ export default function FamilyCalendarPage() {
 
             {/* SETTINGS (MEMBERS) */}
             {modal.mode === "settings" && (
-              <MemberSettings members={members} onSave={handleUpdateMembers} onCancel={() => setModal(null)} saving={saving} />
+              <MemberSettings 
+                members={members} 
+                calendarId={calendarId}
+                hasPassword={hasPassword}
+                onSave={handleUpdateMembers} 
+                onPasswordUpdate={(pwd) => {
+                  setHasPassword(!!pwd);
+                  if (pwd) localStorage.setItem(`family_calendar_auth_${calendarId}`, pwd);
+                  else localStorage.removeItem(`family_calendar_auth_${calendarId}`);
+                }}
+                onCancel={() => setModal(null)} 
+                saving={saving} 
+              />
             )}
           </div>
         </div>
@@ -1453,9 +1502,12 @@ export default function FamilyCalendarPage() {
 }
 
 // ─── メンバー設定コンポーネント ───────────────────────────────────
-function MemberSettings({ members, onSave, onCancel, saving }: {
+function MemberSettings({ members, calendarId, hasPassword, onSave, onPasswordUpdate, onCancel, saving }: {
   members: CalendarMember[];
+  calendarId: string;
+  hasPassword: boolean;
   onSave: (m: CalendarMember[], renames: { oldName: string; newName: string; bulk: boolean }[]) => void;
+  onPasswordUpdate: (pwd: string | null) => void;
   onCancel: () => void;
   saving: boolean;
 }) {
@@ -1464,6 +1516,11 @@ function MemberSettings({ members, onSave, onCancel, saving }: {
   const [originalNames] = useState<string[]>(members.map(m => m.name));
   // 一括変更チェック状態
   const [bulkFlags, setBulkFlags] = useState<boolean[]>(members.map(() => false));
+  
+  // パスワード設定
+  const [newPassword, setNewPassword] = useState("");
+  const [showPasswordInput, setShowPasswordInput] = useState(false);
+  const [isUpdatingPassword, setIsUpdatingPassword] = useState(false);
 
   const updateMember = (index: number, updates: Partial<CalendarMember>) => {
     const next = [...localMembers];
@@ -1503,61 +1560,151 @@ function MemberSettings({ members, onSave, onCancel, saving }: {
           <X className="w-4 h-4" />
         </button>
       </div>
-      <div className="p-5 space-y-4 overflow-y-auto max-h-[60vh] scrollbar-none">
-        <p className="text-[10px] text-slate-500 font-bold mb-2">名前と色を自由に設定できます（全7色）</p>
+      <div className="p-5 space-y-6 overflow-y-auto max-h-[60vh] scrollbar-none">
+        
+        {/* セキュリティ設定 */}
         <div className="space-y-3">
-          {localMembers.map((m, idx) => {
-            const nameChanged = m.name !== (originalNames[idx] ?? m.name);
-            return (
-              <div key={idx} className="bg-slate-800/50 p-3 rounded-2xl border border-slate-800 space-y-2">
-                <div className="flex items-center gap-3">
-                  <div className="flex-1 space-y-2">
-                    <input value={m.name} onChange={e => updateMember(idx, { name: e.target.value })}
-                      className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-violet-500 font-bold" />
-                    <div className="flex gap-1.5">
-                      {COLOR_PRESETS.slice(0, 6).map((preset) => (
-                        <button key={preset.color} onClick={() => updateMember(idx, preset)}
-                          className={`w-6 h-6 rounded-full transition-transform ${m.color === preset.color ? "scale-125 ring-2 ring-white" : "opacity-30 hover:opacity-100"}`}
-                          style={{ backgroundColor: preset.color }} />
-                      ))}
-                      <button onClick={() => updateMember(idx, COLOR_PRESETS[6])}
-                        className={`w-6 h-6 rounded-md transition-transform flex items-center justify-center ${m.color === COLOR_PRESETS[6].color ? "scale-125 ring-2 ring-white" : "opacity-30 hover:opacity-100"}`}
-                        style={{ backgroundColor: COLOR_PRESETS[6].color }}>
-                        <span className="text-white text-[8px] font-black">🔴</span>
-                      </button>
-                    </div>
-                  </div>
-                  <button onClick={() => removeMember(idx)} className="w-8 h-8 rounded-lg bg-red-900/20 hover:bg-red-900/40 flex items-center justify-center text-red-400 transition">
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                </div>
-                {/* 名前が変わった場合のみ一括変更オプションを表示 */}
-                {nameChanged && (
-                  <label className="flex items-center gap-2 cursor-pointer bg-violet-900/20 rounded-lg px-3 py-2 border border-violet-800/30">
-                    <input
-                      type="checkbox"
-                      checked={bulkFlags[idx] ?? false}
-                      onChange={e => {
-                        const next = [...bulkFlags];
-                        next[idx] = e.target.checked;
-                        setBulkFlags(next);
-                      }}
-                      className="w-4 h-4 accent-violet-500"
-                    />
-                    <span className="text-xs text-violet-300">
-                      「{originalNames[idx]}」の既存予定をすべて「{m.name}」に変更する
-                    </span>
-                  </label>
-                )}
+          <p className="text-xs font-bold text-slate-400 flex items-center gap-2">
+            <Lock className="w-4 h-4" /> セキュリティ設定
+          </p>
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4">
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex flex-col">
+                <span className="text-sm font-bold text-white">合言葉での保護</span>
+                <span className="text-[10px] text-slate-500">
+                  {hasPassword ? "現在、合言葉で保護されています" : "合言葉なし（秘密のURLのみ）"}
+                </span>
               </div>
-            );
-          })}
+              <button 
+                onClick={() => setShowPasswordInput(!showPasswordInput)}
+                className={`text-[10px] font-bold px-3 py-1.5 rounded-lg transition-colors ${showPasswordInput ? "bg-slate-800 text-slate-400" : "bg-violet-600/20 text-violet-400 hover:bg-violet-600/30"}`}
+              >
+                {hasPassword ? "変更・解除" : "設定する"}
+              </button>
+            </div>
+
+            {showPasswordInput && (
+              <div className="mt-4 space-y-3 pt-3 border-t border-slate-800 animate-in fade-in slide-in-from-top-2">
+                <div className="space-y-1.5">
+                  <label className="text-[10px] text-slate-500 font-bold px-1">新しい合言葉</label>
+                  <input
+                    type="text"
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    placeholder={hasPassword ? "変更しない場合は空欄" : "例: 家族の記念日など"}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2 text-sm text-white focus:outline-none focus:border-violet-500"
+                  />
+                </div>
+                <div className="flex gap-2">
+                  <Button 
+                    disabled={isUpdatingPassword || (!newPassword && !hasPassword)}
+                    onClick={async () => {
+                      setIsUpdatingPassword(true);
+                      try {
+                        const res = await updateCalendarPassword(calendarId, newPassword || null);
+                        if (res.success) {
+                          toast.success(newPassword ? "合言葉を設定しました" : "合言葉を解除しました");
+                          onPasswordUpdate(newPassword || null);
+                          setNewPassword("");
+                          setShowPasswordInput(false);
+                        } else {
+                          toast.error("更新に失敗しました");
+                        }
+                      } finally {
+                        setIsUpdatingPassword(false);
+                      }
+                    }}
+                    className="flex-1 bg-violet-600 hover:bg-violet-500 h-9 text-xs font-bold"
+                  >
+                    {isUpdatingPassword ? <Loader2 className="w-3 h-3 animate-spin" /> : "更新"}
+                  </Button>
+                  {hasPassword && (
+                    <Button 
+                      variant="ghost"
+                      disabled={isUpdatingPassword}
+                      onClick={async () => {
+                        if (!confirm("保護を解除しますか？")) return;
+                        setIsUpdatingPassword(true);
+                        try {
+                          const res = await updateCalendarPassword(calendarId, null);
+                          if (res.success) {
+                            toast.success("保護を解除しました");
+                            onPasswordUpdate(null);
+                            setShowPasswordInput(false);
+                          }
+                        } finally {
+                          setIsUpdatingPassword(false);
+                        }
+                      }}
+                      className="h-9 text-[10px] text-red-400 hover:text-red-300 hover:bg-red-950/30"
+                    >
+                      解除
+                    </Button>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
         </div>
-        <button onClick={addMember}
-          className="w-full py-3 rounded-xl border border-dashed border-slate-600 text-slate-400 hover:text-white hover:border-slate-400 transition text-xs font-bold flex items-center justify-center gap-2">
-          <Plus className="w-4 h-4" />
-          メンバーを追加
-        </button>
+
+        <div className="space-y-3">
+          <p className="text-xs font-bold text-slate-400 flex items-center gap-2">
+            <Palette className="w-4 h-4" /> メンバー設定
+          </p>
+          <div className="space-y-3">
+            {localMembers.map((m, idx) => {
+              const nameChanged = m.name !== (originalNames[idx] ?? m.name);
+              return (
+                <div key={idx} className="bg-slate-800/50 p-3 rounded-2xl border border-slate-800 space-y-2">
+                  <div className="flex items-center gap-3">
+                    <div className="flex-1 space-y-2">
+                      <input value={m.name} onChange={e => updateMember(idx, { name: e.target.value })}
+                        className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-violet-500 font-bold" />
+                      <div className="flex gap-1.5">
+                        {COLOR_PRESETS.slice(0, 6).map((preset) => (
+                          <button key={preset.color} onClick={() => updateMember(idx, preset)}
+                            className={`w-6 h-6 rounded-full transition-transform ${m.color === preset.color ? "scale-125 ring-2 ring-white" : "opacity-30 hover:opacity-100"}`}
+                            style={{ backgroundColor: preset.color }} />
+                        ))}
+                        <button onClick={() => updateMember(idx, COLOR_PRESETS[6])}
+                          className={`w-6 h-6 rounded-md transition-transform flex items-center justify-center ${m.color === COLOR_PRESETS[6].color ? "scale-125 ring-2 ring-white" : "opacity-30 hover:opacity-100"}`}
+                          style={{ backgroundColor: COLOR_PRESETS[6].color }}>
+                          <span className="text-white text-[8px] font-black">🔴</span>
+                        </button>
+                      </div>
+                    </div>
+                    <button onClick={() => removeMember(idx)} className="w-8 h-8 rounded-lg bg-red-900/20 hover:bg-red-900/40 flex items-center justify-center text-red-400 transition">
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                  {/* 名前が変わった場合のみ一括変更オプションを表示 */}
+                  {nameChanged && (
+                    <label className="flex items-center gap-2 cursor-pointer bg-violet-900/20 rounded-lg px-3 py-2 border border-violet-800/30">
+                      <input
+                        type="checkbox"
+                        checked={bulkFlags[idx] ?? false}
+                        onChange={e => {
+                          const next = [...bulkFlags];
+                          next[idx] = e.target.checked;
+                          setBulkFlags(next);
+                        }}
+                        className="w-4 h-4 accent-violet-500"
+                      />
+                      <span className="text-xs text-violet-300">
+                        「{originalNames[idx]}」の既存予定をすべて「{m.name}」に変更する
+                      </span>
+                    </label>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          <button onClick={addMember}
+            className="w-full py-3 rounded-xl border border-dashed border-slate-600 text-slate-400 hover:text-white hover:border-slate-400 transition text-xs font-bold flex items-center justify-center gap-2">
+            <Plus className="w-4 h-4" />
+            メンバーを追加
+          </button>
+        </div>
       </div>
       <div className="p-4 border-t border-slate-800 bg-slate-900/50">
         <button onClick={handleSave} disabled={saving}

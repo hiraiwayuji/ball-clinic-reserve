@@ -13,7 +13,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { sendAppointmentReminders, sendBirthdayCoupons, runMonthlyLottery, sendWelcomeQuestionnaire, sendWomenOnlyCampaign, getMarketingStats, sendSegmentedCampaign } from "@/app/actions/line-marketing";
-import { ClipboardList, MapIcon, MapPin } from "lucide-react";
+import { generateSEOMeoAdvice } from "@/app/actions/ai-strategist";
+import { ClipboardList, MapIcon, MapPin, Globe, Search } from "lucide-react";
 import Link from "next/link";
 
 export default function MarketingDashboardPage() {
@@ -26,6 +27,7 @@ export default function MarketingDashboardPage() {
   const [areaMessage, setAreaMessage] = useState("");
   const [selectedCity, setSelectedCity] = useState<string | null>(null);
   const [stats, setStats] = useState<any>(null);
+  const [seoAdvice, setSeoAdvice] = useState<string | null>(null);
 
   // 初回読み込み
   useEffect(() => {
@@ -155,6 +157,22 @@ export default function MarketingDashboardPage() {
         data: result.sentTo,
         debugLogs: result.debugLogs,
       });
+    } catch (e: any) {
+      setActionResult({ type: "error", message: e.message || "エラーが発生しました" });
+    } finally {
+      setLoadingAction(null);
+    }
+  };
+
+  const handleGetSEOAdvice = async () => {
+    setLoadingAction("seo");
+    try {
+      const result = await generateSEOMeoAdvice();
+      if (result.success && result.advice) {
+        setSeoAdvice(result.advice);
+      } else {
+        setActionResult({ type: "error", message: result.error || "AI診断に失敗しました" });
+      }
     } catch (e: any) {
       setActionResult({ type: "error", message: e.message || "エラーが発生しました" });
     } finally {
@@ -383,7 +401,68 @@ export default function MarketingDashboardPage() {
           </CardFooter>
         </Card>
 
+        {/* 4. SEO/MEO対策 AI診断 */}
+        <Card className="border-t-4 border-t-indigo-500 hover:shadow-md transition-shadow">
+          <CardHeader>
+            <div className="w-10 h-10 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-600 mb-2">
+              <Globe className="h-5 w-5" />
+            </div>
+            <CardTitle>SEO / MEO対策（AI診断）</CardTitle>
+            <CardDescription>
+              Googleビジネスプロフィールや検索順位を上げるための具体的な施策を、Geminiが現在の院の状況から分析・提案します。
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="text-sm bg-slate-50 p-4 mx-6 rounded my-2 text-slate-600">
+             <div className="flex items-center gap-2 mb-2">
+               <Search className="w-4 h-4 text-indigo-400" />
+               <span className="font-bold text-indigo-700">Google視点の分析内容</span>
+             </div>
+             <ul className="text-xs space-y-1 list-disc list-inside opacity-80">
+               <li>検索キーワードの最適化アドバイス</li>
+               <li>MEO（Googleマップ）での露出アップ策</li>
+               <li>近隣競合に勝つためのWEB戦略</li>
+             </ul>
+          </CardContent>
+          <CardFooter className="pt-4 border-t mt-auto">
+            <Button 
+              className="w-full bg-indigo-600 hover:bg-indigo-700" 
+              onClick={handleGetSEOAdvice}
+              disabled={loadingAction !== null}
+            >
+              {loadingAction === "seo" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
+              {loadingAction === "seo" ? "Google視点で分析中..." : "AIによるSEO診断を開始"}
+            </Button>
+          </CardFooter>
+        </Card>
+
       </div>
+
+      {/* SEO/MEO診断結果表示 */}
+      {seoAdvice && (
+        <div className="mt-6 animate-in fade-in slide-in-from-bottom-4">
+          <Card className="border-2 border-indigo-200">
+            <CardHeader className="bg-indigo-50 border-b pb-4">
+              <div className="flex justify-between items-center">
+                <CardTitle className="flex items-center text-lg text-indigo-700">
+                  <Sparkles className="w-5 h-5 mr-2" />
+                  AIによるSEO / MEO 診断結果
+                </CardTitle>
+                <Button variant="ghost" size="sm" onClick={() => setSeoAdvice(null)} className="text-slate-400 hover:text-slate-600">
+                  閉じる
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent className="pt-6">
+              <div className="prose prose-slate max-w-none text-sm text-slate-700 whitespace-pre-wrap">
+                {seoAdvice}
+              </div>
+            </CardContent>
+            <CardFooter className="bg-slate-50 border-t justify-center py-2">
+              <p className="text-[10px] text-slate-400">※この提案はAIの分析に基づいています。状況に応じて調整してください。</p>
+            </CardFooter>
+          </Card>
+        </div>
+      )}
 
       {/* 女性限定キャンペーン */}
       <div className="mt-6">

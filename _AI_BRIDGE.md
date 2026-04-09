@@ -9,6 +9,7 @@ This file serves as a shared "memory" for all AI assistants (Antigravity, Claude
 - **Google Calendar Integration & LINE Integration**: Finalizing remaining integration details for automated communication.
 
 ## ✅ Recently Completed (Antigravity)
+- [x] **LINE Marketing Automation**: Implemented birthday/segmented coupon delivery and area-based marketing. Added a birthday widget to the admin dashboard.
 - [x] **Family Calendar Privacy**: Added `is_shared` flag to events. Implemented profile switching (ぼーる/まち) and content filtering in the family calendar.
 - [x] **CRM & Analytics Enhancement**: Added city, birth date, and referral source tracking. Implemented a detailed analytics dashboard with 4 interactive charts.
 - [x] **Database Sync Fix**: Resolved "Failed to fetch" errors and Supabase CLI "Remote migration versions not found" errors using manual SQL and `migration repair`.

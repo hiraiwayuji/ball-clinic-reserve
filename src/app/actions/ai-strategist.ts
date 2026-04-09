@@ -296,3 +296,48 @@ export async function generateDailySnsTasks(dateStr: string) {
     };
   }
 }
+
+/**
+ * SEO/MEO Diagnosis
+ */
+export async function generateSEOMeoAdvice() {
+  const { clinicId } = await checkAdminAuth();
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) return { success: false, error: "APIキーが設定されていません" };
+
+  try {
+    const settings = await getClinicSettings();
+    const genAI = new GoogleGenerativeAI(apiKey);
+    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+
+    const context = settings ? `
+      【クリニック基本情報】
+      院名: ${settings.clinic_name}
+      エリア: ${settings.area_name || settings.address || '未設定'}
+      ターゲット層: ${settings.target_persona || '一般'}
+      重点キーワード: ${settings.analysis_keywords?.join(', ') || 'なし'}
+      商圏範囲: ${settings.market_area || '未設定'}
+    ` : '情報が不足しています。';
+
+    const prompt = `
+      あなたは接骨院に特化した「SEO（検索エンジン最適化）およびMEO（マップエンジン最適化）」のプロコンサルタントです。
+      Googleの視点から、上記のクリニックがより多くの新規患者に発見されるための改善策を提案してください。
+
+      【構成ルール】
+      1. 「SEO対策（ホームページ・検索）」と「MEO対策（Googleマップ）」の2つのカテゴリで分けてください。
+      2. それぞれ、明日からすぐ実行できる具体的なアクションを3つずつ（計6つ）提案してください。
+      3. 近隣の競合に勝つための「差別化ポイント」を1つ指摘してください。
+      4. 専門用語は避け、院長先生が実行しやすい平易な言葉で書いてください。
+      5. 全体で400文字〜600文字程度で、Markdown形式で出力してください。バッジやボールドを使って強調してください。
+      
+      【コンテキスト】
+      ${context}
+    `;
+
+    const result = await model.generateContent(prompt);
+    return { success: true, advice: result.response.text() };
+  } catch (error) {
+    console.error("Error generating SEO/MEO advice:", error);
+    return { success: false, error: "AI診断に失敗しました" };
+  }
+}
