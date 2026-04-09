@@ -18,13 +18,15 @@ export const metadata: Metadata = {
   description: "サッカー選手が通う、体のメンテナンスに特化したボール接骨院の予約システムです。24時間Webから予約・キャンセル待ちが可能です。",
 };
 
+import { ThemeProvider } from "@/components/ThemeProvider";
+
 export default function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="ja">
+    <html lang="ja" suppressHydrationWarning>
       <head>
         <meta name="google" content="notranslate" />
         <link rel="manifest" href="/manifest.json" />
@@ -32,13 +34,20 @@ export default function RootLayout({
         {/* iOS PWA */}
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="default" />
-        <meta name="apple-mobile-web-app-title" content="家族カレンダー" />
+        <meta name="apple-mobile-web-app-title" content="V-ARC AI秘書" />
         <link rel="apple-touch-icon" href="/images/logo_symbol_main_black.png" />
       </head>
       <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
-        <ServiceWorkerRegistrar />
-        {children}
-        <Toaster richColors position="top-center" />
+        <ThemeProvider
+          attribute="class"
+          defaultTheme="dark"
+          enableSystem
+          disableTransitionOnChange
+        >
+          <ServiceWorkerRegistrar />
+          {children}
+          <Toaster richColors position="top-center" />
+        </ThemeProvider>
       </body>
     </html>
   );

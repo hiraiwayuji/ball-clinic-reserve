@@ -1,10 +1,10 @@
-"use client";
+﻿"use client";
 
 import { useState, useEffect, useTransition } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Sparkles, Loader2, BookOpen, RefreshCw, Send, ChevronRight } from "lucide-react";
-import { getWeeklyBlogProposals, generateWeeklyBlogProposal } from "@/app/actions/ai-strategist";
+import { getWeeklyBlogProposals, generateWeeklyBlogProposal } from "@/app/actions/ai-secretary";
 import { toast } from "sonner";
 import { format } from "date-fns";
 import { ja } from "date-fns/locale";
@@ -35,7 +35,7 @@ export default function BlogProposal({ clinicContext }: BlogProposalProps) {
     startTransition(async () => {
       const res = await generateWeeklyBlogProposal(clinicContext);
       if (res.success) {
-        toast.success("新しいブログ記事案を生成しました");
+        toast.success("譁ｰ縺励＞繝悶Ο繧ｰ險倅ｺ区｡医ｒ逕滓・縺励∪縺励◆");
         setProposal(res.data);
       } else {
         toast.error(res.error);
@@ -51,14 +51,13 @@ export default function BlogProposal({ clinicContext }: BlogProposalProps) {
         <div>
           <CardTitle className="flex items-center text-sm font-bold text-rose-700">
             <Sparkles className="w-4 h-4 mr-2" />
-            今週のnote執筆提案（AI秘書）
-          </CardTitle>
-          <CardDescription className="text-[10px]">週に1回、最新の経営状況から「バズる」記事を秘書が提案します</CardDescription>
+            莉企ｱ縺ｮnote蝓ｷ遲・署譯茨ｼ・I遘俶嶌・・          </CardTitle>
+          <CardDescription className="text-[10px]">騾ｱ縺ｫ1蝗槭∵怙譁ｰ縺ｮ邨悟霧迥ｶ豕√°繧峨後ヰ繧ｺ繧九崎ｨ倅ｺ九ｒ遘俶嶌縺梧署譯医＠縺ｾ縺・/CardDescription>
         </div>
         {!proposal && (
           <Button size="sm" variant="outline" className="h-7 text-[10px] border-rose-200 text-rose-700" onClick={handleGenerate} disabled={isPending}>
             {isPending ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <RefreshCw className="w-3 h-3 mr-1" />}
-            生成
+            逕滓・
           </Button>
         )}
       </CardHeader>
@@ -85,15 +84,14 @@ export default function BlogProposal({ clinicContext }: BlogProposalProps) {
             </div>
 
             <div className="flex justify-between items-center mt-auto">
-              <span className="text-[9px] text-slate-400">案作成日: {format(new Date(proposal.created_at), "M/d")}</span>
+              <span className="text-[9px] text-slate-400">譯井ｽ懈・譌･: {format(new Date(proposal.created_at), "M/d")}</span>
               <div className="flex gap-2">
                 <Button variant="ghost" size="sm" className="h-7 text-[10px] h-7 text-slate-400" onClick={handleGenerate} disabled={isPending}>
                   {isPending ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <RefreshCw className="w-3 h-3 mr-1" />}
-                  再生成
-                </Button>
+                  蜀咲函謌・                </Button>
                 <Button size="sm" className="h-7 text-[10px] bg-rose-500 hover:bg-rose-600">
                   <BookOpen className="w-3 h-3 mr-1" />
-                  全文を確認して構成を作る
+                  蜈ｨ譁・ｒ遒ｺ隱阪＠縺ｦ讒区・繧剃ｽ懊ｋ
                 </Button>
               </div>
             </div>
@@ -104,12 +102,12 @@ export default function BlogProposal({ clinicContext }: BlogProposalProps) {
                 <Send className="w-5 h-5" />
              </div>
              <p className="text-[11px] text-slate-400 leading-relaxed px-4">
-               今週のデータが分析可能です。<br/>
-               右上の生成ボタンからブログ案を作成してください。
-             </p>
+               莉企ｱ縺ｮ繝・・繧ｿ縺悟・譫仙庄閭ｽ縺ｧ縺吶・br/>
+               蜿ｳ荳翫・逕滓・繝懊ち繝ｳ縺九ｉ繝悶Ο繧ｰ譯医ｒ菴懈・縺励※縺上□縺輔＞縲・             </p>
           </div>
         )}
       </CardContent>
     </Card>
   );
 }
+

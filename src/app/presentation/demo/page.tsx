@@ -445,10 +445,12 @@ export default function DemoDashboardPage() {
               </CardContent>
             </Card>
 
-            <Button className="w-full h-14 bg-slate-900 rounded-2xl font-black text-xs space-y-1 py-1" onClick={() => handleDemoAction("お問い合わせページへ")}>
-               <span>デモ体験の終了 /</span>
-               <span className="block opacity-70">正規版の導入相談はこちら</span>
-            </Button>
+            <Link href="/presentation/inquiry" className="w-full">
+              <Button className="w-full h-14 bg-slate-900 dark:bg-violet-600 rounded-2xl font-black text-xs space-y-1 py-1">
+                 <span>デモ体験の終了 /</span>
+                 <span className="block opacity-70">正規版の導入相談はこちら</span>
+              </Button>
+            </Link>
           </div>
 
         </div>
@@ -466,10 +468,12 @@ export default function DemoDashboardPage() {
              まずは無料のデモンストレーションから始めませんか？
            </p>
            <div className="flex flex-col md:flex-row justify-center gap-4 pt-4">
-              <Button className="h-16 px-10 rounded-3xl bg-slate-900 text-white font-black text-lg shadow-2xl hover:scale-105 transition-transform" onClick={() => handleDemoAction("デモ予約問い合わせ")}>
-                デモの予約・お問い合わせ
-                <Plus className="w-5 h-5 ml-2" strokeWidth={3} />
-              </Button>
+              <Link href="/presentation/inquiry">
+                <Button className="h-16 px-10 rounded-3xl bg-slate-900 dark:bg-violet-600 text-white font-black text-lg shadow-2xl hover:scale-105 transition-transform">
+                  デモの予約・お問い合わせ
+                  <Plus className="w-5 h-5 ml-2" strokeWidth={3} />
+                </Button>
+              </Link>
               <Link href="/presentation">
                  <Button variant="outline" className="h-16 px-10 rounded-3xl border-2 border-slate-200 text-slate-900 font-black text-lg hover:bg-slate-100">
                    プレゼン資料へ戻る

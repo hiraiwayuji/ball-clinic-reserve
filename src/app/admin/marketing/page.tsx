@@ -197,7 +197,7 @@ export default function MarketingDashboardPage() {
           <Link href="/admin/marketing/seo">
             <Button className="bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-700 hover:to-violet-700 text-white shadow-lg px-6 font-bold">
               <Globe className="w-4 h-4 mr-2" />
-              SEO/MEO AI軍師診断
+              SEO/MEO AI秘書診断
               <ArrowRight className="w-4 h-4 ml-2" />
             </Button>
           </Link>

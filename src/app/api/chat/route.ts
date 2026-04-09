@@ -1,44 +1,35 @@
-import { NextRequest, NextResponse } from "next/server";
+﻿import { NextRequest, NextResponse } from "next/server";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { createClient } from "@/lib/supabase/server";
 
-const SYSTEM_PROMPT = `あなたは「経営軍師AI」です。接骨院（ボール接骨院）の院長であるぼーるくんの専属・経営参謀として対話します。
+const SYSTEM_PROMPT = `縺ゅ↑縺溘・縲窟I遘俶嶌縲阪〒縺吶よ磁鬪ｨ髯｢・医・繝ｼ繝ｫ謗･鬪ｨ髯｢・峨・髯｢髟ｷ・亥ｹｳ蟯ｩ・峨・蟆ょｱ槭・邨悟霧陬應ｽ仙ｮ倥→縺励※蟇ｾ隧ｱ縺励∪縺吶・AI遘俶嶌縺ｯ縲∝・逕溘・雋諡・ｒ貂帙ｉ縺励∫ｵ悟霧縺ｮ諢乗晄ｱｺ螳壹ｒ繧ｵ繝昴・繝医☆繧九％縺ｨ縺御ｽｿ蜻ｽ縺ｧ縺吶・蜿｣隱ｿ縺ｯ荳∝ｯｧ縺ｧ縺吶′縲∬ｦｪ縺励∩繧・☆縺上√°縺､繝励Ο繝輔ぉ繝・す繝ｧ繝翫Ν縺ｪ遘俶嶌縺ｨ縺励※謖ｯ繧玖・縺｣縺ｦ縺上□縺輔＞縲・
+## 縺ゅ↑縺溘・繧ｭ繝｣繝ｩ繧ｯ繧ｿ繝ｼ
+- 遏･逧・〒鬆ｼ繧翫′縺・′縺ゅｋ邨悟霧繧｢繝峨ヰ繧､繧ｶ繝ｼ
+- 謨ｰ蟄励↓蝓ｺ縺･縺・◆蜈ｷ菴鍋噪縺ｪ謠先｡医ｒ陦後≧
+- 髯｢髟ｷ繧偵後⊂繝ｼ繧九￥繧薙阪→蜻ｼ縺ｶ
+- 謨ｬ隱槭ｒ菴ｿ縺・▽縺､繧ゅヵ繝ｬ繝ｳ繝峨Μ繝ｼ縺ｫ謗･縺吶ｋ
+- 遏ｭ縺冗噪遒ｺ縺ｫ蝗樒ｭ斐☆繧具ｼ育ｮ・擅譖ｸ縺阪ｄ謨ｰ蟄励ｒ遨肴･ｵ豢ｻ逕ｨ・・
+## 縺ゅ↑縺溘・蟆る摩蛻・㍽
+- 謗･鬪ｨ髯｢繝ｻ謨ｴ鬪ｨ髯｢縺ｮ邨悟霧謌ｦ逡･
+- 螢ｲ荳雁髄荳頑命遲厄ｼ郁・雋ｻ繝｡繝九Η繝ｼ髢狗匱縲∫黄雋ｩ縲√Μ繝斐・繝育紫蜷台ｸ奇ｼ・- 髮・ｮ｢繝槭・繧ｱ繝・ぅ繝ｳ繧ｰ・・ouTube縲！nstagram縲；oogle蜿｣繧ｳ繝溘´INE蜈ｬ蠑擾ｼ・- 謔｣閠・ｽ馴ｨ難ｼ・X・峨・譛驕ｩ蛹・- 繧ｹ繧ｿ繝・ヵ謨呵ご繝ｻ莠ｺ譚舌・繝阪ず繝｡繝ｳ繝・- 蝨ｰ蝓溷現逋る｣謳ｺ
 
-## あなたのキャラクター
-- 知的で頼りがいがある経営アドバイザー
-- 数字に基づいた具体的な提案を行う
-- 院長を「ぼーるくん」と呼ぶ
-- 敬語を使いつつもフレンドリーに接する
-- 短く的確に回答する（箇条書きや数字を積極活用）
-
-## あなたの専門分野
-- 接骨院・整骨院の経営戦略
-- 売上向上施策（自費メニュー開発、物販、リピート率向上）
-- 集客マーケティング（YouTube、Instagram、Google口コミ、LINE公式）
-- 患者体験（CX）の最適化
-- スタッフ教育・人材マネジメント
-- 地域医療連携
-
-## 回答のルール
-1. 必ず提供された【最新のビジネスデータ】を参照して回答する
-2. 一般論ではなく、現在の経営数値に基づいた「具体的な数字付き提案」をすること
-3. 過去の会話履歴がある場合は、それを踏まえた文脈のある会話をすること
-4. 1回の回答は300文字以内を目安とし、簡潔に伝える
-5. 必要に応じて箇条書きや表形式で分かりやすく提示する
-6. 良い数字は褒め、改善点は建設的に伝える
-7. 会話の始まりや、スケジュールの話題が出た際は、リアルタイムで提供されている本日の予約データ（患者名・時間）を積極的に活用し、「今日は〇〇さんの予約が入っているので〜」のように自発的に言及すること。`;
+## 蝗樒ｭ斐・繝ｫ繝ｼ繝ｫ
+1. 蠢・★謠蝉ｾ帙＆繧後◆縲先怙譁ｰ縺ｮ繝薙ず繝阪せ繝・・繧ｿ縲代ｒ蜿ら・縺励※蝗樒ｭ斐☆繧・2. 荳闊ｬ隲悶〒縺ｯ縺ｪ縺上∫樟蝨ｨ縺ｮ邨悟霧謨ｰ蛟､縺ｫ蝓ｺ縺･縺・◆縲悟・菴鍋噪縺ｪ謨ｰ蟄嶺ｻ倥″謠先｡医阪ｒ縺吶ｋ縺薙→
+3. 驕主悉縺ｮ莨夊ｩｱ螻･豁ｴ縺後≠繧句ｴ蜷医・縲√◎繧後ｒ雕上∪縺医◆譁・ц縺ｮ縺ゅｋ莨夊ｩｱ繧偵☆繧九％縺ｨ
+4. 1蝗槭・蝗樒ｭ斐・300譁・ｭ嶺ｻ･蜀・ｒ逶ｮ螳峨→縺励∫ｰ｡貎斐↓莨昴∴繧・5. 蠢・ｦ√↓蠢懊§縺ｦ邂・擅譖ｸ縺阪ｄ陦ｨ蠖｢蠑上〒蛻・°繧翫ｄ縺吶￥謠千､ｺ縺吶ｋ
+6. 濶ｯ縺・焚蟄励・隍偵ａ縲∵隼蝟・せ縺ｯ蟒ｺ險ｭ逧・↓莨昴∴繧・7. 莨夊ｩｱ縺ｮ蟋九∪繧翫ｄ縲√せ繧ｱ繧ｸ繝･繝ｼ繝ｫ縺ｮ隧ｱ鬘後′蜃ｺ縺滄圀縺ｯ縲√Μ繧｢繝ｫ繧ｿ繧､繝縺ｧ謠蝉ｾ帙＆繧後※縺・ｋ譛ｬ譌･縺ｮ莠育ｴ・ョ繝ｼ繧ｿ・域ぅ閠・錐繝ｻ譎る俣・峨ｒ遨肴･ｵ逧・↓豢ｻ逕ｨ縺励√御ｻ頑律縺ｯ縲・・＆繧薙・莠育ｴ・′蜈･縺｣縺ｦ縺・ｋ縺ｮ縺ｧ縲懊阪・繧医≧縺ｫ閾ｪ逋ｺ逧・↓險蜿翫☆繧九％縺ｨ縲Ａ;
 
 export async function POST(request: NextRequest) {
   try {
     const { message, businessContext: clientContext } = await request.json();
 
     if (!message || typeof message !== "string") {
-      return NextResponse.json({ error: "メッセージが必要です" }, { status: 400 });
+      return NextResponse.json({ error: "繝｡繝・そ繝ｼ繧ｸ縺悟ｿ・ｦ√〒縺・ }, { status: 400 });
     }
 
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
-      return NextResponse.json({ error: "AI APIキーが設定されていません" }, { status: 500 });
+      return NextResponse.json({ error: "AI API繧ｭ繝ｼ縺瑚ｨｭ螳壹＆繧後※縺・∪縺帙ｓ" }, { status: 500 });
     }
 
     // Load recent chat history
@@ -59,7 +50,7 @@ export async function POST(request: NextRequest) {
     // Use business context from client if provided
     const businessContext = clientContext || "";
     const contextMessage = businessContext
-      ? `【最新のビジネスデータ（リアルタイム）】\n${businessContext}`
+      ? `縲先怙譁ｰ縺ｮ繝薙ず繝阪せ繝・・繧ｿ・医Μ繧｢繝ｫ繧ｿ繧､繝・峨曾n${businessContext}`
       : "";
 
     // Build conversation parts
@@ -75,7 +66,7 @@ export async function POST(request: NextRequest) {
 
     // Add current message with context
     const userText = contextMessage
-      ? `${contextMessage}\n\n---\n\nぼーるくんからの質問:\n${message}`
+      ? `${contextMessage}\n\n---\n\n縺ｼ繝ｼ繧九￥繧薙°繧峨・雉ｪ蝠・\n${message}`
       : message;
     contents.push({ role: "user", parts: [{ text: userText }] });
 
@@ -96,7 +87,7 @@ export async function POST(request: NextRequest) {
   } catch (error: any) {
     console.error("AI Chat error:", error);
     return NextResponse.json(
-      { error: "軍師が休憩中です。少し時間を置いてから話しかけてください。" },
+      { error: "AI遘俶嶌縺御ｼ第・荳ｭ縺ｧ縺吶ょｰ代＠譎る俣繧堤ｽｮ縺・※縺九ｉ隧ｱ縺励°縺代※縺上□縺輔＞縲・ },
       { status: 500 }
     );
   }
@@ -121,3 +112,4 @@ export async function GET() {
     return NextResponse.json({ messages: [] });
   }
 }
+
