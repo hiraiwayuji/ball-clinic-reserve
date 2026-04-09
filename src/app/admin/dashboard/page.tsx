@@ -12,6 +12,8 @@ import { createClient } from "@/lib/supabase/client";
 import AIMemo from "@/components/admin/AIMemo";
 import BlogProposal from "@/components/admin/BlogProposal";
 import { PatientSearchPanel } from "@/components/admin/PatientSearchPanel";
+import { getUpcomingBirthdays } from "@/app/actions/admin-marketing-actions";
+import { Cake, Sparkles as SparklesIcon } from "lucide-react";
 import { toast } from "sonner";
 
 export default function DashboardPrototype() {
@@ -22,6 +24,7 @@ export default function DashboardPrototype() {
   const [currentDate, setCurrentDate] = useState<Date | null>(null);
   const [patientPanelOpen, setPatientPanelOpen] = useState(false);
   const [selectedPatientId, setSelectedPatientId] = useState<string | null>(null);
+  const [birthdays, setBirthdays] = useState<any>(null);
 
   useEffect(() => {
     setCurrentDate(new Date());
@@ -35,6 +38,10 @@ export default function DashboardPrototype() {
         } else {
           setError(res.error || "データの取得に失敗しました");
         }
+
+        // 誕生日データを取得
+        const bDays = await getUpcomingBirthdays();
+        setBirthdays(bDays);
       } catch (err) {
         console.error("Dashboard fetch error:", err);
         setError("システムエラーが発生しました");
@@ -404,6 +411,57 @@ export default function DashboardPrototype() {
                   <Button className="w-full bg-emerald-600 hover:bg-emerald-700">経費入力画面へ</Button>
                 </Link>
              </div>
+          </CardContent>
+        </Card>
+
+        {/* ======== 4. お誕生日ウィジェット ======== */}
+        <Card className="lg:col-span-1 shadow-sm border-slate-200 bg-gradient-to-br from-rose-50/50 to-orange-50/50">
+          <CardHeader className="bg-rose-50/30 border-b pb-4">
+            <CardTitle className="flex items-center text-lg text-rose-800">
+              <Cake className="w-5 h-5 mr-2 text-rose-500" /> 今月のお誕生日
+            </CardTitle>
+            <CardDescription>お祝いを通じた信頼関係の構築</CardDescription>
+          </CardHeader>
+          <CardContent className="pt-6">
+            {!birthdays || birthdays.totalThisMonth === 0 ? (
+              <div className="text-center py-8 text-slate-400">
+                <p className="text-sm font-medium">今月誕生日の患者さんは<br/>見つかりませんでした</p>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {birthdays.today.length > 0 && (
+                  <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl animate-pulse">
+                    <p className="text-[10px] font-black text-rose-600 mb-1 flex items-center gap-1">
+                      <SparklesIcon className="w-3 h-3" /> TODAY!
+                    </p>
+                    {birthdays.today.map((c: any) => (
+                      <div key={c.id} className="flex justify-between items-center">
+                        <span className="font-bold text-slate-900">{c.name} 様</span>
+                        <Link href="/admin/marketing">
+                          <Button size="sm" className="h-7 bg-rose-500 hover:bg-rose-600 text-[10px]">LINE送付</Button>
+                        </Link>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                
+                <div className="space-y-2">
+                  <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">近日中 ({birthdays.thisWeek.length})</p>
+                  {birthdays.thisWeek.slice(0, 3).map((c: any) => (
+                    <div key={c.id} className="flex justify-between items-center bg-white/50 p-2 rounded-lg border border-slate-100">
+                      <span className="text-sm text-slate-700 font-medium">{c.name} 様</span>
+                      <span className="text-xs text-rose-500 font-bold">{c.month}/{c.day}</span>
+                    </div>
+                  ))}
+                </div>
+
+                <Link href="/admin/marketing" className="block">
+                  <Button variant="ghost" className="w-full text-xs text-rose-600 hover:text-rose-700 hover:bg-rose-50">
+                    マーケティング画面で特典を送る →
+                  </Button>
+                </Link>
+              </div>
+            )}
           </CardContent>
         </Card>
 

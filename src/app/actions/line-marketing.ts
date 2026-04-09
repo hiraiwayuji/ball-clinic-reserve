@@ -190,18 +190,27 @@ export async function sendBirthdayCoupons(month: number) {
 
   const { data: customers, error } = await supabase
     .from("customers")
-    .select("name, birth_month, line_user_id")
-    .eq("birth_month", month)
+    .select("name, birth_month, birth_date, line_user_id")
     .not("line_user_id", "is", null);
 
   if (error) throw new Error("顧客データの取得に失敗しました: " + error.message);
+
+  // 指定した月が誕生月の顧客をフィルタリング
+  const birthdayCustomers = (customers || []).filter(c => {
+    if (c.birth_month === month) return true;
+    if (c.birth_date) {
+      const bDate = new Date(c.birth_date);
+      return (bDate.getMonth() + 1) === month;
+    }
+    return false;
+  });
 
   const channelToken = await getLineAccessToken() || process.env.LINE_CHANNEL_ACCESS_TOKEN;
   const sentTo: string[] = [];
   const skipped: string[] = [];
   const debugLogs: string[] = [];
 
-  for (const customer of customers || []) {
+  for (const customer of birthdayCustomers) {
     if (!customer.line_user_id) { skipped.push(customer.name); continue; }
 
     const msg =
@@ -243,6 +252,92 @@ export async function sendBirthdayCoupons(month: number) {
   }
 
   return { success: true, count: sentTo.length, sentTo, skipped, debugLogs };
+}
+
+/**
+ * マーケティング施策の対象者数統計を取得
+ */
+export async function getMarketingStats() {
+  await checkAdminAuth();
+  const supabase = await getSupabase();
+  const { data: customers, error } = await supabase
+    .from("customers")
+    .select("id, gender, birth_month, birth_date, city_name, line_user_id");
+
+  if (error) throw new Error("統計の取得に失敗しました");
+
+  const now = new Date();
+  const currentMonth = now.getMonth() + 1;
+
+  const stats = {
+    total: customers.length,
+    linkedLine: customers.filter(c => c.line_user_id).length,
+    birthdayThisMonth: customers.filter(c => {
+      if (!c.line_user_id) return false;
+      if (c.birth_month === currentMonth) return true;
+      if (c.birth_date) {
+        return (new Date(c.birth_date).getMonth() + 1) === currentMonth;
+      }
+      return false;
+    }).length,
+    women: customers.filter(c => c.line_user_id && c.gender === "female").length,
+    cityStats: {} as Record<string, number>,
+  };
+
+  // 市町村別の統計（LINE連携済みのみ）
+  customers.forEach(c => {
+    if (c.line_user_id && c.city_name) {
+      stats.cityStats[c.city_name] = (stats.cityStats[c.city_name] || 0) + 1;
+    }
+  });
+
+  return stats;
+}
+
+/**
+ * セグメントを指定してキャンペーン送信
+ */
+export async function sendSegmentedCampaign(options: {
+  gender?: string;
+  city?: string;
+  message: string;
+}) {
+  await checkAdminAuth();
+  const supabase = await getSupabase();
+  
+  let query = supabase.from("customers").select("name, line_user_id");
+  
+  if (options.gender) query = query.eq("gender", options.gender);
+  if (options.city) query = query.eq("city_name", options.city);
+  
+  const { data: customers, error } = await query.not("line_user_id", "is", null);
+  if (error) throw new Error("対象者の取得に失敗しました");
+
+  const channelToken = await getLineAccessToken() || process.env.LINE_CHANNEL_ACCESS_TOKEN;
+  const sentTo: string[] = [];
+  const debugLogs: string[] = [];
+
+  for (const customer of customers || []) {
+    const msg = options.message.replace(/{name}/g, customer.name);
+    debugLogs.push(`【${customer.name}様】\n${msg}`);
+
+    if (channelToken) {
+      try {
+        const res = await fetch("https://api.line.me/v2/bot/message/push", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${channelToken}` },
+          body: JSON.stringify({ to: customer.line_user_id, messages: [{ type: "text", text: msg }] }),
+        });
+        if (res.ok) sentTo.push(customer.name);
+      } catch (e) {
+        console.error("LINE send error:", e);
+      }
+    } else {
+      sentTo.push(customer.name);
+    }
+  }
+
+  return { success: true, count: sentTo.length, sentTo, debugLogs };
 }
 
 /**

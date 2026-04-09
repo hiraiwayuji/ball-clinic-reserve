@@ -12,8 +12,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { sendAppointmentReminders, sendBirthdayCoupons, runMonthlyLottery, sendWelcomeQuestionnaire, sendWomenOnlyCampaign } from "@/app/actions/line-marketing";
-import { ClipboardList } from "lucide-react";
+import { sendAppointmentReminders, sendBirthdayCoupons, runMonthlyLottery, sendWelcomeQuestionnaire, sendWomenOnlyCampaign, getMarketingStats, sendSegmentedCampaign } from "@/app/actions/line-marketing";
+import { ClipboardList, MapIcon, MapPin } from "lucide-react";
 import Link from "next/link";
 
 export default function MarketingDashboardPage() {
@@ -23,6 +23,22 @@ export default function MarketingDashboardPage() {
   const [testMode, setTestMode] = useState(true);
   const [testLineId, setTestLineId] = useState("");
   const [womenMessage, setWomenMessage] = useState("");
+  const [areaMessage, setAreaMessage] = useState("");
+  const [selectedCity, setSelectedCity] = useState<string | null>(null);
+  const [stats, setStats] = useState<any>(null);
+
+  // 初回読み込み
+  useEffect(() => {
+    async function loadStats() {
+      try {
+        const s = await getMarketingStats();
+        setStats(s);
+      } catch (e) {
+        console.error("Stats load error:", e);
+      }
+    }
+    loadStats();
+  }, []);
 
   // 設定の読み込み
   useEffect(() => {
@@ -117,6 +133,27 @@ export default function MarketingDashboardPage() {
         type: "questionnaire", 
         message: `初診・未回答の患者さん（${result.count}名）へ初回アンケート（性別・誕生月など）を送信しました！`,
         data: result.sentTo
+      });
+    } catch (e: any) {
+      setActionResult({ type: "error", message: e.message || "エラーが発生しました" });
+    } finally {
+      setLoadingAction(null);
+    }
+  };
+
+  const handleSendAreaCampaign = async () => {
+    if (!selectedCity) return;
+    setLoadingAction("area");
+    try {
+      const result = await sendSegmentedCampaign({
+        city: selectedCity,
+        message: areaMessage
+      });
+      setActionResult({
+        type: "area",
+        message: `${selectedCity}の患者さん（${result.count}名）へキャンペーンメッセージを送信しました！`,
+        data: result.sentTo,
+        debugLogs: result.debugLogs,
       });
     } catch (e: any) {
       setActionResult({ type: "error", message: e.message || "エラーが発生しました" });
@@ -276,7 +313,9 @@ export default function MarketingDashboardPage() {
             <CardTitle>誕生日クーポン</CardTitle>
             <CardDescription>
               指定した月が誕生月の患者さんへ、特別割引クーポンを一斉送信します。
-              （※通常は毎月1日に自動実行されます）
+              {stats && <Badge className="mt-2 bg-rose-50 text-rose-700 hover:bg-rose-100 border-rose-200">
+                今月の対象: {stats.birthdayThisMonth}名
+              </Badge>}
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -370,7 +409,50 @@ export default function MarketingDashboardPage() {
               disabled={loadingAction !== null}
             >
               {loadingAction === "women" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
-              {loadingAction === "women" ? "送信中..." : "女性患者さんへ送信"}
+              {loadingAction === "women" ? "送信中..." : `女性患者さん(${stats?.women || 0}名)へ送信`}
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* エリア限定キャンペーン */}
+      <div className="mt-6">
+        <h2 className="text-lg font-bold text-slate-800 mb-3 flex items-center gap-2">
+          <MapIcon className="w-5 h-5 text-blue-500" />
+          エリア限定キャンペーン（地域密着）
+        </h2>
+        <Card className="border-t-4 border-t-blue-400">
+          <CardContent className="pt-5 space-y-4">
+            <p className="text-sm text-slate-600">
+              特定の地域にお住まいの患者さんへメッセージを送信します。<br />
+              地域のイベント、天候、店舗周辺のお知らせなどに。
+            </p>
+            
+            <div className="flex flex-wrap gap-2">
+               {stats && Object.entries(stats.cityStats).map(([city, count]) => (
+                 <button
+                   key={city}
+                   onClick={() => setSelectedCity(city)}
+                   className={`px-3 py-1.5 rounded-full text-xs font-bold transition ${selectedCity === city ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}
+                 >
+                   {city} ({count as number}名)
+                 </button>
+               ))}
+            </div>
+
+            <textarea
+              value={areaMessage}
+              onChange={(e) => setAreaMessage(e.target.value)}
+              placeholder={`例：{name}様\n\nボール接骨院です。明日、鳴門市周辺で大規模なイベントがあり、周辺道路の混雑が予想されます。ご来院の際はお気をつけてお越しください。`}
+              className="w-full min-h-[120px] border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800 resize-y"
+            />
+            <Button
+              className="bg-blue-600 hover:bg-blue-700 text-white"
+              onClick={handleSendAreaCampaign}
+              disabled={loadingAction !== null || !selectedCity}
+            >
+              {loadingAction === "area" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <MapPin className="mr-2 h-4 w-4" />}
+              {loadingAction === "area" ? "送信中..." : selectedCity ? `${selectedCity}の患者さんへ送信` : "エリアを選択してください"}
             </Button>
           </CardContent>
         </Card>
