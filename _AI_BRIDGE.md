@@ -5,23 +5,19 @@ This file serves as a shared "memory" for all AI assistants (Antigravity, Claude
 ---
 
 ## 🎯 Current Project Objective
-- **Google Calendar Integration & Multi-tenancy Consistency**: Finalizing the integration of Google Calendar while ensuring all database queries and UI components are resilient to multi-tenancy (using `clinic_id`).
-- **LINE Integration**: Setting up and testing the LINE Messaging API for clinic-to-customer communication.
+- **AI Strategy & Data Consistency**: Leveraging the new customer analytics dashboard to generate actionable marketing strategies via AI, while maintaining database-code synchronization.
+- **Google Calendar Integration & LINE Integration**: Finalizing remaining integration details for automated communication.
 
 ## ✅ Recently Completed (Antigravity)
-- [x] **Build Fixes**: Resolved syntax errors and redundant tags in `src/app/reserve/page.tsx`.
-- [x] **Schema Research**: Identified `ai_memos` and `ai_blog_proposals` tables for AI-driven features.
-- [x] **Infrastructure**: Established this `_AI_BRIDGE.md` for cross-AI synchronization.
-- [x] **Claude Code Setup**: Installed Anthropic Claude Code CLI (v2.1.90).
-- [x] **Handover (LINE)**: Integrated LINE Test User ID and testing instructions.
+- [x] **Family Calendar Privacy**: Added `is_shared` flag to events. Implemented profile switching (ぼーる/まち) and content filtering in the family calendar.
+- [x] **CRM & Analytics Enhancement**: Added city, birth date, and referral source tracking. Implemented a detailed analytics dashboard with 4 interactive charts.
+- [x] **Database Sync Fix**: Resolved "Failed to fetch" errors and Supabase CLI "Remote migration versions not found" errors using manual SQL and `migration repair`.
+- [x] **AI Strategist Update**: Integrated demographic context into AI advice generation.
+- [x] **Production Deployment**: Committed and pushed all changes to GitHub/Vercel; verified production site functionality.
 
 ## 🚧 In Progress / Current State
-- **LINE Integration**: 
-    - **Test User ID**: `U1236495734df25789d98f15d7b2b3b46`
-    - **Method**: Use `sendAppointmentReminders` in `line-marketing.ts`.
-    - **Env Var**: `TEST_LINE_USER_ID` should be set in Vercel.
-- **Google Calendar**: Fragments for Server Actions and UI components have been requested/discussed.
-- **Multi-tenancy**: Dashboard access has been made resilient to missing `clinic_id` columns during migration.
+- **Stability Monitoring**: Ensuring data consistency across local and production (Vercel) after schema updates.
+- **Google Calendar**: Fragments for Server Actions and UI components remain under discussion.
 
 ## 📐 Architectural Decisions & Standards
 - **Schema**: Adhere strictly to the official schema in `supabase/migrations`.
@@ -30,11 +26,11 @@ This file serves as a shared "memory" for all AI assistants (Antigravity, Claude
 - **Multi-tenancy**: All queries must consider `clinic_id` as the primary tenant identifier.
 
 ## 📝 Handover Notes for Other AIs
-- If you are **Claude (Claude Code)**: 
-    - The CLI is installed at `C:\Users\hirai\.local\bin\claude.exe`.
-    - You may need to run `claude` once to authenticate if the session is not inherited.
-    - Update the "Current Objective" or "In Progress" section when you take over a task. 
-- **Wait for Input**: We are currently in the process of finalizing the Google Calendar logic using shared snippets.
+- **DB Migration Status**: All migrations up to `20260409003000` are applied and synced. If you see schema errors, check `supabase_migrations.schema_migrations`.
+- **Deployment**: Vercel auto-deploy is active on the `main` branch.
+- **To Claude (Claude Code)**: 
+    - The environment is ready. CRM and Analytics features are verified.
+    - Please check `_AI_BRIDGE.md` for any new project-level instructions before making schema changes.
 
 ---
-*Last Updated: 2026-04-03 00:26 (Antigravity)*
+*Last Updated: 2026-04-09 01:12 (Antigravity)*

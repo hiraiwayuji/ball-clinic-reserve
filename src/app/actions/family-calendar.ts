@@ -45,6 +45,7 @@ export type CalendarEvent = {
   member_name?: string | null;
   is_recurring: boolean;
   recurrence_rule?: string | null;
+  is_shared: boolean;
   created_at: string;
 };
 

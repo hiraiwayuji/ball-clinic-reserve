@@ -56,6 +56,7 @@ interface Form {
   title: string; description: string; date: string;
   startTime: string; endTime: string; endDate: string; isAllDay: boolean; isMultiDay: boolean; memberName: string;
   location: string;
+  isShared: boolean;
   items: CalendarEventItem[];
 }
 
@@ -76,7 +77,7 @@ function addOneHour(time: string): string {
 const blankForm = (date = toLocalDateStr(new Date()), defaultMember = "家族"): Form => ({
   title: "", description: "", date,
   startTime: "09:00", endTime: "10:00", endDate: date, isAllDay: false, isMultiDay: false, memberName: defaultMember,
-  location: "", items: [],
+  location: "", isShared: true, items: [],
 });
 
 export default function FamilyCalendarPage() {
@@ -102,6 +103,19 @@ export default function FamilyCalendarPage() {
   const [scopePicker, setScopePicker] = useState<{ event: CalendarEvent; fromDate: string } | null>(null);
   // 「この日のみ」編集モード：保存時に元イベントを分割する
   const [singleDayEdit, setSingleDayEdit] = useState<{ originalEvent: CalendarEvent; fromDate: string } | null>(null);
+  const [currentUser, setCurrentUser] = useState<string | null>(null);
+
+  // 初回読み込み時にlocalStorageから表示ユーザーを取得
+  useEffect(() => {
+    const saved = localStorage.getItem(`family_calendar_user_${calendarId}`);
+    if (saved) setCurrentUser(saved);
+  }, [calendarId]);
+
+  const handleUserSwitch = (name: string) => {
+    setCurrentUser(name);
+    localStorage.setItem(`family_calendar_user_${calendarId}`, name);
+    toast.success(`${name}として表示します`);
+  };
 
   const year = anchorDate.getFullYear();
   const month = anchorDate.getMonth();
@@ -181,6 +195,8 @@ export default function FamilyCalendarPage() {
   function eventsForDay(day: number) {
     const dateStr = `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
     return events.filter((e) => {
+      // フィルタリング: 非共有かつ自分以外の予定は隠す
+      if (!e.is_shared && currentUser && e.member_name !== currentUser) return false;
       if (filter && e.member_name !== filter) return false;
       return toJSTDateStr(e.start_time) === dateStr;
     });
@@ -188,6 +204,8 @@ export default function FamilyCalendarPage() {
 
   function eventsForDayStr(dateStr: string, applyFilter = false) {
     return events.filter((e) => {
+      // フィルタリング: 非共有かつ自分以外の予定は隠す
+      if (!e.is_shared && currentUser && e.member_name !== currentUser) return false;
       if (applyFilter && filter && e.member_name !== filter) return false;
       return toJSTDateStr(e.start_time) === dateStr;
     });
@@ -221,7 +239,7 @@ export default function FamilyCalendarPage() {
       endTime: `${String(en.getHours()).padStart(2,"0")}:${String(en.getMinutes()).padStart(2,"0")}`,
       endDate: endDateStr,
       isAllDay: e.is_all_day, isMultiDay: multiDay, memberName: e.member_name ?? "家族",
-      location: e.location ?? "", items: e.items ? [...e.items] : [],
+      location: e.location ?? "", isShared: e.is_shared ?? true, items: e.items ? [...e.items] : [],
     });
     setSingleDayEdit(null);
     setModal({ mode: "edit", event: e });
@@ -235,7 +253,7 @@ export default function FamilyCalendarPage() {
       startTime: `${String(s.getHours()).padStart(2,"0")}:${String(s.getMinutes()).padStart(2,"0")}`,
       endTime: `${String(en.getHours()).padStart(2,"0")}:${String(en.getMinutes()).padStart(2,"0")}`,
       isAllDay: e.is_all_day, isMultiDay: false, memberName: e.member_name ?? "家族",
-      location: e.location ?? "", items: e.items ? [...e.items] : [],
+      location: e.location ?? "", isShared: e.is_shared ?? true, items: e.items ? [...e.items] : [],
     });
     setSingleDayEdit({ originalEvent: e, fromDate });
     setModal({ mode: "edit", event: e });
@@ -260,6 +278,7 @@ export default function FamilyCalendarPage() {
       start_time: startIso, end_time: endIso,
       is_all_day: form.isAllDay, color: member.color,
       member_name: form.memberName, is_recurring: false, recurrence_rule: null,
+      is_shared: form.isShared,
     };
 
     let res: { success: boolean; error?: string };
@@ -308,6 +327,7 @@ export default function FamilyCalendarPage() {
             end_time: orig.end_time,
             is_all_day: orig.is_all_day, color: orig.color,
             member_name: orig.member_name ?? null, is_recurring: false, recurrence_rule: null,
+            is_shared: orig.is_shared ?? true,
           });
         }
       }
@@ -433,6 +453,38 @@ export default function FamilyCalendarPage() {
           </button>
         </div>
 
+        {/* 閲覧者選択（ぼーる・まち対応） */}
+        <div className="px-3 pb-2 flex items-center gap-2">
+          <div className="text-[10px] font-bold text-slate-500 mr-1 uppercase tracking-wider">閲覧中の人:</div>
+          <div className="flex bg-slate-800 p-0.5 rounded-lg flex-1">
+            {members.slice(0, 2).map((m) => {
+              const isActive = currentUser === m.name;
+              return (
+                <button
+                  key={m.name}
+                  onClick={() => handleUserSwitch(m.name)}
+                  className={cn(
+                    "flex-1 flex items-center justify-center gap-1.5 py-1 rounded-md text-[10px] font-black transition-all",
+                    isActive ? "bg-slate-700 text-white shadow-sm ring-1 ring-white/10" : "text-slate-500 hover:text-slate-400"
+                  )}
+                >
+                  <div className={cn("w-1.5 h-1.5 rounded-full", m.bg)} />
+                  {m.name}
+                </button>
+              );
+            })}
+            <button
+              onClick={() => handleUserSwitch("")}
+              className={cn(
+                "flex-1 py-1 rounded-md text-[10px] font-black transition-all",
+                !currentUser ? "bg-slate-700 text-white shadow-sm ring-1 ring-white/10" : "text-slate-500 hover:text-slate-400"
+              )}
+            >
+              全員
+            </button>
+          </div>
+        </div>
+
         {/* 下段：ビュー切替タブ（大きく・目立つ） */}
         <div className="flex border-t border-slate-800">
           {([
@@ -556,11 +608,17 @@ export default function FamilyCalendarPage() {
               </button>
             </div>
           )}
-          {events.filter(e => !filter || e.member_name === filter).length === 0 ? (
+          {events.filter(e => {
+            if (!e.is_shared && currentUser && e.member_name !== currentUser) return false;
+            return !filter || e.member_name === filter;
+          }).length === 0 ? (
             <p className="text-slate-600 text-sm text-center py-6">予定なし</p>
           ) : (
             <div className="space-y-2">
-              {events.filter(e => !filter || e.member_name === filter).map((e) => {
+              {events.filter(e => {
+                if (!e.is_shared && currentUser && e.member_name !== currentUser) return false;
+                return !filter || e.member_name === filter;
+              }).map((e) => {
                 const m = getMember(e.member_name);
                 const s = new Date(e.start_time);
                 const isSelected = selectedIds.has(e.id);
@@ -1283,6 +1341,20 @@ export default function FamilyCalendarPage() {
                     <button onClick={() => setForm({...form, isMultiDay: !form.isMultiDay, endDate: form.date})}
                       className={`w-12 h-6 rounded-full transition-colors relative ${form.isMultiDay ? "bg-violet-500" : "bg-slate-700"}`}>
                       <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow-md transition-all ${form.isMultiDay ? "left-[26px]" : "left-0.5"}`} />
+                    </button>
+                  </div>
+
+                  {/* 共有設定 */}
+                  <div className="flex items-center justify-between bg-violet-900/10 rounded-xl px-4 py-3 border border-violet-900/40">
+                    <div className="flex flex-col">
+                      <span className="text-sm font-bold text-violet-100">家族に予定を共有する</span>
+                      <span className="text-[10px] text-violet-400">
+                        {form.isShared ? "全員のカレンダーに表示されます" : "自分のカレンダーにのみ表示されます"}
+                      </span>
+                    </div>
+                    <button onClick={() => setForm({...form, isShared: !form.isShared})}
+                      className={`w-12 h-6 rounded-full transition-colors relative ${form.isShared ? "bg-violet-500" : "bg-slate-700"}`}>
+                      <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow-md transition-all ${form.isShared ? "left-[26px]" : "left-0.5"}`} />
                     </button>
                   </div>
 
