@@ -487,12 +487,70 @@ export default function InsurancePage() {
                     ) : (
                       payments.map((p) => {
                         const isEditing = editingRow?.id === p.id;
-                        return (
+                        return isEditing ? (
+                          /* 編集モード：フル幅の展開パネル */
+                          <TableRow key={p.id} className="bg-blue-50/60 dark:bg-blue-950/20 border-b dark:border-white/5">
+                            <TableCell colSpan={6} className="py-3 px-4">
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                <div className="space-y-1">
+                                  <Label className="text-xs font-bold text-slate-500">保険種別・名称</Label>
+                                  <Input
+                                    value={editingRow!.insurance_name}
+                                    onChange={(e) => setEditingRow(prev => prev ? { ...prev, insurance_name: e.target.value } : prev)}
+                                    className="h-9"
+                                    list="insurance-types-edit"
+                                  />
+                                  <datalist id="insurance-types-edit">
+                                    <option value="協会けんぽ" /><option value="国民健康保険" />
+                                    <option value="後期高齢者" /><option value="共済組合" />
+                                    <option value="自賠責" /><option value="労災" />
+                                  </datalist>
+                                </div>
+                                <div className="space-y-1">
+                                  <Label className="text-xs font-bold text-slate-500">振込金額</Label>
+                                  <Input
+                                    type="number"
+                                    value={editingRow!.amount}
+                                    onChange={(e) => setEditingRow(prev => prev ? { ...prev, amount: e.target.value } : prev)}
+                                    className="h-9"
+                                  />
+                                </div>
+                                <div className="space-y-1">
+                                  <Label className="text-xs font-bold text-slate-500">振込日</Label>
+                                  <Input
+                                    type="date"
+                                    value={editingRow!.payment_date}
+                                    onChange={(e) => setEditingRow(prev => prev ? { ...prev, payment_date: e.target.value } : prev)}
+                                    className="h-9"
+                                  />
+                                </div>
+                                <div className="space-y-1">
+                                  <Label className="text-xs font-bold text-slate-500">メモ（任意）</Label>
+                                  <Input
+                                    value={editingRow!.notes}
+                                    onChange={(e) => setEditingRow(prev => prev ? { ...prev, notes: e.target.value } : prev)}
+                                    placeholder="療養費・施術料の内訳など"
+                                    className="h-9"
+                                  />
+                                </div>
+                              </div>
+                              <div className="flex justify-end gap-2 mt-3">
+                                <Button variant="outline" size="sm" onClick={handleCancelEdit} className="h-8">
+                                  <X className="w-3.5 h-3.5 mr-1" />キャンセル
+                                </Button>
+                                <Button size="sm" onClick={handleSaveEdit} disabled={isSavingEdit} className="h-8 bg-blue-600 hover:bg-blue-700 text-white">
+                                  {isSavingEdit ? <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" /> : <Check className="w-3.5 h-3.5 mr-1" />}
+                                  保存する
+                                </Button>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        ) : (
+                          /* 通常表示 */
                           <TableRow
                             key={p.id}
-                            className={`transition-colors border-b dark:border-white/5 ${isEditing ? "bg-blue-50/60 dark:bg-blue-950/20" : p.passbook_checked ? "bg-emerald-50/50 dark:bg-emerald-950/20" : "hover:bg-slate-50/50 dark:hover:bg-slate-800/30"}`}
+                            className={`transition-colors border-b dark:border-white/5 ${p.passbook_checked ? "bg-emerald-50/50 dark:bg-emerald-950/20" : "hover:bg-slate-50/50 dark:hover:bg-slate-800/30"}`}
                           >
-                            {/* 画像アイコン */}
                             <TableCell className="pr-0">
                               {p.image_url ? (
                                 <a href={p.image_url} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:text-blue-600">
@@ -502,78 +560,25 @@ export default function InsurancePage() {
                                 <span className="text-slate-200 dark:text-slate-700"><ImageIcon className="w-4 h-4" /></span>
                               )}
                             </TableCell>
-
-                            {/* 保険名・メモ */}
                             <TableCell>
-                              {isEditing ? (
-                                <div className="space-y-1">
-                                  <Input
-                                    value={editingRow!.insurance_name}
-                                    onChange={(e) => setEditingRow(prev => prev ? { ...prev, insurance_name: e.target.value } : prev)}
-                                    className="h-7 text-sm px-2 py-0"
-                                    list="insurance-types-edit"
-                                  />
-                                  <datalist id="insurance-types-edit">
-                                    <option value="協会けんぽ" /><option value="国民健康保険" />
-                                    <option value="後期高齢者" /><option value="共済組合" />
-                                    <option value="自賠責" /><option value="労災" />
-                                  </datalist>
-                                  <Input
-                                    value={editingRow!.notes}
-                                    onChange={(e) => setEditingRow(prev => prev ? { ...prev, notes: e.target.value } : prev)}
-                                    placeholder="メモ（任意）"
-                                    className="h-7 text-xs px-2 py-0"
-                                  />
-                                </div>
-                              ) : (
-                                <>
-                                  <p className="font-medium text-slate-700 dark:text-slate-300">{p.insurance_name}</p>
-                                  {p.notes && <p className="text-xs text-slate-400 mt-0.5 truncate max-w-[160px]">{p.notes}</p>}
-                                </>
-                              )}
+                              <p className="font-medium text-slate-700 dark:text-slate-300">{p.insurance_name}</p>
+                              {p.notes && <p className="text-xs text-slate-400 mt-0.5 truncate max-w-[160px]">{p.notes}</p>}
                             </TableCell>
-
-                            {/* 振込日 */}
-                            <TableCell className="hidden sm:table-cell">
-                              {isEditing ? (
-                                <Input
-                                  type="date"
-                                  value={editingRow!.payment_date}
-                                  onChange={(e) => setEditingRow(prev => prev ? { ...prev, payment_date: e.target.value } : prev)}
-                                  className="h-7 text-sm px-2 py-0 w-32"
-                                />
-                              ) : (
-                                <span className="text-sm text-slate-500 dark:text-slate-400">
-                                  {p.payment_date ? format(new Date(p.payment_date), "M/d") : "—"}
-                                </span>
-                              )}
+                            <TableCell className="hidden sm:table-cell text-sm text-slate-500 dark:text-slate-400">
+                              {p.payment_date ? format(new Date(p.payment_date), "M/d") : "—"}
                             </TableCell>
-
-                            {/* 金額 */}
-                            <TableCell className="text-right">
-                              {isEditing ? (
-                                <Input
-                                  type="number"
-                                  value={editingRow!.amount}
-                                  onChange={(e) => setEditingRow(prev => prev ? { ...prev, amount: e.target.value } : prev)}
-                                  className="h-7 text-sm px-2 py-0 text-right w-28 ml-auto"
-                                />
-                              ) : (
-                                <span className="font-bold text-slate-800 dark:text-slate-200">¥{p.amount.toLocaleString()}</span>
-                              )}
+                            <TableCell className="text-right font-bold text-slate-800 dark:text-slate-200">
+                              ¥{p.amount.toLocaleString()}
                             </TableCell>
-
-                            {/* 通帳確認 */}
                             <TableCell className="text-center">
                               <button
                                 type="button"
-                                disabled={isEditing}
                                 onClick={() => handlePassbookToggle(p.id, p.passbook_checked)}
                                 className={`inline-flex items-center gap-1 text-xs font-bold px-2 py-1 rounded-full transition-colors ${
                                   p.passbook_checked
                                     ? "bg-emerald-100 text-emerald-700 hover:bg-emerald-200 dark:bg-emerald-900/50 dark:text-emerald-400"
                                     : "bg-slate-100 text-slate-400 hover:bg-amber-100 hover:text-amber-600 dark:bg-slate-800 dark:hover:bg-amber-900/40"
-                                } disabled:opacity-40`}
+                                }`}
                               >
                                 {p.passbook_checked
                                   ? <><CheckCircle2 className="w-3.5 h-3.5" />確認済</>
@@ -581,45 +586,15 @@ export default function InsurancePage() {
                                 }
                               </button>
                             </TableCell>
-
-                            {/* 操作ボタン */}
                             <TableCell className="text-right">
-                              {isEditing ? (
-                                <div className="flex items-center justify-end gap-1">
-                                  <Button
-                                    variant="ghost" size="icon"
-                                    className="h-8 w-8 text-blue-500 hover:text-blue-700 hover:bg-blue-50 rounded-full"
-                                    onClick={handleSaveEdit}
-                                    disabled={isSavingEdit}
-                                  >
-                                    {isSavingEdit ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
-                                  </Button>
-                                  <Button
-                                    variant="ghost" size="icon"
-                                    className="h-8 w-8 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-full"
-                                    onClick={handleCancelEdit}
-                                  >
-                                    <X className="w-4 h-4" />
-                                  </Button>
-                                </div>
-                              ) : (
-                                <div className="flex items-center justify-end gap-1">
-                                  <Button
-                                    variant="ghost" size="icon"
-                                    className="h-8 w-8 text-slate-300 hover:text-blue-500 hover:bg-blue-50 rounded-full"
-                                    onClick={() => handleStartEdit(p)}
-                                  >
-                                    <Pencil className="w-4 h-4" />
-                                  </Button>
-                                  <Button
-                                    variant="ghost" size="icon"
-                                    className="h-8 w-8 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-full"
-                                    onClick={() => handleDelete(p.id)}
-                                  >
-                                    <Trash2 className="w-4 h-4" />
-                                  </Button>
-                                </div>
-                              )}
+                              <div className="flex items-center justify-end gap-1">
+                                <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-300 hover:text-blue-500 hover:bg-blue-50 rounded-full" onClick={() => handleStartEdit(p)}>
+                                  <Pencil className="w-4 h-4" />
+                                </Button>
+                                <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-full" onClick={() => handleDelete(p.id)}>
+                                  <Trash2 className="w-4 h-4" />
+                                </Button>
+                              </div>
                             </TableCell>
                           </TableRow>
                         );
