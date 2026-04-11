@@ -548,7 +548,7 @@ export default function EvaluationPage() {
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <select
-            className="bg-white border rounded-md px-3 py-2 text-sm"
+            className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-white/10 rounded-md px-3 py-2 text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500"
             value={`${activeYear}-${activeMonth}`}
             onChange={(e) => {
               const [y, m] = e.target.value.split('-');
@@ -567,7 +567,7 @@ export default function EvaluationPage() {
           <Button
             variant="outline"
             onClick={() => setIsDetailOpen(true)}
-            className="border-amber-300 text-amber-700 hover:bg-amber-50"
+            className="border-amber-300 dark:border-amber-700 text-amber-700 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950/40 bg-white dark:bg-slate-800"
           >
             <Search className="w-4 h-4 mr-2" />
             数字の根拠を確認・修正
@@ -577,7 +577,7 @@ export default function EvaluationPage() {
           <Link href="/admin/analytics">
              <Button
                variant="default"
-               className="bg-indigo-600 hover:bg-indigo-700 text-white shadow-lg shadow-indigo-100 flex items-center gap-2"
+               className="bg-indigo-600 hover:bg-indigo-700 dark:bg-indigo-500 dark:hover:bg-indigo-600 text-white shadow-lg shadow-indigo-100 dark:shadow-indigo-900/30 flex items-center gap-2"
              >
                <TrendingUp className="w-4 h-4" />
                <span className="font-bold">さらに詳しく分析する</span>
@@ -586,7 +586,7 @@ export default function EvaluationPage() {
 
           <Dialog open={isEditModalOpen} onOpenChange={setIsEditModalOpen}>
             <DialogTrigger>
-              <span className="inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 border border-input bg-background hover:bg-accent hover:text-accent-foreground h-10 px-4 py-2 cursor-pointer">
+              <span className="inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 h-10 px-4 py-2 cursor-pointer">
                 <Star className="w-4 h-4 mr-2" />目標・手動指標の編集
               </span>
             </DialogTrigger>
