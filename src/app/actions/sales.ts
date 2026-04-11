@@ -150,6 +150,34 @@ export async function getInsurancePayments(monthStr: string) {
   }
 }
 
+export async function updateInsurancePayment(id: string, data: {
+  insurance_name: string;
+  amount: number;
+  payment_date: string | null;
+  notes: string | null;
+}) {
+  await checkAdminAuth();
+  try {
+    const supabase = await getSupabase();
+    const { error } = await supabase
+      .from("insurance_payments")
+      .update({
+        insurance_name: data.insurance_name,
+        amount: data.amount,
+        payment_date: data.payment_date || null,
+        notes: data.notes || null,
+      })
+      .eq("id", id);
+
+    if (error) throw error;
+    revalidatePath("/admin/insurance");
+    return { success: true };
+  } catch (error) {
+    console.error("Error updating insurance payment:", error);
+    return { success: false, error: "更新に失敗しました" };
+  }
+}
+
 export async function updateInsurancePassbookCheck(id: string, checked: boolean) {
   await checkAdminAuth();
   try {
