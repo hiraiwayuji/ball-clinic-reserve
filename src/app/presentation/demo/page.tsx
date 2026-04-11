@@ -485,9 +485,9 @@ export default function DemoDashboardPage() {
                 </Button>
               </Link>
               <Link href="/presentation" className="block">
-                <Button variant="outline" className="w-full h-12 rounded-2xl font-bold text-sm border-2 border-slate-300 text-slate-700 hover:bg-slate-100 flex items-center justify-center gap-2">
+                <Button variant="outline" className="w-full h-12 rounded-2xl font-bold text-sm border-2 border-slate-700 bg-slate-800 text-white hover:bg-slate-700 flex items-center justify-center gap-2">
                   <ArrowLeft className="w-4 h-4" />
-                  デモ体験を終了してプレゼン資料へ戻る
+                  デモ体験を終了 / プレゼン資料へ戻る
                 </Button>
               </Link>
             </div>
@@ -495,64 +495,61 @@ export default function DemoDashboardPage() {
 
           {/* 5. 年次比較セクション（去年3月 vs 今年3月） */}
           <Card className="lg:col-span-3 shadow-2xl border-none ring-1 ring-slate-200 overflow-hidden">
-            <CardHeader className="bg-gradient-to-br from-blue-50 to-indigo-50 border-b pb-6">
-              <CardTitle className="flex items-center text-lg font-black text-slate-800">
-                <BarChart2 className="w-5 h-5 mr-2 text-blue-600" />
-                前年同月比 分析レポート — {lastYear.month} vs {thisYear.month}
+            <CardHeader className="bg-slate-900 border-b border-white/10 pb-6">
+              <CardTitle className="flex items-center text-lg font-black text-white">
+                <BarChart2 className="w-5 h-5 mr-2 text-blue-400" />
+                前年同月比 分析レポート
+                <span className="ml-3 text-sm font-bold text-slate-400">{lastYear.month} vs {thisYear.month}</span>
               </CardTitle>
-              <CardDescription className="font-medium text-slate-500">
-                AIが自動で前年同月のデータを比較・分析します
+              <CardDescription className="font-medium text-slate-400">
+                AIが自動で前年同月のデータを比較・分析します。実際の画面ではお好きな月を選んで自由に比較できます。
               </CardDescription>
             </CardHeader>
-            <CardContent className="pt-6 space-y-8">
+            <CardContent className="pt-6 space-y-8 bg-white">
 
               {/* KPIカード */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 {[
                   {
                     label: "来院件数",
-                    icon: <Users className="w-4 h-4" />,
+                    icon: <Users className="w-4 h-4 text-blue-500" />,
                     last: `${lastYear.visits}件`,
-                    this: `${thisYear.visits}件`,
+                    thisVal: `${thisYear.visits}件`,
                     diff: visitDiff,
-                    color: "blue"
                   },
                   {
                     label: "月間売上",
-                    icon: <TrendingUp className="w-4 h-4" />,
+                    icon: <TrendingUp className="w-4 h-4 text-violet-500" />,
                     last: `¥${(lastYear.revenue / 10000).toFixed(0)}万`,
-                    this: `¥${(thisYear.revenue / 10000).toFixed(0)}万`,
+                    thisVal: `¥${(thisYear.revenue / 10000).toFixed(0)}万`,
                     diff: revenueDiff,
-                    color: "violet"
                   },
                   {
                     label: "新規患者数",
-                    icon: <Users className="w-4 h-4" />,
+                    icon: <Users className="w-4 h-4 text-emerald-500" />,
                     last: `${lastYear.newPatients}名`,
-                    this: `${thisYear.newPatients}名`,
+                    thisVal: `${thisYear.newPatients}名`,
                     diff: newPatientDiff,
-                    color: "emerald"
                   },
                   {
                     label: "リピート率",
-                    icon: <TrendingUp className="w-4 h-4" />,
+                    icon: <TrendingUp className="w-4 h-4 text-amber-500" />,
                     last: `${lastYear.repeatRate}%`,
-                    this: `${thisYear.repeatRate}%`,
+                    thisVal: `${thisYear.repeatRate}%`,
                     diff: repeatDiff,
-                    color: "amber"
                   }
                 ].map((kpi, i) => (
-                  <div key={i} className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 space-y-3">
-                    <div className="flex items-center gap-2 text-slate-500 text-xs font-bold uppercase tracking-wide">
+                  <div key={i} className="bg-slate-50 rounded-2xl border border-slate-200 p-4 space-y-3">
+                    <div className="flex items-center gap-2 text-slate-600 text-xs font-bold uppercase tracking-wide">
                       {kpi.icon}{kpi.label}
                     </div>
                     <div>
-                      <p className="text-2xl font-black text-slate-900">{kpi.this}</p>
-                      <p className="text-xs text-slate-400 mt-0.5">前年: {kpi.last}</p>
+                      <p className="text-2xl font-black text-slate-900">{kpi.thisVal}</p>
+                      <p className="text-xs text-slate-500 font-medium mt-0.5">前年: {kpi.last}</p>
                     </div>
                     <div className={cn(
-                      "inline-flex items-center gap-1 text-sm font-black px-2 py-0.5 rounded-full",
-                      kpi.diff > 0 ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-600"
+                      "inline-flex items-center gap-1 text-sm font-black px-2.5 py-1 rounded-full",
+                      kpi.diff > 0 ? "bg-emerald-100 text-emerald-800" : "bg-red-100 text-red-700"
                     )}>
                       {kpi.diff > 0 ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
                       {kpi.diff > 0 ? "+" : ""}{kpi.diff}%
@@ -565,23 +562,23 @@ export default function DemoDashboardPage() {
               <div className="grid md:grid-cols-2 gap-8">
                 {/* 来院数比較 */}
                 <div className="space-y-4">
-                  <h4 className="text-sm font-black text-slate-700">来院件数の比較</h4>
+                  <h4 className="text-sm font-black text-slate-800">来院件数の比較</h4>
                   <div className="space-y-3">
                     {[
-                      { label: lastYear.month, value: lastYear.visits, max: thisYear.visits, color: "bg-slate-300" },
-                      { label: thisYear.month, value: thisYear.visits, max: thisYear.visits, color: "bg-blue-500" }
+                      { label: lastYear.month, value: lastYear.visits, max: thisYear.visits, color: "bg-slate-400" },
+                      { label: thisYear.month, value: thisYear.visits, max: thisYear.visits, color: "bg-blue-600" }
                     ].map((row, i) => (
-                      <div key={i} className="space-y-1">
-                        <div className="flex justify-between text-xs font-bold text-slate-600">
+                      <div key={i} className="space-y-1.5">
+                        <div className="flex justify-between text-sm font-bold text-slate-700">
                           <span>{row.label}</span>
-                          <span>{row.value}件</span>
+                          <span className="text-slate-900">{row.value}件</span>
                         </div>
-                        <div className="h-8 bg-slate-100 rounded-full overflow-hidden">
+                        <div className="h-9 bg-slate-100 rounded-xl overflow-hidden">
                           <div
-                            className={`h-full ${row.color} rounded-full transition-all duration-1000 flex items-center justify-end pr-3`}
+                            className={`h-full ${row.color} rounded-xl transition-all duration-1000 flex items-center justify-end pr-3`}
                             style={{ width: `${(row.value / row.max) * 100}%` }}
                           >
-                            <span className="text-white text-[10px] font-black">{row.value}</span>
+                            <span className="text-white text-xs font-black">{row.value}</span>
                           </div>
                         </div>
                       </div>
@@ -591,23 +588,23 @@ export default function DemoDashboardPage() {
 
                 {/* 売上比較 */}
                 <div className="space-y-4">
-                  <h4 className="text-sm font-black text-slate-700">月間売上の比較</h4>
+                  <h4 className="text-sm font-black text-slate-800">月間売上の比較</h4>
                   <div className="space-y-3">
                     {[
-                      { label: lastYear.month, value: lastYear.revenue, max: thisYear.revenue, color: "bg-slate-300" },
-                      { label: thisYear.month, value: thisYear.revenue, max: thisYear.revenue, color: "bg-violet-500" }
+                      { label: lastYear.month, value: lastYear.revenue, max: thisYear.revenue, color: "bg-slate-400" },
+                      { label: thisYear.month, value: thisYear.revenue, max: thisYear.revenue, color: "bg-violet-600" }
                     ].map((row, i) => (
-                      <div key={i} className="space-y-1">
-                        <div className="flex justify-between text-xs font-bold text-slate-600">
+                      <div key={i} className="space-y-1.5">
+                        <div className="flex justify-between text-sm font-bold text-slate-700">
                           <span>{row.label}</span>
-                          <span>¥{(row.value / 10000).toFixed(0)}万</span>
+                          <span className="text-slate-900">¥{(row.value / 10000).toFixed(0)}万</span>
                         </div>
-                        <div className="h-8 bg-slate-100 rounded-full overflow-hidden">
+                        <div className="h-9 bg-slate-100 rounded-xl overflow-hidden">
                           <div
-                            className={`h-full ${row.color} rounded-full transition-all duration-1000 flex items-center justify-end pr-3`}
+                            className={`h-full ${row.color} rounded-xl transition-all duration-1000 flex items-center justify-end pr-3`}
                             style={{ width: `${(row.value / row.max) * 100}%` }}
                           >
-                            <span className="text-white text-[10px] font-black">¥{(row.value / 10000).toFixed(0)}万</span>
+                            <span className="text-white text-xs font-black">¥{(row.value / 10000).toFixed(0)}万</span>
                           </div>
                         </div>
                       </div>
@@ -617,12 +614,12 @@ export default function DemoDashboardPage() {
               </div>
 
               {/* AI解説 */}
-              <div className="bg-gradient-to-r from-blue-600 to-indigo-600 rounded-2xl p-5 text-white">
-                <p className="text-xs font-black text-blue-200 mb-2 flex items-center gap-1">
+              <div className="bg-slate-900 rounded-2xl p-6 text-white">
+                <p className="text-xs font-black text-violet-400 mb-3 flex items-center gap-1">
                   <Sparkles className="w-3.5 h-3.5" /> AI秘書による前年比分析コメント
                 </p>
-                <p className="text-sm leading-relaxed font-medium">
-                  「前年同月比で来院数が <strong className="text-amber-300">+{visitDiff}%</strong>、売上が <strong className="text-amber-300">+{revenueDiff}%</strong> と大幅な成長を達成しています。特に新規患者数が <strong className="text-amber-300">{lastYear.newPatients}名 → {thisYear.newPatients}名</strong> へ増加しており、LINE集客とMEO対策の相乗効果が確認できます。リピート率も{lastYear.repeatRate}% → {thisYear.repeatRate}% に改善されており、患者満足度の向上が数字に表れています。」
+                <p className="text-sm leading-relaxed text-slate-200 font-medium">
+                  「前年同月比で来院数が <strong className="text-amber-400">+{visitDiff}%</strong>、売上が <strong className="text-amber-400">+{revenueDiff}%</strong> と大幅な成長を達成しています。特に新規患者数が <strong className="text-amber-400">{lastYear.newPatients}名 → {thisYear.newPatients}名</strong> へ増加しており、LINE集客とMEO対策の相乗効果が確認できます。リピート率も{lastYear.repeatRate}% → {thisYear.repeatRate}% に改善されており、患者満足度の向上が数字に表れています。」
                 </p>
               </div>
 
@@ -650,7 +647,7 @@ export default function DemoDashboardPage() {
               </Button>
             </Link>
             <Link href="/presentation">
-              <Button variant="outline" className="h-16 px-10 rounded-3xl border-2 border-slate-300 text-slate-800 font-black text-lg hover:bg-slate-100 flex items-center gap-2">
+              <Button variant="outline" className="h-16 px-10 rounded-3xl border-2 border-slate-700 bg-slate-800 text-white font-black text-lg hover:bg-slate-700 flex items-center gap-2">
                 <ArrowLeft className="w-5 h-5" />
                 プレゼン資料へ戻る
               </Button>
