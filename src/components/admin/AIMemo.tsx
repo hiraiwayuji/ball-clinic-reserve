@@ -63,33 +63,33 @@ export default function AIMemo() {
   if (loading) return <div className="p-4 text-center"><Loader2 className="w-5 h-5 animate-spin mx-auto text-slate-300" /></div>;
 
   return (
-    <Card className="shadow-sm border-blue-200 bg-blue-50">
+    <Card className="shadow-sm border-blue-200 dark:border-blue-900 bg-blue-50 dark:bg-blue-950/30">
       <CardHeader className="pb-3">
-        <CardTitle className="text-sm font-black text-indigo-800 flex items-center gap-2">
+        <CardTitle className="text-sm font-black text-indigo-800 dark:text-indigo-300 flex items-center gap-2">
           <MessageSquare className="w-5 h-5" />
           AI秘書への伝言・メモ
         </CardTitle>
-        <CardDescription className="text-[11px] font-semibold text-indigo-500">戦略への考えやAIへの指示をメモとして保存できます</CardDescription>
+        <CardDescription className="text-[11px] font-semibold text-indigo-500 dark:text-indigo-400">戦略への考えやAIへの指示をメモとして保存できます</CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
         {isEditing ? (
           <div className="space-y-2">
             {existingMemo && (
-              <div className="bg-blue-100 border border-blue-200 rounded-lg px-3 py-2 text-xs text-slate-600 whitespace-pre-wrap">
-                <span className="font-bold text-blue-600 block mb-1">現在のメモ</span>
+              <div className="bg-blue-100 dark:bg-blue-900/40 border border-blue-200 dark:border-blue-800 rounded-lg px-3 py-2 text-xs text-slate-600 dark:text-slate-300 whitespace-pre-wrap">
+                <span className="font-bold text-blue-600 dark:text-blue-400 block mb-1">現在のメモ</span>
                 {existingMemo.content}
               </div>
             )}
             <Textarea
               placeholder="最近の悩み、共有したい情報、AIへの要望などを自由に入力してください..."
-              className="min-h-[120px] text-sm bg-white text-slate-800 placeholder:text-slate-400 border-blue-200"
+              className="min-h-[120px] text-sm bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 border-blue-200 dark:border-blue-800"
               value={memo}
               onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setMemo(e.target.value)}
               autoFocus
             />
             <div className="flex justify-end gap-2">
               {existingMemo && (
-                <Button variant="ghost" size="sm" className="text-slate-600" onClick={() => { setMemo(existingMemo.content); setIsEditing(false); }}>
+                <Button variant="ghost" size="sm" className="text-slate-600 dark:text-slate-300" onClick={() => { setMemo(existingMemo.content); setIsEditing(false); }}>
                   キャンセル
                 </Button>
               )}
@@ -101,21 +101,21 @@ export default function AIMemo() {
           </div>
         ) : (
           <div className="space-y-3">
-            <div className="bg-white p-3 rounded-lg border border-blue-200 text-sm text-slate-800 font-medium whitespace-pre-wrap min-h-[100px] leading-relaxed">
+            <div className="bg-white dark:bg-slate-800 p-3 rounded-lg border border-blue-200 dark:border-blue-800 text-sm text-slate-800 dark:text-slate-100 font-medium whitespace-pre-wrap min-h-[100px] leading-relaxed">
               {existingMemo?.content}
             </div>
             <div className="flex justify-end gap-2">
               <Button variant="ghost" size="sm" className="text-slate-400 hover:text-rose-600" onClick={handleDelete}>
                 <Trash2 className="w-4 h-4" />
               </Button>
-              <Button variant="outline" size="sm" className="text-blue-700 border-blue-300 hover:bg-blue-100" onClick={() => { setMemo(""); setIsEditing(true); }}>
+              <Button variant="outline" size="sm" className="text-blue-700 dark:text-blue-400 border-blue-300 dark:border-blue-700 hover:bg-blue-100 dark:hover:bg-blue-900/40" onClick={() => { setMemo(""); setIsEditing(true); }}>
                 <Edit3 className="w-4 h-4 mr-1" />
                 メモを追記・変更
               </Button>
               <Button
                 variant="outline"
                 size="sm"
-                className="bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100 shadow-sm"
+                className="bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-400 border-amber-200 dark:border-amber-800 hover:bg-amber-100 dark:hover:bg-amber-900/40 shadow-sm"
                 onClick={() => {
                   window.dispatchEvent(new CustomEvent("open-ai-chat", {
                     detail: {
