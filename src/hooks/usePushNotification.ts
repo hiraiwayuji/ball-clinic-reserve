@@ -1,8 +1,13 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 
 type PushState = "unsupported" | "denied" | "subscribed" | "unsubscribed" | "loading";
+
+export interface NotifyPrefs {
+  memberName: string | null;
+  notifyOthers: boolean;
+}
 
 function urlBase64ToUint8Array(base64String: string): ArrayBuffer {
   const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
@@ -15,11 +20,22 @@ function urlBase64ToUint8Array(base64String: string): ArrayBuffer {
   return outputArray.buffer;
 }
 
-export function usePushNotification(calendarId: string) {
+async function getActiveSubscription(): Promise<PushSubscription | null> {
+  if (!("serviceWorker" in navigator) || !("PushManager" in window)) return null;
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    return await reg.pushManager.getSubscription();
+  } catch {
+    return null;
+  }
+}
+
+export function usePushNotification(calendarId: string, prefs?: NotifyPrefs) {
   const [state, setState] = useState<PushState>("loading");
   const [isProcessing, setIsProcessing] = useState(false);
+  const prefsRef = useRef(prefs);
+  prefsRef.current = prefs;
 
-  // 現在の購読状態を確認
   useEffect(() => {
     if (typeof window === "undefined") return;
 
@@ -40,7 +56,7 @@ export function usePushNotification(calendarId: string) {
     }).catch(() => setState("unsubscribed"));
   }, []);
 
-  const subscribe = useCallback(async () => {
+  const subscribe = useCallback(async (overridePrefs?: NotifyPrefs) => {
     const vapidPublicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
     if (!vapidPublicKey) {
       console.error("[Push] VAPID public key not set");
@@ -61,10 +77,16 @@ export function usePushNotification(calendarId: string) {
         applicationServerKey: urlBase64ToUint8Array(vapidPublicKey),
       });
 
+      const activePrefs = overridePrefs ?? prefsRef.current;
       const res = await fetch("/api/push/subscribe", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ calendarId, subscription: sub.toJSON() }),
+        body: JSON.stringify({
+          calendarId,
+          subscription: sub.toJSON(),
+          memberName: activePrefs?.memberName ?? null,
+          notifyOthers: activePrefs?.notifyOthers !== false,
+        }),
       });
 
       if (res.ok) {
@@ -82,21 +104,18 @@ export function usePushNotification(calendarId: string) {
   const unsubscribe = useCallback(async () => {
     setIsProcessing(true);
     try {
-      const reg = await navigator.serviceWorker.ready;
-      const sub = await reg.pushManager.getSubscription();
+      const sub = await getActiveSubscription();
       if (!sub) {
         setState("unsubscribed");
         return;
       }
 
-      // サーバー側から削除
       await fetch("/api/push/subscribe", {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ endpoint: sub.endpoint }),
       });
 
-      // ブラウザ側も解除
       await sub.unsubscribe();
       setState("unsubscribed");
     } catch (err) {
@@ -106,5 +125,21 @@ export function usePushNotification(calendarId: string) {
     }
   }, []);
 
-  return { state, isProcessing, subscribe, unsubscribe };
+  // 設定だけ更新（再購読なし）
+  const updatePrefs = useCallback(async (newPrefs: NotifyPrefs) => {
+    const sub = await getActiveSubscription();
+    if (!sub) return false;
+    const res = await fetch("/api/push/subscribe", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        endpoint: sub.endpoint,
+        memberName: newPrefs.memberName ?? null,
+        notifyOthers: newPrefs.notifyOthers !== false,
+      }),
+    });
+    return res.ok;
+  }, []);
+
+  return { state, isProcessing, subscribe, unsubscribe, updatePrefs };
 }

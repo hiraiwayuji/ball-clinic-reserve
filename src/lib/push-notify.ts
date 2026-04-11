@@ -14,11 +14,14 @@ interface Subscription {
   endpoint: string;
   p256dh: string;
   auth: string;
+  member_name: string | null;
+  notify_others: boolean;
 }
 
 export async function sendPushToCalendar(
   calendarId: string,
-  payload: PushPayload
+  payload: PushPayload,
+  fromMember?: string | null
 ): Promise<{ sent: number; failed: number }> {
   const vapidPublicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
   const vapidPrivateKey = process.env.VAPID_PRIVATE_KEY;
@@ -36,14 +39,22 @@ export async function sendPushToCalendar(
     process.env.SUPABASE_SERVICE_ROLE_KEY!
   );
 
-  const { data: subs, error } = await serviceClient
+  const { data: allSubs, error } = await serviceClient
     .from("push_subscriptions")
-    .select("endpoint, p256dh, auth")
+    .select("endpoint, p256dh, auth, member_name, notify_others")
     .eq("calendar_id", calendarId);
 
-  if (error || !subs || subs.length === 0) {
+  if (error || !allSubs || allSubs.length === 0) {
     return { sent: 0, failed: 0 };
   }
+
+  // 「他の人の予定は通知しない」設定のデバイスをフィルタ
+  const subs = allSubs.filter((sub: Subscription) => {
+    if (sub.notify_others) return true; // 全員通知 → 送る
+    if (!fromMember) return true;       // 送信者不明 → 送る
+    // 自分の予定なら通知する（member_name が一致 or 未設定）
+    return !sub.member_name || sub.member_name === fromMember;
+  });
 
   const webpush = (await import("web-push")).default;
   webpush.setVapidDetails(vapidSubject, vapidPublicKey, vapidPrivateKey);

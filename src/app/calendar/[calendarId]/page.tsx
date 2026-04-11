@@ -154,7 +154,28 @@ export default function FamilyCalendarPage() {
     return { main: `${month + 1}月${anchorDate.getDate()}日（${WEEKDAYS[anchorDate.getDay()]}）`, sub: String(year) };
   }
 
-  const { state: pushState, isProcessing: pushProcessing, subscribe: subscribePush, unsubscribe: unsubscribePush } = usePushNotification(calendarId);
+  const [notifySheet, setNotifySheet] = useState(false);
+  const [notifyPrefs, setNotifyPrefs] = useState<{ memberName: string | null; notifyOthers: boolean }>(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const saved = localStorage.getItem(`push_prefs_${calendarId}`);
+        if (saved) return JSON.parse(saved);
+      } catch {}
+    }
+    return { memberName: null, notifyOthers: true };
+  });
+
+  const { state: pushState, isProcessing: pushProcessing, subscribe: subscribePush, unsubscribe: unsubscribePush, updatePrefs: updatePushPrefs } = usePushNotification(calendarId, notifyPrefs);
+
+  const saveNotifyPrefs = async (prefs: { memberName: string | null; notifyOthers: boolean }) => {
+    setNotifyPrefs(prefs);
+    localStorage.setItem(`push_prefs_${calendarId}`, JSON.stringify(prefs));
+    if (pushState === "subscribed") {
+      await updatePushPrefs(prefs);
+    }
+    toast.success("通知設定を保存しました");
+    setNotifySheet(false);
+  };
 
   function getMember(name?: string | null) {
     return members.find((m) => m.name === name) ?? members[0] ?? COLOR_PRESETS[4];
@@ -454,6 +475,20 @@ export default function FamilyCalendarPage() {
   return (
     <div className="min-h-screen bg-slate-950 text-white">
 
+      {/* 通知設定シート */}
+      {notifySheet && (
+        <NotifySettingsSheet
+          members={members}
+          pushState={pushState}
+          pushProcessing={pushProcessing}
+          prefs={notifyPrefs}
+          onSubscribe={(prefs) => { subscribePush(prefs); saveNotifyPrefs(prefs); }}
+          onUnsubscribe={unsubscribePush}
+          onSave={saveNotifyPrefs}
+          onClose={() => setNotifySheet(false)}
+        />
+      )}
+
       {/* ヘッダー */}
       <header className="sticky top-0 z-30 bg-slate-900/95 backdrop-blur border-b border-slate-800">
         {/* 上段：タイトル・ボタン */}
@@ -463,13 +498,8 @@ export default function FamilyCalendarPage() {
           {/* 通知ベルボタン */}
           {pushState !== "unsupported" && (
             <button
-              onClick={pushState === "subscribed" ? unsubscribePush : subscribePush}
-              disabled={pushProcessing || pushState === "loading" || pushState === "denied"}
-              title={
-                pushState === "subscribed" ? "通知をオフにする" :
-                pushState === "denied" ? "ブラウザで通知が拒否されています" :
-                "予定追加の通知を受け取る"
-              }
+              onClick={() => setNotifySheet(true)}
+              disabled={pushProcessing || pushState === "loading"}
               className={`w-8 h-8 rounded-lg border flex items-center justify-center shrink-0 transition-colors ${
                 pushState === "subscribed"
                   ? "bg-violet-600 border-violet-500"
@@ -1711,6 +1741,118 @@ function MemberSettings({ members, calendarId, hasPassword, onSave, onPasswordUp
           className="w-full bg-violet-600 hover:bg-violet-500 disabled:opacity-40 text-white font-black py-4 rounded-2xl flex items-center justify-center gap-2 transition shadow-xl shadow-violet-900/20 text-base">
           {saving ? <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" /> : <><Check className="w-5 h-5 stroke-[3]" />設定を保存</>}
         </button>
+      </div>
+    </>
+  );
+}
+
+// ─── 通知設定シート ────────────────────────────────────────────────────────────
+function NotifySettingsSheet({
+  members, pushState, pushProcessing, prefs,
+  onSubscribe, onUnsubscribe, onSave, onClose,
+}: {
+  members: CalendarMember[];
+  pushState: string;
+  pushProcessing: boolean;
+  prefs: { memberName: string | null; notifyOthers: boolean };
+  onSubscribe: (prefs: { memberName: string | null; notifyOthers: boolean }) => void;
+  onUnsubscribe: () => void;
+  onSave: (prefs: { memberName: string | null; notifyOthers: boolean }) => void;
+  onClose: () => void;
+}) {
+  const [memberName, setMemberName] = useState(prefs.memberName);
+  const [notifyOthers, setNotifyOthers] = useState(prefs.notifyOthers);
+  const isSubscribed = pushState === "subscribed";
+  const isDenied = pushState === "denied";
+
+  return (
+    <>
+      <div className="fixed inset-0 z-50 bg-black/60" onClick={onClose} />
+      <div className="fixed bottom-0 left-0 right-0 z-50 bg-slate-900 border-t border-slate-700 rounded-t-3xl p-6 space-y-5 animate-in slide-in-from-bottom duration-200">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Bell className="w-5 h-5 text-violet-400" />
+            <h3 className="font-black text-white text-base">通知設定</h3>
+          </div>
+          <button onClick={onClose} className="text-slate-500 hover:text-white">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        {isDenied ? (
+          <div className="bg-rose-950/50 border border-rose-800 rounded-2xl p-4 text-sm text-rose-300">
+            ブラウザの通知が拒否されています。<br />
+            スマホの設定 → ブラウザ → 通知 → このサイトを「許可」にしてください。
+          </div>
+        ) : (
+          <>
+            {/* 通知のオン/オフ */}
+            <div className="flex items-center justify-between bg-slate-800 rounded-2xl px-4 py-3">
+              <div>
+                <p className="text-sm font-bold text-white">予定追加の通知</p>
+                <p className="text-xs text-slate-400 mt-0.5">新しい予定が追加されたときに通知</p>
+              </div>
+              <button
+                onClick={() => isSubscribed ? onUnsubscribe() : onSubscribe({ memberName, notifyOthers })}
+                disabled={pushProcessing || pushState === "loading"}
+                className={`relative w-12 h-6 rounded-full transition-colors ${isSubscribed ? "bg-violet-600" : "bg-slate-600"}`}
+              >
+                <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${isSubscribed ? "translate-x-6" : "translate-x-0.5"}`} />
+              </button>
+            </div>
+
+            {/* 自分の名前設定 */}
+            <div className="space-y-2">
+              <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">このデバイスを使う人</p>
+              <div className="grid grid-cols-4 gap-2">
+                {members.slice(0, 6).map((m) => (
+                  <button
+                    key={m.name}
+                    onClick={() => setMemberName(m.name)}
+                    className={`py-2 rounded-xl text-xs font-bold transition-all border ${
+                      memberName === m.name
+                        ? "border-violet-500 bg-violet-600 text-white"
+                        : "border-slate-700 bg-slate-800 text-slate-400 hover:text-white"
+                    }`}
+                  >
+                    {m.name}
+                  </button>
+                ))}
+                <button
+                  onClick={() => setMemberName(null)}
+                  className={`py-2 rounded-xl text-xs font-bold transition-all border ${
+                    memberName === null
+                      ? "border-violet-500 bg-violet-600 text-white"
+                      : "border-slate-700 bg-slate-800 text-slate-400 hover:text-white"
+                  }`}
+                >
+                  未設定
+                </button>
+              </div>
+            </div>
+
+            {/* 他の人の予定を通知するか */}
+            <div className="flex items-center justify-between bg-slate-800 rounded-2xl px-4 py-3">
+              <div>
+                <p className="text-sm font-bold text-white">他の人の予定も通知する</p>
+                <p className="text-xs text-slate-400 mt-0.5">オフにすると自分の予定だけ通知</p>
+              </div>
+              <button
+                onClick={() => setNotifyOthers(v => !v)}
+                className={`relative w-12 h-6 rounded-full transition-colors ${notifyOthers ? "bg-violet-600" : "bg-slate-600"}`}
+              >
+                <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${notifyOthers ? "translate-x-6" : "translate-x-0.5"}`} />
+              </button>
+            </div>
+
+            <button
+              onClick={() => onSave({ memberName, notifyOthers })}
+              className="w-full bg-violet-600 hover:bg-violet-500 text-white font-black py-3 rounded-2xl text-sm"
+            >
+              設定を保存
+            </button>
+          </>
+        )}
       </div>
     </>
   );

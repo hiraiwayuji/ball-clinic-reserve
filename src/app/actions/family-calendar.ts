@@ -132,7 +132,7 @@ export async function createEvent(calendarId: string, event: Omit<CalendarEvent,
       body: `${event.title}（${dateLabel}${timeLabel}）`,
       url: `/family`,
       tag: `event-${data.id}`,
-    }).catch((err) => console.error("[Push] createEvent notify error:", err));
+    }, event.member_name ?? null).catch((err) => console.error("[Push] createEvent notify error:", err));
 
     return { success: true, event: data };
   } catch (e: unknown) { return { success: false, error: e instanceof Error ? e.message : "Unknown error" }; }
