@@ -189,13 +189,13 @@ export async function sendLineConfirmation(appointmentId: string) {
     // 予約と顧客情報（line_user_id含む）を取得
     const { data: apt, error } = await supabase
       .from("appointments")
-      .select("id, start_time, is_first_visit, status, profiles(name, line_user_id)")
+      .select("id, start_time, is_first_visit, status, customers(name, line_user_id)")
       .eq("id", appointmentId)
       .single();
 
     if (error || !apt) return { success: false, error: "予約情報の取得に失敗しました" };
 
-    const customer = Array.isArray(apt.profiles) ? apt.profiles[0] : apt.profiles;
+    const customer = Array.isArray(apt.customers) ? apt.customers[0] : apt.customers;
     const lineUserId = customer?.line_user_id;
 
     if (!lineUserId) {

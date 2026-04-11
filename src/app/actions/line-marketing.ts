@@ -64,7 +64,7 @@ export async function sendAppointmentReminders(testLineId: string | null = null)
   // 本日の予約を取得
   const { data: appointments, error } = await supabase
     .from("appointments")
-    .select("*, profiles(name, phone, line_user_id)")
+    .select("*, customers(name, phone, line_user_id)")
     .gte("start_time", todayStart.toISOString())
     .lte("start_time", todayEnd.toISOString())
     .neq("status", "cancelled");
@@ -76,10 +76,10 @@ export async function sendAppointmentReminders(testLineId: string | null = null)
   // 実際にはLINE Messaging APIを呼び出すが、今回はモックとして配列に結果を格納
   const sentTo = [];
   const debugLogs: string[] = [];
-  
+
   for (const apt of appointments || []) {
     // 複数の顧客が紐づく仕様に備えて配列チェック
-    const customer = Array.isArray(apt.profiles) ? apt.profiles[0] : apt.profiles;
+    const customer = Array.isArray(apt.customers) ? apt.customers[0] : apt.customers;
     if (customer && customer.name) {
        // 時間のフォーマット
        const timeMatch = new Date(apt.start_time).toLocaleString("ja-JP", {timeZone: "Asia/Tokyo", hour: '2-digit', minute: '2-digit'});
@@ -405,9 +405,9 @@ export async function runMonthlyLottery() {
   // LINE連携済み かつ 来院実績あり（confirmed）の顧客を取得
   const { data: appointments, error } = await supabase
     .from("appointments")
-    .select("profiles(id, name, line_user_id)")
+    .select("customers(id, name, line_user_id)")
     .eq("status", "confirmed")
-    .not("profiles", "is", null);
+    .not("customers", "is", null);
 
   if (error) {
     throw new Error("来院データの取得に失敗しました: " + error.message);
@@ -418,7 +418,7 @@ export async function runMonthlyLottery() {
   const eligibleCustomers: { id: string; name: string; line_user_id: string }[] = [];
 
   for (const apt of appointments || []) {
-    const c = Array.isArray(apt.profiles) ? apt.profiles[0] : apt.profiles;
+    const c = Array.isArray(apt.customers) ? apt.customers[0] : apt.customers;
     if (c && c.line_user_id && !seen.has(c.id)) {
       seen.add(c.id);
       eligibleCustomers.push(c as { id: string; name: string; line_user_id: string });
