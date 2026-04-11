@@ -322,7 +322,7 @@ export default function ExpensesPage() {
             <Link href="/admin/sales">
               <Button size="lg" className="bg-emerald-600 hover:bg-emerald-700 text-white shadow-lg shadow-emerald-200/50 flex items-center gap-2 group">
                 <Plus className="w-5 h-5 group-hover:scale-110 transition-transform" />
-                <span className="text-base font-black">売上入力</span>
+                <span className="text-base font-black">受付入力</span>
               </Button>
             </Link>
             <Link href="/admin/insurance">

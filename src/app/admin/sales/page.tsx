@@ -106,7 +106,7 @@ export default function SalesPage() {
           <CardHeader>
             <CardTitle className="text-lg flex items-center gap-2">
               <Plus className="w-5 h-5 text-blue-600" />
-              新規売上入力
+              新規受付入力
             </CardTitle>
             <CardDescription>{format(date, "M月d日 (E)", { locale: ja })} の売上</CardDescription>
           </CardHeader>
