@@ -398,8 +398,50 @@ export async function sendWomenOnlyCampaign(campaignMessage: string) {
  * 3. 来院済み・LINE連携済み患者を対象にした抽選会
  *    当選者にはLINEでクーポンメッセージを送信する
  */
-export async function runMonthlyLottery() {
+export async function runMonthlyLottery(testLineId: string | null = null) {
   await checkAdminAuth();
+  const effectiveTestId = testLineId || process.env.TEST_LINE_USER_ID || null;
+
+  const channelToken = await getLineAccessToken() || process.env.LINE_CHANNEL_ACCESS_TOKEN;
+
+  // テストモード：実際の患者データを使わず、指定IDに当選メッセージを1通送信して返す
+  if (effectiveTestId) {
+    const winMsg =
+      `🎉【テスト送信】やったー！当たり！！\n\n` +
+      `いつもボール接骨院をご利用いただきありがとうございます😊\n\n` +
+      `今月の来院者限定抽選で【当選】しました🎊\n\n` +
+      `次回ご来院時に施術料金から\n` +
+      `━━━━━━━━━━\n` +
+      `　　500円引き 🙌\n` +
+      `━━━━━━━━━━\n` +
+      `させていただきます！\n\n` +
+      `有効期限は今月末まで。\n` +
+      `スタッフにこのメッセージを見せてください📱\n\n` +
+      `また身体のメンテナンス、お待ちしてます💪\nボール接骨院`;
+
+    if (channelToken) {
+      await fetch("https://api.line.me/v2/bot/message/push", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${channelToken}`,
+        },
+        body: JSON.stringify({
+          to: effectiveTestId,
+          messages: [{ type: "text", text: winMsg }],
+        }),
+      });
+    }
+
+    return {
+      success: true,
+      target: `テスト配信（ID: ${effectiveTestId.substring(0, 8)}...）`,
+      totalCount: 1,
+      winnerCount: 1,
+      winners: ["テストユーザー（当選メッセージを送信）"],
+    };
+  }
+
   const supabase = await getSupabase();
 
   // LINE連携済み かつ 来院実績あり（confirmed）の顧客を取得
@@ -428,8 +470,6 @@ export async function runMonthlyLottery() {
   const totalCount = eligibleCustomers.length;
   const winners: string[] = [];
   const losers: string[] = [];
-
-  const channelToken = await getLineAccessToken() || process.env.LINE_CHANNEL_ACCESS_TOKEN;
 
   for (const customer of eligibleCustomers) {
     const isWinner = Math.random() <= 0.10;

@@ -143,7 +143,7 @@ export default function MarketingDashboardPage() {
     showPreview("来院者限定抽選会", testMode ? "テスト配信（自分のLINEのみ）" : "来院履歴のある患者様全員", defaultMsg, async (_msg, _time) => {
       setLoadingAction("lottery");
       try {
-        const result = await runMonthlyLottery();
+        const result = await runMonthlyLottery(testMode ? testLineId : null);
         setActionResult({
           type: "lottery", wasTestMode: testMode,
           message: `今月の来院者限定抽選会を実施しました！（対象: ${result.totalCount}名, 当選: ${result.winnerCount}名）`,
