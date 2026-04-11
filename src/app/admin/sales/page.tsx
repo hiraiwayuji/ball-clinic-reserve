@@ -8,9 +8,10 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Calendar as CalendarIcon, Plus, Trash2, Loader2, Coins, User, UserPlus } from "lucide-react";
+import { Calendar as CalendarIcon, Plus, Trash2, Loader2, Coins, User, UserPlus, Landmark } from "lucide-react";
 import { addCashSale, getCashSales, deleteCashSale } from "@/app/actions/sales";
 import { toast } from "sonner";
+import Link from "next/link";
 
 export default function SalesPage() {
   const [date, setDate] = useState<Date | null>(null);
@@ -89,14 +90,22 @@ export default function SalesPage() {
           <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-100">売上登録（受付）</h1>
           <p className="text-slate-500 dark:text-slate-400">窓口での自費・物販等の売上を記録します</p>
         </div>
-        <div className="flex items-center gap-2 bg-white dark:bg-slate-900 p-2 border dark:border-slate-800 rounded-lg shadow-sm">
-          <CalendarIcon className="w-5 h-5 text-blue-600 dark:text-blue-400" />
-          <input 
-            type="date" 
-            className="border-none focus:ring-0 text-sm font-medium bg-transparent dark:text-slate-100" 
-            value={format(date, "yyyy-MM-dd")} 
-            onChange={(e) => setDate(new Date(e.target.value))}
-          />
+        <div className="flex items-center gap-3 flex-wrap justify-end">
+          <Link href="/admin/insurance">
+            <Button variant="outline" size="sm" className="border-blue-200 text-blue-600 hover:bg-blue-50 dark:border-blue-800 dark:text-blue-400 dark:hover:bg-blue-950/50 font-bold">
+              <Landmark className="w-4 h-4 mr-1.5" />
+              保険入金へ
+            </Button>
+          </Link>
+          <div className="flex items-center gap-2 bg-white dark:bg-slate-900 p-2 border dark:border-slate-800 rounded-lg shadow-sm">
+            <CalendarIcon className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+            <input
+              type="date"
+              className="border-none focus:ring-0 text-sm font-medium bg-transparent dark:text-slate-100"
+              value={format(date, "yyyy-MM-dd")}
+              onChange={(e) => setDate(new Date(e.target.value))}
+            />
+          </div>
         </div>
       </div>
 

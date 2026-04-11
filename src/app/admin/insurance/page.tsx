@@ -12,8 +12,9 @@ import { Badge } from "@/components/ui/badge";
 import {
   FileText, Plus, Trash2, Loader2, Landmark, Calendar as CalendarIcon,
   Camera, Sparkles, BookOpen, CheckCircle2, Circle, Image as ImageIcon,
-  Pencil, Check, X
+  Pencil, Check, X, ClipboardList
 } from "lucide-react";
+import Link from "next/link";
 import {
   addInsurancePayment, getInsurancePayments,
   deleteInsurancePayment, updateInsurancePassbookCheck, updateInsurancePayment
@@ -266,14 +267,22 @@ export default function InsurancePage() {
           <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-100">保険入金管理</h1>
           <p className="text-slate-500 dark:text-slate-400">振込通知書の写真から自動入力・通帳との照合ができます</p>
         </div>
-        <div className="flex items-center gap-2 bg-white dark:bg-slate-900 p-2 border dark:border-slate-800 rounded-lg shadow-sm">
-          <CalendarIcon className="w-5 h-5 text-blue-600 dark:text-blue-400" />
-          <input
-            type="month"
-            className="border-none focus:ring-0 text-sm font-medium bg-transparent dark:text-slate-100"
-            value={format(currentMonth, "yyyy-MM")}
-            onChange={(e) => setCurrentMonth(startOfMonth(new Date(e.target.value + "-01")))}
-          />
+        <div className="flex items-center gap-3 flex-wrap justify-end">
+          <Link href="/admin/sales">
+            <Button variant="outline" size="sm" className="border-emerald-200 text-emerald-600 hover:bg-emerald-50 dark:border-emerald-800 dark:text-emerald-400 dark:hover:bg-emerald-950/50 font-bold">
+              <ClipboardList className="w-4 h-4 mr-1.5" />
+              受付入力へ
+            </Button>
+          </Link>
+          <div className="flex items-center gap-2 bg-white dark:bg-slate-900 p-2 border dark:border-slate-800 rounded-lg shadow-sm">
+            <CalendarIcon className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+            <input
+              type="month"
+              className="border-none focus:ring-0 text-sm font-medium bg-transparent dark:text-slate-100"
+              value={format(currentMonth, "yyyy-MM")}
+              onChange={(e) => setCurrentMonth(startOfMonth(new Date(e.target.value + "-01")))}
+            />
+          </div>
         </div>
       </div>
 
