@@ -21,6 +21,7 @@ import {
   FileText,
   Loader2,
   Minus,
+  Megaphone,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { getBriefingContext } from "@/app/actions/ai-secretary";
@@ -263,6 +264,19 @@ export default function AISecretaryBriefing({
                 <div>
                   <p className="text-[10px] font-black text-violet-400 uppercase tracking-wider mb-1">AI秘書からの朝のひと言</p>
                   <p className="text-xs text-slate-200 leading-relaxed font-medium">{ctx.aiAdvice}</p>
+                </div>
+              </div>
+            )}
+
+            {/* SNS・LINE 今日のアクション提言 */}
+            {ctx?.snsAdvice && (
+              <div className="bg-gradient-to-br from-teal-900/50 to-emerald-900/40 border border-teal-700/40 rounded-2xl p-4 flex gap-3 items-start">
+                <div className="w-9 h-9 bg-teal-500/20 rounded-xl flex items-center justify-center shrink-0">
+                  <Megaphone className="w-4 h-4 text-teal-300" />
+                </div>
+                <div>
+                  <p className="text-[10px] font-black text-teal-400 uppercase tracking-wider mb-1">SNS・LINE 今日のアクション提言</p>
+                  <p className="text-xs text-slate-200 leading-relaxed font-medium">{ctx.snsAdvice}</p>
                 </div>
               </div>
             )}

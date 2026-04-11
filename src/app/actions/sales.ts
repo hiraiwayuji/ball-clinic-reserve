@@ -723,6 +723,72 @@ export async function getTodayDashboardData() {
   }
 }
 
+// --- Cash Sales Bulk Import ---
+
+export interface ImportCashSaleRow {
+  sale_date: string;
+  customer_name: string;
+  treatment_fee: number;
+  memo?: string | null;
+  is_first_visit?: boolean;
+}
+
+export async function bulkImportCashSales(rows: ImportCashSaleRow[]): Promise<{
+  success: boolean;
+  inserted: number;
+  skipped: number;
+  errors: { row: number; name: string; reason: string }[];
+}> {
+  const { clinicId } = await checkAdminAuth();
+  const supabase = await getSupabase();
+
+  let inserted = 0;
+  let skipped = 0;
+  const errors: { row: number; name: string; reason: string }[] = [];
+
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    const rowNum = i + 2; // 1-indexed, header is row 1
+
+    // バリデーション
+    if (!row.sale_date) {
+      errors.push({ row: rowNum, name: row.customer_name, reason: "日付が未入力です" });
+      skipped++;
+      continue;
+    }
+    if (!row.customer_name) {
+      errors.push({ row: rowNum, name: "（空欄）", reason: "お名前が未入力です" });
+      skipped++;
+      continue;
+    }
+    if (!row.treatment_fee || isNaN(row.treatment_fee) || row.treatment_fee <= 0) {
+      errors.push({ row: rowNum, name: row.customer_name, reason: "金額が無効です" });
+      skipped++;
+      continue;
+    }
+
+    try {
+      const { error } = await supabase.from("cash_sales").insert([{
+        sale_date: row.sale_date,
+        customer_name: row.customer_name,
+        treatment_fee: row.treatment_fee,
+        memo: row.memo || null,
+        is_first_visit: row.is_first_visit ?? false,
+        clinic_id: clinicId,
+      }]);
+      if (error) throw error;
+      inserted++;
+    } catch (e: any) {
+      errors.push({ row: rowNum, name: row.customer_name, reason: e.message || "登録エラー" });
+      skipped++;
+    }
+  }
+
+  revalidatePath("/admin/sales");
+  revalidatePath("/admin/dashboard");
+  return { success: true, inserted, skipped, errors };
+}
+
 // --- Pending Expenses (Triage Flow) ---
 
 export async function addPendingExpense(imageUrl: string | null, triageData: any = {}) {

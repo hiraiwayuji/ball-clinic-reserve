@@ -399,8 +399,9 @@ export async function getBriefingContext() {
     latestMemo = data?.content?.slice(0, 120) ?? null;
   } catch {}
 
-  // Gemini で短い朝のアドバイスを生成
+  // Gemini で朝のアドバイス＋SNS提言を並列生成
   let aiAdvice: string | null = null;
+  let snsAdvice: string | null = null;
   if (apiKey) {
     try {
       const settings = await getClinicSettings();
@@ -415,19 +416,45 @@ export async function getBriefingContext() {
         `院名: ${settings?.clinic_name || "接骨院"}`,
         `今週の来院: ${thisWeekVisits}件（先週比${weekDiff > 0 ? "+" : ""}${weekDiff}%）`,
         `今月の来院: ${thisMonthVisits}件（去年同月比${monthDiff > 0 ? "+" : ""}${monthDiff}%）`,
-        `今月の初診数: ${thisWeekNew}件（今週分）`,
+        `今週の初診数: ${thisWeekNew}名`,
         isWeekStart ? "本日は週初めです。" : "",
         isMonthStart ? "本日は月初めです。" : "",
         latestMemo ? `最近のメモ: ${latestMemo}` : "",
       ].filter(Boolean).join(" / ");
 
-      const prompt = `あなたは接骨院の専属AI秘書です。以下のデータをもとに、院長への朝のひと言アドバイスを1〜2文で生成してください。数字を必ず1つ使い、具体的で前向きな内容にしてください。敬語で。
-データ: ${briefCtx}`;
+      const dayNames = ["日", "月", "火", "水", "木", "金", "土"];
+      const snsCtx = [
+        `今週の来院: ${thisWeekVisits}件`,
+        prevWeekVisits > 0 ? `先週比: ${weekDiff > 0 ? "+" : ""}${weekDiff}%` : "",
+        `今週の初診: ${thisWeekNew}名`,
+        `今日: ${dayNames[dayOfWeek]}曜日`,
+        isWeekStart ? "週初め" : "",
+        isMonthStart ? "月初め" : "",
+        settings?.target_persona ? `ターゲット: ${settings.target_persona}` : "",
+      ].filter(Boolean).join(" / ");
 
       const genAI = new GoogleGenerativeAI(apiKey);
       const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
-      const result = await model.generateContent(prompt);
-      aiAdvice = result.response.text().trim();
+
+      const [adviceResult, snsResult] = await Promise.all([
+        model.generateContent(
+          `あなたは接骨院の専属AI秘書です。以下のデータをもとに、院長への朝のひと言アドバイスを1〜2文で生成してください。数字を必ず1つ使い、具体的で前向きな内容にしてください。敬語で。\nデータ: ${briefCtx}`
+        ),
+        model.generateContent(
+          `あなたは接骨院のSNS・LINE集客の専門家です。以下の院のデータをもとに、今日（または今週）取るべき具体的なSNS・LINE配信アクションを1つだけ、2〜3文で提案してください。
+ルール:
+- 来院数が少ない/減っている場合は集客系アクション（LINE動画配信・キャンペーン告知など）
+- 来院数が多い/増えている場合は口コミ・紹介促進系アクション
+- 月初めの場合はその月のSNS投稿テーマ提案
+- 週初め（月曜）の場合は今週のLINE配信タイミングの提案
+- 具体的なコンテンツ例（動画テーマ・文言例など）を1つ含めること
+- 敬語で、前置き不要で結論から始めること
+データ: ${snsCtx}`
+        ),
+      ]);
+
+      aiAdvice = adviceResult.response.text().trim();
+      snsAdvice = snsResult.response.text().trim();
     } catch {}
   }
 
@@ -444,5 +471,6 @@ export async function getBriefingContext() {
     month,
     latestMemo,
     aiAdvice,
+    snsAdvice,
   };
 }
