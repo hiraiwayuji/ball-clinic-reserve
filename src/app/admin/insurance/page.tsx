@@ -12,7 +12,7 @@ import { Badge } from "@/components/ui/badge";
 import {
   FileText, Plus, Trash2, Loader2, Landmark, Calendar as CalendarIcon,
   Camera, Sparkles, BookOpen, CheckCircle2, Circle, Image as ImageIcon,
-  Pencil, Check, X, ClipboardList
+  Pencil, Check, X, ClipboardList, Receipt
 } from "lucide-react";
 import Link from "next/link";
 import {
@@ -268,8 +268,14 @@ export default function InsurancePage() {
           <p className="text-slate-500 dark:text-slate-400">振込通知書の写真から自動入力・通帳との照合ができます</p>
         </div>
         <div className="flex items-center gap-3 flex-wrap justify-end">
-          <Link href="/admin/sales">
+          <Link href="/admin/expenses">
             <Button variant="outline" size="sm" className="border-emerald-200 text-emerald-600 hover:bg-emerald-50 dark:border-emerald-800 dark:text-emerald-400 dark:hover:bg-emerald-950/50 font-bold">
+              <Receipt className="w-4 h-4 mr-1.5" />
+              売上記帳へ
+            </Button>
+          </Link>
+          <Link href="/admin/sales">
+            <Button variant="outline" size="sm" className="border-slate-200 text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-400 dark:hover:bg-slate-800 font-bold">
               <ClipboardList className="w-4 h-4 mr-1.5" />
               受付入力へ
             </Button>

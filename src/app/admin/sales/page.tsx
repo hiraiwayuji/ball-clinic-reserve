@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Calendar as CalendarIcon, Plus, Trash2, Loader2, Coins, User, UserPlus, Landmark } from "lucide-react";
+import { Calendar as CalendarIcon, Plus, Trash2, Loader2, Coins, User, UserPlus, Landmark, Receipt } from "lucide-react";
 import { addCashSale, getCashSales, deleteCashSale } from "@/app/actions/sales";
 import { toast } from "sonner";
 import Link from "next/link";
@@ -91,6 +91,12 @@ export default function SalesPage() {
           <p className="text-slate-500 dark:text-slate-400">窓口での自費・物販等の売上を記録します</p>
         </div>
         <div className="flex items-center gap-3 flex-wrap justify-end">
+          <Link href="/admin/expenses">
+            <Button variant="outline" size="sm" className="border-emerald-200 text-emerald-600 hover:bg-emerald-50 dark:border-emerald-800 dark:text-emerald-400 dark:hover:bg-emerald-950/50 font-bold">
+              <Receipt className="w-4 h-4 mr-1.5" />
+              売上記帳へ
+            </Button>
+          </Link>
           <Link href="/admin/insurance">
             <Button variant="outline" size="sm" className="border-blue-200 text-blue-600 hover:bg-blue-50 dark:border-blue-800 dark:text-blue-400 dark:hover:bg-blue-950/50 font-bold">
               <Landmark className="w-4 h-4 mr-1.5" />
