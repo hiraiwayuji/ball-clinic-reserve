@@ -7,7 +7,7 @@ const NAV_ITEMS = [
   { href: "/admin/dashboard", label: "ダッシュボード" },
   { href: "/admin/appointments", label: "予約一覧" },
   { href: "/admin/customers", label: "顧客管理" },
-  { href: "/admin/expenses", label: "売上記帳" },
+  { href: "/admin/sales", label: "売上記帳" },
   { href: "/admin/evaluation", label: "経営評価" },
   { href: "/admin/marketing", label: "LINE・販促" },
   { href: "/admin/settings", label: "設定" },
