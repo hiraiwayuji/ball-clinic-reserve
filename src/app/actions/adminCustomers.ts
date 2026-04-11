@@ -341,3 +341,110 @@ export async function toggleBookingSuspension(customerId: string, suspend: boole
   if (error) throw new Error(error.message);
   revalidatePath("/admin/customers");
 }
+
+// ===== CSV一括インポート =====
+
+export type ImportCustomerRow = {
+  name: string;
+  phone?: string | null;
+  birth_date?: string | null;   // "YYYY-MM-DD" or "YYYY/MM/DD"
+  gender?: string | null;       // 男/女/その他
+  city_name?: string | null;
+  medical_record_number?: string | null;
+  referral_source?: string | null;
+  memo?: string | null;
+};
+
+export type ImportResult = {
+  success: boolean;
+  inserted: number;
+  skipped: number;
+  errors: { row: number; name: string; reason: string }[];
+};
+
+function normalizeGender(val: string | null | undefined): string | null {
+  if (!val) return null;
+  const v = val.trim();
+  if (v === "男" || v === "male" || v === "男性") return "male";
+  if (v === "女" || v === "female" || v === "女性") return "female";
+  if (v === "その他" || v === "other") return "other";
+  return null;
+}
+
+function normalizeDate(val: string | null | undefined): string | null {
+  if (!val) return null;
+  // YYYY/MM/DD → YYYY-MM-DD
+  const normalized = val.trim().replace(/\//g, "-");
+  // 簡易バリデーション
+  if (/^\d{4}-\d{2}-\d{2}$/.test(normalized)) return normalized;
+  return null;
+}
+
+export async function bulkImportCustomers(rows: ImportCustomerRow[]): Promise<ImportResult> {
+  const { clinicId } = await checkAdminAuth();
+
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) throw new Error("Supabase env missing");
+
+  const supabase = createAdminClient(url, key);
+
+  // 既存の名前+電話番号のセットを取得（重複チェック用）
+  const { data: existing } = await supabase
+    .from("customers")
+    .select("name, phone")
+    .eq("clinic_id", clinicId);
+
+  const existingKeys = new Set(
+    (existing || []).map((c) => `${c.name.trim()}__${(c.phone || "").trim()}`)
+  );
+
+  let inserted = 0;
+  let skipped = 0;
+  const errors: ImportResult["errors"] = [];
+  const toInsert: Record<string, any>[] = [];
+
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    const rowNum = i + 1;
+
+    if (!row.name?.trim()) {
+      errors.push({ row: rowNum, name: "(空)", reason: "患者名が空です" });
+      continue;
+    }
+
+    const key = `${row.name.trim()}__${(row.phone || "").trim()}`;
+    if (existingKeys.has(key)) {
+      skipped++;
+      continue;
+    }
+    existingKeys.add(key); // 同一CSV内の重複も防ぐ
+
+    const record: Record<string, any> = {
+      name: row.name.trim(),
+      clinic_id: clinicId,
+    };
+    if (row.phone?.trim()) record.phone = row.phone.trim();
+    const bd = normalizeDate(row.birth_date);
+    if (bd) {
+      record.birth_date = bd;
+      record.birth_month = parseInt(bd.split("-")[1], 10);
+    }
+    const gender = normalizeGender(row.gender);
+    if (gender) record.gender = gender;
+    if (row.city_name?.trim()) record.city_name = row.city_name.trim();
+    if (row.medical_record_number?.trim()) record.medical_record_number = row.medical_record_number.trim();
+    if (row.referral_source?.trim()) record.referral_source = row.referral_source.trim();
+
+    toInsert.push(record);
+  }
+
+  if (toInsert.length > 0) {
+    const { error } = await supabase.from("customers").insert(toInsert);
+    if (error) throw new Error("一括登録に失敗しました: " + error.message);
+    inserted = toInsert.length;
+  }
+
+  revalidatePath("/admin/customers");
+  return { success: true, inserted, skipped, errors };
+}

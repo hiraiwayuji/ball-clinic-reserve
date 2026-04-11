@@ -17,9 +17,11 @@ import { updateCustomerInfo, mergeCustomers } from "@/app/actions/adminCustomers
 import { QuestionnaireDialog } from "./QuestionnaireDialog";
 import {
   Search, Pencil, Check, X, Loader2, ClipboardList,
-  AlertTriangle, ArrowUpDown, Hash, GitMerge, Calendar, Phone,
+  AlertTriangle, ArrowUpDown, Hash, GitMerge, Calendar, Phone, Upload,
 } from "lucide-react";
 import { toast } from "sonner";
+import CustomerImportDialog from "@/components/admin/CustomerImportDialog";
+import { useRouter } from "next/navigation";
 
 export type Customer = {
   id: string;
@@ -538,6 +540,8 @@ export function CustomersTable({ customers }: { customers: Customer[] }) {
   const [sortKey, setSortKey] = useState<SortKey>("created_at");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [showDuplicatesOnly, setShowDuplicatesOnly] = useState(false);
+  const [showImport, setShowImport] = useState(false);
+  const router = useRouter();
 
   const duplicateIds = useMemo(() => buildDuplicateSet(customers), [customers]);
 
@@ -608,7 +612,23 @@ export function CustomersTable({ customers }: { customers: Customer[] }) {
         )}
 
         <span className="text-sm text-slate-400 ml-auto">{processed.length} / {customers.length} 件</span>
+
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => setShowImport(true)}
+          className="border-emerald-200 text-emerald-600 hover:bg-emerald-50 dark:border-emerald-800 dark:text-emerald-400 font-bold"
+        >
+          <Upload className="w-4 h-4 mr-1.5" />
+          CSVインポート
+        </Button>
       </div>
+
+      <CustomerImportDialog
+        open={showImport}
+        onClose={() => setShowImport(false)}
+        onImported={() => router.refresh()}
+      />
 
       <div className="bg-white dark:bg-slate-900/50 rounded-xl shadow-sm border border-slate-200 dark:border-white/10 overflow-x-auto">
         <Table className="min-w-[1100px]">
