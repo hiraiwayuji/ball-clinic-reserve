@@ -184,10 +184,37 @@ export async function sendAppointmentReminders(testLineId: string | null = null)
 /**
  * 2. 指定した誕生月の顧客にクーポンを送信
  */
-export async function sendBirthdayCoupons(month: number) {
+export async function sendBirthdayCoupons(month: number, testLineId: string | null = null) {
   await checkAdminAuth();
-  const supabase = await getSupabase();
+  const effectiveTestId = testLineId || process.env.TEST_LINE_USER_ID || null;
+  const channelToken = await getLineAccessToken() || process.env.LINE_CHANNEL_ACCESS_TOKEN;
 
+  // テストモード
+  if (effectiveTestId) {
+    const msg =
+      `🎂【テスト送信】テストユーザー様、お誕生月おめでとうございます！\n\n` +
+      `いつもボール接骨院をご利用いただきありがとうございます😊\n\n` +
+      `今月のお誕生月にちなんで\n` +
+      `━━━━━━━━━━\n` +
+      `　誕生月割引クーポン 💝\n` +
+      `　　施術料金 500円OFF\n` +
+      `━━━━━━━━━━\n` +
+      `をプレゼントします！\n\n` +
+      `有効期限：今月末まで\n` +
+      `ご来院時にスタッフへこのメッセージをご提示ください📱\n\n` +
+      `素敵な誕生月をお過ごしください🌸\nボール接骨院`;
+
+    if (channelToken) {
+      await fetch("https://api.line.me/v2/bot/message/push", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${channelToken}` },
+        body: JSON.stringify({ to: effectiveTestId, messages: [{ type: "text", text: msg }] }),
+      });
+    }
+    return { success: true, count: 1, sentTo: [`テストユーザー（ID: ${effectiveTestId.substring(0, 8)}...）`], skipped: [], debugLogs: [msg] };
+  }
+
+  const supabase = await getSupabase();
   const { data: customers, error } = await supabase
     .from("customers")
     .select("name, birth_month, birth_date, line_user_id")
@@ -205,7 +232,6 @@ export async function sendBirthdayCoupons(month: number) {
     return false;
   });
 
-  const channelToken = await getLineAccessToken() || process.env.LINE_CHANNEL_ACCESS_TOKEN;
   const sentTo: string[] = [];
   const skipped: string[] = [];
   const debugLogs: string[] = [];
@@ -301,19 +327,34 @@ export async function sendSegmentedCampaign(options: {
   gender?: string;
   city?: string;
   message: string;
+  testLineId?: string | null;
 }) {
   await checkAdminAuth();
+  const effectiveTestId = options.testLineId || process.env.TEST_LINE_USER_ID || null;
+  const channelToken = await getLineAccessToken() || process.env.LINE_CHANNEL_ACCESS_TOKEN;
+
+  // テストモード
+  if (effectiveTestId) {
+    const msg = options.message.replace(/{name}/g, "テストユーザー");
+    if (channelToken) {
+      await fetch("https://api.line.me/v2/bot/message/push", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${channelToken}` },
+        body: JSON.stringify({ to: effectiveTestId, messages: [{ type: "text", text: `【テスト送信】\n${msg}` }] }),
+      });
+    }
+    return { success: true, count: 1, sentTo: [`テストユーザー（ID: ${effectiveTestId.substring(0, 8)}...）`], debugLogs: [msg] };
+  }
+
   const supabase = await getSupabase();
-  
   let query = supabase.from("customers").select("name, line_user_id");
-  
+
   if (options.gender) query = query.eq("gender", options.gender);
   if (options.city) query = query.eq("city_name", options.city);
-  
+
   const { data: customers, error } = await query.not("line_user_id", "is", null);
   if (error) throw new Error("対象者の取得に失敗しました");
 
-  const channelToken = await getLineAccessToken() || process.env.LINE_CHANNEL_ACCESS_TOKEN;
   const sentTo: string[] = [];
   const debugLogs: string[] = [];
 
@@ -343,10 +384,28 @@ export async function sendSegmentedCampaign(options: {
 /**
  * 2b. 女性限定キャンペーン送信
  */
-export async function sendWomenOnlyCampaign(campaignMessage: string) {
+export async function sendWomenOnlyCampaign(campaignMessage: string, testLineId: string | null = null) {
   await checkAdminAuth();
-  const supabase = await getSupabase();
+  const effectiveTestId = testLineId || process.env.TEST_LINE_USER_ID || null;
+  const channelToken = await getLineAccessToken() || process.env.LINE_CHANNEL_ACCESS_TOKEN;
 
+  // テストモード
+  if (effectiveTestId) {
+    const msg = campaignMessage
+      ? campaignMessage.replace("{name}", "テストユーザー")
+      : `テストユーザー様\n\n【テスト送信】女性限定キャンペーンのお知らせです！\n\nボール接骨院では女性患者様限定の特別キャンペーンを実施中です✨\n\n詳しくはスタッフまでお気軽にお問い合わせください😊\nボール接骨院`;
+
+    if (channelToken) {
+      await fetch("https://api.line.me/v2/bot/message/push", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${channelToken}` },
+        body: JSON.stringify({ to: effectiveTestId, messages: [{ type: "text", text: msg }] }),
+      });
+    }
+    return { success: true, count: 1, sentTo: [`テストユーザー（ID: ${effectiveTestId.substring(0, 8)}...）`], debugLogs: [msg] };
+  }
+
+  const supabase = await getSupabase();
   const { data: customers, error } = await supabase
     .from("customers")
     .select("name, gender, line_user_id")
@@ -355,7 +414,6 @@ export async function sendWomenOnlyCampaign(campaignMessage: string) {
 
   if (error) throw new Error("顧客データの取得に失敗しました: " + error.message);
 
-  const channelToken = await getLineAccessToken() || process.env.LINE_CHANNEL_ACCESS_TOKEN;
   const sentTo: string[] = [];
   const debugLogs: string[] = [];
 
@@ -564,36 +622,71 @@ export async function runMonthlyLottery(testLineId: string | null = null) {
 }
 
 /**
- * 4. 初回アンケートを「送信」するモック処理
+ * 4. 初回アンケートを送信する処理
  */
-export async function sendWelcomeQuestionnaire() {
+export async function sendWelcomeQuestionnaire(testLineId: string | null = null) {
   await checkAdminAuth();
+  const effectiveTestId = testLineId || process.env.TEST_LINE_USER_ID || null;
+  const channelToken = await getLineAccessToken() || process.env.LINE_CHANNEL_ACCESS_TOKEN;
+
+  const questionnaireMsg =
+    `ご来院ありがとうございます！ボール接骨院です🌱\n\n` +
+    `カルテ作成のため、簡単なアンケートにご協力をお願いします。\n\n` +
+    `▼ お答えいただける方はこちらから\n` +
+    `（スタッフが次回ご来院時にご案内します）\n\n` +
+    `・お名前\n・生年月日\n・ご住所（市区町村まで）\n・性別\n\n` +
+    `お手数をおかけしますが、よろしくお願いします🙏\nボール接骨院`;
+
+  // テストモード
+  if (effectiveTestId) {
+    if (channelToken) {
+      await fetch("https://api.line.me/v2/bot/message/push", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${channelToken}` },
+        body: JSON.stringify({ to: effectiveTestId, messages: [{ type: "text", text: `【テスト送信】\n${questionnaireMsg}` }] }),
+      });
+    }
+    return {
+      success: true,
+      count: 1,
+      sentTo: [`テストユーザー（ID: ${effectiveTestId.substring(0, 8)}...）`],
+    };
+  }
+
+  // 本番：初診かつ LINE 連携済みの顧客を対象
   const supabase = await getSupabase();
   const { data: customers, error } = await supabase
     .from("customers")
-    .select("name")
-    .order("id", { ascending: false })
-    .limit(5);
+    .select("id, name, line_user_id, is_first_visit")
+    .not("line_user_id", "is", null)
+    .order("created_at", { ascending: false })
+    .limit(50);
 
-  if (error) {
-    throw new Error("対象者の抽出に失敗しました: " + error.message);
-  }
+  if (error) throw new Error("対象者の抽出に失敗しました: " + error.message);
 
-  const sentTo = [];
+  const sentTo: string[] = [];
+
   for (const customer of customers || []) {
-    sentTo.push(customer.name);
+    if (!customer.line_user_id) continue;
+
+    const msg = questionnaireMsg;
+    if (channelToken) {
+      try {
+        const res = await fetch("https://api.line.me/v2/bot/message/push", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${channelToken}` },
+          body: JSON.stringify({ to: customer.line_user_id, messages: [{ type: "text", text: msg }] }),
+        });
+        if (res.ok) sentTo.push(customer.name);
+      } catch (e) {
+        console.error("LINE send error:", e);
+      }
+    } else {
+      sentTo.push(customer.name);
+    }
   }
 
-  if (sentTo.length === 0) {
-    sentTo.push("平井（テスト用ダミー）");
-    sentTo.push("鈴木（テスト用ダミー）");
-  }
-
-  return {
-    success: true,
-    count: sentTo.length,
-    sentTo: sentTo
-  };
+  return { success: true, count: sentTo.length, sentTo };
 }
 
 /**

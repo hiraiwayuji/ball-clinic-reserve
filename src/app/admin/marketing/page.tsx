@@ -126,7 +126,7 @@ export default function MarketingDashboardPage() {
     showPreview("誕生日クーポン", testMode ? "テスト配信（自分のLINEのみ）" : count, defaultMsg, async (_msg, _time) => {
       setLoadingAction("birthday");
       try {
-        const result = await sendBirthdayCoupons(parseInt(selectedMonth));
+        const result = await sendBirthdayCoupons(parseInt(selectedMonth), testMode ? testLineId : null);
         setActionResult({
           type: "birthday", wasTestMode: testMode,
           message: `${selectedMonth}月生まれの患者さん（${result.count}名）へ誕生日クーポン付きLINEを送信しました！`,
@@ -162,7 +162,7 @@ export default function MarketingDashboardPage() {
       setWomenMessage(msg);
       setLoadingAction("women");
       try {
-        const result = await sendWomenOnlyCampaign(msg);
+        const result = await sendWomenOnlyCampaign(msg, testMode ? testLineId : null);
         setActionResult({
           type: "women", wasTestMode: testMode,
           message: `女性患者さん（${result.count}名）へキャンペーンメッセージを送信しました！`,
@@ -179,7 +179,7 @@ export default function MarketingDashboardPage() {
     showPreview("初診アンケート", testMode ? "テスト配信（自分のLINEのみ）" : "初診・未回答の患者様", defaultMsg, async (_msg, _time) => {
       setLoadingAction("questionnaire");
       try {
-        const result = await sendWelcomeQuestionnaire();
+        const result = await sendWelcomeQuestionnaire(testMode ? testLineId : null);
         setActionResult({
           type: "questionnaire", wasTestMode: testMode,
           message: `初診・未回答の患者さん（${result.count}名）へ初回アンケート（性別・誕生月など）を送信しました！`,
@@ -200,7 +200,7 @@ export default function MarketingDashboardPage() {
       setAreaMessage(msg);
       setLoadingAction("area");
       try {
-        const result = await sendSegmentedCampaign({ city: selectedCity!, message: msg });
+        const result = await sendSegmentedCampaign({ city: selectedCity!, message: msg, testLineId: testMode ? testLineId : null });
         setActionResult({
           type: "area", wasTestMode: testMode,
           message: `${selectedCity}の患者さん（${result.count}名）へキャンペーンメッセージを送信しました！`,
