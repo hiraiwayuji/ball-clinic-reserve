@@ -65,9 +65,11 @@ export default function InquiryPage() {
       
       setCompleted(true);
       toast.success("お問い合わせを送信しました！");
-    } catch (error) {
-      console.error("Inquiry error:", error);
-      toast.error("送信に失敗しました。もう一度お試しください。");
+    } catch (error: any) {
+      console.error("Inquiry error full object:", error);
+      const errorMsg = error.message || "予期せぬエラーが発生しました";
+      console.error("Detailed error message:", errorMsg);
+      toast.error(`送信に失敗しました: ${errorMsg}`);
     } finally {
       setSubmitting(false);
     }
@@ -99,7 +101,7 @@ export default function InquiryPage() {
             </div>
 
             <Button className="w-full h-16 bg-[#06C755] hover:bg-[#05b34c] text-white rounded-2xl font-black text-lg shadow-xl shadow-[#06C755]/20 group transition-all" asChild>
-              <a href="https://line.me/R/ti/p/@your_id" target="_blank" rel="noopener noreferrer">
+              <a href="https://line.me/ti/p/%40shc8761q" target="_blank" rel="noopener noreferrer">
                 <MessageCircle className="w-6 h-6 mr-2" />
                 LINEでお得に登録・相談する
                 <ArrowRight className="w-5 h-5 ml-2 group-hover:translate-x-1 transition-transform" />

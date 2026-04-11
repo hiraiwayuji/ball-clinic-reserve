@@ -152,16 +152,16 @@ export function AddAppointmentDialog({
                 <Label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">
                   時間 <span className="text-red-500">*</span>
                 </Label>
-                <select value={time} onChange={(e) => setTime(e.target.value)} className={selectClass}>
+                <select value={time} onChange={(e) => setTime(e.target.value)} className={selectClass + " bg-slate-900 text-white"}>
                   {!date ? (
-                    <option value="" disabled>先に日付を選択</option>
+                    <option value="" disabled className="bg-slate-900 text-white">先に日付を選択</option>
                   ) : getTimeSlots(date, true).length === 0 ? (
-                    <option value="" disabled>休診日</option>
+                    <option value="" disabled className="bg-slate-900 text-white">休診日</option>
                   ) : (
-                    <option value="" disabled>時間を選択</option>
+                    <option value="" disabled className="bg-slate-900 text-white">時間を選択</option>
                   )}
                   {date && getTimeSlots(date, true).map((t) => (
-                    <option key={t} value={t}>{t}</option>
+                    <option key={t} value={t} className="bg-slate-900 text-white">{t}</option>
                   ))}
                 </select>
               </div>
@@ -170,13 +170,13 @@ export function AddAppointmentDialog({
                 <Label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">
                   所要時間
                 </Label>
-                <select name="duration" defaultValue="30" className={selectClass}>
-                  <option value="30">30分</option>
-                  <option value="60">60分</option>
-                  <option value="90">90分</option>
-                  <option value="120">120分</option>
-                  <option value="150">150分</option>
-                  <option value="180">180分</option>
+                <select name="duration" defaultValue="30" className={selectClass + " bg-slate-900 text-white"}>
+                  <option value="30" className="bg-slate-900 text-white">30分</option>
+                  <option value="60" className="bg-slate-900 text-white">60分</option>
+                  <option value="90" className="bg-slate-900 text-white">90分</option>
+                  <option value="120" className="bg-slate-900 text-white">120分</option>
+                  <option value="150" className="bg-slate-900 text-white">150分</option>
+                  <option value="180" className="bg-slate-900 text-white">180分</option>
                 </select>
               </div>
             </div>
@@ -186,7 +186,7 @@ export function AddAppointmentDialog({
               <Label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">
                 患者名 <span className="text-red-500">*</span>
               </Label>
-              <Input name="name" required placeholder="山田 太郎" className="h-11" />
+              <Input name="name" required placeholder="山田 太郎" className="h-11 bg-slate-900 text-white" />
             </div>
 
             {/* 電話番号 */}
@@ -194,7 +194,7 @@ export function AddAppointmentDialog({
               <Label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">
                 電話番号 <span className="text-red-500">*</span>
               </Label>
-              <Input name="phone" type="tel" required placeholder="090-0000-0000" className="h-11" />
+              <Input name="phone" type="tel" required placeholder="090-0000-0000" className="h-11 bg-slate-900 text-white" />
             </div>
 
             {/* 初診/再診 */}

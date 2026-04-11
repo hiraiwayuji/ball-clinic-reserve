@@ -86,14 +86,14 @@ export default function SalesPage() {
     <div className="space-y-6 container mx-auto py-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">売上登録（受付）</h1>
-          <p className="text-slate-500">窓口での自費・物販等の売上を記録します</p>
+          <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-100">売上登録（受付）</h1>
+          <p className="text-slate-500 dark:text-slate-400">窓口での自費・物販等の売上を記録します</p>
         </div>
-        <div className="flex items-center gap-2 bg-white p-2 border rounded-lg shadow-sm">
-          <CalendarIcon className="w-5 h-5 text-blue-600" />
+        <div className="flex items-center gap-2 bg-white dark:bg-slate-900 p-2 border dark:border-slate-800 rounded-lg shadow-sm">
+          <CalendarIcon className="w-5 h-5 text-blue-600 dark:text-blue-400" />
           <input 
             type="date" 
-            className="border-none focus:ring-0 text-sm font-medium" 
+            className="border-none focus:ring-0 text-sm font-medium bg-transparent dark:text-slate-100" 
             value={format(date, "yyyy-MM-dd")} 
             onChange={(e) => setDate(new Date(e.target.value))}
           />
@@ -102,7 +102,7 @@ export default function SalesPage() {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* 入力フォーム */}
-        <Card className="lg:col-span-1 shadow-sm border-slate-200">
+        <Card className="lg:col-span-1 shadow-sm border-slate-200 dark:border-white/10 dark:bg-slate-900/50">
           <CardHeader>
             <CardTitle className="text-lg flex items-center gap-2">
               <Plus className="w-5 h-5 text-blue-600" />
@@ -152,7 +152,7 @@ export default function SalesPage() {
         </Card>
 
         {/* 売上リスト */}
-        <Card className="lg:col-span-2 shadow-sm border-slate-200">
+        <Card className="lg:col-span-2 shadow-sm border-slate-200 dark:border-white/10 dark:bg-slate-900/50">
           <CardHeader className="flex flex-row items-center justify-between">
             <div>
               <CardTitle>本日（{format(date, "M/d")}）の売上一覧</CardTitle>
@@ -166,16 +166,16 @@ export default function SalesPage() {
                 </div>
               )}
               <div className="text-right">
-                <p className="text-xs text-slate-500 font-medium">本日合計</p>
-                <p className="text-2xl font-bold text-blue-600">¥{totalAmount.toLocaleString()}</p>
+                <p className="text-xs text-slate-500 dark:text-slate-400 font-medium">本日合計</p>
+                <p className="text-2xl font-bold text-blue-600 dark:text-blue-400">¥{totalAmount.toLocaleString()}</p>
               </div>
             </div>
           </CardHeader>
           <CardContent>
-            <div className="rounded-md border border-slate-100 overflow-hidden">
+            <div className="rounded-md border border-slate-100 dark:border-white/5 overflow-hidden">
               <Table>
-                <TableHeader className="bg-slate-50/50">
-                  <TableRow>
+                <TableHeader className="bg-slate-50/50 dark:bg-slate-800/30">
+                  <TableRow className="border-b dark:border-white/5">
                     <TableHead>お名前</TableHead>
                     <TableHead>備考</TableHead>
                     <TableHead className="text-right">金額</TableHead>
@@ -202,16 +202,16 @@ export default function SalesPage() {
                   ) : (
                     sales.map((sale) => (
                       <TableRow key={sale.id} className="hover:bg-slate-50/50 transition-colors">
-                        <TableCell className="font-medium">
+                        <TableCell className="font-medium text-slate-900 dark:text-slate-100">
                           <div className="flex items-center gap-2">
                             {sale.customer_name}
                             {sale.is_first_visit && (
-                              <span className="text-xs bg-amber-100 text-amber-700 font-bold px-1.5 py-0.5 rounded">新患</span>
+                              <span className="text-xs bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 font-bold px-1.5 py-0.5 rounded">新患</span>
                             )}
                           </div>
                         </TableCell>
-                        <TableCell className="text-slate-500 text-sm">{sale.memo || "-"}</TableCell>
-                        <TableCell className="text-right font-bold text-slate-700">¥{sale.treatment_fee.toLocaleString()}</TableCell>
+                        <TableCell className="text-slate-500 dark:text-slate-400 text-sm">{sale.memo || "-"}</TableCell>
+                        <TableCell className="text-right font-bold text-slate-700 dark:text-slate-200">¥{sale.treatment_fee.toLocaleString()}</TableCell>
                         <TableCell className="text-right text-slate-100 group">
                           <Button 
                             variant="ghost" 

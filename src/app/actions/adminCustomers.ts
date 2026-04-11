@@ -22,6 +22,7 @@ type CustomerWithStats = {
   city_name: string | null;
   birth_date: string | null;
   referral_source: string | null;
+  medical_record_number: string | null;
 };
 
 export async function getCustomers(): Promise<CustomerWithStats[]> {
@@ -29,7 +30,8 @@ export async function getCustomers(): Promise<CustomerWithStats[]> {
   try {
     const supabase = await createClient();
 
-    const { data: customers, error } = await supabase
+    // まず medical_record_number を含めてクエリ
+    let { data: rawCustomers, error } = await supabase
       .from("customers")
       .select(`
         id,
@@ -45,6 +47,7 @@ export async function getCustomers(): Promise<CustomerWithStats[]> {
         city_name,
         birth_date,
         referral_source,
+        medical_record_number,
         appointments (
           id,
           start_time,
@@ -54,12 +57,47 @@ export async function getCustomers(): Promise<CustomerWithStats[]> {
       .eq("clinic_id", clinicId)
       .order("created_at", { ascending: false });
 
+    // エラーが発生した場合（medical_record_number カラム未作成など）は除外して再クエリ
     if (error) {
-      console.error("Failed to fetch customers:", error);
+      const errMsg = (error as any).message ?? JSON.stringify(error);
+      console.warn("First query failed, retrying without medical_record_number:", errMsg);
+      const fallback = await supabase
+        .from("customers")
+        .select(`
+          id,
+          name,
+          phone,
+          created_at,
+          booking_suspended,
+          line_user_id,
+          birth_month,
+          gender,
+          age_group,
+          guardian_name,
+          city_name,
+          birth_date,
+          referral_source,
+          appointments (
+            id,
+            start_time,
+            status
+          )
+        `)
+        .eq("clinic_id", clinicId)
+        .order("created_at", { ascending: false });
+      rawCustomers = (fallback.data as any) ?? null;
+      error = fallback.error;
+    }
+
+    if (error) {
+      const errMsg = (error as any).message ?? JSON.stringify(error);
+      console.error("Failed to fetch customers:", errMsg);
       return [];
     }
 
-    const formattedCustomers: CustomerWithStats[] = customers.map((c: any) => {
+    const customers = rawCustomers ?? [];
+
+    const formattedCustomers: CustomerWithStats[] = (customers as any[]).map((c: any) => {
       const appointments = c.appointments || [];
       const cancelled = appointments.filter((a: any) => a.status === "cancelled");
       const active = appointments.filter((a: any) => a.status !== "cancelled");
@@ -89,6 +127,7 @@ export async function getCustomers(): Promise<CustomerWithStats[]> {
         city_name: c.city_name ?? null,
         birth_date: c.birth_date ?? null,
         referral_source: c.referral_source ?? null,
+        medical_record_number: c.medical_record_number ?? null,
       };
     });
 
@@ -126,7 +165,12 @@ export async function updateCustomerQuestionnaire(
   return { success: true };
 }
 
-export async function updateCustomerInfo(customerId: string, name: string, phone: string) {
+export async function updateCustomerInfo(
+  customerId: string, 
+  name: string, 
+  phone: string,
+  medicalRecordNumber?: string | null
+) {
   const { clinicId } = await checkAdminAuth();
 
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -134,13 +178,63 @@ export async function updateCustomerInfo(customerId: string, name: string, phone
   if (!url || !key) throw new Error("Supabase env missing");
 
   const supabase = createAdminClient(url, key);
+  
+  const updateData: any = { 
+    name: name.trim(), 
+    phone: phone.trim() 
+  };
+  
+  if (medicalRecordNumber !== undefined) {
+    updateData.medical_record_number = medicalRecordNumber?.trim() || null;
+  }
+
   const { error } = await supabase
     .from("customers")
-    .update({ name: name.trim(), phone: phone.trim() })
+    .update(updateData)
     .eq("id", customerId)
     .eq("clinic_id", clinicId);
 
   if (error) throw new Error(error.message);
+  revalidatePath("/admin/customers");
+  return { success: true };
+}
+
+/**
+ * 二つの顧客データを統合する（名寄せ）
+ * sourceId の予約履歴を targetId へ移動し、sourceId を削除する
+ */
+export async function mergeCustomers(sourceId: string, targetId: string) {
+  const { clinicId } = await checkAdminAuth();
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) throw new Error("Supabase env missing");
+
+  const supabase = createAdminClient(url, key);
+
+  // 1. 予約データの移行
+  const { error: moveError } = await supabase
+    .from("appointments")
+    .update({ customer_id: targetId })
+    .eq("customer_id", sourceId)
+    .eq("clinic_id", clinicId);
+
+  if (moveError) {
+    console.error("Failed to move appointments:", moveError);
+    throw new Error("予約データの移行に失敗しました");
+  }
+
+  // 2. 元の顧客データを削除
+  const { error: deleteError } = await supabase
+    .from("customers")
+    .delete()
+    .eq("id", sourceId)
+    .eq("clinic_id", clinicId);
+
+  if (deleteError) {
+    console.error("Failed to delete source customer:", deleteError);
+    // 予約は既に移動済みなので、ここでのエラーは致命的ではないかもしれないが通知
+  }
+
   revalidatePath("/admin/customers");
   return { success: true };
 }

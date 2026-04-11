@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useState, useEffect, useTransition } from "react";
 import { Button } from "@/components/ui/button";
@@ -35,7 +35,7 @@ export default function BlogProposal({ clinicContext }: BlogProposalProps) {
     startTransition(async () => {
       const res = await generateWeeklyBlogProposal(clinicContext);
       if (res.success) {
-        toast.success("譁ｰ縺励＞繝悶Ο繧ｰ險倅ｺ区｡医ｒ逕滓・縺励∪縺励◆");
+        toast.success("\u65b0\u3057\u3044\u30d6\u30ed\u30b0\u8a18\u4e8b\u6848\u3092\u751f\u6210\u3057\u307e\u3057\u305f");
         setProposal(res.data);
       } else {
         toast.error(res.error);
@@ -51,13 +51,14 @@ export default function BlogProposal({ clinicContext }: BlogProposalProps) {
         <div>
           <CardTitle className="flex items-center text-sm font-bold text-rose-700">
             <Sparkles className="w-4 h-4 mr-2" />
-            莉企ｱ縺ｮnote蝓ｷ遲・署譯茨ｼ・I遘俶嶌・・          </CardTitle>
-          <CardDescription className="text-[10px]">騾ｱ縺ｫ1蝗槭∵怙譁ｰ縺ｮ邨悟霧迥ｶ豕√°繧峨後ヰ繧ｺ繧九崎ｨ倅ｺ九ｒ遘俶嶌縺梧署譯医＠縺ｾ縺・/CardDescription>
+            今週のnote記事提案（AI秘書）
+          </CardTitle>
+          <CardDescription className="text-[10px]">週に1度、最新の経営状況から「バズる記事」を秘書が提案します</CardDescription>
         </div>
         {!proposal && (
           <Button size="sm" variant="outline" className="h-7 text-[10px] border-rose-200 text-rose-700" onClick={handleGenerate} disabled={isPending}>
             {isPending ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <RefreshCw className="w-3 h-3 mr-1" />}
-            逕滓・
+            生成
           </Button>
         )}
       </CardHeader>
@@ -69,7 +70,7 @@ export default function BlogProposal({ clinicContext }: BlogProposalProps) {
                 <span className="text-[10px] bg-rose-100 text-rose-700 px-1.5 py-0.5 rounded font-bold uppercase tracking-wider">Title</span>
                 <h5 className="font-bold text-sm text-slate-800 leading-snug">{proposal.title}</h5>
               </div>
-              
+
               <div className="flex flex-wrap gap-1 mb-3">
                 {proposal.keywords?.map((k: string) => (
                   <span key={k} className="text-[10px] text-slate-400 bg-slate-50 px-1.5 py-0.5 rounded border border-slate-100">
@@ -84,30 +85,31 @@ export default function BlogProposal({ clinicContext }: BlogProposalProps) {
             </div>
 
             <div className="flex justify-between items-center mt-auto">
-              <span className="text-[9px] text-slate-400">譯井ｽ懈・譌･: {format(new Date(proposal.created_at), "M/d")}</span>
+              <span className="text-[9px] text-slate-400">提案日: {format(new Date(proposal.created_at), "M/d")}</span>
               <div className="flex gap-2">
-                <Button variant="ghost" size="sm" className="h-7 text-[10px] h-7 text-slate-400" onClick={handleGenerate} disabled={isPending}>
+                <Button variant="ghost" size="sm" className="h-7 text-[10px] text-slate-400" onClick={handleGenerate} disabled={isPending}>
                   {isPending ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <RefreshCw className="w-3 h-3 mr-1" />}
-                  蜀咲函謌・                </Button>
+                  再生成
+                </Button>
                 <Button size="sm" className="h-7 text-[10px] bg-rose-500 hover:bg-rose-600">
                   <BookOpen className="w-3 h-3 mr-1" />
-                  蜈ｨ譁・ｒ遒ｺ隱阪＠縺ｦ讒区・繧剃ｽ懊ｋ
+                  全文を確認して記事を作る
                 </Button>
               </div>
             </div>
           </div>
         ) : (
           <div className="flex-1 flex flex-col items-center justify-center py-6 text-center space-y-3 border border-dashed border-rose-100 rounded-xl">
-             <div className="w-10 h-10 bg-rose-50 rounded-full flex items-center justify-center text-rose-300">
-                <Send className="w-5 h-5" />
-             </div>
-             <p className="text-[11px] text-slate-400 leading-relaxed px-4">
-               莉企ｱ縺ｮ繝・・繧ｿ縺悟・譫仙庄閭ｽ縺ｧ縺吶・br/>
-               蜿ｳ荳翫・逕滓・繝懊ち繝ｳ縺九ｉ繝悶Ο繧ｰ譯医ｒ菴懈・縺励※縺上□縺輔＞縲・             </p>
+            <div className="w-10 h-10 bg-rose-50 rounded-full flex items-center justify-center text-rose-300">
+              <Send className="w-5 h-5" />
+            </div>
+            <p className="text-[11px] text-slate-400 leading-relaxed px-4">
+              今週のデータが取得可能です。<br />
+              右上の生成ボタンからブログ案を生成してください。
+            </p>
           </div>
         )}
       </CardContent>
     </Card>
   );
 }
-

@@ -541,7 +541,7 @@ export default function EvaluationPage() {
 
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight text-slate-900 border-l-4 border-emerald-600 pl-3">
+          <h1 className="text-3xl font-bold tracking-tight text-slate-900 dark:text-white border-l-4 border-emerald-600 pl-3">
             月間経営評価レポート
           </h1>
           <p className="text-muted-foreground mt-2">視覚的分析によるクリニックの健康診断</p>
@@ -735,17 +735,17 @@ export default function EvaluationPage() {
               </div>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="p-3 bg-slate-50 rounded-lg border-l-4 border-emerald-500 whitespace-pre-wrap text-sm text-slate-700">
+              <div className="p-3 bg-white dark:bg-slate-800 rounded-lg border-l-4 border-emerald-500 whitespace-pre-wrap text-sm text-slate-800 dark:text-slate-100 border border-slate-200 dark:border-slate-700">
                 {evalData?.ai_suggestions ? (
                   evalData.ai_suggestions
                 ) : (
-                  <p className="text-slate-500 italic">まだAI提案が生成されていません。</p>
+                  <p className="text-slate-400 italic">まだAI提案が生成されていません。</p>
                 )}
               </div>
               <Button
                 onClick={handleGenerateAi}
                 disabled={isGeneratingAi}
-                className="w-full bg-slate-900 hover:bg-slate-800 mt-2"
+                className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold mt-2"
               >
                 {isGeneratingAi && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
                 {evalData?.ai_suggestions ? "AI提案を再生成する" : "AIに戦略を提案させる"}

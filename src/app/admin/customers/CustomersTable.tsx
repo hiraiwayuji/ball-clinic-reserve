@@ -1,26 +1,27 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState, useTransition, useMemo } from "react";
 import { format } from "date-fns";
 import { ja } from "date-fns/locale";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
+  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
+} from "@/components/ui/dialog";
 import { SuspendToggle } from "./SuspendToggle";
 import { LinkLineDialog } from "./LinkLineDialog";
-import { updateCustomerInfo } from "@/app/actions/adminCustomers";
+import { updateCustomerInfo, mergeCustomers } from "@/app/actions/adminCustomers";
 import { QuestionnaireDialog } from "./QuestionnaireDialog";
-import { Search, Pencil, Check, X, Loader2, ClipboardList } from "lucide-react";
+import {
+  Search, Pencil, Check, X, Loader2, ClipboardList,
+  AlertTriangle, ArrowUpDown, Hash, GitMerge, Calendar, Phone,
+} from "lucide-react";
 import { toast } from "sonner";
 
-type Customer = {
+export type Customer = {
   id: string;
   name: string;
   phone: string;
@@ -37,24 +38,273 @@ type Customer = {
   city_name: string | null;
   birth_date: string | null;
   referral_source: string | null;
+  medical_record_number: string | null;
 };
+
+type SortKey = "name" | "appointmentCount" | "lastVisit" | "created_at" | "medical_record_number";
+type SortDir = "asc" | "desc";
 
 const GENDER_LABEL: Record<string, string> = { male: "男性", female: "女性", other: "その他" };
 
-function EditableRow({ customer }: { customer: Customer }) {
+/** 重複判定: 同名+同電話 or 同カルテNO */
+function buildDuplicateSet(customers: Customer[]): Set<string> {
+  const dupIds = new Set<string>();
+
+  const phoneNameMap = new Map<string, string[]>();
+  for (const c of customers) {
+    const key = `${c.name.trim()}__${c.phone.trim()}`;
+    if (!phoneNameMap.has(key)) phoneNameMap.set(key, []);
+    phoneNameMap.get(key)!.push(c.id);
+  }
+  for (const ids of phoneNameMap.values()) {
+    if (ids.length > 1) ids.forEach(id => dupIds.add(id));
+  }
+
+  const recordMap = new Map<string, string[]>();
+  for (const c of customers) {
+    if (!c.medical_record_number?.trim()) continue;
+    const key = c.medical_record_number.trim();
+    if (!recordMap.has(key)) recordMap.set(key, []);
+    recordMap.get(key)!.push(c.id);
+  }
+  for (const ids of recordMap.values()) {
+    if (ids.length > 1) ids.forEach(id => dupIds.add(id));
+  }
+
+  return dupIds;
+}
+
+/** カルテNO保存後に重複候補を探す（同名 or 同電話 で別ID） */
+function findMergeCandidates(current: Customer, allCustomers: Customer[]): Customer[] {
+  return allCustomers.filter(c => {
+    if (c.id === current.id) return false;
+    const sameName = c.name.trim() === current.name.trim();
+    const samePhone = c.phone.trim() !== "" && c.phone.trim() === current.phone.trim();
+    return sameName || samePhone;
+  });
+}
+
+// ── 統合ダイアログ ────────────────────────────────────────────────
+
+function MergeDialog({
+  open,
+  onOpenChange,
+  targetCustomer,
+  candidates,
+  onMergeComplete,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  targetCustomer: Customer;
+  candidates: Customer[];
+  onMergeComplete: () => void;
+}) {
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [merging, setMerging] = useState(false);
+
+  const toggleSelect = (id: string) =>
+    setSelected(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+
+  const handleMerge = async () => {
+    if (selected.size === 0) { toast.error("統合する患者を選択してください"); return; }
+    setMerging(true);
+    let ok = 0;
+    for (const sourceId of selected) {
+      try {
+        const res = await mergeCustomers(sourceId, targetCustomer.id);
+        if (res.success) ok++;
+        else toast.error("統合に失敗した患者があります");
+      } catch {
+        toast.error("統合エラーが発生しました");
+      }
+    }
+    setMerging(false);
+    if (ok > 0) {
+      toast.success(`${ok}件の患者データを統合しました`);
+      setSelected(new Set());
+      onOpenChange(false);
+      onMergeComplete();
+    }
+  };
+
+  const CustomerCard = ({ c, isTarget }: { c: Customer; isTarget?: boolean }) => (
+    <div className={`rounded-xl border p-4 space-y-2 ${isTarget ? "border-blue-400 bg-blue-50/50 dark:border-blue-600 dark:bg-blue-900/20" : "border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-800"}`}>
+      {isTarget && (
+        <p className="text-[10px] font-black text-blue-600 dark:text-blue-400 uppercase tracking-widest">統合先（残るデータ）</p>
+      )}
+      <div className="flex items-center gap-2">
+        <span className="font-bold text-slate-900 dark:text-slate-100">{c.name}</span>
+        {c.medical_record_number && (
+          <span className="font-mono text-xs bg-slate-100 dark:bg-slate-700 px-2 py-0.5 rounded text-slate-600 dark:text-slate-300">
+            カルテ {c.medical_record_number}
+          </span>
+        )}
+      </div>
+      <div className="flex flex-wrap gap-3 text-xs text-slate-500 dark:text-slate-400">
+        <span className="flex items-center gap-1"><Phone className="w-3 h-3" />{c.phone || "—"}</span>
+        <span className="flex items-center gap-1"><Calendar className="w-3 h-3" />予約 {c.appointmentCount}回</span>
+        {c.lastVisit && (
+          <span>最終: {format(new Date(c.lastVisit), "yyyy/MM/dd", { locale: ja })}</span>
+        )}
+      </div>
+    </div>
+  );
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-xl max-h-[80dvh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2 text-amber-700">
+            <GitMerge className="w-5 h-5" />
+            重複候補の確認・統合
+          </DialogTitle>
+          <DialogDescription>
+            同じ名前または電話番号の患者が見つかりました。統合すると予約履歴が統合先に移動し、選択した患者は削除されます。
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-4 mt-2">
+          {/* 統合先 */}
+          <CustomerCard c={targetCustomer} isTarget />
+
+          {/* 候補リスト */}
+          <div className="space-y-2">
+            <p className="text-xs font-bold text-slate-500 uppercase tracking-wide">
+              重複候補（チェックしたものを統合先へ統合）
+            </p>
+            {candidates.map(c => {
+              const checked = selected.has(c.id);
+              const reasonSameName = c.name.trim() === targetCustomer.name.trim();
+              const reasonSamePhone = c.phone.trim() !== "" && c.phone.trim() === targetCustomer.phone.trim();
+              return (
+                <label
+                  key={c.id}
+                  className={`flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition-colors ${
+                    checked
+                      ? "border-amber-400 bg-amber-50 dark:border-amber-500 dark:bg-amber-900/30"
+                      : "border-slate-200 hover:bg-slate-50 dark:border-slate-600 dark:hover:bg-slate-800"
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={() => toggleSelect(c.id)}
+                    className="mt-1 w-4 h-4 accent-amber-500 shrink-0"
+                  />
+                  <div className="flex-1 space-y-1.5">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-bold text-slate-900 dark:text-slate-100">{c.name}</span>
+                      {c.medical_record_number && (
+                        <span className="font-mono text-xs bg-slate-100 dark:bg-slate-700 px-2 py-0.5 rounded text-slate-600 dark:text-slate-300">
+                          カルテ {c.medical_record_number}
+                        </span>
+                      )}
+                      <div className="flex gap-1">
+                        {reasonSameName && (
+                          <span className="text-[10px] bg-rose-100 dark:bg-rose-900/50 text-rose-600 dark:text-rose-400 px-1.5 py-0.5 rounded font-bold">同名</span>
+                        )}
+                        {reasonSamePhone && (
+                          <span className="text-[10px] bg-orange-100 dark:bg-orange-900/50 text-orange-600 dark:text-orange-400 px-1.5 py-0.5 rounded font-bold">同電話</span>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap gap-3 text-xs text-slate-500 dark:text-slate-400">
+                      <span className="flex items-center gap-1"><Phone className="w-3 h-3" />{c.phone || "—"}</span>
+                      <span className="flex items-center gap-1"><Calendar className="w-3 h-3" />予約 {c.appointmentCount}回</span>
+                      {c.lastVisit && (
+                        <span>最終: {format(new Date(c.lastVisit), "yyyy/MM/dd", { locale: ja })}</span>
+                      )}
+                      <span>登録: {format(new Date(c.created_at), "yyyy/MM/dd", { locale: ja })}</span>
+                    </div>
+                  </div>
+                </label>
+              );
+            })}
+          </div>
+
+          {selected.size > 0 && (
+            <div className="bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-700 rounded-lg p-3 text-sm text-amber-800 dark:text-amber-200">
+              <strong>{selected.size}件</strong>の患者を「{targetCustomer.name}」に統合します。<br />
+              選択した患者の予約履歴が統合先に移動し、<strong>元のデータは削除</strong>されます。
+            </div>
+          )}
+
+          <div className="flex gap-2 pt-2">
+            <Button
+              onClick={handleMerge}
+              disabled={merging || selected.size === 0}
+              className="bg-amber-500 hover:bg-amber-600 text-white flex-1"
+            >
+              {merging ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <GitMerge className="w-4 h-4 mr-2" />}
+              {selected.size > 0 ? `${selected.size}件を統合する` : "統合する患者を選択してください"}
+            </Button>
+            <Button variant="outline" onClick={() => onOpenChange(false)} disabled={merging}>
+              閉じる
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ── 行コンポーネント ────────────────────────────────────────────────
+
+function EditableRow({
+  customer, index, isDuplicate, allRecordNumbers, allPhones, allCustomers,
+}: {
+  customer: Customer;
+  index: number;
+  isDuplicate: boolean;
+  allRecordNumbers: Set<string>;
+  allPhones: Set<string>;
+  allCustomers: Customer[];
+}) {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(customer.name);
   const [phone, setPhone] = useState(customer.phone);
+  const [recordNo, setRecordNo] = useState(customer.medical_record_number ?? "");
   const [qOpen, setQOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
 
+  // 統合ダイアログ
+  const [mergeOpen, setMergeOpen] = useState(false);
+  const [mergeCandidates, setMergeCandidates] = useState<Customer[]>([]);
+
+  const warnRecordNo =
+    recordNo.trim() !== "" &&
+    recordNo.trim() !== (customer.medical_record_number ?? "").trim() &&
+    allRecordNumbers.has(recordNo.trim());
+
+  const warnPhone =
+    phone.trim() !== customer.phone.trim() &&
+    allPhones.has(phone.trim());
+
+  // 現在の編集内容で重複候補を探す（保存前プレビュー用）
+  const liveCustomer: Customer = { ...customer, name, phone };
+
   const handleSave = () => {
     if (!name.trim()) { toast.error("名前を入力してください"); return; }
+    if (warnRecordNo) {
+      toast.error("カルテNO「" + recordNo + "」は既に使用されています");
+      return;
+    }
     startTransition(async () => {
       try {
-        await updateCustomerInfo(customer.id, name, phone);
+        await updateCustomerInfo(customer.id, name, phone, recordNo.trim() || null);
         toast.success("更新しました");
         setEditing(false);
+
+        // 保存後に重複候補を検索
+        const candidates = findMergeCandidates(liveCustomer, allCustomers);
+        if (candidates.length > 0) {
+          setMergeCandidates(candidates);
+          setMergeOpen(true);
+        }
       } catch {
         toast.error("更新に失敗しました");
       }
@@ -64,175 +314,281 @@ function EditableRow({ customer }: { customer: Customer }) {
   const handleCancel = () => {
     setName(customer.name);
     setPhone(customer.phone);
+    setRecordNo(customer.medical_record_number ?? "");
     setEditing(false);
   };
 
   return (
-    <TableRow className={`hover:bg-slate-50/50 ${customer.booking_suspended ? "bg-red-50/40" : ""}`}>
-      <TableCell className="font-medium text-slate-500 text-sm" />
+    <>
+      <TableRow className={[
+        "transition-colors",
+        customer.booking_suspended ? "bg-red-50/40" : "hover:bg-slate-50/50",
+        isDuplicate ? "ring-1 ring-inset ring-amber-300" : "",
+      ].join(" ")}>
 
-      {/* 名前 */}
-      <TableCell>
-        {editing ? (
-          <input
-            value={name}
-            onChange={e => setName(e.target.value)}
-            className="w-full h-8 border border-blue-300 rounded-lg px-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
-            autoFocus
-          />
-        ) : (
-          <span className="font-semibold">{name}</span>
-        )}
-      </TableCell>
+        <TableCell className="text-slate-400 text-xs font-mono text-center">{index + 1}</TableCell>
 
-      {/* 電話番号 */}
-      <TableCell>
-        {editing ? (
-          <input
-            value={phone}
-            onChange={e => setPhone(e.target.value)}
-            className="w-full h-8 border border-blue-300 rounded-lg px-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
-          />
-        ) : (
-          <span>{phone}</span>
-        )}
-      </TableCell>
+        {/* カルテNO */}
+        <TableCell>
+          {editing ? (
+            <div className="space-y-1">
+              <input
+                value={recordNo}
+                onChange={e => setRecordNo(e.target.value)}
+                placeholder="例: 00123"
+                className={[
+                  "w-24 h-8 border rounded-lg px-2 text-sm font-mono focus:outline-none focus:ring-2 bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-900 dark:text-slate-100",
+                  warnRecordNo ? "border-red-400 focus:ring-red-400" : "border-blue-300 focus:ring-blue-400",
+                ].join(" ")}
+              />
+              {warnRecordNo && (
+                <p className="text-[10px] text-red-500 flex items-center gap-0.5">
+                  <AlertTriangle className="w-2.5 h-2.5" /> 重複しています
+                </p>
+              )}
+            </div>
+          ) : (
+            <span className="font-mono text-sm">
+              {customer.medical_record_number
+                ? <span className="bg-slate-100 px-2 py-0.5 rounded text-slate-700">{customer.medical_record_number}</span>
+                : <span className="text-slate-300">—</span>}
+            </span>
+          )}
+        </TableCell>
 
-      <TableCell className="text-center">
-        <Badge variant="secondary" className="px-3">{customer.appointmentCount} 回</Badge>
-      </TableCell>
-
-      <TableCell className="text-center">
-        {customer.cancelCount > 0 ? (
-          <Badge variant="secondary" className={`px-3 ${customer.cancelCount >= 3 ? "bg-orange-100 text-orange-700" : ""}`}>
-            {customer.cancelCount} 回
-          </Badge>
-        ) : (
-          <span className="text-slate-400 text-sm">0 回</span>
-        )}
-      </TableCell>
-
-      <TableCell>
-        {customer.lastVisit
-          ? format(new Date(customer.lastVisit), "yyyy/MM/dd (E) HH:mm", { locale: ja })
-          : <span className="text-slate-400">記録なし</span>
-        }
-      </TableCell>
-
-      <TableCell>
-        {format(new Date(customer.created_at), "yyyy/MM/dd", { locale: ja })}
-      </TableCell>
-
-      <TableCell className="text-center">
-        <LinkLineDialog
-          customerId={customer.id}
-          customerName={name}
-          lineUserId={customer.line_user_id}
-        />
-      </TableCell>
-
-      {/* アンケート列 */}
-      <TableCell>
-        <button
-          type="button"
-          onClick={() => setQOpen(true)}
-          className="flex items-center gap-1 text-[11px] text-slate-500 hover:text-blue-600 hover:bg-blue-50 px-2 py-1 rounded-lg transition-colors"
-        >
-          <ClipboardList className="w-3 h-3" />
-          {customer.city_name ? `${customer.city_name} / ` : ""}
-          {customer.gender ? `${GENDER_LABEL[customer.gender] ?? customer.gender} / ` : ""}
-          {customer.referral_source ? `${customer.referral_source}` : "分析データ"}
-        </button>
-        <QuestionnaireDialog
-          open={qOpen}
-          onOpenChange={setQOpen}
-          customerId={customer.id}
-          customerName={name}
-          initialData={{
-            guardian_name: customer.guardian_name,
-            birth_month: customer.birth_month,
-            gender: customer.gender,
-            age_group: customer.age_group,
-            city_name: customer.city_name,
-            birth_date: customer.birth_date,
-            referral_source: customer.referral_source,
-          }}
-        />
-      </TableCell>
-
-      {/* 編集ボタン列 */}
-      <TableCell>
-        {editing ? (
-          <div className="flex items-center gap-1">
-            <button
-              type="button"
-              onClick={handleSave}
-              disabled={isPending}
-              className="p-1.5 rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
-            >
-              {isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
-            </button>
-            <button
-              type="button"
-              onClick={handleCancel}
-              disabled={isPending}
-              className="p-1.5 rounded-lg bg-slate-100 text-slate-600 hover:bg-slate-200"
-            >
-              <X className="w-3.5 h-3.5" />
-            </button>
+        {/* 患者名 */}
+        <TableCell>
+          <div className="flex items-center gap-2">
+            {editing
+              ? <input value={name} onChange={e => setName(e.target.value)} autoFocus
+                  className="w-full h-8 border border-blue-300 rounded-lg px-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100" />
+              : <span className="font-semibold text-slate-900 dark:text-slate-100">{name}</span>
+            }
+            {isDuplicate && !editing && (
+              <button
+                type="button"
+                onClick={() => {
+                  const candidates = findMergeCandidates(customer, allCustomers);
+                  if (candidates.length > 0) {
+                    setMergeCandidates(candidates);
+                    setMergeOpen(true);
+                  }
+                }}
+                className="flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 bg-amber-100 text-amber-700 border border-amber-300 rounded hover:bg-amber-200 transition-colors"
+              >
+                <AlertTriangle className="w-2.5 h-2.5 mr-0.5" />重複
+                <GitMerge className="w-2.5 h-2.5 ml-0.5" />
+              </button>
+            )}
           </div>
-        ) : (
-          <button
-            type="button"
-            onClick={() => setEditing(true)}
-            className="p-1.5 rounded-lg text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-colors"
-          >
-            <Pencil className="w-3.5 h-3.5" />
-          </button>
-        )}
-      </TableCell>
+        </TableCell>
 
-      <TableCell>
-        <SuspendToggle customerId={customer.id} suspended={customer.booking_suspended} />
-      </TableCell>
-    </TableRow>
+        {/* 電話番号 */}
+        <TableCell>
+          {editing ? (
+            <div className="space-y-1">
+              <input
+                value={phone}
+                onChange={e => setPhone(e.target.value)}
+                className={[
+                  "w-36 h-8 border rounded-lg px-2 text-sm focus:outline-none focus:ring-2 bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-900 dark:text-slate-100",
+                  warnPhone ? "border-amber-400 focus:ring-amber-400" : "border-blue-300 focus:ring-blue-400",
+                ].join(" ")}
+              />
+              {warnPhone && (
+                <p className="text-[10px] text-amber-600 flex items-center gap-0.5">
+                  <AlertTriangle className="w-2.5 h-2.5" /> 同じ電話番号が存在します
+                </p>
+              )}
+            </div>
+          ) : <span className="text-sm text-slate-600 dark:text-slate-300">{phone}</span>}
+        </TableCell>
+
+        <TableCell className="text-center">
+          <Badge variant="secondary" className="px-3">{customer.appointmentCount} 回</Badge>
+        </TableCell>
+
+        <TableCell className="text-center">
+          {customer.cancelCount > 0
+            ? <Badge variant="secondary" className={"px-3 " + (customer.cancelCount >= 3 ? "bg-orange-100 text-orange-700" : "")}>{customer.cancelCount} 回</Badge>
+            : <span className="text-slate-400 text-sm">0 回</span>}
+        </TableCell>
+
+        <TableCell className="text-sm text-slate-600 dark:text-slate-400 whitespace-nowrap">
+          {customer.lastVisit
+            ? format(new Date(customer.lastVisit), "yyyy/MM/dd (E)", { locale: ja })
+            : <span className="text-slate-400 dark:text-slate-600">記録なし</span>}
+        </TableCell>
+
+        <TableCell className="text-sm text-slate-500 dark:text-slate-500 whitespace-nowrap">
+          {format(new Date(customer.created_at), "yyyy/MM/dd", { locale: ja })}
+        </TableCell>
+
+        <TableCell className="text-center">
+          <LinkLineDialog customerId={customer.id} customerName={name} lineUserId={customer.line_user_id} />
+        </TableCell>
+
+        <TableCell>
+          <button type="button" onClick={() => setQOpen(true)}
+            className="flex items-center gap-1 text-[11px] text-slate-500 dark:text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 px-2 py-1 rounded-lg transition-colors">
+            <ClipboardList className="w-3 h-3" />
+            {customer.city_name ? customer.city_name + " / " : ""}
+            {customer.gender ? (GENDER_LABEL[customer.gender] ?? customer.gender) + " / " : ""}
+            {customer.referral_source ?? "分析データ"}
+          </button>
+          <QuestionnaireDialog
+            open={qOpen} onOpenChange={setQOpen}
+            customerId={customer.id} customerName={name}
+            initialData={{
+              guardian_name: customer.guardian_name,
+              birth_month: customer.birth_month,
+              gender: customer.gender,
+              age_group: customer.age_group,
+              city_name: customer.city_name,
+              birth_date: customer.birth_date,
+              referral_source: customer.referral_source,
+            }}
+          />
+        </TableCell>
+
+        <TableCell>
+          {editing ? (
+            <div className="flex items-center gap-1">
+              <button type="button" onClick={handleSave} disabled={isPending}
+                className="p-1.5 rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50">
+                {isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+              </button>
+              <button type="button" onClick={handleCancel} disabled={isPending}
+                className="p-1.5 rounded-lg bg-slate-100 text-slate-600 hover:bg-slate-200">
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          ) : (
+            <button type="button" onClick={() => setEditing(true)}
+              className="p-1.5 rounded-lg text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-colors">
+              <Pencil className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </TableCell>
+
+        <TableCell>
+          <SuspendToggle customerId={customer.id} suspended={customer.booking_suspended} />
+        </TableCell>
+      </TableRow>
+
+      {/* 統合ダイアログ */}
+      <MergeDialog
+        open={mergeOpen}
+        onOpenChange={setMergeOpen}
+        targetCustomer={{ ...customer, name, phone }}
+        candidates={mergeCandidates}
+        onMergeComplete={() => window.location.reload()}
+      />
+    </>
   );
 }
 
+// ── テーブル本体 ────────────────────────────────────────────────────
+
 export function CustomersTable({ customers }: { customers: Customer[] }) {
   const [query, setQuery] = useState("");
+  const [sortKey, setSortKey] = useState<SortKey>("created_at");
+  const [sortDir, setSortDir] = useState<SortDir>("desc");
+  const [showDuplicatesOnly, setShowDuplicatesOnly] = useState(false);
 
-  const filtered = query.trim()
-    ? customers.filter(c =>
-        c.name.includes(query.trim()) || c.phone.includes(query.trim())
-      )
-    : customers;
+  const duplicateIds = useMemo(() => buildDuplicateSet(customers), [customers]);
+
+  const allRecordNumbers = useMemo(
+    () => new Set(customers.map(c => c.medical_record_number?.trim()).filter((v): v is string => Boolean(v))),
+    [customers]
+  );
+  const allPhones = useMemo(() => new Set(customers.map(c => c.phone.trim())), [customers]);
+
+  const handleSort = (key: SortKey) => {
+    if (sortKey === key) setSortDir(d => d === "asc" ? "desc" : "asc");
+    else { setSortKey(key); setSortDir("asc"); }
+  };
+
+  const SortIcon = ({ k }: { k: SortKey }) => (
+    <ArrowUpDown className={"w-3 h-3 ml-1 inline " + (sortKey === k ? "text-blue-500" : "text-slate-300")} />
+  );
+
+  const processed = useMemo(() => {
+    const trimmed = query.trim();
+    let result = trimmed
+      ? customers.filter(c =>
+          c.name.includes(trimmed) ||
+          c.phone.includes(trimmed) ||
+          (c.medical_record_number ?? "").includes(trimmed))
+      : [...customers];
+
+    if (showDuplicatesOnly) result = result.filter(c => duplicateIds.has(c.id));
+
+    result.sort((a, b) => {
+      let av: string | number | null = null;
+      let bv: string | number | null = null;
+      if (sortKey === "name")                      { av = a.name; bv = b.name; }
+      else if (sortKey === "appointmentCount")     { av = a.appointmentCount; bv = b.appointmentCount; }
+      else if (sortKey === "lastVisit")            { av = a.lastVisit; bv = b.lastVisit; }
+      else if (sortKey === "created_at")           { av = a.created_at; bv = b.created_at; }
+      else if (sortKey === "medical_record_number") { av = a.medical_record_number; bv = b.medical_record_number; }
+      if (av === null && bv === null) return 0;
+      if (av === null) return 1;
+      if (bv === null) return -1;
+      const cmp = av < bv ? -1 : av > bv ? 1 : 0;
+      return sortDir === "asc" ? cmp : -cmp;
+    });
+    return result;
+  }, [customers, query, sortKey, sortDir, showDuplicatesOnly, duplicateIds]);
 
   return (
     <div className="space-y-4">
-      {/* 検索バー */}
-      <div className="relative max-w-sm">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
-        <input
-          type="text"
-          value={query}
-          onChange={e => setQuery(e.target.value)}
-          placeholder="名前・電話番号で検索..."
-          className="w-full h-10 pl-9 pr-4 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
-        />
+      <div className="flex items-center gap-3 flex-wrap">
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+          <input type="text" value={query} onChange={e => setQuery(e.target.value)}
+            placeholder="名前・電話番号・カルテNOで検索..."
+            className="h-10 pl-9 pr-4 w-72 border border-slate-200 dark:border-slate-800 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100" />
+        </div>
+
+        {duplicateIds.size > 0 && (
+          <button type="button" onClick={() => setShowDuplicatesOnly(v => !v)}
+            className={[
+              "flex items-center gap-1.5 h-10 px-4 rounded-lg text-sm font-medium border transition-colors",
+              showDuplicatesOnly
+                ? "bg-amber-500 text-white border-amber-500"
+                : "bg-amber-50 text-amber-700 border-amber-300 hover:bg-amber-100",
+            ].join(" ")}>
+            <AlertTriangle className="w-4 h-4" />
+            重複のみ表示（{duplicateIds.size} 件）
+          </button>
+        )}
+
+        <span className="text-sm text-slate-400 ml-auto">{processed.length} / {customers.length} 件</span>
       </div>
 
-      <div className="bg-white rounded-xl shadow-sm border overflow-x-auto">
-        <Table className="min-w-[900px]">
-          <TableHeader className="bg-slate-50">
+      <div className="bg-white dark:bg-slate-900/50 rounded-xl shadow-sm border border-slate-200 dark:border-white/10 overflow-x-auto">
+        <Table className="min-w-[1100px]">
+          <TableHeader className="bg-slate-50 dark:bg-slate-800/50">
             <TableRow>
-              <TableHead className="w-[40px]">No.</TableHead>
-              <TableHead>患者名</TableHead>
+              <TableHead className="w-[40px] text-center">No.</TableHead>
+              <TableHead className="cursor-pointer select-none w-[110px]" onClick={() => handleSort("medical_record_number")}>
+                <Hash className="w-3 h-3 inline mr-0.5 text-slate-400" />カルテNO<SortIcon k="medical_record_number" />
+              </TableHead>
+              <TableHead className="cursor-pointer select-none" onClick={() => handleSort("name")}>
+                患者名<SortIcon k="name" />
+              </TableHead>
               <TableHead>電話番号</TableHead>
-              <TableHead className="text-center">予約回数</TableHead>
-              <TableHead className="text-center">キャンセル回数</TableHead>
-              <TableHead>最終来院日</TableHead>
-              <TableHead>初回登録日</TableHead>
+              <TableHead className="text-center cursor-pointer select-none" onClick={() => handleSort("appointmentCount")}>
+                予約回数<SortIcon k="appointmentCount" />
+              </TableHead>
+              <TableHead className="text-center">キャンセル</TableHead>
+              <TableHead className="cursor-pointer select-none" onClick={() => handleSort("lastVisit")}>
+                最終来院日<SortIcon k="lastVisit" />
+              </TableHead>
+              <TableHead className="cursor-pointer select-none" onClick={() => handleSort("created_at")}>
+                初回登録日<SortIcon k="created_at" />
+              </TableHead>
               <TableHead className="text-center">LINE</TableHead>
               <TableHead>アンケート</TableHead>
               <TableHead className="w-[60px]">編集</TableHead>
@@ -240,26 +596,31 @@ export function CustomersTable({ customers }: { customers: Customer[] }) {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {filtered.length === 0 ? (
+            {processed.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={11} className="h-32 text-center text-slate-500">
-                  {query ? `「${query}」に一致する患者が見つかりません` : "顧客データがありません"}
+                <TableCell colSpan={12} className="h-32 text-center text-slate-500">
+                  {query
+                    ? "「" + query + "」に一致する患者が見つかりません"
+                    : showDuplicatesOnly ? "重複データはありません"
+                    : "顧客データがありません"}
                 </TableCell>
               </TableRow>
             ) : (
-              filtered.map((customer) => (
-                <EditableRow key={customer.id} customer={customer} />
+              processed.map((customer, i) => (
+                <EditableRow
+                  key={customer.id}
+                  customer={customer}
+                  index={i}
+                  isDuplicate={duplicateIds.has(customer.id)}
+                  allRecordNumbers={allRecordNumbers}
+                  allPhones={allPhones}
+                  allCustomers={customers}
+                />
               ))
             )}
           </TableBody>
         </Table>
       </div>
-
-      {query && (
-        <p className="text-xs text-slate-400">
-          {filtered.length} 件 / 全 {customers.length} 件
-        </p>
-      )}
     </div>
   );
 }

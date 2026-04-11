@@ -16,7 +16,10 @@ import {
   Calendar,
   MousePointer2,
   ArrowRight,
-  ClipboardList
+  ClipboardList,
+  MapPin,
+  Clock,
+  Video
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -164,15 +167,51 @@ const SLIDES = [
               </div>
            </div>
         </div>
-        <div className="w-full md:w-72 bg-slate-900 border border-slate-800 rounded-[40px] p-4 shadow-2xl relative">
-           <div className="w-12 h-1 bg-slate-800 rounded-full mx-auto mb-6" />
-           <div className="space-y-3">
-              <div className="h-10 bg-slate-800 rounded-xl" />
-              <div className="h-40 bg-violet-500/10 rounded-2xl border border-violet-500/20" />
-              <div className="h-8 bg-green-500/10 rounded-xl border border-green-500/20" />
+        <div className="w-full md:w-72 bg-slate-900 border border-slate-700 rounded-[40px] p-4 shadow-2xl relative shrink-0">
+           {/* ノッチ */}
+           <div className="w-12 h-1.5 bg-slate-700 rounded-full mx-auto mb-4" />
+           {/* LINEヘッダー */}
+           <div className="bg-green-600 rounded-2xl px-3 py-2 flex items-center gap-2 mb-3">
+              <div className="w-7 h-7 bg-white/20 rounded-full flex items-center justify-center text-xs font-black text-white">院</div>
+              <div>
+                <p className="text-white text-[11px] font-black leading-none">ボール接骨院</p>
+                <p className="text-green-200 text-[9px]">LINE公式アカウント</p>
+              </div>
            </div>
-           <div className="absolute -right-6 -bottom-6 bg-white text-slate-950 p-4 rounded-2xl font-black shadow-xl animate-bounce">
-              成約率UP!
+           {/* チャットメッセージ */}
+           <div className="space-y-2 px-1">
+              <div className="flex gap-1.5 items-end">
+                 <div className="w-5 h-5 bg-green-600 rounded-full shrink-0" />
+                 <div className="bg-white rounded-2xl rounded-bl-sm px-3 py-2 max-w-[80%] shadow-sm">
+                    <p className="text-slate-800 text-[10px] font-bold leading-relaxed">🎂 お誕生日おめでとう<br />ございます！<br />今月限定クーポン<br />をお届けします✨</p>
+                 </div>
+              </div>
+              <div className="flex gap-1.5 items-end">
+                 <div className="w-5 h-5 bg-green-600 rounded-full shrink-0" />
+                 <div className="bg-white rounded-2xl rounded-bl-sm px-3 py-2 shadow-sm">
+                    <div className="bg-green-50 border border-green-200 rounded-xl p-2">
+                       <p className="text-green-700 text-[10px] font-black">🎁 施術20%OFF</p>
+                       <p className="text-slate-500 text-[9px]">今月末まで有効</p>
+                    </div>
+                 </div>
+              </div>
+              <div className="flex justify-end">
+                 <div className="bg-green-500 rounded-2xl rounded-br-sm px-3 py-1.5 shadow-sm">
+                    <p className="text-white text-[10px] font-bold">ありがとうございます！</p>
+                 </div>
+              </div>
+              <div className="flex gap-1.5 items-end">
+                 <div className="w-5 h-5 bg-green-600 rounded-full shrink-0" />
+                 <div className="bg-white rounded-2xl rounded-bl-sm px-3 py-2 shadow-sm">
+                    <p className="text-slate-800 text-[10px] font-bold">📅 ご予約はこちらから</p>
+                    <div className="mt-1 bg-green-600 rounded-lg px-2 py-1 text-center">
+                       <p className="text-white text-[9px] font-black">予約する →</p>
+                    </div>
+                 </div>
+              </div>
+           </div>
+           <div className="absolute -right-5 -bottom-5 bg-white text-slate-950 px-3 py-2 rounded-2xl font-black shadow-xl animate-bounce text-sm">
+              成約率UP! 🔥
            </div>
         </div>
       </div>
@@ -291,8 +330,93 @@ const SLIDES = [
             </div>
           </Link>
          <p className="text-slate-600 text-sm font-bold">
-           ※本資料は紹介専用です。詳細な導入費用については個別にお問い合わせください。
+            ※本資料は紹介専用です。詳細な導入費用については個別にお問い合わせください。
          </p>
+      </div>
+    )
+  },
+  {
+    title: "Slide 9: 進化し続ける、完成のないシステム",
+    content: (
+      <div className="relative w-full max-w-5xl h-[600px] flex flex-col items-center justify-center overflow-hidden rounded-[48px] border border-white/10 bg-black/40 backdrop-blur-sm">
+        {/* アップデート履歴の背景アニメーション */}
+        <div className="absolute inset-0 opacity-10 pointer-events-none overflow-hidden flex flex-col gap-4 py-8 select-none">
+          {[...Array(3)].map((_, i) => (
+            <div 
+              key={i} 
+              className={cn(
+                "whitespace-nowrap flex gap-8 text-[10px] font-mono tracking-tighter",
+                i % 2 === 0 ? "animate-[marquee_60s_linear_infinite]" : "animate-[marquee_70s_linear_infinite_reverse]"
+              )}
+            >
+              {[...Array(10)].map((_, j) => (
+                <span key={j} className="text-violet-400">
+                  v1.{i}.{j} STABLE UPDATE: AI LOGIC OPTIMIZED {'>'} SEARCH CONSOLE CONNECTED {'>'} REPEAT RATE ANALYTICS EXPANDED {'>'} LINE WEBHOOK LATENCY REDUCED {'>'} 
+                </span>
+              ))}
+            </div>
+          ))}
+          {[...Array(3)].map((_, i) => (
+            <div 
+              key={i+3} 
+              className={cn(
+                "whitespace-nowrap flex gap-8 text-[10px] font-mono tracking-tighter opacity-50",
+                i % 2 !== 0 ? "animate-[marquee_50s_linear_infinite]" : "animate-[marquee_80s_linear_infinite_reverse]"
+              )}
+            >
+              {[...Array(10)].map((_, j) => (
+                <span key={j} className="text-indigo-400">
+                  CLIENT FEEDBACK IMPLEMENTED: {'>'} UI ACCESSIBILITY {'>'} DARK MODE CONTRAST {'>'} CUSTOMER MERGE LOGIC {'>'} DATA INDEPENDENCE {'>'}
+                </span>
+              ))}
+            </div>
+          ))}
+        </div>
+
+        <div className="relative z-10 space-y-8 px-6 text-center">
+          <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-violet-500/10 border border-violet-500/20 text-violet-400 text-sm font-black tracking-widest uppercase">
+            <Zap className="w-4 h-4 animate-pulse" /> Constant Evolution
+          </div>
+          
+          <h2 className="text-4xl md:text-6xl font-black text-white leading-tight">
+            あなたの院と共に成長する。<br />
+            <span className="relative inline-block mt-2">
+              <span className="relative z-10 text-transparent bg-clip-text bg-gradient-to-r from-violet-400 via-fuchsia-400 to-indigo-400">
+                完成しない、進化し続けるAI秘書。
+              </span>
+              <div className="absolute -bottom-2 left-0 w-full h-3 bg-violet-600/30 -skew-x-12" />
+            </span>
+          </h2>
+
+          <div className="grid md:grid-cols-2 gap-6 max-w-4xl mx-auto mt-12">
+            <div className="p-8 bg-gradient-to-br from-slate-900 to-slate-950 rounded-[32px] border border-white/10 text-left relative group hover:border-violet-500/50 transition-colors">
+              <div className="w-12 h-12 bg-violet-500/20 rounded-2xl flex items-center justify-center mb-6 text-violet-400">
+                <MessageCircle className="w-6 h-6" />
+              </div>
+              <h4 className="text-xl font-black text-white mb-3">ユーザーフィードバック優先</h4>
+              <p className="text-slate-400 font-medium leading-relaxed">
+                現場の「不便」を吸い上げ、数日単位で機能をアップデート。V-ARCは先生方の声で昨日より賢くなります。
+              </p>
+            </div>
+            <div className="p-8 bg-gradient-to-br from-slate-900 to-slate-950 rounded-[32px] border border-white/10 text-left relative group hover:border-indigo-500/50 transition-colors">
+              <div className="w-12 h-12 bg-indigo-500/20 rounded-2xl flex items-center justify-center mb-6 text-indigo-400">
+                <ShieldCheck className="w-6 h-6" />
+              </div>
+              <h4 className="text-xl font-black text-white mb-3">コミュニティ主導の知性</h4>
+              <p className="text-slate-400 font-medium leading-relaxed">
+                全国の先生方の成功事例や効率化の知恵が、AIの「経営判断」をより正確かつ強力なものへと育て上げます。
+              </p>
+            </div>
+          </div>
+
+          <p className="text-lg md:text-xl font-bold text-slate-200 mt-8 italic">
+            「完成品を売る」のではなく、「最高の院を共に創るパートナー」でありたい。
+          </p>
+        </div>
+
+        {/* 装飾用のアニメーション装飾 */}
+        <div className="absolute -bottom-24 -left-24 w-64 h-64 bg-violet-600/20 blur-[100px] rounded-full animate-pulse" />
+        <div className="absolute -top-24 -right-24 w-64 h-64 bg-indigo-600/20 blur-[100px] rounded-full animate-pulse" />
       </div>
     )
   }
@@ -374,19 +498,23 @@ export default function PresentationPage() {
         </div>
 
         {/* フッター / ナビ */}
-        <footer className="p-8 flex items-center justify-between z-10 shrink-0 border-t border-white/5 bg-slate-950/50 backdrop-blur-md">
-           <div className="flex gap-4">
-              <Button 
+        <footer className="p-6 flex items-center justify-between z-10 shrink-0 border-t border-white/5 bg-slate-950/50 backdrop-blur-md">
+           <div className="flex gap-3">
+              <Button
                 onClick={prevSlide}
-                className="w-14 h-14 rounded-2xl bg-slate-900 hover:bg-slate-800 border border-white/10"
+                disabled={currentSlide === 0}
+                className="h-12 px-5 rounded-2xl bg-slate-800 hover:bg-slate-700 border border-white/10 flex items-center gap-2 font-bold text-slate-300 disabled:opacity-30 disabled:cursor-not-allowed"
               >
-                <ChevronLeft className="w-6 h-6" />
+                <ChevronLeft className="w-5 h-5" />
+                <span className="text-sm">前へ</span>
               </Button>
-              <Button 
+              <Button
                 onClick={nextSlide}
-                className="w-14 h-14 rounded-2xl bg-slate-900 hover:bg-slate-800 border border-white/10"
+                disabled={currentSlide === SLIDES.length - 1}
+                className="h-12 px-6 rounded-2xl bg-violet-600 hover:bg-violet-500 border border-violet-500/50 flex items-center gap-2 font-bold text-white shadow-lg shadow-violet-900/40 disabled:opacity-30 disabled:cursor-not-allowed"
               >
-                <ChevronRight className="w-6 h-6" />
+                <span className="text-sm">次へ</span>
+                <ChevronRight className="w-5 h-5" />
               </Button>
            </div>
 

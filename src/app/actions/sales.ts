@@ -557,7 +557,6 @@ export async function getTodayDashboardData() {
           is_first_visit,
           customer_id,
           customers (
-            id,
             name,
             phone
           )

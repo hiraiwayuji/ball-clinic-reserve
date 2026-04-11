@@ -163,7 +163,7 @@ export default function AdminWeeklyGridPage() {
             variant="outline"
             size="sm"
             onClick={() => setIsSearchPanelOpen(true)}
-            className="border-blue-200 text-blue-700 hover:bg-blue-50"
+            className="border-blue-200 text-blue-700 dark:text-blue-300 dark:border-blue-700 hover:bg-blue-50 dark:hover:bg-blue-950 font-semibold"
           >
             <Search className="w-4 h-4 mr-1 sm:mr-2" />
             <span className="hidden sm:inline">患者検索・予測</span>
@@ -213,10 +213,10 @@ export default function AdminWeeklyGridPage() {
           </Button>
           <button
             onClick={() => handleWeekChange(new Date())}
-            className="text-sm font-semibold text-slate-600 px-2 py-1 rounded-lg hover:bg-slate-100 active:bg-slate-200 transition-colors"
+            className="text-sm font-semibold text-slate-700 dark:text-slate-200 px-2 py-1 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 active:bg-slate-200 transition-colors"
           >
             {format(weekDays[0], "M月d日", { locale: ja })}
-            <span className="text-slate-400 mx-1.5">—</span>
+            <span className="text-slate-400 dark:text-slate-500 mx-1.5">—</span>
             {format(weekDays[6], "M月d日", { locale: ja })}
           </button>
           <Button
@@ -456,11 +456,11 @@ export default function AdminWeeklyGridPage() {
               </Button>
             </div>
 
-            <div className="text-lg font-bold text-slate-800 flex items-center">
-              <Calendar className="w-5 h-5 mr-2 text-slate-500" />
-              {format(weekDays[0], "yyyy年 M月 d日", { locale: ja })}
-              <span className="text-slate-400 mx-2">〜</span>
-              {format(weekDays[6], "M月 d日", { locale: ja })}
+            <div className="text-lg font-bold text-slate-800 dark:text-slate-100 flex items-center">
+              <Calendar className="w-5 h-5 mr-2 text-slate-400 dark:text-slate-500 shrink-0" />
+              <span>{format(weekDays[0], "yyyy年 M月 d日", { locale: ja })}</span>
+              <span className="text-slate-400 dark:text-slate-500 mx-2">〜</span>
+              <span>{format(weekDays[6], "M月 d日", { locale: ja })}</span>
             </div>
 
             <div className="flex items-center gap-2 text-sm">

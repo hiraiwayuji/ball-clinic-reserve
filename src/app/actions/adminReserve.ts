@@ -35,68 +35,83 @@ export async function createManualReservation(formData: FormData) {
       return { success: false, error: "必須項目が不足しています" };
     }
 
-    const supabase = await getSupabase();
-    if (supabase) {
-      // 1. 顧客の作成（名前と電話番号で簡易登録）
-      const { data: customer, error: customerErr } = await supabase
-        .from("customers")
-        .insert([{ 
-          name, 
-          phone,
-          clinic_id: clinicId
-        }])
-        .select()
-        .single();
-        
-      if (customerErr) {
-        console.error("Customer insertion error:", customerErr);
-        return { success: false, error: "顧客情報の登録に失敗しました" };
-      }
-      const customerId = customer.id;
-
-      // 2. 予約の作成（管理側から追加したものは最初から confirmed とする例）
-      const baseDate = new Date(`${rawDate}T${time}:00+09:00`);
-      const isFirstVisit = visitType === "new";
-
-      const appointmentsToInsert = [];
-      for (let i = 0; i < recurringWeeks; i++) {
-        const targetDate = new Date(baseDate.getTime());
-        targetDate.setDate(targetDate.getDate() + (i * 7));
-        
-        const startDateTimeStr = targetDate.toISOString();
-        const endDate = new Date(targetDate.getTime() + durationMinutes * 60 * 1000);
-        const endDateTimeStr = endDate.toISOString();
-        const memoBase = `[院内追加] ${symptoms}`.trim();
-        const memoText = recurringWeeks > 1 ? `${memoBase} (定期予約 ${i+1}/${recurringWeeks})` : memoBase;
-        
-        appointmentsToInsert.push({
-          customer_id: customerId,
-          start_time: startDateTimeStr,
-          end_time: endDateTimeStr,
-          memo: memoText,
-          is_first_visit: i === 0 ? isFirstVisit : false,
-          status: "confirmed",
-          clinic_id: clinicId
-        });
-      }
-
-      const { error: appointmentErr } = await supabase
-        .from("appointments")
-        .insert(appointmentsToInsert);
-
-      if (appointmentErr) {
-        console.error("Appointment insertion error:", appointmentErr);
-        return { success: false, error: "予約情報の登録に失敗しました" };
-      }
-
-      revalidatePath("/admin/appointments");
-      revalidatePath("/admin");
+    // RLS をバイパスするために service role クライアントを使用
+    const supabase = getAdminSupabase();
+    if (!supabase) {
+      return { success: false, error: "サーバー設定エラー（service role key 未設定）" };
     }
 
+    // 1. 同じ電話番号の顧客が既に存在するか確認（同一院内）
+    const { data: existing } = await supabase
+      .from("customers")
+      .select("id")
+      .eq("phone", phone.trim())
+      .eq("clinic_id", clinicId)
+      .maybeSingle();
+
+    let customerId: string;
+    if (existing) {
+      // 既存顧客を使用（名前も最新に更新）
+      customerId = existing.id;
+      await supabase
+        .from("customers")
+        .update({ name: name.trim() })
+        .eq("id", customerId);
+    } else {
+      // 新規顧客を作成
+      const { data: newCustomer, error: customerErr } = await supabase
+        .from("customers")
+        .insert([{ name: name.trim(), phone: phone.trim(), clinic_id: clinicId }])
+        .select("id")
+        .single();
+
+      if (customerErr || !newCustomer) {
+        console.error("Customer insertion error:", customerErr);
+        return { success: false, error: `顧客情報の登録に失敗しました: ${customerErr?.message ?? "不明なエラー"}` };
+      }
+      customerId = newCustomer.id;
+    }
+
+    // 2. 予約を作成（管理側追加は即 confirmed）
+    const baseDate = new Date(`${rawDate}T${time}:00+09:00`);
+    const isFirstVisit = visitType === "new";
+
+    const appointmentsToInsert = [];
+    for (let i = 0; i < recurringWeeks; i++) {
+      const targetDate = new Date(baseDate.getTime());
+      targetDate.setDate(targetDate.getDate() + i * 7);
+
+      const startDateTimeStr = targetDate.toISOString();
+      const endDate = new Date(targetDate.getTime() + durationMinutes * 60 * 1000);
+      const memoBase = `[院内追加] ${symptoms}`.trim();
+      const memoText = recurringWeeks > 1 ? `${memoBase} (定期予約 ${i + 1}/${recurringWeeks})` : memoBase;
+
+      appointmentsToInsert.push({
+        customer_id: customerId,
+        start_time: startDateTimeStr,
+        end_time: endDate.toISOString(),
+        memo: memoText,
+        is_first_visit: i === 0 ? isFirstVisit : false,
+        status: "confirmed",
+        clinic_id: clinicId,
+      });
+    }
+
+    const { error: appointmentErr } = await supabase
+      .from("appointments")
+      .insert(appointmentsToInsert);
+
+    if (appointmentErr) {
+      console.error("Appointment insertion error:", appointmentErr);
+      return { success: false, error: `予約情報の登録に失敗しました: ${appointmentErr.message}` };
+    }
+
+    revalidatePath("/admin/appointments");
+    revalidatePath("/admin");
     return { success: true };
-  } catch (err) {
+  } catch (err: any) {
     console.error(err);
-    return { success: false, error: "予期せぬエラーが発生しました" };
+    return { success: false, error: err?.message ?? "予期せぬエラーが発生しました" };
   }
 }
 
@@ -174,13 +189,13 @@ export async function sendLineConfirmation(appointmentId: string) {
     // 予約と顧客情報（line_user_id含む）を取得
     const { data: apt, error } = await supabase
       .from("appointments")
-      .select("id, start_time, is_first_visit, status, customers(name, line_user_id)")
+      .select("id, start_time, is_first_visit, status, profiles(name, line_user_id)")
       .eq("id", appointmentId)
       .single();
 
     if (error || !apt) return { success: false, error: "予約情報の取得に失敗しました" };
 
-    const customer = Array.isArray(apt.customers) ? apt.customers[0] : apt.customers;
+    const customer = Array.isArray(apt.profiles) ? apt.profiles[0] : apt.profiles;
     const lineUserId = customer?.line_user_id;
 
     if (!lineUserId) {

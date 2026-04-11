@@ -312,13 +312,13 @@ export default function ExpensesPage() {
     <div className="space-y-6 container mx-auto py-6">
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
           <div>
-            <h1 className="text-3xl font-bold tracking-tight text-slate-900 border-l-4 border-emerald-600 pl-3">
+            <h1 className="text-3xl font-bold tracking-tight text-slate-900 dark:text-slate-100 border-l-4 border-emerald-600 pl-3">
               売上記帳
             </h1>
             <p className="text-muted-foreground mt-2">AIレシート読み取りで経費を効率化</p>
           </div>
-          <div className="flex items-center gap-3 flex-wrap sm:flex-nowrap p-3 bg-slate-50 rounded-xl border border-slate-200">
-            <span className="text-sm font-bold text-slate-500 mr-2 border-r pr-3">こちらの入力も必要ですか？</span>
+          <div className="flex items-center gap-3 flex-wrap sm:flex-nowrap p-3 bg-slate-50 dark:bg-slate-800/50 rounded-xl border border-slate-200 dark:border-white/10">
+            <span className="text-sm font-bold text-slate-500 dark:text-slate-400 mr-2 border-r dark:border-slate-700 pr-3">こちらの入力も必要ですか？</span>
             <Link href="/admin/sales">
               <Button size="lg" className="bg-emerald-600 hover:bg-emerald-700 text-white shadow-lg shadow-emerald-200/50 flex items-center gap-2 group">
                 <Plus className="w-5 h-5 group-hover:scale-110 transition-transform" />
@@ -341,11 +341,11 @@ export default function ExpensesPage() {
               仕分け待ちを確認
             </Button>
           </Link>
-          <div className="flex items-center gap-2 bg-white p-2 border rounded-lg shadow-sm">
-            <CalendarIcon className="w-5 h-5 text-emerald-600" />
+          <div className="flex items-center gap-2 bg-white dark:bg-slate-900 p-2 border dark:border-slate-800 rounded-lg shadow-sm">
+            <CalendarIcon className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
             <input
               type="date"
-              className="border-none focus:ring-0 text-sm font-medium"
+              className="border-none focus:ring-0 text-sm font-medium bg-transparent dark:text-slate-100"
               value={format(date, "yyyy-MM-dd")}
               onChange={(e) => setDate(new Date(e.target.value))}
             />
@@ -355,7 +355,7 @@ export default function ExpensesPage() {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* 入力フォーム */}
-        <Card className="lg:col-span-1 shadow-sm border-slate-200">
+        <Card className="lg:col-span-1 shadow-sm border-slate-200 dark:border-white/10 dark:bg-slate-900/50">
           <CardHeader>
             <CardTitle className="text-lg flex items-center gap-2">
               <Plus className="w-5 h-5 text-emerald-600" />
@@ -407,8 +407,8 @@ export default function ExpensesPage() {
               {/* プレビュー */}
               {previewUrl && !isReading && !cameraOpen && (
                 <div className="relative">
-                  <img src={previewUrl} alt="レシート" className="w-full max-h-36 object-contain rounded-xl border border-slate-200 bg-slate-50" />
-                  <button type="button" onClick={() => setPreviewUrl(null)} className="absolute top-1 right-1 bg-white rounded-full w-5 h-5 flex items-center justify-center text-slate-400 hover:text-slate-600 border border-slate-200 text-xs shadow">✕</button>
+                  <img src={previewUrl} alt="レシート" className="w-full max-h-36 object-contain rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950" />
+                  <button type="button" onClick={() => setPreviewUrl(null)} className="absolute top-1 right-1 bg-white dark:bg-slate-800 rounded-full w-5 h-5 flex items-center justify-center text-slate-400 hover:text-slate-600 border border-slate-200 dark:border-slate-700 text-xs shadow">✕</button>
                 </div>
               )}
 
@@ -443,7 +443,7 @@ export default function ExpensesPage() {
                   type="date"
                   value={formExpenseDate}
                   onChange={(e) => setFormExpenseDate(e.target.value)}
-                  className="w-full border border-slate-200 rounded-md px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
+                  className="w-full border border-slate-200 dark:border-slate-800 rounded-md px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 outline-none bg-white dark:bg-slate-950 text-slate-900 dark:text-slate-100"
                 />
                 <p className="text-xs text-slate-400">レシート読み取り時に自動入力。手動でも変更できます</p>
               </div>
@@ -454,7 +454,7 @@ export default function ExpensesPage() {
                   <select
                     id="category"
                     name="category"
-                    className="w-full border border-slate-200 rounded-md pl-9 pr-3 py-2 text-sm bg-white focus:ring-2 focus:ring-emerald-500 outline-none"
+                    className="w-full border border-slate-200 dark:border-slate-800 rounded-md pl-9 pr-3 py-2 text-sm bg-white dark:bg-slate-950 text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-emerald-500 outline-none"
                   >
                     <option value="">（後で決める）</option>
                     {EXPENSE_CATEGORIES.map((cat) => (
@@ -503,21 +503,21 @@ export default function ExpensesPage() {
         </Card>
 
         {/* 経費リスト */}
-        <Card className="lg:col-span-2 shadow-sm border-slate-200">
+        <Card className="lg:col-span-2 shadow-sm border-slate-200 dark:border-white/10 dark:bg-slate-900/50">
           <CardHeader className="flex flex-row items-center justify-between">
             <div>
-              <CardTitle>今月（{format(date, "M月")}）の確定済み経費</CardTitle>
+              <CardTitle className="text-slate-900 dark:text-slate-100">今月（{format(date, "M月")}）の確定済み経費</CardTitle>
               <CardDescription>{expenses.length} 件の記録があります</CardDescription>
             </div>
             <div className="text-right">
-              <p className="text-xs text-slate-500 font-medium">今月経費合計</p>
-              <p className="text-2xl font-bold text-emerald-600">¥{totalAmount.toLocaleString()}</p>
+              <p className="text-xs text-slate-500 dark:text-slate-400 font-medium">今月経費合計</p>
+              <p className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">¥{totalAmount.toLocaleString()}</p>
             </div>
           </CardHeader>
           <CardContent>
-            <div className="rounded-md border border-slate-100 overflow-hidden">
+            <div className="rounded-md border border-slate-100 dark:border-white/5 overflow-hidden">
               <Table>
-                <TableHeader className="bg-slate-50/50">
+                <TableHeader className="bg-slate-50/50 dark:bg-slate-800/30">
                   <TableRow>
                     <TableHead className="w-[100px]">日付</TableHead>
                     <TableHead>カテゴリ</TableHead>

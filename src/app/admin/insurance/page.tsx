@@ -77,14 +77,14 @@ export default function InsurancePage() {
     <div className="space-y-6 container mx-auto py-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">保険入金管理</h1>
-          <p className="text-slate-500">振込通知等に基づき、各保険の入金額を記録します</p>
+          <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-100">保険入金管理</h1>
+          <p className="text-slate-500 dark:text-slate-400">振込通知等に基づき、各保険の入金額を記録します</p>
         </div>
-        <div className="flex items-center gap-2 bg-white p-2 border rounded-lg shadow-sm">
-          <CalendarIcon className="w-5 h-5 text-blue-600" />
+        <div className="flex items-center gap-2 bg-white dark:bg-slate-900 p-2 border dark:border-slate-800 rounded-lg shadow-sm">
+          <CalendarIcon className="w-5 h-5 text-blue-600 dark:text-blue-400" />
           <input 
             type="month" 
-            className="border-none focus:ring-0 text-sm font-medium" 
+            className="border-none focus:ring-0 text-sm font-medium bg-transparent dark:text-slate-100" 
             value={format(currentMonth!, "yyyy-MM")} 
             onChange={(e) => setCurrentMonth(startOfMonth(new Date(e.target.value + "-01")))}
           />
@@ -93,7 +93,7 @@ export default function InsurancePage() {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* 入力フォーム */}
-        <Card className="lg:col-span-1 shadow-sm border-slate-200 h-fit">
+        <Card className="lg:col-span-1 shadow-sm border-slate-200 dark:border-white/10 dark:bg-slate-900/50 h-fit">
           <CardHeader>
             <CardTitle className="text-lg flex items-center gap-2">
               <FileText className="w-5 h-5 text-blue-600" />
@@ -141,22 +141,22 @@ export default function InsurancePage() {
         </Card>
 
         {/* 入金リスト */}
-        <Card className="lg:col-span-2 shadow-sm border-slate-200">
+        <Card className="lg:col-span-2 shadow-sm border-slate-200 dark:border-white/10 dark:bg-slate-900/50">
           <CardHeader className="flex flex-row items-center justify-between">
             <div>
               <CardTitle>{format(currentMonth!, "yyyy年M月")} 入金内訳</CardTitle>
               <CardDescription>{payments.length} 件の登録済みデータ</CardDescription>
             </div>
             <div className="text-right">
-              <p className="text-xs text-slate-500 font-medium">保険入金合計</p>
-              <p className="text-2xl font-bold text-emerald-600">¥{totalAmount.toLocaleString()}</p>
+              <p className="text-xs text-slate-500 dark:text-slate-400 font-medium">保険入金合計</p>
+              <p className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">¥{totalAmount.toLocaleString()}</p>
             </div>
           </CardHeader>
           <CardContent>
-            <div className="rounded-md border border-slate-100 overflow-hidden">
+            <div className="rounded-md border border-slate-100 dark:border-white/5 overflow-hidden">
               <Table>
-                <TableHeader className="bg-slate-50/50">
-                  <TableRow>
+                <TableHeader className="bg-slate-50/50 dark:bg-slate-800/30">
+                  <TableRow className="border-b dark:border-white/5">
                     <TableHead>保険種別・名称</TableHead>
                     <TableHead className="text-right">振込金額</TableHead>
                     <TableHead className="w-[80px]"></TableHead>
@@ -180,9 +180,9 @@ export default function InsurancePage() {
                     </TableRow>
                   ) : (
                     payments.map((p) => (
-                      <TableRow key={p.id} className="hover:bg-slate-50/50 transition-colors">
-                        <TableCell className="font-medium text-slate-700">{p.insurance_name}</TableCell>
-                        <TableCell className="text-right font-bold text-slate-800">¥{p.amount.toLocaleString()}</TableCell>
+                      <TableRow key={p.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/30 transition-colors border-b dark:border-white/5">
+                        <TableCell className="font-medium text-slate-700 dark:text-slate-300">{p.insurance_name}</TableCell>
+                        <TableCell className="text-right font-bold text-slate-800 dark:text-slate-200">¥{p.amount.toLocaleString()}</TableCell>
                         <TableCell className="text-right">
                           <Button 
                             variant="ghost" 

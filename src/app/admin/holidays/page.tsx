@@ -80,8 +80,8 @@ export default function AdminHolidaysPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-3xl font-bold tracking-tight">休診日設定</h1>
-        <p className="text-slate-500 mt-2">
+        <h1 className="text-3xl font-bold tracking-tight text-slate-900 dark:text-white">休診日設定</h1>
+        <p className="text-slate-600 dark:text-slate-300 mt-2">
           臨時休診する日をカレンダーからタップして設定します。ここで設定した時間枠は予約できなくなります。
         </p>
       </div>

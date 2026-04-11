@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { Button } from "@/components/ui/button";
@@ -104,7 +104,7 @@ export default function AiChatPanel() {
       if (data.error) {
         setMessages((prev) => [
           ...prev,
-          { role: "assistant", content: `笞・・繧ｨ繝ｩ繝ｼ: ${data.error}` },
+          { role: "assistant", content: `\u26a0\ufe0f \u30a8\u30e9\u30fc: ${data.error}` },
         ]);
       } else {
         setMessages((prev) => [
@@ -115,7 +115,7 @@ export default function AiChatPanel() {
     } catch (err) {
       setMessages((prev) => [
         ...prev,
-        { role: "assistant", content: "AI遘俶嶌縺御ｼ第・荳ｭ縺ｧ縺吶ょｰ代＠譎る俣繧堤ｽｮ縺・※縺九ｉ隧ｱ縺励°縺代※縺上□縺輔＞縲・ },
+        { role: "assistant", content: "AI\u79d8\u66f8\u304c\u5fdc\u7b54\u4e2d\u3067\u3059\u3002\u5c11\u3057\u6642\u9593\u3092\u304a\u3044\u3066\u304b\u3089\u304a\u8a66\u3057\u304f\u3060\u3055\u3044\u3002" },
       ]);
     } finally {
       setIsLoading(false);
@@ -166,12 +166,13 @@ export default function AiChatPanel() {
       {!isOpen && (
         <button
           onClick={() => setIsOpen(true)}
-          className="fixed bottom-6 right-6 z-50 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-full p-4 shadow-xl hover:shadow-2xl hover:scale-105 transition-all duration-300 group"
+          className="fixed bottom-6 right-6 z-50 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-2xl px-4 py-3 shadow-xl hover:shadow-2xl hover:scale-105 transition-all duration-300 group flex items-center gap-2"
         >
           <div className="relative">
-            <Sparkles className="w-6 h-6 group-hover:animate-pulse" />
-            <span className="absolute -top-1 -right-1 w-3 h-3 bg-emerald-400 rounded-full animate-pulse border-2 border-white" />
+            <Sparkles className="w-5 h-5 group-hover:animate-pulse" />
+            <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-emerald-400 rounded-full animate-pulse border-2 border-white" />
           </div>
+          <span className="text-sm font-black tracking-tight">AI秘書</span>
         </button>
       )}
 
@@ -185,8 +186,8 @@ export default function AiChatPanel() {
                 <Sparkles className="w-5 h-5" />
               </div>
               <div>
-                <h3 className="font-bold text-sm tracking-wide">V-ARC AI遘俶嶌</h3>
-                <p className="text-[10px] text-white/70 font-medium">繝ｪ繧｢繝ｫ繧ｿ繧､繝繝・・繧ｿ蛻・梵 窶｢ Gemini</p>
+                <h3 className="font-bold text-sm tracking-wide">V-ARC AI秘書</h3>
+                <p className="text-[10px] text-white/70 font-medium">リアルタイムデータ分析 — Gemini</p>
               </div>
             </div>
             <button
@@ -202,23 +203,23 @@ export default function AiChatPanel() {
             {isHistoryLoading ? (
               <div className="flex items-center justify-center h-full text-slate-400">
                 <Loader2 className="w-6 h-6 animate-spin mr-2" />
-                <span className="text-sm">螻･豁ｴ繧定ｪｭ縺ｿ霎ｼ縺ｿ荳ｭ...</span>
+                <span className="text-sm">履歴を読み込み中...</span>
               </div>
             ) : messages.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-full text-center px-6">
                 <div className="w-16 h-16 bg-gradient-to-br from-indigo-100 to-purple-100 rounded-2xl flex items-center justify-center mb-4">
                   <Sparkles className="w-8 h-8 text-indigo-500" />
                 </div>
-                <h4 className="font-bold text-slate-800 text-lg mb-2">V-ARC AI遘俶嶌縺ｸ繧医≧縺薙◎</h4>
+                <h4 className="font-bold text-slate-800 text-lg mb-2">V-ARC AI秘書へようこそ</h4>
                 <p className="text-sm text-slate-500 mb-6">
-                  髯｢縺ｮ邨悟霧迥ｶ豕√ｒ繝ｪ繧｢繝ｫ繧ｿ繧､繝縺ｧ蛻・梵縺励・
-                  <br />蜈ｷ菴鍋噪縺ｪ繧｢繧ｯ繧ｷ繝ｧ繝ｳ繧呈署譯医＠縺ｾ縺吶・
+                  院の経営状況をリアルタイムで分析し、
+                  <br />具体的なアクションを提案します。
                 </p>
                 <div className="space-y-2 w-full">
                   {[
-                    "莉翫・邨悟霧迥ｶ豕√ｒ縺ｩ縺・昴≧・・,
-                    "莉頑怦縺ｮ逶ｮ讓咎＃謌舌・縺溘ａ縺ｫ縺吶∋縺阪％縺ｨ縺ｯ・・,
-                    "髮・ｮ｢繧貞｢励ｄ縺吶い繧､繝・い繧呈蕗縺医※",
+                    "今の経営状況をどう思う？",
+                    "今月の目標達成のためにすべきことは？",
+                    "集患を増やすアイデアを教えて",
                   ].map((suggestion) => (
                     <button
                       key={suggestion}
@@ -228,7 +229,7 @@ export default function AiChatPanel() {
                       }}
                       className="w-full text-left p-3 bg-white rounded-xl border border-slate-200 text-sm text-slate-700 hover:border-indigo-300 hover:bg-indigo-50/50 transition-all group"
                     >
-                      <span className="text-indigo-500 mr-2 group-hover:mr-3 transition-all">竊・/span>
+                      <span className="text-indigo-500 mr-2 group-hover:mr-3 transition-all">→</span>
                       {suggestion}
                     </button>
                   ))}
@@ -261,7 +262,7 @@ export default function AiChatPanel() {
                     <div className="bg-white border border-slate-200 rounded-2xl rounded-bl-md px-4 py-3 shadow-sm">
                       <div className="flex items-center gap-2 text-slate-400">
                         <Loader2 className="w-4 h-4 animate-spin" />
-                        <span className="text-sm">蛻・梵荳ｭ...</span>
+                        <span className="text-sm">分析中...</span>
                       </div>
                     </div>
                   </div>
@@ -280,7 +281,7 @@ export default function AiChatPanel() {
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder="邨悟霧縺ｫ縺､縺・※逶ｸ隲・☆繧・.."
+                placeholder="経営について質問する..."
                 className="flex-1 border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent bg-slate-50 placeholder:text-slate-400"
                 disabled={isLoading}
               />
@@ -293,7 +294,7 @@ export default function AiChatPanel() {
               </button>
             </div>
             <p className="text-[10px] text-slate-400 mt-2 text-center">
-              邨悟霧遘俶嶌AI 窶｢ 繝ｪ繧｢繝ｫ繧ｿ繧､繝繝・・繧ｿ縺ｫ蝓ｺ縺･縺乗署譯・
+              経営秘書AI — リアルタイムデータに基づく提案
             </p>
           </div>
         </div>
@@ -301,4 +302,3 @@ export default function AiChatPanel() {
     </>
   );
 }
-

@@ -1,4 +1,10 @@
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { checkAdminAuth, logoutAction } from "@/app/actions/auth";
+import Link from "next/link";
+import Image from "next/image";
+import { Button } from "@/components/ui/button";
+import { LogOut } from "lucide-react";
+import AiChatPanel from "@/components/AiChatPanel";
 
 export default async function AdminLayout({
   children,
@@ -26,14 +32,14 @@ export default async function AdminLayout({
             </Link>
             <div className="h-6 w-px bg-slate-200 dark:bg-slate-800 mx-2 hidden md:block" />
             <span className="text-sm font-medium text-slate-500 hidden md:block uppercase tracking-widest">AI Secretary System</span>
-            <nav className="hidden lg:flex gap-5 text-sm items-center">
-              <Link href="/admin/dashboard" className="text-slate-600 dark:text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 font-medium">ダッシュボード</Link>
-              <Link href="/admin/appointments" className="text-slate-600 dark:text-slate-400 hover:text-blue-600 dark:hover:text-blue-400">予約一覧</Link>
-              <Link href="/admin/customers" className="text-slate-600 dark:text-slate-400 hover:text-blue-600 dark:hover:text-blue-400">顧客管理</Link>
-              <Link href="/admin/expenses" className="px-3 py-1 bg-slate-100 dark:bg-slate-800 rounded-md text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors font-bold">売上記帳</Link>
-              <Link href="/admin/evaluation" className="text-slate-600 dark:text-slate-400 hover:text-blue-600 dark:hover:text-blue-400">経営評価</Link>
-              <Link href="/admin/marketing" className="text-slate-600 dark:text-slate-400 hover:text-blue-600 dark:hover:text-blue-400">LINE・販促</Link>
-              <Link href="/admin/settings" className="text-slate-400 dark:text-slate-600 hover:text-blue-600 ml-2">設定</Link>
+            <nav className="flex flex-wrap gap-x-4 gap-y-1 text-sm items-center">
+              <Link href="/admin/dashboard" className="text-slate-600 dark:text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 font-medium whitespace-nowrap">ダッシュボード</Link>
+              <Link href="/admin/appointments" className="text-slate-600 dark:text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 whitespace-nowrap">予約一覧</Link>
+              <Link href="/admin/customers" className="text-slate-600 dark:text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 whitespace-nowrap">顧客管理</Link>
+              <Link href="/admin/expenses" className="px-3 py-1 bg-slate-100 dark:bg-slate-800 rounded-md text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors font-bold whitespace-nowrap">売上記帳</Link>
+              <Link href="/admin/evaluation" className="text-slate-600 dark:text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 whitespace-nowrap">経営評価</Link>
+              <Link href="/admin/marketing" className="text-slate-600 dark:text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 whitespace-nowrap">LINE・販促</Link>
+              <Link href="/admin/settings" className="text-slate-400 dark:text-slate-600 hover:text-blue-600 ml-2 whitespace-nowrap">設定</Link>
             </nav>
           </div>
           <div className="flex items-center gap-2">

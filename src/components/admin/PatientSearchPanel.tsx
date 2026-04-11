@@ -146,8 +146,8 @@ export function PatientSearchPanel({ open, onOpenChange, onRefresh, initialPatie
   return (
     <Dialog open={open} onOpenChange={handleClose}>
       <DialogContent className="w-full max-w-lg max-h-[90vh] overflow-y-auto p-0">
-        <DialogHeader className="px-5 pt-5 pb-3 border-b sticky top-0 bg-white z-10">
-          <DialogTitle className="flex items-center gap-2 text-base">
+        <DialogHeader className="px-5 pt-5 pb-3 border-b sticky top-0 bg-white dark:bg-slate-900 z-10">
+          <DialogTitle className="flex items-center gap-2 text-base text-slate-900 dark:text-white">
             <Search className="w-4 h-4 text-blue-600" />
             患者別 予約確認・予測
           </DialogTitle>
@@ -179,15 +179,15 @@ export function PatientSearchPanel({ open, onOpenChange, onRefresh, initialPatie
                   <button
                     key={p.id}
                     type="button"
-                    className="w-full flex items-center gap-3 px-4 py-3 hover:bg-slate-50 text-left border-b last:border-0"
+                    className="w-full flex items-center gap-3 px-4 py-3 hover:bg-slate-50 dark:hover:bg-slate-800 text-left border-b last:border-0 dark:border-slate-700"
                     onClick={() => handleSelectPatient(p)}
                   >
                     <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center shrink-0">
                       <User className="w-4 h-4 text-blue-600" />
                     </div>
                     <div>
-                      <p className="font-semibold text-sm text-slate-800">{p.name}</p>
-                      <p className="text-xs text-slate-400">{p.phone}</p>
+                      <p className="font-semibold text-sm text-slate-800 dark:text-slate-100">{p.name}</p>
+                      <p className="text-xs text-slate-500 dark:text-slate-400">{p.phone}</p>
                     </div>
                     {p.line_user_id && (
                       <span className="ml-auto text-[10px] text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded-full font-semibold">LINE済</span>
@@ -202,13 +202,13 @@ export function PatientSearchPanel({ open, onOpenChange, onRefresh, initialPatie
           {selected && (
             <div className="space-y-5">
               {/* 患者ヘッダー */}
-              <div className="flex items-center gap-3 p-3 bg-blue-50 rounded-xl border border-blue-100">
+              <div className="flex items-center gap-3 p-3 bg-blue-50 dark:bg-blue-950/50 rounded-xl border border-blue-100 dark:border-blue-800">
                 <div className="w-10 h-10 rounded-full bg-blue-600 flex items-center justify-center shrink-0">
                   <User className="w-5 h-5 text-white" />
                 </div>
                 <div>
-                  <p className="font-bold text-slate-800">{selected.name}</p>
-                  <p className="text-xs text-slate-500">{selected.phone}</p>
+                  <p className="font-bold text-slate-800 dark:text-slate-100">{selected.name}</p>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">{selected.phone}</p>
                 </div>
                 <Button
                   size="sm"

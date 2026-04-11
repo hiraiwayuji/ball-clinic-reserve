@@ -45,6 +45,12 @@
   --radius-2xl: calc(var(--radius) * 1.8);
   --radius-3xl: calc(var(--radius) * 2.2);
   --radius-4xl: calc(var(--radius) * 2.6);
+  --animate-marquee: marquee 60s linear infinite;
+
+  @keyframes marquee {
+    from { transform: translateX(0); }
+    to { transform: translateX(-50%); }
+  }
 }
 
 :root {
@@ -125,6 +131,9 @@
   }
   html {
     @apply font-sans;
+  }
+  input, select, option {
+    @apply bg-slate-900 text-white border-white/20;
   }
 }
 

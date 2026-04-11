@@ -250,12 +250,12 @@ function ReserveContent() {
                     <div className="space-y-2">
                       <Label className="text-blue-100/60 font-bold text-xs uppercase">来院時間</Label>
                       <Select value={time} onValueChange={(val) => setTime(val || "")}>
-                        <SelectTrigger className="w-full h-14 bg-white/5 border border-white/10 rounded-2xl px-4 text-white">
+                        <SelectTrigger className="w-full h-14 bg-slate-900 border-white/10 rounded-2xl px-4 text-white">
                           <SelectValue placeholder="時間を選択" />
                         </SelectTrigger>
                         <SelectContent className="bg-slate-900 border-white/10 text-white">
                           {(date ? getTimeSlots(date) : []).map((t) => (
-                            <SelectItem key={t} value={t}>{t}</SelectItem>
+                            <SelectItem key={t} value={t} className="bg-slate-900 text-white focus:bg-slate-800">{t}</SelectItem>
                           ))}
                         </SelectContent>
                       </Select>
@@ -288,29 +288,28 @@ function ReserveContent() {
                     </div>
                   </div>
 
-                  {/* お名前 */}
-                  <div className="space-y-2">
-                    <Label className="text-blue-100/60 font-bold text-xs uppercase" htmlFor="name">お名前</Label>
-                    <Input id="name" name="name" value={name} onChange={(e) => setName(e.target.value)} required placeholder="山田 太郎" className="h-14 bg-white/5 border-white/10 rounded-2xl text-white placeholder:text-white/20" />
-                  </div>
+                    <div className="space-y-2">
+                      <Label className="text-blue-100/60 font-bold text-xs uppercase" htmlFor="name">お名前</Label>
+                      <Input id="name" name="name" value={name} onChange={(e) => setName(e.target.value)} required placeholder="山田 太郎" className="h-14 bg-slate-900 border-white/10 rounded-2xl text-white placeholder:text-white/20" />
+                    </div>
 
-                  {/* 初診のみ：電話番号・LINE */}
-                  {visitType === "new" && (
-                    <div className="space-y-4 p-6 bg-blue-500/10 border border-blue-500/20 rounded-2xl">
-                      <p className="text-blue-300 text-sm font-bold">📋 初診の方は以下もご入力ください</p>
-                      <div className="space-y-2">
-                        <Label className="text-blue-100/60 font-bold text-xs uppercase" htmlFor="phone">電話番号</Label>
-                        <Input
-                          id="phone"
-                          name="phone"
-                          type="tel"
-                          value={phone}
-                          onChange={(e) => setPhone(e.target.value)}
-                          required
-                          placeholder="090-0000-0000"
-                          className="h-14 bg-white/5 border-white/10 rounded-2xl text-white placeholder:text-white/20"
-                        />
-                      </div>
+                    {/* 初診のみ：電話番号・LINE */}
+                    {visitType === "new" && (
+                      <div className="space-y-4 p-6 bg-blue-500/10 border border-blue-500/20 rounded-2xl">
+                        <p className="text-blue-300 text-sm font-bold">📋 初診の方は以下もご入力ください</p>
+                        <div className="space-y-2">
+                          <Label className="text-blue-100/60 font-bold text-xs uppercase" htmlFor="phone">電話番号</Label>
+                          <Input
+                            id="phone"
+                            name="phone"
+                            type="tel"
+                            value={phone}
+                            onChange={(e) => setPhone(e.target.value)}
+                            required
+                            placeholder="090-0000-0000"
+                            className="h-14 bg-slate-900 border-white/10 rounded-2xl text-white placeholder:text-white/20"
+                          />
+                        </div>
                       <div className="flex items-center gap-3 p-4 bg-green-500/10 border border-green-500/20 rounded-xl">
                         <input
                           type="checkbox"

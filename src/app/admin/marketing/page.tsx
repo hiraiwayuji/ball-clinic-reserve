@@ -13,11 +13,16 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { sendAppointmentReminders, sendBirthdayCoupons, runMonthlyLottery, sendWelcomeQuestionnaire, sendWomenOnlyCampaign, getMarketingStats, sendSegmentedCampaign, sendReferralMessage } from "@/app/actions/line-marketing";
+import { updateClinicSettings, getClinicSettings } from "@/app/actions/settings";
 import Link from "next/link";
+import { Clock } from "lucide-react";
 
 export default function MarketingDashboardPage() {
   const [loadingAction, setLoadingAction] = useState<string | null>(null);
-  const [actionResult, setActionResult] = useState<{ type: string; message: string; data?: any; debugLogs?: string[] } | null>(null);
+  const [actionResult, setActionResult] = useState<{ type: string; message: string; wasTestMode?: boolean; data?: any; debugLogs?: string[] } | null>(null);
+  const [previewDialog, setPreviewDialog] = useState<{ label: string; count: string; sentAt: string; onConfirm: (msg: string, time: string) => void } | null>(null);
+  const [previewMessage, setPreviewMessage] = useState("");
+  const [previewTime, setPreviewTime] = useState("");
   const [selectedMonth, setSelectedMonth] = useState<string>(new Date().getMonth() + 1 + "");
   const [testMode, setTestMode] = useState(true);
   const [testLineId, setTestLineId] = useState("");
@@ -27,6 +32,9 @@ export default function MarketingDashboardPage() {
   const [stats, setStats] = useState<any>(null);
   const [referralTargetId, setReferralTargetId] = useState("");
   const [showQr, setShowQr] = useState(false);
+  const [autoRemindEnabled, setAutoRemindEnabled] = useState(false);
+  const [autoRemindTime, setAutoRemindTime] = useState("08:00");
+  const [savingRemindSettings, setSavingRemindSettings] = useState(false);
 
   // 初回読み込み
   useEffect(() => {
@@ -38,7 +46,19 @@ export default function MarketingDashboardPage() {
         console.error("Stats load error:", e);
       }
     }
+    async function loadRemindSettings() {
+      try {
+        const s = await getClinicSettings();
+        if (s) {
+          setAutoRemindEnabled((s as any).auto_remind_enabled ?? false);
+          setAutoRemindTime((s as any).auto_remind_time ?? "08:00");
+        }
+      } catch (e) {
+        console.error("Remind settings load error:", e);
+      }
+    }
     loadStats();
+    loadRemindSettings();
   }, []);
 
   // 設定の読み込み
@@ -60,107 +80,136 @@ export default function MarketingDashboardPage() {
     localStorage.setItem("ballClinic_testLineId", val);
   };
 
-  const handleSendReminders = async () => {
-    setLoadingAction("reminders");
+  const handleSaveRemindSettings = async (enabled: boolean, time: string) => {
+    setSavingRemindSettings(true);
     try {
-      const result = await sendAppointmentReminders(testMode ? testLineId : null);
-      setActionResult({ 
-        type: "reminders", 
-        message: `本日の予約（${result.count}件）に対してリマインドメッセージを送信完了しました！`,
-        data: result.sentTo,
-        debugLogs: result.debugLogs
-      });
-    } catch (e: any) {
-      setActionResult({ type: "error", message: e.message || "エラーが発生しました" });
+      await updateClinicSettings({ auto_remind_enabled: enabled as any, auto_remind_time: time as any } as any);
+      setAutoRemindEnabled(enabled);
+      setAutoRemindTime(time);
+    } catch (e) {
+      console.error("Remind settings save error:", e);
     } finally {
-      setLoadingAction(null);
+      setSavingRemindSettings(false);
     }
   };
 
-  const handleSendBirthday = async () => {
-    setLoadingAction("birthday");
-    try {
-      const result = await sendBirthdayCoupons(parseInt(selectedMonth));
-      setActionResult({ 
-        type: "birthday", 
-        message: `${selectedMonth}月生まれの患者さん（${result.count}名）へ誕生日クーポン付きLINEを送信しました！`,
-        data: result.sentTo
-      });
-    } catch (e: any) {
-      setActionResult({ type: "error", message: e.message || "エラーが発生しました" });
-    } finally {
-      setLoadingAction(null);
-    }
+  const nowStr = () => new Date().toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" });
+
+  /** 配信前プレビューダイアログを表示し、確認後にコールバックを実行 */
+  const showPreview = (label: string, count: string, defaultMessage: string, onConfirm: (msg: string, time: string) => void) => {
+    setPreviewMessage(defaultMessage);
+    setPreviewTime(nowStr());
+    setPreviewDialog({ label, count, sentAt: nowStr(), onConfirm });
   };
 
-  const handleRunLottery = async () => {
-    setLoadingAction("lottery");
-    try {
-      const result = await runMonthlyLottery();
-      setActionResult({ 
-        type: "lottery", 
-        message: `今月の来院者限定抽選会を実施しました！（対象: ${result.totalCount}名, 当選: ${result.winnerCount}名）`,
-        data: { winners: result.winners, target: result.target, note: (result as any).note }
-      });
-    } catch (e: any) {
-      setActionResult({ type: "error", message: e.message || "エラーが発生しました" });
-    } finally {
-      setLoadingAction(null);
-    }
+  const handleSendReminders = () => {
+    const count = stats?.todayAppointments != null ? `本日の予約 ${stats.todayAppointments}件` : "本日の予約者";
+    const defaultMsg = "様\n\nこんにちは！ボール接骨院です。\n本日ご予約日となっております。\nお気を付けてお越しください！";
+    showPreview("当日リマインド", testMode ? "テスト配信（自分のLINEのみ）" : count, defaultMsg, async (_msg, _time) => {
+      setLoadingAction("reminders");
+      try {
+        const result = await sendAppointmentReminders(testMode ? testLineId : null);
+        setActionResult({
+          type: "reminders", wasTestMode: testMode,
+          message: `本日の予約（${result.count}件）に対してリマインドメッセージを送信完了しました！`,
+          data: result.sentTo, debugLogs: result.debugLogs
+        });
+      } catch (e: any) {
+        setActionResult({ type: "error", message: e.message || "エラーが発生しました" });
+      } finally { setLoadingAction(null); }
+    });
   };
 
-  const handleSendWomenCampaign = async () => {
-    setLoadingAction("women");
-    try {
-      const result = await sendWomenOnlyCampaign(womenMessage);
-      setActionResult({
-        type: "women",
-        message: `女性患者さん（${result.count}名）へキャンペーンメッセージを送信しました！`,
-        data: result.sentTo,
-        debugLogs: result.debugLogs,
-      });
-    } catch (e: any) {
-      setActionResult({ type: "error", message: e.message || "エラーが発生しました" });
-    } finally {
-      setLoadingAction(null);
-    }
+  const handleSendBirthday = () => {
+    const count = stats?.birthdayThisMonth != null ? `${selectedMonth}月生まれ ${stats.birthdayThisMonth}名` : `${selectedMonth}月生まれの患者様`;
+    const defaultMsg = `🎂 お誕生日おめでとうございます！\n今月限定の特別クーポンをお届けします。\nぜひご来院の際にお使いください🎁`;
+    showPreview("誕生日クーポン", testMode ? "テスト配信（自分のLINEのみ）" : count, defaultMsg, async (_msg, _time) => {
+      setLoadingAction("birthday");
+      try {
+        const result = await sendBirthdayCoupons(parseInt(selectedMonth));
+        setActionResult({
+          type: "birthday", wasTestMode: testMode,
+          message: `${selectedMonth}月生まれの患者さん（${result.count}名）へ誕生日クーポン付きLINEを送信しました！`,
+          data: result.sentTo
+        });
+      } catch (e: any) {
+        setActionResult({ type: "error", message: e.message || "エラーが発生しました" });
+      } finally { setLoadingAction(null); }
+    });
   };
 
-  const handleSendQuestionnaire = async () => {
-    setLoadingAction("questionnaire");
-    try {
-      const result = await sendWelcomeQuestionnaire();
-      setActionResult({ 
-        type: "questionnaire", 
-        message: `初診・未回答の患者さん（${result.count}名）へ初回アンケート（性別・誕生月など）を送信しました！`,
-        data: result.sentTo
-      });
-    } catch (e: any) {
-      setActionResult({ type: "error", message: e.message || "エラーが発生しました" });
-    } finally {
-      setLoadingAction(null);
-    }
+  const handleRunLottery = () => {
+    const defaultMsg = "🎰 今月の来院者限定抽選会を実施します！\n当選された方には特別クーポンをお届けします。";
+    showPreview("来院者限定抽選会", testMode ? "テスト配信（自分のLINEのみ）" : "来院履歴のある患者様全員", defaultMsg, async (_msg, _time) => {
+      setLoadingAction("lottery");
+      try {
+        const result = await runMonthlyLottery();
+        setActionResult({
+          type: "lottery", wasTestMode: testMode,
+          message: `今月の来院者限定抽選会を実施しました！（対象: ${result.totalCount}名, 当選: ${result.winnerCount}名）`,
+          data: { winners: result.winners, target: result.target, note: (result as any).note }
+        });
+      } catch (e: any) {
+        setActionResult({ type: "error", message: e.message || "エラーが発生しました" });
+      } finally { setLoadingAction(null); }
+    });
   };
 
-  const handleSendAreaCampaign = async () => {
+  const handleSendWomenCampaign = () => {
+    const count = stats?.women != null ? `女性患者様 ${stats.women}名` : "女性患者様";
+    const defaultMsg = womenMessage || "女性患者様へ特別なお知らせをお届けします。";
+    showPreview("女性限定キャンペーン", testMode ? "テスト配信（自分のLINEのみ）" : count, defaultMsg, async (msg, _time) => {
+      setWomenMessage(msg);
+      setLoadingAction("women");
+      try {
+        const result = await sendWomenOnlyCampaign(msg);
+        setActionResult({
+          type: "women", wasTestMode: testMode,
+          message: `女性患者さん（${result.count}名）へキャンペーンメッセージを送信しました！`,
+          data: result.sentTo, debugLogs: result.debugLogs,
+        });
+      } catch (e: any) {
+        setActionResult({ type: "error", message: e.message || "エラーが発生しました" });
+      } finally { setLoadingAction(null); }
+    });
+  };
+
+  const handleSendQuestionnaire = () => {
+    const defaultMsg = "ご来院ありがとうございます！\nカルテ作成のため、簡単なアンケートにご回答をお願いします🌱";
+    showPreview("初診アンケート", testMode ? "テスト配信（自分のLINEのみ）" : "初診・未回答の患者様", defaultMsg, async (_msg, _time) => {
+      setLoadingAction("questionnaire");
+      try {
+        const result = await sendWelcomeQuestionnaire();
+        setActionResult({
+          type: "questionnaire", wasTestMode: testMode,
+          message: `初診・未回答の患者さん（${result.count}名）へ初回アンケート（性別・誕生月など）を送信しました！`,
+          data: result.sentTo
+        });
+      } catch (e: any) {
+        setActionResult({ type: "error", message: e.message || "エラーが発生しました" });
+      } finally { setLoadingAction(null); }
+    });
+  };
+
+  const handleSendAreaCampaign = () => {
     if (!selectedCity) return;
-    setLoadingAction("area");
-    try {
-      const result = await sendSegmentedCampaign({
-        city: selectedCity,
-        message: areaMessage
-      });
-      setActionResult({
-        type: "area",
-        message: `${selectedCity}の患者さん（${result.count}名）へキャンペーンメッセージを送信しました！`,
-        data: result.sentTo,
-        debugLogs: result.debugLogs,
-      });
-    } catch (e: any) {
-      setActionResult({ type: "error", message: e.message || "エラーが発生しました" });
-    } finally {
-      setLoadingAction(null);
-    }
+    const cityCount = stats?.cityStats?.[selectedCity];
+    const count = cityCount != null ? `${selectedCity}の患者様 ${cityCount}名` : `${selectedCity}の患者様`;
+    const defaultMsg = areaMessage || `${selectedCity}エリアの患者様へ特別なお知らせをお届けします。`;
+    showPreview("エリア限定配信", testMode ? "テスト配信（自分のLINEのみ）" : count, defaultMsg, async (msg, _time) => {
+      setAreaMessage(msg);
+      setLoadingAction("area");
+      try {
+        const result = await sendSegmentedCampaign({ city: selectedCity!, message: msg });
+        setActionResult({
+          type: "area", wasTestMode: testMode,
+          message: `${selectedCity}の患者さん（${result.count}名）へキャンペーンメッセージを送信しました！`,
+          data: result.sentTo, debugLogs: result.debugLogs,
+        });
+      } catch (e: any) {
+        setActionResult({ type: "error", message: e.message || "エラーが発生しました" });
+      } finally { setLoadingAction(null); }
+    });
   };
 
   const handleSendReferral = async () => {
@@ -184,12 +233,13 @@ export default function MarketingDashboardPage() {
     <div className="space-y-6 pb-12">
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight flex items-center gap-2">
+          <h1 className="text-3xl font-bold tracking-tight flex items-center gap-2 text-slate-900 dark:text-slate-100">
             <MessageCircle className="h-8 w-8 text-green-500" />
             V-ARC 販促・LINE管理
           </h1>
-          <p className="text-slate-500 mt-1">
-            患者さんへの自動リマインドや、各種キャンペーンを一括送信します。
+          <p className="text-slate-500 dark:text-slate-400 mt-1">
+            LINEリマインド・キャンペーンを患者様へ一括送信します。<br />
+            <span className="text-amber-600 dark:text-amber-400 font-bold text-xs">⚠ 本番送信前に必ず「テスト送信モード」で動作確認してください。</span>
           </p>
         </div>
         
@@ -202,7 +252,7 @@ export default function MarketingDashboardPage() {
             </Button>
           </Link>
           <Link href="/admin/tasks">
-            <Button variant="outline" className="border-slate-200">
+            <Button variant="outline" className="border-slate-200 dark:border-slate-800 dark:text-slate-300">
               <ClipboardList className="w-4 h-4 mr-2 text-indigo-500" />
               SNSタスク
             </Button>
@@ -210,37 +260,114 @@ export default function MarketingDashboardPage() {
         </div>
       </div>
 
-      <div className="bg-white border border-slate-200 p-4 rounded-xl shadow-sm flex flex-col md:flex-row md:items-center gap-4">
-        <div className="flex items-center gap-2 text-sm font-bold text-slate-700">
-          <input 
-            type="checkbox" 
-            id="testMode" 
-            checked={testMode} 
-            onChange={(e) => handleToggleTestMode(e.target.checked)}
-            className="w-4 h-4 text-blue-600 rounded border-slate-300"
-          />
-          <label htmlFor="testMode">テスト送信モード（自分だけに届く）</label>
+      <div className={`border rounded-xl shadow-sm p-4 flex flex-col gap-3 ${testMode ? "bg-amber-50 dark:bg-amber-950/40 border-amber-300 dark:border-amber-700" : "bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800"}`}>
+        <div className="flex flex-col md:flex-row md:items-center gap-3">
+          <label className="flex items-center gap-2 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              id="testMode"
+              checked={testMode}
+              onChange={(e) => handleToggleTestMode(e.target.checked)}
+              className="w-4 h-4 text-amber-500 rounded border-slate-300 dark:border-slate-700 dark:bg-slate-800 accent-amber-500"
+            />
+            <span className={`text-sm font-bold ${testMode ? "text-amber-700 dark:text-amber-300" : "text-slate-700 dark:text-slate-300"}`}>
+              テスト送信モード（自分のLINEにだけ届く）
+            </span>
+          </label>
+          {testMode && (
+            <input
+              type="text"
+              placeholder="自分のLINEユーザーID (U3xxxx...) を入力"
+              value={testLineId}
+              onChange={(e) => handleChangeTestId(e.target.value)}
+              className="flex-1 border bg-white dark:bg-slate-800 border-amber-300 dark:border-amber-700 rounded-lg px-3 py-1.5 text-xs font-mono text-slate-800 dark:text-slate-200 placeholder:text-slate-400"
+            />
+          )}
         </div>
-        {testMode && (
-          <input 
-            type="text" 
-            placeholder="LINEユーザーID (U3....)" 
-            value={testLineId}
-            onChange={(e) => handleChangeTestId(e.target.value)}
-            className="flex-1 border bg-slate-50 border-slate-300 rounded-lg px-3 py-1.5 text-xs font-mono"
-          />
+        {testMode ? (
+          <p className="text-xs text-amber-700 dark:text-amber-300 font-semibold flex items-center gap-1">
+            ✅ テストモードON：上のIDのLINEにのみ送信されます。本番配信時はチェックを外してください。
+          </p>
+        ) : (
+          <p className="text-xs text-rose-600 dark:text-rose-400 font-bold flex items-center gap-1">
+            🔴 本番モード：各ボタンを押すと患者様全員に実際にLINEが送信されます。必ずテストモードで確認してから使用してください。
+          </p>
         )}
       </div>
 
+      {/* 配信前プレビューダイアログ */}
+      {previewDialog && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm animate-in fade-in p-4">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl max-w-sm w-full p-6 space-y-4 border border-slate-200 dark:border-slate-700">
+            <div className="flex items-center gap-2">
+              <div className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 ${testMode ? "bg-amber-100" : "bg-blue-100"}`}>
+                <MessageCircle className={`w-5 h-5 ${testMode ? "text-amber-600" : "text-blue-600"}`} />
+              </div>
+              <div>
+                <p className="font-black text-slate-900 dark:text-white text-sm">{previewDialog.label}</p>
+                <p className={`text-[10px] font-bold ${testMode ? "text-amber-600" : "text-slate-500 dark:text-slate-400"}`}>
+                  {testMode ? "🧪 テスト送信モード" : "🔴 本番送信"}
+                </p>
+              </div>
+            </div>
+            <div className="bg-slate-50 dark:bg-slate-800 rounded-xl p-3 space-y-2 text-sm">
+              <div className="flex justify-between items-center">
+                <span className="text-slate-500 dark:text-slate-400 text-xs">配信先</span>
+                <span className="font-bold text-slate-800 dark:text-slate-100 text-xs">{previewDialog.count}</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-slate-500 dark:text-slate-400 text-xs">配信時刻</span>
+                <input
+                  type="time"
+                  value={previewTime}
+                  onChange={(e) => setPreviewTime(e.target.value)}
+                  className="text-xs border border-slate-200 dark:border-slate-600 rounded px-2 py-0.5 bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 font-bold"
+                />
+              </div>
+            </div>
+            <div className="space-y-1">
+              <p className="text-xs font-bold text-slate-600 dark:text-slate-300">配信内容（編集可）</p>
+              <textarea
+                value={previewMessage}
+                onChange={(e) => setPreviewMessage(e.target.value)}
+                rows={4}
+                className="w-full text-xs border border-slate-200 dark:border-slate-600 rounded-lg p-2.5 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 resize-none focus:ring-2 focus:ring-blue-400 outline-none"
+              />
+            </div>
+            {!testMode && (
+              <p className="text-xs text-rose-600 dark:text-rose-400 font-semibold">
+                患者様全員に実際のLINEが送信されます。よろしいですか？
+              </p>
+            )}
+            <div className="flex gap-2 pt-1">
+              <Button variant="outline" className="flex-1" onClick={() => setPreviewDialog(null)}>キャンセル</Button>
+              <Button
+                className={`flex-1 font-bold ${testMode ? "bg-amber-500 hover:bg-amber-400 text-white" : "bg-blue-600 hover:bg-blue-500 text-white"}`}
+                onClick={() => { const fn = previewDialog.onConfirm; const msg = previewMessage; const t = previewTime; setPreviewDialog(null); fn(msg, t); }}
+              >
+                {testMode ? "テスト送信する" : "送信する"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {actionResult && (
-        <div className={`p-4 rounded-lg flex items-start gap-3 shadow-sm animate-in fade-in slide-in-from-top-2 ${actionResult.type === "error" ? "bg-rose-50 border border-rose-200 text-rose-800" : "bg-green-50 border border-green-200 text-green-800"}`}>
+        <div className={`p-4 rounded-lg flex items-start gap-3 shadow-sm animate-in fade-in slide-in-from-top-2 ${actionResult.type === "error" ? "bg-rose-50 border border-rose-200 text-rose-800" : actionResult.wasTestMode ? "bg-amber-50 border border-amber-200 text-amber-800" : "bg-green-50 border border-green-200 text-green-800"}`}>
           {actionResult.type === "error" ? (
              <div className="shrink-0 mt-0.5">⚠️</div>
+          ) : actionResult.wasTestMode ? (
+             <div className="shrink-0 mt-0.5">🧪</div>
           ) : (
              <CheckCircle2 className="h-5 w-5 text-green-600 shrink-0 mt-0.5" />
           )}
           <div className="flex-1">
-            <h3 className="font-bold">{actionResult.type === "error" ? "エラーが発生しました" : "配信完了"}</h3>
+            <h3 className="font-bold">
+              {actionResult.type === "error" ? "エラーが発生しました" : actionResult.wasTestMode ? "テスト配信完了" : "配信完了"}
+            </h3>
+            {actionResult.wasTestMode && (
+              <p className="text-xs font-bold text-amber-700 mb-1">【テスト配信】自分のLINEにのみ送信されました。本番配信ではありません。</p>
+            )}
             <p className="text-sm mt-0.5">{actionResult.message}</p>
             {actionResult.debugLogs && actionResult.debugLogs.length > 0 && (
               <div className="mt-4 p-3 bg-slate-900 text-green-400 rounded font-mono text-[10px] max-h-40 overflow-auto">
@@ -255,7 +382,7 @@ export default function MarketingDashboardPage() {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         
         {/* 1. 初診アンケート */}
-        <Card className="border-t-4 border-t-purple-500 hover:shadow-md transition-shadow h-full flex flex-col">
+        <Card className="border-t-4 border-t-purple-500 hover:shadow-md transition-shadow h-full flex flex-col dark:bg-slate-900/50 dark:border-x-white/5 dark:border-b-white/5">
           <CardHeader className="pb-3">
             <div className="w-10 h-10 rounded-full bg-purple-100 flex items-center justify-center text-purple-600 mb-2">
               <ClipboardList className="h-5 w-5" />
@@ -265,7 +392,7 @@ export default function MarketingDashboardPage() {
               属性取得用フォームを送信します。
             </CardDescription>
           </CardHeader>
-          <CardContent className="text-[11px] bg-slate-50 p-3 mx-4 rounded text-slate-500 flex-grow">
+          <CardContent className="text-[11px] bg-slate-50 dark:bg-slate-800/50 p-3 mx-4 rounded text-slate-500 dark:text-slate-400 flex-grow">
             「ご来院ありがとうございます！カルテ作成のためアンケートにご回答をお願いします🌱」
           </CardContent>
           <CardFooter className="pt-4 mt-auto">
@@ -277,29 +404,79 @@ export default function MarketingDashboardPage() {
         </Card>
 
         {/* 2. 当日リマインド */}
-        <Card className="border-t-4 border-t-blue-500 hover:shadow-md transition-shadow h-full flex flex-col">
+        <Card className="border-t-4 border-t-blue-500 hover:shadow-md transition-shadow h-full flex flex-col dark:bg-slate-900/50 dark:border-x-white/5 dark:border-b-white/5">
           <CardHeader className="pb-3">
-            <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 mb-2">
-              <BellElectric className="h-5 w-5" />
+            <div className="flex items-start justify-between">
+              <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 mb-2">
+                <BellElectric className="h-5 w-5" />
+              </div>
+              {autoRemindEnabled && (
+                <span className="text-[9px] font-bold bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300 px-2 py-0.5 rounded-full">自動配信ON</span>
+              )}
             </div>
             <CardTitle className="text-lg">当日リマインド</CardTitle>
             <CardDescription className="text-xs">
               本日の予約者へ忘れ防止LINE。
+              {stats?.todayAppointments != null && (
+                <span className="ml-1 font-bold text-blue-600 dark:text-blue-400">本日 {stats.todayAppointments}件</span>
+              )}
             </CardDescription>
           </CardHeader>
-          <CardContent className="text-[11px] bg-slate-50 p-3 mx-4 rounded text-slate-500 flex-grow">
-            「本日ご予約日となっております。お気を付けてお越しください！」
+          <CardContent className="space-y-3 flex-grow">
+            <div className="text-[11px] bg-slate-50 dark:bg-slate-800/50 p-3 rounded text-slate-500 dark:text-slate-400">
+              「本日ご予約日となっております。お気を付けてお越しください！」
+            </div>
+            {/* 自動配信設定 */}
+            <div className="border border-blue-100 dark:border-blue-900 rounded-lg p-3 space-y-2 bg-blue-50/50 dark:bg-blue-950/30">
+              <div className="flex items-center justify-between">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={autoRemindEnabled}
+                    onChange={(e) => handleSaveRemindSettings(e.target.checked, autoRemindTime)}
+                    disabled={savingRemindSettings}
+                    className="w-3.5 h-3.5 accent-blue-500"
+                  />
+                  <span className="text-[11px] font-bold text-blue-800 dark:text-blue-300 flex items-center gap-1">
+                    <Clock className="w-3 h-3" />
+                    自動配信
+                  </span>
+                </label>
+                {savingRemindSettings && <Loader2 className="w-3 h-3 animate-spin text-blue-500" />}
+              </div>
+              {autoRemindEnabled && (
+                <div className="space-y-1.5">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] text-slate-500 dark:text-slate-400">配信時刻</span>
+                    <input
+                      type="time"
+                      value={autoRemindTime}
+                      onChange={(e) => setAutoRemindTime(e.target.value)}
+                      onBlur={(e) => handleSaveRemindSettings(autoRemindEnabled, e.target.value)}
+                      className="text-xs border border-blue-200 dark:border-blue-700 rounded px-2 py-0.5 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100"
+                    />
+                    <span className="text-[10px] text-slate-400">毎日</span>
+                  </div>
+                  <p className="text-[9px] text-slate-400 dark:text-slate-500">
+                    ※現在は毎朝8:00 JSTに自動配信（Vercel Hobbyプラン）
+                  </p>
+                  <p className="text-[9px] text-blue-600 dark:text-blue-400">
+                    AI秘書の提案に配信状況が反映されます
+                  </p>
+                </div>
+              )}
+            </div>
           </CardContent>
-          <CardFooter className="pt-4 mt-auto">
-            <Button className="w-full bg-blue-600 text-xs py-2" onClick={handleSendReminders} disabled={loadingAction !== null}>
-              {loadingAction === "reminders" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <MessageCircle className="mr-2 h-4 w-4 text-[10px]" />}
+          <CardFooter className="pt-2 mt-auto">
+            <Button className="w-full bg-blue-600 hover:bg-blue-500 text-white text-xs py-2 font-bold" onClick={handleSendReminders} disabled={loadingAction !== null}>
+              {loadingAction === "reminders" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <MessageCircle className="mr-2 h-4 w-4" />}
               {loadingAction === "reminders" ? "送信中..." : "今すぐリマインド配信"}
             </Button>
           </CardFooter>
         </Card>
 
         {/* 3. 誕生日クーポン */}
-        <Card className="border-t-4 border-t-rose-500 hover:shadow-md transition-shadow h-full flex flex-col">
+        <Card className="border-t-4 border-t-rose-500 hover:shadow-md transition-shadow h-full flex flex-col dark:bg-slate-900/50 dark:border-x-white/5 dark:border-b-white/5">
           <CardHeader className="pb-3">
             <div className="w-10 h-10 rounded-full bg-rose-100 flex items-center justify-center text-rose-600 mb-2">
               <Gift className="h-5 w-5" />
@@ -331,7 +508,7 @@ export default function MarketingDashboardPage() {
         </Card>
 
         {/* 4. 抽選会 */}
-        <Card className="border-t-4 border-t-amber-500 hover:shadow-md transition-shadow h-full flex flex-col">
+        <Card className="border-t-4 border-t-amber-500 hover:shadow-md transition-shadow h-full flex flex-col dark:bg-slate-900/50 dark:border-x-white/5 dark:border-b-white/5">
           <CardHeader className="pb-3">
             <div className="w-10 h-10 rounded-full bg-amber-100 flex items-center justify-center text-amber-600 mb-2">
               <Trophy className="h-5 w-5" />
@@ -341,7 +518,7 @@ export default function MarketingDashboardPage() {
               10%の確率で自動クーポン。
             </CardDescription>
           </CardHeader>
-          <CardContent className="text-[11px] bg-slate-50 p-3 mx-4 rounded text-amber-700 flex-grow">
+          <CardContent className="text-[11px] bg-slate-50 dark:bg-slate-800/50 p-3 mx-4 rounded text-amber-700 dark:text-amber-400 flex-grow">
             来院履歴のある患者様を対象に今月の抽選を行います。
           </CardContent>
           <CardFooter className="pt-4 mt-auto">
@@ -353,7 +530,7 @@ export default function MarketingDashboardPage() {
         </Card>
 
         {/* 5. 女性限定キャンペーン */}
-        <Card className="border-t-4 border-t-pink-500 hover:shadow-md transition-shadow h-full flex flex-col">
+        <Card className="border-t-4 border-t-pink-500 hover:shadow-md transition-shadow h-full flex flex-col dark:bg-slate-900/50 dark:border-x-white/5 dark:border-b-white/5">
           <CardHeader className="pb-3">
             <div className="w-10 h-10 rounded-full bg-pink-100 flex items-center justify-center text-pink-600 mb-2">
               <Sparkles className="h-5 w-5" />
@@ -368,7 +545,7 @@ export default function MarketingDashboardPage() {
               value={womenMessage}
               onChange={(e) => setWomenMessage(e.target.value)}
               placeholder="メッセージ内容（空欄でデフォルト）"
-              className="w-full h-24 border border-slate-200 rounded p-2 text-[10px] resize-none"
+              className="w-full h-24 border border-slate-200 dark:border-slate-800 rounded p-2 text-[10px] resize-none bg-white dark:bg-slate-950 text-slate-900 dark:text-slate-100"
             />
           </CardContent>
           <CardFooter className="pt-4 mt-auto">
@@ -380,7 +557,7 @@ export default function MarketingDashboardPage() {
         </Card>
 
         {/* 6. エリア限定配信 */}
-        <Card className="border-t-4 border-t-blue-400 hover:shadow-md transition-shadow h-full flex flex-col">
+        <Card className="border-t-4 border-t-blue-400 hover:shadow-md transition-shadow h-full flex flex-col dark:bg-slate-900/50 dark:border-x-white/5 dark:border-b-white/5">
           <CardHeader className="pb-3">
             <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 mb-2">
               <MapIcon className="h-5 w-5" />
@@ -402,19 +579,19 @@ export default function MarketingDashboardPage() {
                value={areaMessage}
                onChange={(e) => setAreaMessage(e.target.value)}
                placeholder="地域限定の情報を入力..."
-               className="w-full h-12 border border-slate-200 rounded p-2 text-[10px] resize-none"
+               className="w-full h-12 border border-slate-200 dark:border-slate-800 rounded p-2 text-[10px] resize-none bg-white dark:bg-slate-950 text-slate-900 dark:text-slate-100"
              />
           </CardContent>
           <CardFooter className="pt-4 mt-auto">
-            <Button className="w-full bg-blue-600 text-xs py-2" onClick={handleSendAreaCampaign} disabled={loadingAction !== null || !selectedCity}>
-              {loadingAction === "area" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <MapPin className="mr-2 h-4 w-4 text-[10px]" />}
+            <Button className="w-full bg-blue-600 hover:bg-blue-500 text-white text-xs py-2 font-bold" onClick={handleSendAreaCampaign} disabled={loadingAction !== null || !selectedCity}>
+              {loadingAction === "area" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <MapPin className="mr-2 h-4 w-4" />}
               {loadingAction === "area" ? "送信中..." : selectedCity ? `${selectedCity}の患者様へ` : "エリア選択"}
             </Button>
           </CardFooter>
         </Card>
 
         {/* 7. 他院へのご紹介 */}
-        <Card className="border-t-4 border-t-indigo-600 hover:shadow-md transition-shadow h-full flex flex-col bg-slate-50/30">
+        <Card className="border-t-4 border-t-indigo-600 hover:shadow-md transition-shadow h-full flex flex-col bg-slate-50/30 dark:bg-slate-900/50">
           <CardHeader className="pb-3">
             <div className="w-10 h-10 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-600 mb-2">
               <Share2 className="h-5 w-5" />
@@ -425,12 +602,12 @@ export default function MarketingDashboardPage() {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3 flex-grow">
-             <div className="p-3 bg-white border border-indigo-100 rounded-lg space-y-2">
-                <p className="text-[10px] font-bold text-slate-500 flex items-center gap-1">
+             <div className="p-3 bg-indigo-50 dark:bg-indigo-950 border border-indigo-200 dark:border-indigo-700 rounded-lg space-y-2">
+                <p className="text-[10px] font-bold text-indigo-600 dark:text-indigo-300 flex items-center gap-1">
                    <ExternalLink className="w-3 h-3" />
                    紹介用URL
                 </p>
-                <code className="text-[9px] block bg-slate-100 p-1.5 rounded truncate text-indigo-600">
+                <code className="text-[10px] font-semibold block bg-white dark:bg-slate-800 p-1.5 rounded truncate text-indigo-700 dark:text-indigo-300 border border-indigo-100 dark:border-indigo-700">
                    {typeof window !== 'undefined' ? window.location.origin : ''}/presentation
                 </code>
              </div>
@@ -439,20 +616,20 @@ export default function MarketingDashboardPage() {
                placeholder="紹介先のLINE ID（空欄でテストID）" 
                value={referralTargetId}
                onChange={(e) => setReferralTargetId(e.target.value)}
-               className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-[10px]"
+               className="w-full border border-slate-200 dark:border-slate-800 rounded-lg px-2 py-1.5 text-[10px] bg-white dark:bg-slate-950 text-slate-900 dark:text-slate-100"
              />
           </CardContent>
           <CardFooter className="pt-2 mt-auto grid grid-cols-3 gap-2">
             <Link href="/presentation" target="_blank" className="w-full">
-              <Button variant="outline" className="w-full text-[10px] h-8 border-indigo-200 text-indigo-700">
+              <Button variant="outline" className="w-full text-xs h-9 border-indigo-300 dark:border-indigo-600 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-50 dark:hover:bg-indigo-900 font-bold">
                 資料を見る
               </Button>
             </Link>
-            <Button variant="outline" className="w-full text-[10px] h-8 border-indigo-200 text-indigo-700" onClick={() => setShowQr(true)}>
+            <Button variant="outline" className="w-full text-xs h-9 border-indigo-300 dark:border-indigo-600 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-50 dark:hover:bg-indigo-900 font-bold" onClick={() => setShowQr(true)}>
               <QrCode className="h-3 w-3 mr-1" />
               QRコード
             </Button>
-            <Button className="w-full bg-indigo-600 text-[10px] h-8" onClick={handleSendReferral} disabled={loadingAction !== null}>
+            <Button className="w-full bg-indigo-600 hover:bg-indigo-500 text-white text-xs h-9 font-bold" onClick={handleSendReferral} disabled={loadingAction !== null}>
               {loadingAction === "referral" ? <Loader2 className="h-3 w-3 animate-spin" /> : <MessageCircle className="h-3 w-3 mr-1" />}
               LINEで送る
             </Button>
