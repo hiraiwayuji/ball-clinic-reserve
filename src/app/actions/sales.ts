@@ -99,6 +99,9 @@ export async function addInsurancePayment(formData: FormData) {
     const paymentMonth = formData.get("payment_month") as string; // "YYYY-MM-01"
     const insuranceName = formData.get("insurance_name") as string;
     const amount = parseInt(formData.get("amount") as string, 10);
+    const paymentDate = (formData.get("payment_date") as string) || null;
+    const imageUrl = (formData.get("image_url") as string) || null;
+    const notes = (formData.get("notes") as string) || null;
 
     if (!paymentMonth || !insuranceName || isNaN(amount)) {
       return { success: false, error: "必須項目を入力してください" };
@@ -107,10 +110,13 @@ export async function addInsurancePayment(formData: FormData) {
     const supabase = await getSupabase();
     const { error } = await supabase
       .from("insurance_payments")
-      .insert([{ 
-        payment_month: paymentMonth, 
-        insurance_name: insuranceName, 
+      .insert([{
+        payment_month: paymentMonth,
+        insurance_name: insuranceName,
         amount,
+        payment_date: paymentDate,
+        image_url: imageUrl,
+        notes,
         clinic_id: clinicId
       }]);
 
@@ -134,13 +140,31 @@ export async function getInsurancePayments(monthStr: string) {
       .select("*")
       .eq("payment_month", monthStr)
       .eq("clinic_id", clinicId)
-      .order("insurance_name", { ascending: true });
+      .order("payment_date", { ascending: true });
 
     if (error) throw error;
     return { success: true, data };
   } catch (error) {
     console.error("Error fetching insurance payments:", error);
     return { success: false, error: "取得に失敗しました", data: [] };
+  }
+}
+
+export async function updateInsurancePassbookCheck(id: string, checked: boolean) {
+  await checkAdminAuth();
+  try {
+    const supabase = await getSupabase();
+    const { error } = await supabase
+      .from("insurance_payments")
+      .update({ passbook_checked: checked })
+      .eq("id", id);
+
+    if (error) throw error;
+    revalidatePath("/admin/insurance");
+    return { success: true };
+  } catch (error) {
+    console.error("Error updating passbook check:", error);
+    return { success: false, error: "更新に失敗しました" };
   }
 }
 
