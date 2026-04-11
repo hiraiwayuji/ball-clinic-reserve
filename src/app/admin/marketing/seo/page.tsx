@@ -66,7 +66,7 @@ export default function SeoDiagnosisPage() {
           <CardHeader>
             <CardTitle className="text-sm font-bold flex items-center text-slate-800 dark:text-slate-100">
               <Lightbulb className="w-4 h-4 mr-2 text-amber-500" />
-              現在の分析コンテキスト
+              AI診断に使われるデータ
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4 text-sm">
@@ -90,21 +90,35 @@ export default function SeoDiagnosisPage() {
                 )) || <p className="text-slate-500 dark:text-slate-400 italic">未設定</p>}
               </div>
             </div>
+            <div className="border-t border-indigo-100 dark:border-indigo-800 pt-3 space-y-1.5">
+              <p className="text-[10px] uppercase font-bold text-indigo-500 dark:text-indigo-400">自動取得データ（毎回最新）</p>
+              {[
+                "今月の来院件数・初診/再診比率",
+                "前月比トレンド",
+                "今月の自費売上",
+                "最近のAIメモ（最新3件）",
+              ].map((item) => (
+                <div key={item} className="flex items-center gap-1.5 text-xs text-slate-600 dark:text-slate-300">
+                  <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 shrink-0" />
+                  {item}
+                </div>
+              ))}
+            </div>
             <Link href="/admin/settings">
               <Button variant="link" size="sm" className="px-0 text-indigo-600 dark:text-indigo-400 text-[11px]">
-                設定を変更する
+                院の設定を変更する
               </Button>
             </Link>
           </CardContent>
         </Card>
 
-        <Card className="md:col-span-2 shadow-xl border-2 border-indigo-600 ring-4 ring-indigo-50 overflow-hidden">
+        <Card className="md:col-span-2 shadow-xl border-2 border-indigo-600 ring-4 ring-indigo-50 dark:ring-indigo-900/30 overflow-hidden">
           <div className="bg-indigo-600 p-6 text-white">
             <h2 className="text-xl font-bold flex items-center gap-2">
               <Sparkles className="w-5 h-5" />
               AI診断を開始する
             </h2>
-            <p className="text-indigo-100 text-sm mt-1">最新のGoogleアルゴリズムに基づき、展覧を最大化するアドバイスを生成します。</p>
+            <p className="text-indigo-100 text-sm mt-1">来院数・売上・最近のメモをもとに、この院固有のSEO/MEOアドバイスを生成します。</p>
           </div>
           <CardContent className="p-8 flex flex-col items-center justify-center min-h-[200px] bg-white">
             {!advice && !loading && (
@@ -128,9 +142,9 @@ export default function SeoDiagnosisPage() {
             {loading && (
               <div className="text-center space-y-4 py-8">
                 <Loader2 className="w-12 h-12 animate-spin text-indigo-600 mx-auto" />
-                <p className="text-slate-600 font-bold animate-pulse text-lg">Googleの目線であなたの院を分析中...</p>
-                <p className="text-slate-400 text-xs text-center max-w-xs mx-auto">
-                  サイト展覧・エリアキーワード・GoogleビジネスプロフィールのSEO最適化方法をチェックしています。
+                <p className="text-slate-600 font-bold animate-pulse text-lg">来院データ・メモをもとに分析中...</p>
+                <p className="text-slate-400 text-sm text-center max-w-xs mx-auto">
+                  今月の来院数・前月比・AIメモをAIに渡して、この院固有の改善策を生成しています。
                 </p>
               </div>
             )}

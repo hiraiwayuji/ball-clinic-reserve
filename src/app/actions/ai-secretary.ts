@@ -171,22 +171,278 @@ export async function generateDailySnsTasks(dateStr: string) {
 }
 
 export async function generateSEOMeoAdvice() {
-  const { clinicId: _clinicId } = await checkAdminAuth();
+  const { clinicId } = await checkAdminAuth();
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) return { success: false, error: "APIキーが未設定です" };
   try {
+    const supabase = await getSupabase();
     const settings = await getClinicSettings();
+    const notSet = "未設定";
+
+    // JST今日
+    const now = new Date();
+    const jstNow = new Date(now.getTime() + 9 * 60 * 60 * 1000);
+    const dateStr = jstNow.toISOString().split("T")[0];
+    const year = jstNow.getUTCFullYear();
+    const month = jstNow.getUTCMonth() + 1;
+    const monthStr = `${year}-${String(month).padStart(2, "0")}`;
+    const startOfMonth = `${monthStr}-01`;
+    const endOfMonth = new Date(year, month, 0).toISOString().split("T")[0];
+
+    // 今月の来院数
+    let monthVisits = 0;
+    let newVisits = 0;
+    try {
+      const { data } = await supabase
+        .from("appointments")
+        .select("id, is_first_visit")
+        .eq("clinic_id", clinicId)
+        .gte("start_time", `${startOfMonth}T00:00:00+09:00`)
+        .lte("start_time", `${endOfMonth}T23:59:59+09:00`)
+        .neq("status", "cancelled");
+      monthVisits = data?.length ?? 0;
+      newVisits = data?.filter((a) => a.is_first_visit).length ?? 0;
+    } catch {}
+
+    // 先月の来院数
+    const prevMonth = month === 1 ? 12 : month - 1;
+    const prevYear = month === 1 ? year - 1 : year;
+    const prevMonthStr = `${prevYear}-${String(prevMonth).padStart(2, "0")}`;
+    const prevStart = `${prevMonthStr}-01`;
+    const prevEnd = new Date(prevYear, prevMonth, 0).toISOString().split("T")[0];
+    let prevMonthVisits = 0;
+    try {
+      const { data } = await supabase
+        .from("appointments")
+        .select("id")
+        .eq("clinic_id", clinicId)
+        .gte("start_time", `${prevStart}T00:00:00+09:00`)
+        .lte("start_time", `${prevEnd}T23:59:59+09:00`)
+        .neq("status", "cancelled");
+      prevMonthVisits = data?.length ?? 0;
+    } catch {}
+
+    // 今月の売上
+    let monthRevenue = 0;
+    try {
+      const { data } = await supabase
+        .from("cash_sales")
+        .select("treatment_fee")
+        .eq("clinic_id", clinicId)
+        .gte("sale_date", startOfMonth)
+        .lte("sale_date", endOfMonth);
+      monthRevenue = data?.reduce((s, r) => s + (r.treatment_fee ?? 0), 0) ?? 0;
+    } catch {}
+
+    // 最近のAIメモ（最新3件）
+    let memoText = "なし";
+    try {
+      const { data } = await supabase
+        .from("ai_memos")
+        .select("content, created_at")
+        .eq("clinic_id", clinicId)
+        .order("created_at", { ascending: false })
+        .limit(3);
+      if (data && data.length > 0) {
+        memoText = data
+          .map((m) => `・${m.content.slice(0, 100)}`)
+          .join("\n");
+      }
+    } catch {}
+
+    const visitTrend = prevMonthVisits > 0
+      ? monthVisits > prevMonthVisits
+        ? `先月(${prevMonthVisits}件)より増加中`
+        : monthVisits < prevMonthVisits
+        ? `先月(${prevMonthVisits}件)より減少中`
+        : "先月と同水準"
+      : "比較データなし";
+
+    const ctx = `
+【院の基本情報】
+院名: ${settings?.clinic_name || notSet}
+エリア: ${settings?.area_name || settings?.address || notSet}
+ターゲット: ${settings?.target_persona || "一般"}
+HP URL: ${settings?.hp_url || notSet}
+分析キーワード: ${settings?.analysis_keywords?.join("、") || notSet}
+
+【今月の経営数値（${monthStr}）】
+来院件数: ${monthVisits}件（うち初診: ${newVisits}件 / 再診: ${monthVisits - newVisits}件）
+前月比トレンド: ${visitTrend}
+今月の自費売上: ¥${monthRevenue.toLocaleString()}
+
+【最近のAIメモ（院長・スタッフの気づき）】
+${memoText}
+`.trim();
+
     const genAI = new GoogleGenerativeAI(apiKey);
     const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
-    const notSet = "未設定";
-    const ctx = settings
-      ? `院名:${settings.clinic_name} エリア:${settings.area_name || notSet} HP:${settings.hp_url || notSet} ターゲット:${settings.target_persona || "一般"}`
-      : "情報未登録";
-    const prompt = `接骨院のSEO/MEOコンサルタントとして、Googleから新規患者が来院しやすくなる改善策を提案してください。コンテキスト: ${ctx}。SEOとMEOの2カテゴリで具体的なアクションを各２つ。Markdown形式400字以内。`;
+    const prompt = `あなたは接骨院専門のSEO/MEOコンサルタントです。
+以下の実際の経営データとメモをもとに、この院固有の状況に合わせたSEO・MEO改善アドバイスを提案してください。
+
+${ctx}
+
+【出力ルール】
+- 来院数の増減トレンド・初診比率・メモの内容を必ず根拠として言及すること
+- 汎用的なアドバイスではなく、この院の数字に基づいた具体的な施策にすること
+- 以下の3カテゴリで各2〜3アクションを提示すること
+  1. SEO（ホームページ・ブログ・note）
+  2. MEO（Googleマップ・口コミ対策）
+  3. SNS・LINE集客（来院数トレンドを踏まえた短期施策）
+- Markdown形式、600字以内`;
+
     const result = await model.generateContent(prompt);
     return { success: true, advice: result.response.text() };
   } catch (error: any) {
     console.error(error);
     return { success: false, error: "AI診断失敗: " + (error.message || "") };
   }
+}
+
+// ─── 朝のブリーフィング用コンテキスト取得 ───────────────────────────────────
+export async function getBriefingContext() {
+  const { clinicId } = await checkAdminAuth();
+  const supabase = await getSupabase();
+  const apiKey = process.env.GEMINI_API_KEY;
+
+  // JST日時
+  const now = new Date();
+  const jst = new Date(now.getTime() + 9 * 60 * 60 * 1000);
+  const dayOfWeek = jst.getUTCDay(); // 0=日 1=月
+  const dayOfMonth = jst.getUTCDate();
+  const year = jst.getUTCFullYear();
+  const month = jst.getUTCMonth() + 1;
+
+  const isWeekStart = dayOfWeek === 1; // 月曜
+  const isMonthStart = dayOfMonth <= 2; // 月初め2日以内
+
+  // 日付ユーティリティ
+  const toJstDate = (d: Date) => d.toISOString().split("T")[0];
+  const addDays = (d: Date, n: number) => new Date(d.getTime() + n * 86400000);
+
+  // 今週（月〜今日）と先週の範囲
+  const weekStartDate = addDays(jst, -(dayOfWeek === 0 ? 6 : dayOfWeek - 1));
+  const prevWeekStart = addDays(weekStartDate, -7);
+  const prevWeekEnd = addDays(weekStartDate, -1);
+
+  // 今月・先月・去年同月の範囲
+  const thisMonthStart = `${year}-${String(month).padStart(2, "0")}-01`;
+  const thisMonthEnd = new Date(year, month, 0).toISOString().split("T")[0];
+  const prevM = month === 1 ? 12 : month - 1;
+  const prevY = month === 1 ? year - 1 : year;
+  const prevMonthStart = `${prevY}-${String(prevM).padStart(2, "0")}-01`;
+  const prevMonthEnd = new Date(prevY, prevM, 0).toISOString().split("T")[0];
+  const lastYearSameStart = `${year - 1}-${String(month).padStart(2, "0")}-01`;
+  const lastYearSameEnd = new Date(year - 1, month, 0).toISOString().split("T")[0];
+
+  // 今週の来院数
+  let thisWeekVisits = 0;
+  let thisWeekNew = 0;
+  try {
+    const { data } = await supabase
+      .from("appointments").select("id, is_first_visit")
+      .eq("clinic_id", clinicId)
+      .gte("start_time", `${toJstDate(weekStartDate)}T00:00:00+09:00`)
+      .lte("start_time", `${toJstDate(jst)}T23:59:59+09:00`)
+      .neq("status", "cancelled");
+    thisWeekVisits = data?.length ?? 0;
+    thisWeekNew = data?.filter((a) => a.is_first_visit).length ?? 0;
+  } catch {}
+
+  // 先週の来院数
+  let prevWeekVisits = 0;
+  try {
+    const { data } = await supabase
+      .from("appointments").select("id")
+      .eq("clinic_id", clinicId)
+      .gte("start_time", `${toJstDate(prevWeekStart)}T00:00:00+09:00`)
+      .lte("start_time", `${toJstDate(prevWeekEnd)}T23:59:59+09:00`)
+      .neq("status", "cancelled");
+    prevWeekVisits = data?.length ?? 0;
+  } catch {}
+
+  // 今月・先月
+  let thisMonthVisits = 0;
+  let prevMonthVisits = 0;
+  let lastYearSameVisits = 0;
+  try {
+    const [tm, pm, ly] = await Promise.all([
+      supabase.from("appointments").select("id", { count: "exact", head: true })
+        .eq("clinic_id", clinicId)
+        .gte("start_time", `${thisMonthStart}T00:00:00+09:00`)
+        .lte("start_time", `${thisMonthEnd}T23:59:59+09:00`)
+        .neq("status", "cancelled"),
+      supabase.from("appointments").select("id", { count: "exact", head: true })
+        .eq("clinic_id", clinicId)
+        .gte("start_time", `${prevMonthStart}T00:00:00+09:00`)
+        .lte("start_time", `${prevMonthEnd}T23:59:59+09:00`)
+        .neq("status", "cancelled"),
+      supabase.from("appointments").select("id", { count: "exact", head: true })
+        .eq("clinic_id", clinicId)
+        .gte("start_time", `${lastYearSameStart}T00:00:00+09:00`)
+        .lte("start_time", `${lastYearSameEnd}T23:59:59+09:00`)
+        .neq("status", "cancelled"),
+    ]);
+    thisMonthVisits = tm.count ?? 0;
+    prevMonthVisits = pm.count ?? 0;
+    lastYearSameVisits = ly.count ?? 0;
+  } catch {}
+
+  // 最新AIメモ
+  let latestMemo: string | null = null;
+  try {
+    const { data } = await supabase
+      .from("ai_memos").select("content")
+      .eq("clinic_id", clinicId)
+      .order("created_at", { ascending: false })
+      .limit(1).single();
+    latestMemo = data?.content?.slice(0, 120) ?? null;
+  } catch {}
+
+  // Gemini で短い朝のアドバイスを生成
+  let aiAdvice: string | null = null;
+  if (apiKey) {
+    try {
+      const settings = await getClinicSettings();
+      const weekDiff = prevWeekVisits > 0
+        ? Math.round(((thisWeekVisits - prevWeekVisits) / prevWeekVisits) * 100)
+        : 0;
+      const monthDiff = lastYearSameVisits > 0
+        ? Math.round(((thisMonthVisits - lastYearSameVisits) / lastYearSameVisits) * 100)
+        : 0;
+
+      const briefCtx = [
+        `院名: ${settings?.clinic_name || "接骨院"}`,
+        `今週の来院: ${thisWeekVisits}件（先週比${weekDiff > 0 ? "+" : ""}${weekDiff}%）`,
+        `今月の来院: ${thisMonthVisits}件（去年同月比${monthDiff > 0 ? "+" : ""}${monthDiff}%）`,
+        `今月の初診数: ${thisWeekNew}件（今週分）`,
+        isWeekStart ? "本日は週初めです。" : "",
+        isMonthStart ? "本日は月初めです。" : "",
+        latestMemo ? `最近のメモ: ${latestMemo}` : "",
+      ].filter(Boolean).join(" / ");
+
+      const prompt = `あなたは接骨院の専属AI秘書です。以下のデータをもとに、院長への朝のひと言アドバイスを1〜2文で生成してください。数字を必ず1つ使い、具体的で前向きな内容にしてください。敬語で。
+データ: ${briefCtx}`;
+
+      const genAI = new GoogleGenerativeAI(apiKey);
+      const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+      const result = await model.generateContent(prompt);
+      aiAdvice = result.response.text().trim();
+    } catch {}
+  }
+
+  return {
+    isWeekStart,
+    isMonthStart,
+    dayOfWeek,
+    thisWeekVisits,
+    thisWeekNew,
+    prevWeekVisits,
+    thisMonthVisits,
+    prevMonthVisits,
+    lastYearSameVisits,
+    month,
+    latestMemo,
+    aiAdvice,
+  };
 }

@@ -46,20 +46,23 @@ type SortDir = "asc" | "desc";
 
 const GENDER_LABEL: Record<string, string> = { male: "男性", female: "女性", other: "その他" };
 
-/** 重複判定: 同名+同電話 or 同カルテNO */
+/** 重複判定: 同名 or 同カルテNO（電話番号は除外 — 仮番号が多いため） */
 function buildDuplicateSet(customers: Customer[]): Set<string> {
   const dupIds = new Set<string>();
 
-  const phoneNameMap = new Map<string, string[]>();
+  // 名前のみで判定
+  const nameMap = new Map<string, string[]>();
   for (const c of customers) {
-    const key = `${c.name.trim()}__${c.phone.trim()}`;
-    if (!phoneNameMap.has(key)) phoneNameMap.set(key, []);
-    phoneNameMap.get(key)!.push(c.id);
+    const key = c.name.trim();
+    if (!key) continue;
+    if (!nameMap.has(key)) nameMap.set(key, []);
+    nameMap.get(key)!.push(c.id);
   }
-  for (const ids of phoneNameMap.values()) {
+  for (const ids of nameMap.values()) {
     if (ids.length > 1) ids.forEach(id => dupIds.add(id));
   }
 
+  // 同カルテNO（空白は除外）
   const recordMap = new Map<string, string[]>();
   for (const c of customers) {
     if (!c.medical_record_number?.trim()) continue;
@@ -74,13 +77,11 @@ function buildDuplicateSet(customers: Customer[]): Set<string> {
   return dupIds;
 }
 
-/** カルテNO保存後に重複候補を探す（同名 or 同電話 で別ID） */
+/** 重複候補を探す（名前のみで判定 — 電話番号は除外） */
 function findMergeCandidates(current: Customer, allCustomers: Customer[]): Customer[] {
   return allCustomers.filter(c => {
     if (c.id === current.id) return false;
-    const sameName = c.name.trim() === current.name.trim();
-    const samePhone = c.phone.trim() !== "" && c.phone.trim() === current.phone.trim();
-    return sameName || samePhone;
+    return c.name.trim() === current.name.trim();
   });
 }
 
@@ -108,6 +109,21 @@ function MergeDialog({
       next.has(id) ? next.delete(id) : next.add(id);
       return next;
     });
+
+  // 統合後プレビューの計算
+  const selectedCandidates = candidates.filter(c => selected.has(c.id));
+  const mergedPreview = {
+    name: targetCustomer.name,
+    phone: targetCustomer.phone || selectedCandidates.find(c => c.phone)?.phone || "—",
+    medical_record_number: targetCustomer.medical_record_number || selectedCandidates.find(c => c.medical_record_number)?.medical_record_number || null,
+    appointmentCount: targetCustomer.appointmentCount + selectedCandidates.reduce((s, c) => s + c.appointmentCount, 0),
+    cancelCount: targetCustomer.cancelCount + selectedCandidates.reduce((s, c) => s + c.cancelCount, 0),
+    lastVisit: [targetCustomer.lastVisit, ...selectedCandidates.map(c => c.lastVisit)]
+      .filter(Boolean)
+      .sort()
+      .at(-1) ?? null,
+    line_user_id: targetCustomer.line_user_id || selectedCandidates.find(c => c.line_user_id)?.line_user_id || null,
+  };
 
   const handleMerge = async () => {
     if (selected.size === 0) { toast.error("統合する患者を選択してください"); return; }
@@ -227,9 +243,36 @@ function MergeDialog({
           </div>
 
           {selected.size > 0 && (
-            <div className="bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-700 rounded-lg p-3 text-sm text-amber-800 dark:text-amber-200">
-              <strong>{selected.size}件</strong>の患者を「{targetCustomer.name}」に統合します。<br />
-              選択した患者の予約履歴が統合先に移動し、<strong>元のデータは削除</strong>されます。
+            <div className="space-y-3">
+              {/* 統合後プレビュー */}
+              <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-700 rounded-xl p-4 space-y-3">
+                <p className="text-[10px] font-black text-blue-700 dark:text-blue-300 uppercase tracking-widest flex items-center gap-1">
+                  <GitMerge className="w-3 h-3" /> 統合後のデータプレビュー
+                </p>
+                <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
+                  {[
+                    { label: "患者名", value: mergedPreview.name },
+                    { label: "電話番号", value: mergedPreview.phone },
+                    { label: "カルテNO", value: mergedPreview.medical_record_number || "—" },
+                    { label: "LINE連携", value: mergedPreview.line_user_id ? "あり ✅" : "なし" },
+                    { label: "予約回数（合算）", value: `${mergedPreview.appointmentCount}回` },
+                    { label: "キャンセル（合算）", value: `${mergedPreview.cancelCount}回` },
+                    { label: "最終来院日", value: mergedPreview.lastVisit ? format(new Date(mergedPreview.lastVisit), "yyyy/MM/dd", { locale: ja }) : "—" },
+                  ].map(({ label, value }) => (
+                    <div key={label} className="flex justify-between gap-2 py-0.5 border-b border-blue-100 dark:border-blue-800 last:border-0">
+                      <span className="text-slate-500 dark:text-slate-400">{label}</span>
+                      <span className="font-bold text-slate-800 dark:text-slate-100 text-right">{value}</span>
+                    </div>
+                  ))}
+                </div>
+                <p className="text-[10px] text-blue-600 dark:text-blue-400">
+                  ※ 選択した患者の予約履歴が統合先へ移動し、元のレコードは削除されます。
+                </p>
+              </div>
+
+              <div className="bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-700 rounded-lg p-3 text-sm text-amber-800 dark:text-amber-200">
+                <strong>{selected.size}件</strong>を「{targetCustomer.name}」に統合します。この操作は元に戻せません。
+              </div>
             </div>
           )}
 
