@@ -6,8 +6,8 @@ export const metadata: Metadata = {
 
 const LAST_UPDATED = "2026年4月14日";
 const SERVICE_NAME = "接骨院管理システム";
-const OPERATOR     = "【運営者名・屋号】";  // ← あなたの名前・屋号に変更
-const EMAIL        = "【メールアドレス】";   // ← 連絡先メールに変更
+const OPERATOR     = "平岩裕治";
+const EMAIL        = "hiraiwayuji@gmail.com";
 
 export default function PrivacyPage() {
   return (
