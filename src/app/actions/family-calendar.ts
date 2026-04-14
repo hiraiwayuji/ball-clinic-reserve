@@ -112,9 +112,20 @@ export async function getEvents(calendarId: string, start: string, end: string):
   const supabase = await getSupabase();
   if (!calendarId) return [];
   try {
-    const { data, error } = await supabase.from("calendar_events").select("*").eq("calendar_id", calendarId).lte("start_time", end).gte("end_time", start).order("start_time", { ascending: true });
-    if (error) { console.error("getEvents error:", error); return []; }
-    return data || [];
+    // 通常イベント（期間内）
+    const { data: regular, error: e1 } = await supabase.from("calendar_events").select("*")
+      .eq("calendar_id", calendarId).eq("is_recurring", false)
+      .lte("start_time", end).gte("end_time", start)
+      .order("start_time", { ascending: true });
+    if (e1) { console.error("getEvents error:", e1); return []; }
+
+    // 繰り返しイベント（開始日に関係なく全件取得してクライアントで展開）
+    const { data: recurring, error: e2 } = await supabase.from("calendar_events").select("*")
+      .eq("calendar_id", calendarId).eq("is_recurring", true)
+      .order("start_time", { ascending: true });
+    if (e2) { console.error("getEvents recurring error:", e2); }
+
+    return [...(regular || []), ...(recurring || [])];
   } catch (e) { console.error("getEvents exception:", e); return []; }
 }
 

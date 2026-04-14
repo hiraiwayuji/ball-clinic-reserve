@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useParams } from "next/navigation";
-import { ChevronLeft, ChevronRight, Plus, X, Pencil, Trash2, Check, Clock, User, CalendarDays, Settings2, Palette, Bell, BellOff, MapPin, ListChecks, Lock, Loader2, KeyRound } from "lucide-react";
+import { ChevronLeft, ChevronRight, Plus, X, Pencil, Trash2, Check, Clock, User, CalendarDays, Settings2, Palette, Bell, BellOff, MapPin, ListChecks, Lock, Loader2, KeyRound, Copy, RefreshCw, Sparkles, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   getEvents,
@@ -62,6 +62,9 @@ interface Form {
   location: string;
   isShared: boolean;
   items: CalendarEventItem[];
+  isRecurring: boolean;
+  recurrenceFreq: "daily" | "weekly" | "monthly";
+  recurrenceDays: number[];
 }
 
 function getWeekDays(dateStr: string): string[] {
@@ -78,10 +81,94 @@ function addOneHour(time: string): string {
   return `${String((h + 1) % 24).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
 }
 
+function buildRecurrenceRule(freq: string, days: number[]): string {
+  if (freq === "daily") return "DAILY";
+  if (freq === "monthly") return "MONTHLY";
+  if (days.length > 0) return `WEEKLY:${days.join(",")}`;
+  return "WEEKLY";
+}
+function parseRecurrenceFreq(rule?: string | null): "daily" | "weekly" | "monthly" {
+  if (!rule) return "weekly";
+  if (rule.startsWith("DAILY")) return "daily";
+  if (rule.startsWith("MONTHLY")) return "monthly";
+  return "weekly";
+}
+function parseRecurrenceDays(rule?: string | null): number[] {
+  if (!rule) return [];
+  // EXDATEセクションを除いたWEEKLY部分だけを見る
+  const base = rule.split(";")[0];
+  if (!base.startsWith("WEEKLY:")) return [];
+  return base.replace("WEEKLY:", "").split(",").map(Number).filter(n => !isNaN(n));
+}
+// 除外日のリストを取得（"EXDATE:2026-04-15,2026-04-22" → ["2026-04-15","2026-04-22"]）
+function parseExceptions(rule?: string | null): string[] {
+  if (!rule) return [];
+  const part = rule.split(";").find(p => p.startsWith("EXDATE:"));
+  if (!part) return [];
+  return part.replace("EXDATE:", "").split(",").filter(Boolean);
+}
+// 除外日を追加したruleを返す
+function addException(rule: string | null | undefined, dateStr: string): string {
+  const base = rule || "WEEKLY";
+  const existing = parseExceptions(base);
+  if (existing.includes(dateStr)) return base;
+  const newExceptions = [...existing, dateStr];
+  const withoutExdate = base.split(";").filter(p => !p.startsWith("EXDATE:")).join(";");
+  return `${withoutExdate};EXDATE:${newExceptions.join(",")}`;
+}
+
+// 繰り返しイベントをビュー期間内に展開する（除外日はスキップ）
+function expandRecurringEvents(events: CalendarEvent[], viewStart: Date, viewEnd: Date): CalendarEvent[] {
+  const nonRecurring = events.filter(e => !e.is_recurring);
+  const recurring = events.filter(e => e.is_recurring);
+  const instances: CalendarEvent[] = [];
+  for (const ev of recurring) {
+    const freq = parseRecurrenceFreq(ev.recurrence_rule);
+    const days = parseRecurrenceDays(ev.recurrence_rule);
+    const exceptions = parseExceptions(ev.recurrence_rule);
+    const evStart = new Date(ev.start_time);
+    const evEnd = new Date(ev.end_time);
+    const duration = evEnd.getTime() - evStart.getTime();
+    const cursorStart = evStart > viewStart ? new Date(evStart) : new Date(viewStart);
+    let cursor = new Date(cursorStart.getFullYear(), cursorStart.getMonth(), cursorStart.getDate());
+    while (cursor <= viewEnd) {
+      const dateKey = toLocalDateStr(cursor);
+      let matches = false;
+      if (freq === "daily") {
+        matches = true;
+      } else if (freq === "weekly") {
+        if (days.length > 0) matches = days.includes(cursor.getDay());
+        else matches = cursor.getDay() === evStart.getDay();
+      } else if (freq === "monthly") {
+        matches = cursor.getDate() === evStart.getDate();
+      }
+      // 除外日はスキップ
+      if (matches && !exceptions.includes(dateKey)) {
+        const instStart = new Date(cursor.getFullYear(), cursor.getMonth(), cursor.getDate(), evStart.getHours(), evStart.getMinutes());
+        const instEnd = new Date(instStart.getTime() + duration);
+        instances.push({
+          ...ev,
+          id: `${ev.id};${dateKey}`,
+          start_time: instStart.toISOString(),
+          end_time: instEnd.toISOString(),
+        });
+      }
+      cursor = new Date(cursor.getFullYear(), cursor.getMonth(), cursor.getDate() + 1);
+    }
+  }
+  return [...nonRecurring, ...instances];
+}
+
+// 繰り返しイベントのIDからベースIDを取得
+function getBaseEventId(id: string): string {
+  return id.includes(";") ? id.split(";")[0] : id;
+}
+
 const blankForm = (date = toLocalDateStr(new Date()), defaultMember = "家族"): Form => ({
   title: "", description: "", date,
   startTime: "09:00", endTime: "10:00", endDate: date, isAllDay: false, isMultiDay: false, memberName: defaultMember,
   location: "", isShared: true, items: [],
+  isRecurring: false, recurrenceFreq: "weekly", recurrenceDays: [],
 });
 
 export default function FamilyCalendarPage() {
@@ -108,8 +195,16 @@ export default function FamilyCalendarPage() {
   const [hasPassword, setHasPassword] = useState(false);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [authLoading, setAuthLoading] = useState(true);
+  const [aiReview, setAiReview] = useState<string | null>(null);
+  const [aiReviewLoading, setAiReviewLoading] = useState(false);
   // 複数日イベントの編集スコープ選択
   const [scopePicker, setScopePicker] = useState<{ event: CalendarEvent; fromDate: string } | null>(null);
+  // 繰り返しイベントのスコープ選択（この日のみ / すべて）
+  const [recurringPicker, setRecurringPicker] = useState<{
+    event: CalendarEvent; dateStr: string; action: "edit" | "delete";
+  } | null>(null);
+  // 繰り返しの「この日のみ編集」モード
+  const [recurringDayEdit, setRecurringDayEdit] = useState<{ baseEvent: CalendarEvent; dateStr: string } | null>(null);
   // 「この日のみ」編集モード：保存時に元イベントを分割する
   const [singleDayEdit, setSingleDayEdit] = useState<{ originalEvent: CalendarEvent; fromDate: string } | null>(null);
   const [currentUser, setCurrentUser] = useState<string | null>(null);
@@ -224,7 +319,7 @@ export default function FamilyCalendarPage() {
       endD = new Date(y, mo, d + 1, 23, 59, 59); // 翌日分も取得
     }
     const data = await getEvents(calendarId, startD.toISOString(), endD.toISOString());
-    setEvents(data);
+    setEvents(expandRecurringEvents(data, startD, endD));
     setLoading(false);
   }, [calendarId, viewMode, anchorDate]);
 
@@ -259,18 +354,107 @@ export default function FamilyCalendarPage() {
 
   // モーダル操作
   function openCreate(date: string) { setForm(blankForm(date, members[0]?.name || "家族")); setModal({ mode: "create", date }); }
-  function openView(e: CalendarEvent, fromDate?: string) { setModal({ mode: "view", event: e, date: fromDate }); }
+  function openView(e: CalendarEvent, fromDate?: string) {
+    // 繰り返しイベントは実IDを持つ元イベントを表示
+    setModal({ mode: "view", event: { ...e, id: getBaseEventId(e.id) }, date: fromDate });
+  }
+
+  function handleCopy(ev: CalendarEvent) {
+    const startDateStr = toJSTDateStr(ev.start_time);
+    const endDateStr = toJSTDateStr(ev.end_time);
+    const s = new Date(ev.start_time);
+    const en = new Date(ev.end_time);
+    const multiDay = startDateStr !== endDateStr;
+    setForm({
+      title: ev.title,
+      description: ev.description ?? "",
+      date: startDateStr,
+      startTime: `${String(s.getHours()).padStart(2,"0")}:${String(s.getMinutes()).padStart(2,"0")}`,
+      endTime: `${String(en.getHours()).padStart(2,"0")}:${String(en.getMinutes()).padStart(2,"0")}`,
+      endDate: endDateStr,
+      isAllDay: ev.is_all_day,
+      isMultiDay: multiDay,
+      memberName: ev.member_name ?? "家族",
+      location: ev.location ?? "",
+      isShared: ev.is_shared ?? true,
+      items: ev.items ? [...ev.items] : [],
+      isRecurring: false,
+      recurrenceFreq: "weekly",
+      recurrenceDays: [],
+    });
+    setModal({ mode: "create" });
+  }
+
+  async function handleAiReview() {
+    setAiReviewLoading(true);
+    setAiReview(null);
+    const y = anchorDate.getFullYear(), mo = anchorDate.getMonth();
+    const monthEvents = events.filter(e => {
+      const d = new Date(e.start_time);
+      return d.getFullYear() === y && d.getMonth() === mo;
+    });
+    const eventList = monthEvents.map(e => {
+      const s = new Date(e.start_time);
+      return `・${e.member_name || "家族"}：${e.title}（${s.getMonth()+1}/${s.getDate()} ${e.is_all_day ? "終日" : formatTime(e.start_time)}〜）`;
+    }).join("\n");
+    try {
+      const res = await fetch("/api/ai-review", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ month: `${y}年${mo+1}月`, events: eventList }),
+      });
+      const json = await res.json();
+      setAiReview(json.review || "レビューを取得できませんでした");
+    } catch {
+      setAiReview("AI秘書の呼び出しに失敗しました");
+    } finally {
+      setAiReviewLoading(false);
+    }
+  }
 
   function openEdit(e: CalendarEvent, fromDate?: string) {
-    const startDateStr = toJSTDateStr(e.start_time);
-    const endDateStr = toJSTDateStr(e.end_time);
-    const isMultiDay = startDateStr !== endDateStr;
-    // 複数日イベントかつ編集元の日が分かる場合はスコープ選択を出す
-    if (isMultiDay && fromDate) {
-      setScopePicker({ event: e, fromDate });
+    const isInstance = e.id.includes(";");
+    // 繰り返しインスタンスはスコープ選択を出す
+    if (isInstance) {
+      const dateStr = e.id.split(";")[1];
+      const baseEvent = { ...e, id: getBaseEventId(e.id) };
+      setRecurringPicker({ event: baseEvent, dateStr, action: "edit" });
       return;
     }
-    applyEditForm(e);
+    const baseEvent = { ...e, id: getBaseEventId(e.id) };
+    const startDateStr = toJSTDateStr(baseEvent.start_time);
+    const endDateStr = toJSTDateStr(baseEvent.end_time);
+    const isMultiDay = startDateStr !== endDateStr;
+    if (isMultiDay && fromDate && !baseEvent.is_recurring) {
+      setScopePicker({ event: baseEvent, fromDate });
+      return;
+    }
+    applyEditForm(baseEvent);
+  }
+
+  function openRecurringDayEdit(baseEvent: CalendarEvent, dateStr: string) {
+    const evStart = new Date(baseEvent.start_time);
+    const evEnd = new Date(baseEvent.end_time);
+    setForm({
+      title: baseEvent.title,
+      description: baseEvent.description ?? "",
+      date: dateStr,
+      endDate: dateStr,
+      startTime: `${String(evStart.getHours()).padStart(2,"0")}:${String(evStart.getMinutes()).padStart(2,"0")}`,
+      endTime: `${String(evEnd.getHours()).padStart(2,"0")}:${String(evEnd.getMinutes()).padStart(2,"0")}`,
+      isAllDay: baseEvent.is_all_day,
+      isMultiDay: false,
+      memberName: baseEvent.member_name ?? "家族",
+      location: baseEvent.location ?? "",
+      isShared: baseEvent.is_shared ?? true,
+      items: baseEvent.items ? [...baseEvent.items] : [],
+      isRecurring: false,
+      recurrenceFreq: "weekly",
+      recurrenceDays: [],
+    });
+    setRecurringDayEdit({ baseEvent, dateStr });
+    setRecurringPicker(null);
+    setModal({ mode: "create" });
   }
 
   function applyEditForm(e: CalendarEvent) {
@@ -286,6 +470,9 @@ export default function FamilyCalendarPage() {
       endDate: endDateStr,
       isAllDay: e.is_all_day, isMultiDay: multiDay, memberName: e.member_name ?? "家族",
       location: e.location ?? "", isShared: e.is_shared ?? true, items: e.items ? [...e.items] : [],
+      isRecurring: e.is_recurring ?? false,
+      recurrenceFreq: parseRecurrenceFreq(e.recurrence_rule),
+      recurrenceDays: parseRecurrenceDays(e.recurrence_rule),
     });
     setSingleDayEdit(null);
     setModal({ mode: "edit", event: e });
@@ -300,6 +487,7 @@ export default function FamilyCalendarPage() {
       endTime: `${String(en.getHours()).padStart(2,"0")}:${String(en.getMinutes()).padStart(2,"0")}`,
       isAllDay: e.is_all_day, isMultiDay: false, memberName: e.member_name ?? "家族",
       location: e.location ?? "", isShared: e.is_shared ?? true, items: e.items ? [...e.items] : [],
+      isRecurring: false, recurrenceFreq: "weekly", recurrenceDays: [],
     });
     setSingleDayEdit({ originalEvent: e, fromDate });
     setModal({ mode: "edit", event: e });
@@ -323,13 +511,22 @@ export default function FamilyCalendarPage() {
       items: form.items.length > 0 ? form.items : null,
       start_time: startIso, end_time: endIso,
       is_all_day: form.isAllDay, color: member.color,
-      member_name: form.memberName, is_recurring: false, recurrence_rule: null,
+      member_name: form.memberName,
+      is_recurring: form.isRecurring,
+      recurrence_rule: form.isRecurring ? buildRecurrenceRule(form.recurrenceFreq, form.recurrenceDays) : null,
       is_shared: form.isShared,
     };
 
     let res: { success: boolean; error?: string };
 
-    if (singleDayEdit) {
+    if (recurringDayEdit) {
+      // ─── 繰り返しのこの日のみ編集：新規1日イベント作成 + 除外日を追加 ───
+      res = await createEvent(calendarId, { ...payload, is_recurring: false, recurrence_rule: null });
+      if (res.success) {
+        const newRule = addException(recurringDayEdit.baseEvent.recurrence_rule, recurringDayEdit.dateStr);
+        await updateEvent(recurringDayEdit.baseEvent.id, { recurrence_rule: newRule });
+      }
+    } else if (singleDayEdit) {
       // ─── この日のみ編集：新規1日イベント作成 + 元イベント分割 ───
       res = await createEvent(calendarId, payload);
       if (res.success) {
@@ -391,20 +588,49 @@ export default function FamilyCalendarPage() {
       return;
     }
 
+    const wasRecurringDay = !!recurringDayEdit;
     const wasSingleDay = !!singleDayEdit;
     setSingleDayEdit(null);
-    toast.success(wasSingleDay ? "この日のみ変更しました" : modal?.mode === "create" ? "予定を追加しました" : "予定を更新しました");
+    setRecurringDayEdit(null);
+    toast.success(wasRecurringDay ? "この日のみ変更しました" : wasSingleDay ? "この日のみ変更しました" : modal?.mode === "create" ? "予定を追加しました" : "予定を更新しました");
     await fetchEvents();
     setSaving(false);
     setModal(null);
   }
 
   async function handleDelete(id: string) {
+    const isInstance = id.includes(";");
+    if (isInstance) {
+      // 繰り返しインスタンス → スコープ選択シートを出す（イベント情報を events から引く）
+      const baseId = getBaseEventId(id);
+      const dateStr = id.split(";")[1];
+      const baseEvent = events.find(e => e.id === id || e.id === baseId);
+      if (baseEvent) {
+        setModal(null);
+        setRecurringPicker({ event: { ...baseEvent, id: baseId }, dateStr, action: "delete" });
+        return;
+      }
+    }
     if (!confirm("この予定を削除しますか？")) return;
     await deleteEvent(id);
     await fetchEvents();
     setModal(null);
-    // 日別シートが開いていた場合はそのまま残す
+  }
+
+  async function handleDeleteRecurringDay(baseEvent: CalendarEvent, dateStr: string) {
+    const newRule = addException(baseEvent.recurrence_rule, dateStr);
+    await updateEvent(baseEvent.id, { recurrence_rule: newRule });
+    await fetchEvents();
+    setRecurringPicker(null);
+    toast.success("この日の予定を削除しました");
+  }
+
+  async function handleDeleteAllRecurring(baseEvent: CalendarEvent) {
+    if (!confirm("繰り返しの予定をすべて削除しますか？")) return;
+    await deleteEvent(baseEvent.id);
+    await fetchEvents();
+    setRecurringPicker(null);
+    toast.success("繰り返し予定をすべて削除しました");
   }
 
   async function handleToggleItem(ev: CalendarEvent, idx: number) {
@@ -643,7 +869,7 @@ export default function FamilyCalendarPage() {
                       const m = getMember(e.member_name);
                       const isMatch = e.member_name === "試合" || e.title.includes("🔴");
                       return (
-                        <div key={e.id} onClick={(ev) => { ev.stopPropagation(); openView(e); }}
+                        <div key={getBaseEventId(e.id)} onClick={(ev) => { ev.stopPropagation(); setDaySheet(dateStr); }}
                           className={`${isMatch ? "bg-red-600 text-white" : `${m.light} ${m.text}`} text-[9px] font-bold truncate rounded-sm px-1 leading-4 cursor-pointer shadow-sm ${isMatch ? "ring-1 ring-red-400" : ""}`}>
                           {isMatch && "🔴 "}{e.title}
                         </div>
@@ -661,11 +887,36 @@ export default function FamilyCalendarPage() {
         <div className="px-4 py-5 pb-32">
           <div className="flex items-center justify-between mb-3">
             <p className="text-xs font-bold text-slate-500 uppercase tracking-widest">今月の予定</p>
-            <button onClick={() => { setSelectMode(!selectMode); setSelectedIds(new Set()); }}
-              className={`text-xs font-bold px-3 py-1 rounded-full transition ${selectMode ? "bg-violet-500 text-white" : "bg-slate-800 text-slate-400"}`}>
-              {selectMode ? "キャンセル" : "選択する"}
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleAiReview}
+                disabled={aiReviewLoading}
+                className="flex items-center gap-1 text-xs font-bold px-3 py-1 rounded-full bg-violet-900/50 text-violet-300 border border-violet-700/40 hover:bg-violet-800/60 transition disabled:opacity-40"
+              >
+                {aiReviewLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
+                AI秘書
+              </button>
+              <button onClick={() => { setSelectMode(!selectMode); setSelectedIds(new Set()); }}
+                className={`text-xs font-bold px-3 py-1 rounded-full transition ${selectMode ? "bg-violet-500 text-white" : "bg-slate-800 text-slate-400"}`}>
+                {selectMode ? "キャンセル" : "選択する"}
+              </button>
+            </div>
           </div>
+          {/* AI秘書レビュー */}
+          {aiReview && (
+            <div className="mb-4 bg-violet-950/40 border border-violet-700/40 rounded-2xl p-4">
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-1.5">
+                  <Sparkles className="w-3.5 h-3.5 text-violet-400" />
+                  <span className="text-xs font-bold text-violet-300">AI秘書からのコメント</span>
+                </div>
+                <button onClick={() => setAiReview(null)} className="text-slate-500 hover:text-slate-300">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+              <p className="text-sm text-slate-300 leading-relaxed whitespace-pre-wrap">{aiReview}</p>
+            </div>
+          )}
           {selectMode && selectedIds.size > 0 && (
             <div className="mb-3 flex items-center gap-2 bg-violet-900/30 border border-violet-700/40 rounded-xl px-4 py-2">
               <span className="text-xs text-violet-300 flex-1">{selectedIds.size}件選択中</span>
@@ -1024,6 +1275,87 @@ export default function FamilyCalendarPage() {
         );
       })()}
 
+      {/* ─── 繰り返し予定スコープ選択シート ─── */}
+      {recurringPicker && (() => {
+        const { event: ev, dateStr, action } = recurringPicker;
+        const [dy, dm, dd] = dateStr.split("-").map(Number);
+        const dow = new Date(dy, dm - 1, dd).getDay();
+        const m = getMember(ev.member_name);
+        const isEdit = action === "edit";
+        return (
+          <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center"
+            onClick={(e) => { if (e.target === e.currentTarget) setRecurringPicker(null); }}>
+            <div className="bg-slate-900 w-full sm:max-w-md rounded-t-3xl sm:rounded-2xl border border-slate-700 overflow-hidden shadow-2xl">
+              <div className="flex items-center justify-between px-5 pt-5 pb-4 border-b border-slate-800">
+                <div>
+                  <p className="text-xs text-slate-500 mb-1">{isEdit ? "変更の範囲を選択" : "削除の範囲を選択"}</p>
+                  <div className="flex items-center gap-2">
+                    <div className={`w-3 h-3 rounded-full ${m.bg}`} />
+                    <h2 className="text-base font-black truncate">{ev.title}</h2>
+                    <span className="flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-violet-900/40 text-violet-300 border border-violet-700/30">
+                      <RotateCcw className="w-2.5 h-2.5" />繰り返し
+                    </span>
+                  </div>
+                </div>
+                <button onClick={() => setRecurringPicker(null)} className="w-8 h-8 rounded-xl bg-slate-800 flex items-center justify-center border border-slate-700">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+              <div className="p-4 space-y-3">
+                {/* この日のみ */}
+                <button
+                  onClick={() => {
+                    if (isEdit) {
+                      openRecurringDayEdit(ev, dateStr);
+                    } else {
+                      handleDeleteRecurringDay(ev, dateStr);
+                    }
+                  }}
+                  className="w-full text-left bg-violet-950/40 hover:bg-violet-900/50 border-2 border-violet-700 rounded-2xl p-4 transition active:scale-[0.98]"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-full bg-violet-600 flex items-center justify-center shrink-0">
+                      <CalendarDays className="w-5 h-5 text-white" />
+                    </div>
+                    <div>
+                      <p className="font-black text-white">{dm}/{dd}（{WEEKDAYS[dow]}）のみ{isEdit ? "変更" : "削除"}</p>
+                      <p className="text-xs text-slate-400 mt-0.5">この日だけ{isEdit ? "別の予定として保存" : "削除"}。他の日は変わりません</p>
+                    </div>
+                  </div>
+                </button>
+                {/* すべての繰り返し */}
+                <button
+                  onClick={() => {
+                    if (isEdit) {
+                      setRecurringPicker(null);
+                      applyEditForm(ev);
+                    } else {
+                      handleDeleteAllRecurring(ev);
+                    }
+                  }}
+                  className="w-full text-left bg-slate-800 hover:bg-slate-750 border border-slate-700 rounded-2xl p-4 transition active:scale-[0.98]"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${isEdit ? "bg-slate-700" : "bg-red-900/60"}`}>
+                      {isEdit
+                        ? <RotateCcw className="w-5 h-5 text-slate-300" />
+                        : <Trash2 className="w-5 h-5 text-red-400" />
+                      }
+                    </div>
+                    <div>
+                      <p className={`font-black ${isEdit ? "text-white" : "text-red-400"}`}>
+                        すべての繰り返しを{isEdit ? "変更" : "削除"}
+                      </p>
+                      <p className="text-xs text-slate-400 mt-0.5">今後の繰り返し予定すべてに反映されます</p>
+                    </div>
+                  </div>
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* 一括タグ変更モーダル */}
       {bulkTagModal && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center"
@@ -1192,6 +1524,13 @@ export default function FamilyCalendarPage() {
                             {/* 編集アイコン */}
                             <div className="flex gap-1 shrink-0">
                               <button
+                                onClick={(e) => { e.stopPropagation(); setDaySheet(null); handleCopy(ev); }}
+                                className="w-8 h-8 rounded-lg bg-slate-700 hover:bg-slate-600 flex items-center justify-center transition"
+                                title="コピー"
+                              >
+                                <Copy className="w-3.5 h-3.5 text-slate-300" />
+                              </button>
+                              <button
                                 onClick={(e) => { e.stopPropagation(); openEdit(ev, daySheet!); }}
                                 className="w-8 h-8 rounded-lg bg-slate-700 hover:bg-slate-600 flex items-center justify-center transition"
                               >
@@ -1235,7 +1574,7 @@ export default function FamilyCalendarPage() {
       {/* モーダル */}
       {modal && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center"
-          onClick={(e) => { if (e.target === e.currentTarget) setModal(null); }}>
+          onClick={(e) => { if (e.target === e.currentTarget) { setModal(null); setRecurringDayEdit(null); } }}>
           <div className="bg-slate-900 w-full sm:max-w-md rounded-t-3xl sm:rounded-2xl border border-slate-700 overflow-hidden shadow-2xl">
 
             {/* VIEW */}
@@ -1251,6 +1590,9 @@ export default function FamilyCalendarPage() {
                     <div className="flex items-start justify-between mb-4">
                       <h2 className="text-xl font-black flex-1 pr-3 leading-snug">{ev.title}</h2>
                       <div className="flex gap-2">
+                        <button onClick={() => { setModal(null); handleCopy(ev); }} className="w-9 h-9 rounded-xl bg-slate-800 hover:bg-slate-700 flex items-center justify-center transition border border-slate-700" title="コピー">
+                          <Copy className="w-4 h-4 text-slate-300" />
+                        </button>
                         <button onClick={() => openEdit(ev, modal.date)} className="w-9 h-9 rounded-xl bg-slate-800 hover:bg-slate-700 flex items-center justify-center transition border border-slate-700">
                           <Pencil className="w-4 h-4 text-slate-300" />
                         </button>
@@ -1286,6 +1628,11 @@ export default function FamilyCalendarPage() {
                         <div className="flex items-center gap-2">
                           <User className="w-4 h-4 text-slate-500 shrink-0" />
                           <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${m.light} ${m.text}`}>{ev.member_name}</span>
+                          {ev.is_recurring && (
+                            <span className="flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-violet-900/40 text-violet-300 border border-violet-700/30">
+                              <RotateCcw className="w-2.5 h-2.5" />繰り返し
+                            </span>
+                          )}
                         </div>
                       )}
                       {ev.description && (
@@ -1326,26 +1673,57 @@ export default function FamilyCalendarPage() {
                 <div className="flex items-center justify-between p-5 border-b border-slate-800">
                   <div>
                     <h2 className="text-lg font-black">
-                      {modal.mode === "create" ? "予定を追加" : singleDayEdit ? "この日のみ編集" : "予定を編集"}
+                      {recurringDayEdit
+                        ? "この日のみ変更"
+                        : modal.mode === "create"
+                        ? "予定を追加"
+                        : singleDayEdit
+                        ? "この日のみ編集"
+                        : "予定を編集"}
                     </h2>
+                    {recurringDayEdit && (
+                      <p className="text-xs text-violet-400 mt-0.5 flex items-center gap-1">
+                        <RotateCcw className="w-3 h-3" />
+                        {recurringDayEdit.dateStr.replace(/-/g, "/")} のみ変更
+                      </p>
+                    )}
                     {singleDayEdit && (
                       <p className="text-xs text-violet-400 mt-0.5">
                         {singleDayEdit.fromDate.replace(/-/g, "/")} のみ変更
                       </p>
                     )}
                   </div>
-                  <button onClick={() => setModal(null)} className="w-8 h-8 rounded-xl bg-slate-800 hover:bg-slate-700 flex items-center justify-center transition border border-slate-700">
+                  <button onClick={() => { setModal(null); setRecurringDayEdit(null); }} className="w-8 h-8 rounded-xl bg-slate-800 hover:bg-slate-700 flex items-center justify-center transition border border-slate-700">
                     <X className="w-4 h-4" />
                   </button>
                 </div>
                 <div className="p-5 space-y-4 overflow-y-auto max-h-[65vh] scrollbar-none">
 
-                  {/* タイトル */}
-                  <div>
+                  {/* タイトル（予測入力付き） */}
+                  <div className="relative">
                     <label className="text-xs font-bold text-slate-400 block mb-1.5">タイトル</label>
                     <input value={form.title} onChange={e => setForm({...form, title: e.target.value})}
                       placeholder="例: パパ サッカー試合" autoFocus
                       className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white placeholder:text-slate-600 focus:outline-none focus:border-violet-500 text-sm" />
+                    {form.title.length >= 1 && (() => {
+                      const q = form.title.toLowerCase();
+                      const suggestions = [...new Set(
+                        events.filter(e => e.title.toLowerCase().includes(q) && e.title !== form.title)
+                          .map(e => e.title)
+                      )].slice(0, 4);
+                      if (suggestions.length === 0) return null;
+                      return (
+                        <div className="absolute z-10 top-full mt-1 w-full bg-slate-800 border border-slate-700 rounded-xl overflow-hidden shadow-xl">
+                          {suggestions.map(s => (
+                            <button key={s} type="button"
+                              onClick={() => setForm({...form, title: s})}
+                              className="w-full text-left px-4 py-2.5 text-sm text-slate-200 hover:bg-slate-700 transition">
+                              {s}
+                            </button>
+                          ))}
+                        </div>
+                      );
+                    })()}
                   </div>
 
                   {/* メンバー */}
@@ -1410,6 +1788,49 @@ export default function FamilyCalendarPage() {
                       <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow-md transition-all ${form.isMultiDay ? "left-[26px]" : "left-0.5"}`} />
                     </button>
                   </div>
+
+                  {/* 繰り返し設定 */}
+                  <div className="flex items-center justify-between bg-slate-800/50 rounded-xl px-4 py-3 border border-slate-800">
+                    <div className="flex items-center gap-2">
+                      <RotateCcw className="w-4 h-4 text-slate-400" />
+                      <span className="text-sm text-slate-300">繰り返し</span>
+                    </div>
+                    <button onClick={() => setForm({...form, isRecurring: !form.isRecurring})}
+                      className={`w-12 h-6 rounded-full transition-colors relative ${form.isRecurring ? "bg-violet-500" : "bg-slate-700"}`}>
+                      <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow-md transition-all ${form.isRecurring ? "left-[26px]" : "left-0.5"}`} />
+                    </button>
+                  </div>
+                  {form.isRecurring && (
+                    <div className="bg-slate-800/30 rounded-xl p-3 border border-violet-700/30 space-y-3">
+                      {/* 頻度 */}
+                      <div className="flex gap-2">
+                        {(["daily", "weekly", "monthly"] as const).map((f) => (
+                          <button key={f} onClick={() => setForm({...form, recurrenceFreq: f})}
+                            className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition ${form.recurrenceFreq === f ? "bg-violet-600 text-white" : "bg-slate-700 text-slate-400 hover:bg-slate-600"}`}>
+                            {f === "daily" ? "毎日" : f === "weekly" ? "毎週" : "毎月"}
+                          </button>
+                        ))}
+                      </div>
+                      {/* 毎週の場合：曜日選択 */}
+                      {form.recurrenceFreq === "weekly" && (
+                        <div className="flex gap-1">
+                          {WEEKDAYS.map((label, i) => {
+                            const sel = form.recurrenceDays.includes(i);
+                            return (
+                              <button key={i} onClick={() => {
+                                const next = sel ? form.recurrenceDays.filter(d => d !== i) : [...form.recurrenceDays, i];
+                                setForm({...form, recurrenceDays: next});
+                              }}
+                                className={`flex-1 py-1.5 rounded-lg text-[11px] font-black transition ${sel ? (i===0?"bg-red-600 text-white":i===6?"bg-blue-600 text-white":"bg-violet-600 text-white") : "bg-slate-700 text-slate-500 hover:bg-slate-600"}`}>
+                                {label}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+                      <p className="text-[10px] text-violet-400">※ 編集・削除すると全ての繰り返しに反映されます</p>
+                    </div>
+                  )}
 
                   {/* 共有設定 */}
                   <div className="flex items-center justify-between bg-violet-900/10 rounded-xl px-4 py-3 border border-violet-900/40">
