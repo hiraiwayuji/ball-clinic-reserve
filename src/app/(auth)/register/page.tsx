@@ -285,9 +285,13 @@ export default function RegisterPage() {
           )}
         </div>
 
-        <p className="text-center text-slate-600 text-xs mt-6">
-          © 2026 接骨院管理システム All rights reserved.
-        </p>
+        <div className="text-center mt-6 space-y-2">
+          <div className="flex justify-center gap-4 text-xs">
+            <a href="/terms"   target="_blank" className="text-slate-500 hover:text-slate-300 underline underline-offset-2">利用規約</a>
+            <a href="/privacy" target="_blank" className="text-slate-500 hover:text-slate-300 underline underline-offset-2">プライバシーポリシー</a>
+          </div>
+          <p className="text-slate-600 text-xs">© 2026 接骨院管理システム All rights reserved.</p>
+        </div>
       </div>
 
       <style jsx>{`
