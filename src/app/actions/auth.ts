@@ -68,23 +68,37 @@ export async function logoutAction() {
 }
 
 export async function signUpAction(formData: FormData) {
-  const email = formData.get("email") as string;
-  const password = formData.get("password") as string;
+  const email        = formData.get("email") as string;
+  const password     = formData.get("password") as string;
   const setupPassword = formData.get("setupPassword") as string;
+  const clinicName   = (formData.get("clinicName") as string)?.trim() || "新規接骨院";
 
-  // セキュリティ強化: 環境変数で設定されたセットアップ用パスワードを確認
+  // セットアップパスワード確認
   const requiredPassword = process.env.SETUP_PASSWORD;
   if (requiredPassword && setupPassword !== requiredPassword) {
-    return { error: "セットアップパスワードが正しくありません。管理者に確認してください。" };
+    return { error: "セットアップコードが正しくありません。発行者にご確認ください。" };
   }
 
-  // サービスロールでアカウント作成（メール確認不要・即時ログイン可能）
   const { createClient: createServiceClient } = await import("@supabase/supabase-js");
   const serviceClient = createServiceClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_ROLE_KEY!
   );
 
+  // ① 新しいクリニックを clinic_settings に作成（固有 UUID）
+  const { data: clinicData, error: clinicError } = await serviceClient
+    .from("clinic_settings")
+    .insert({ clinic_name: clinicName })
+    .select("id")
+    .single();
+
+  if (clinicError || !clinicData) {
+    return { error: `クリニック作成に失敗しました: ${clinicError?.message}` };
+  }
+
+  const newClinicId = clinicData.id;
+
+  // ② ユーザーアカウント作成（メール確認不要）
   const { data: adminData, error: createError } = await serviceClient.auth.admin.createUser({
     email,
     password,
@@ -92,25 +106,26 @@ export async function signUpAction(formData: FormData) {
   });
 
   if (createError) {
+    // ユーザー作成失敗時はクリニックも削除
+    await serviceClient.from("clinic_settings").delete().eq("id", newClinicId);
     return { error: `アカウント作成に失敗しました: ${createError.message}` };
   }
 
-  // 新規ユーザーをデフォルトクリニックに自動登録
+  // ③ ユーザーを新クリニックのオーナーとして登録
   if (adminData.user) {
     await serviceClient.from("clinic_users").upsert({
       user_id: adminData.user.id,
-      clinic_id: "00000000-0000-0000-0000-000000000001",
+      clinic_id: newClinicId,
       role: "owner",
     }, { onConflict: "user_id, clinic_id", ignoreDuplicates: true });
   }
 
-  // 作成直後にそのままサインイン（セッションCookieをセット）
+  // ④ 作成直後にそのままサインイン
   const { createClient } = await import("@/lib/supabase/server");
   const supabase = await createClient();
   const { error: signInError } = await supabase.auth.signInWithPassword({ email, password });
 
   if (signInError) {
-    // アカウントは作成済み。手動でログインしてもらう
     return { success: "アカウントを作成しました。ログイン画面からログインしてください。", autoLogin: false };
   }
 
