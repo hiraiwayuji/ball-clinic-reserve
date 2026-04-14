@@ -8,7 +8,8 @@ const LAST_UPDATED = "2026年4月14日";
 const SERVICE_NAME = "接骨院管理システム";
 const OPERATOR     = "平岩裕治";
 const EMAIL        = "hiraiwayuji@gmail.com";
-const PRICE        = "月額【●,000】円（税込）"; // ← 実際の料金に変更
+const SETUP_FEE    = "10,000円（税込・初回のみ）";
+const PRICE        = "月額3,980円（税込）";
 
 export default function TermsPage() {
   return (
@@ -49,13 +50,24 @@ export default function TermsPage() {
 
           <Section title="第3条（利用料金・支払い）">
             <ol className="list-decimal pl-5 space-y-2">
-              <li>本サービスの利用料金は{PRICE}です。</li>
               <li>
-                利用料金は、運営者が指定する方法（銀行振込・クレジットカード等）により、
-                毎月末日までに翌月分をお支払いください。
+                本サービスの料金は以下のとおりです。
+                <ul className="list-disc pl-5 mt-2 space-y-1 text-sm">
+                  <li>導入費用（初回のみ）：{SETUP_FEE}</li>
+                  <li>月額利用料：{PRICE}</li>
+                </ul>
               </li>
-              <li>一度支払われた利用料金は、原則として返金しません。</li>
-              <li>14日間の無料トライアル期間を提供します（運営者が別途案内した場合に限る）。</li>
+              <li>
+                導入費用は、契約成立後に運営者が指定する口座へお振込みください。
+                入金確認後にアカウントを発行します。
+              </li>
+              <li>
+                月額利用料は、毎月末日までに翌月分をお振込みください。
+              </li>
+              <li>
+                無料期間の適用は、運営者がユーザーへ個別に案内した場合に限ります。
+              </li>
+              <li>一度支払われた料金は、原則として返金しません。</li>
             </ol>
           </Section>
 
