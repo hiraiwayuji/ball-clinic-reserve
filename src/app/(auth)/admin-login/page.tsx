@@ -2,20 +2,35 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { loginAction, sendPasswordResetEmail } from "@/app/actions/auth";
+import { loginAction, sendPasswordResetEmail, demoLoginAction } from "@/app/actions/auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Lock, Mail, Eye, EyeOff, Shield, ArrowRight } from "lucide-react";
+import { Lock, Mail, Eye, EyeOff, Shield, ArrowRight, FlaskConical } from "lucide-react";
 import Image from "next/image";
+import { isDemo, isFamilyGift, APP_TITLE } from "@/lib/app-mode";
 
 export default function AdminLoginPage() {
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [isDemoLoading, setIsDemoLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [showReset, setShowReset] = useState(false);
   const [resetEmail, setResetEmail] = useState("");
   const [resetSent, setResetSent] = useState(false);
   const router = useRouter();
+
+  const handleDemoLogin = async () => {
+    setIsDemoLoading(true);
+    setError(null);
+    const result = await demoLoginAction();
+    if (result?.error) {
+      setError(result.error);
+      setIsDemoLoading(false);
+      return;
+    }
+    router.push("/admin");
+    router.refresh();
+  };
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -100,11 +115,16 @@ export default function AdminLoginPage() {
             </div>
           </div>
           <h1 className="text-3xl font-black text-white tracking-tight">
-            ボール接骨院
+            {isFamilyGift ? APP_TITLE : "ボール接骨院"}
           </h1>
           <p className="text-blue-300/70 text-sm mt-2 font-medium tracking-wide">
-            予約管理システム
+            {isDemo ? "デモ環境 - 自由にお試しいただけます" : "予約管理システム"}
           </p>
+          {isDemo && (
+            <span className="mt-2 inline-block text-xs font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 px-3 py-1 rounded-full">
+              DEMO MODE
+            </span>
+          )}
         </div>
 
         {/* Glass card */}
@@ -205,6 +225,28 @@ export default function AdminLoginPage() {
               )}
             </Button>
           </form>
+
+          {/* デモログインボタン（DEMO モードのみ表示） */}
+          {isDemo && (
+            <div className="mt-4 pt-4 border-t border-white/10">
+              <button
+                type="button"
+                onClick={handleDemoLogin}
+                disabled={isDemoLoading || isLoading}
+                className="w-full h-12 rounded-xl text-base font-bold transition-all duration-300 flex items-center justify-center gap-2 border-2 border-amber-400/40 text-amber-300 hover:bg-amber-400/10 disabled:opacity-50"
+              >
+                {isDemoLoading ? (
+                  <span className="w-5 h-5 border-2 border-amber-300/30 border-t-amber-300 rounded-full animate-spin" />
+                ) : (
+                  <FlaskConical className="w-5 h-5" />
+                )}
+                {isDemoLoading ? "ログイン中..." : "デモサイトを体験する"}
+              </button>
+              <p className="text-center text-amber-400/50 text-xs mt-2">
+                テスト用アカウントで自動ログインします
+              </p>
+            </div>
+          )}
 
           {/* Footer hint */}
           <div className="mt-8 pt-6 border-t border-white/5 text-center space-y-3">

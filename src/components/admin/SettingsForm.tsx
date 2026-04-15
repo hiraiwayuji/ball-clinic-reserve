@@ -10,6 +10,8 @@ import { Settings, Video, MapPin, Save, Loader2, MessageSquare, Instagram, Youtu
 import { updateClinicSettings, ClinicSettings } from "@/app/actions/settings";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
+import { isDemo } from "@/lib/app-mode";
+import DemoModeBanner from "@/components/admin/DemoModeBanner";
 
 export default function SettingsForm({ initialSettings }: { initialSettings: ClinicSettings | null }) {
   const router = useRouter();
@@ -19,6 +21,7 @@ export default function SettingsForm({ initialSettings }: { initialSettings: Cli
 
   const handleSave = async () => {
     if (!settings) return;
+    if (isDemo) { toast.error("デモモードでは設定を変更できません"); return; }
     setIsSaving(true);
     try {
       const res = await updateClinicSettings(settings);
@@ -71,6 +74,7 @@ export default function SettingsForm({ initialSettings }: { initialSettings: Cli
 
   return (
     <div className="space-y-8 animate-in fade-in pb-12">
+      <DemoModeBanner restrictions="デモモードでは設定の保存はできません。内容の閲覧のみ可能です。" />
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
           <h1 className="text-3xl font-bold tracking-tight text-slate-900 dark:text-slate-100 border-l-4 border-slate-600 dark:border-slate-400 pl-3">

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { isFamilyGift } from "@/lib/app-mode";
+import { isFamilyGift, isDemo } from "@/lib/app-mode";
 
 const CLINIC_NAV_ITEMS = [
   { href: "/admin/dashboard", label: "ダッシュボード" },
@@ -21,6 +21,7 @@ const FAMILY_GIFT_NAV_ITEMS = [
 
 export default function AdminNavLinks() {
   const pathname = usePathname();
+  // DEMOモードはフルナビを表示（CLINICと同じ）
   const NAV_ITEMS = isFamilyGift ? FAMILY_GIFT_NAV_ITEMS : CLINIC_NAV_ITEMS;
 
   return (

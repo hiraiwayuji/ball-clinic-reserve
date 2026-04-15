@@ -60,6 +60,26 @@ export async function sendPasswordResetEmail(email: string, siteUrl: string) {
   return { success: true };
 }
 
+/** デモアカウントで自動ログイン（APP_MODE=DEMO 時のみ有効） */
+export async function demoLoginAction() {
+  const email = process.env.DEMO_LOGIN_EMAIL;
+  const password = process.env.DEMO_LOGIN_PASSWORD;
+
+  if (!email || !password) {
+    return { error: "デモアカウントが設定されていません（DEMO_LOGIN_EMAIL / DEMO_LOGIN_PASSWORD）。" };
+  }
+
+  const { createClient } = await import("@/lib/supabase/server");
+  const supabase = await createClient();
+
+  const { error } = await supabase.auth.signInWithPassword({ email, password });
+  if (error) {
+    return { error: "デモアカウントへのログインに失敗しました。" };
+  }
+
+  return { success: true };
+}
+
 export async function logoutAction() {
   const { createClient } = await import("@/lib/supabase/server");
   const supabase = await createClient();

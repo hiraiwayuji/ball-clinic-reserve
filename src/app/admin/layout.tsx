@@ -6,7 +6,8 @@ import { Button } from "@/components/ui/button";
 import { LogOut } from "lucide-react";
 import AiChatPanel from "@/components/AiChatPanel";
 import AdminNavLinks from "@/components/admin/AdminNavLinks";
-import { isFamilyGift, APP_TITLE, APP_SUBTITLE } from "@/lib/app-mode";
+import { isFamilyGift, isDemo, APP_TITLE, APP_SUBTITLE } from "@/lib/app-mode";
+import { FlaskConical } from "lucide-react";
 
 export default async function AdminLayout({
   children,
@@ -51,6 +52,12 @@ export default async function AdminLayout({
         </div>
       </header>
 
+      {isDemo && (
+        <div className="bg-amber-500/10 border-b border-amber-500/20 px-4 py-2 flex items-center gap-2 text-amber-400 text-xs font-bold">
+          <FlaskConical className="w-3.5 h-3.5" />
+          DEMO MODE — テスト環境です。重要な設定変更は無効化されています。
+        </div>
+      )}
       <main className="flex-1 container mx-auto px-4 py-8 relative">
         {children}
       </main>
