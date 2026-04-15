@@ -563,7 +563,7 @@ export default function ExpensesPage() {
                                 <select
                                   value={editingRow!.category}
                                   onChange={(e) => setEditingRow(r => r ? { ...r, category: e.target.value } : r)}
-                                  className="w-full border border-emerald-300 rounded px-1.5 py-1 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                                  className="w-full border border-emerald-300 rounded px-1.5 py-1 text-xs bg-white text-slate-800 focus:outline-none focus:ring-1 focus:ring-emerald-500"
                                 >
                                   <option value="">未分類</option>
                                   {EXPENSE_CATEGORIES.map(cat => (

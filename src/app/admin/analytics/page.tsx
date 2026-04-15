@@ -184,8 +184,8 @@ export default function AnalyticsPage() {
     : [];
 
   const revMixA = a ? [
-    { name: "\u81ea\u8cbb", value: a.revenue.cash },
-    { name: "\u4fdd\u967a", value: a.revenue.insurance },
+    { name: "自費", value: a.revenue.cash },
+    { name: "保険", value: a.revenue.insurance },
   ] : [];
 
   // 顧客属性データ変換
@@ -289,7 +289,7 @@ export default function AnalyticsPage() {
           {/* KPIカード */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <KpiCard
-              label="\u58f2\u4e0a\u5408\u8a08" valueA={a.revenue.total} valueB={b.revenue.total}
+              label="売上合計" valueA={a.revenue.total} valueB={b.revenue.total}
               diff={d.revenueTotal} pct={d.revenuePct} format={yen}
               icon={<Banknote className="w-4 h-4" />}
             />
@@ -299,7 +299,7 @@ export default function AnalyticsPage() {
               icon={<Users className="w-4 h-4" />}
             />
             <KpiCard
-              label="\u5229\u76ca\uff08\u58f2\u4e0a-\u7d4c\u8cbb\uff09" valueA={a.profit} valueB={b.profit}
+              label="利益（売上-経費）" valueA={a.profit} valueB={b.profit}
               diff={d.profit} pct={d.profitPct} format={yen}
               icon={<TrendingUp className="w-4 h-4" />}
             />
@@ -309,12 +309,12 @@ export default function AnalyticsPage() {
               icon={<ReceiptText className="w-4 h-4" />}
             />
             <KpiCard
-              label="\u81ea\u8cbb\u58f2\u4e0a" valueA={a.revenue.cash} valueB={b.revenue.cash}
+              label="自費売上" valueA={a.revenue.cash} valueB={b.revenue.cash}
               diff={d.cash} pct={d.cashPct} format={yen}
               icon={<Banknote className="w-4 h-4" />}
             />
             <KpiCard
-              label="\u4fdd\u967a\u5165\u91d1" valueA={a.revenue.insurance} valueB={b.revenue.insurance}
+              label="保険入金" valueA={a.revenue.insurance} valueB={b.revenue.insurance}
               diff={d.insurance} pct={d.insurancePct} format={yen}
               icon={<Banknote className="w-4 h-4" />}
             />
