@@ -1,9 +1,13 @@
+import { redirect } from "next/navigation";
+import { isFamilyGift } from "@/lib/app-mode";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { CalendarDays, Clock, MapPin, Phone } from "lucide-react";
 import Image from "next/image";
 
 export default function Home() {
+  if (isFamilyGift) redirect("/calendar");
+
   return (
     <div className="min-h-screen bg-slate-900" data-dark-page>
       {/* Header */}

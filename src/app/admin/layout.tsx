@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { LogOut } from "lucide-react";
 import AiChatPanel from "@/components/AiChatPanel";
 import AdminNavLinks from "@/components/admin/AdminNavLinks";
+import { isFamilyGift, APP_TITLE, APP_SUBTITLE } from "@/lib/app-mode";
 
 export default async function AdminLayout({
   children,
@@ -20,19 +21,21 @@ export default async function AdminLayout({
       <header className="bg-white/80 dark:bg-slate-900/80 backdrop-blur-md border-b sticky top-0 z-50 transition-colors duration-500">
         <div className="container mx-auto px-4 h-16 flex items-center justify-between">
           <div className="flex items-center gap-4">
-            <Link href="/admin/dashboard" className="flex items-center gap-2 group">
-              <div className="relative w-8 h-8 dark:invert">
-                <Image 
-                  src="/images/logo-black.png" 
-                  alt="ボール接骨院" 
-                  fill 
-                  className="object-contain"
-                />
-              </div>
-              <span className="text-xl font-bold text-slate-900 dark:text-blue-50 group-hover:text-blue-600 transition-colors">ボール接骨院</span>
+            <Link href={isFamilyGift ? "/calendar" : "/admin/dashboard"} className="flex items-center gap-2 group">
+              {!isFamilyGift && (
+                <div className="relative w-8 h-8 dark:invert">
+                  <Image
+                    src="/images/logo-black.png"
+                    alt="ボール接骨院"
+                    fill
+                    className="object-contain"
+                  />
+                </div>
+              )}
+              <span className="text-xl font-bold text-slate-900 dark:text-blue-50 group-hover:text-blue-600 transition-colors">{APP_TITLE}</span>
             </Link>
             <div className="h-6 w-px bg-slate-200 dark:bg-slate-800 mx-2 hidden md:block" />
-            <span className="text-sm font-medium text-slate-500 hidden md:block uppercase tracking-widest">AI Secretary System</span>
+            <span className="text-sm font-medium text-slate-500 hidden md:block uppercase tracking-widest">{APP_SUBTITLE}</span>
             <AdminNavLinks />
           </div>
           <div className="flex items-center gap-2">
@@ -52,8 +55,8 @@ export default async function AdminLayout({
         {children}
       </main>
       
-      {/* 全管理画面にAIチャットを配置 */}
-      <AiChatPanel />
+      {/* 全管理画面にAIチャットを配置（CLINICモードのみ） */}
+      {!isFamilyGift && <AiChatPanel />}
     </div>
   );
 }

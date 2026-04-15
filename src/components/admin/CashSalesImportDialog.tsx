@@ -10,52 +10,24 @@ import {
   Loader2, ChevronRight, X
 } from "lucide-react";
 import { bulkImportCashSales, ImportCashSaleRow } from "@/app/actions/sales";
+import { parseUploadedFile, downloadExcelTemplate } from "@/lib/excel";
 import { toast } from "sonner";
 
-// CSVテンプレートの列定義
-const TEMPLATE_HEADERS = [
-  "日付(YYYY/MM/DD)", "お名前", "金額（税込）", "備考", "新患（○/空欄）",
+const COLUMNS = [
+  { key: "sale_date",       label: "日付(YYYY/MM/DD)" },
+  { key: "customer_name",   label: "お名前" },
+  { key: "treatment_fee",   label: "金額（税込）" },
+  { key: "memo",            label: "備考" },
+  { key: "is_first_visit",  label: "新患（○/空欄）" },
 ];
-const TEMPLATE_SAMPLE = [
-  "2026/01/15", "やまだ たろう", "5000", "自費施術", "",
-];
 
-// CSV列→フィールドのマッピング
-const COL_MAP = ["sale_date", "customer_name", "treatment_fee", "memo", "is_first_visit"] as const;
-
-function downloadTemplate() {
-  const bom = "\uFEFF";
-  const header = TEMPLATE_HEADERS.join(",");
-  const sample = TEMPLATE_SAMPLE.join(",");
-  const csv = bom + header + "\n" + sample + "\n";
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = "受付入力テンプレート.csv";
-  a.click();
-  URL.revokeObjectURL(url);
-}
-
-function parseCSV(text: string): string[][] {
-  const clean = text.replace(/^\uFEFF/, "");
-  return clean
-    .split(/\r?\n/)
-    .map((line) => {
-      const cells: string[] = [];
-      let cur = "";
-      let inQ = false;
-      for (let i = 0; i < line.length; i++) {
-        const c = line[i];
-        if (c === '"') { inQ = !inQ; continue; }
-        if (c === "," && !inQ) { cells.push(cur.trim()); cur = ""; continue; }
-        cur += c;
-      }
-      cells.push(cur.trim());
-      return cells;
-    })
-    .filter((row) => row.some((c) => c !== ""));
-}
+const SAMPLE_ROW = {
+  "日付(YYYY/MM/DD)": "2026/01/15",
+  "お名前": "やまだ たろう",
+  "金額（税込）": 5000,
+  "備考": "自費施術",
+  "新患（○/空欄）": "",
+};
 
 function normalizeDate(val: string | null): string | null {
   if (!val) return null;
@@ -93,15 +65,13 @@ export default function CashSalesImportDialog({ open, onClose, onImported }: Pro
     onClose();
   };
 
-  const processFile = (file: File) => {
-    if (!file.name.match(/\.(csv|txt)$/i)) {
-      toast.error("CSVファイル（.csv）を選択してください");
+  const processFile = async (file: File) => {
+    if (!file.name.match(/\.(csv|txt|xlsx)$/i)) {
+      toast.error("Excel（.xlsx）またはCSV（.csv）を選択してください");
       return;
     }
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const text = e.target?.result as string;
-      const matrix = parseCSV(text);
+    try {
+      const matrix = await parseUploadedFile(file);
       if (matrix.length < 2) { toast.error("データが見つかりません"); return; }
 
       const dataRows = matrix.slice(1).map((cells) => {
@@ -121,8 +91,9 @@ export default function CashSalesImportDialog({ open, onClose, onImported }: Pro
       if (dataRows.length === 0) { toast.error("お名前が入力された行がありません"); return; }
       setRows(dataRows);
       setStep("preview");
-    };
-    reader.readAsText(file, "UTF-8");
+    } catch {
+      toast.error("ファイルの読み込みに失敗しました");
+    }
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -131,11 +102,11 @@ export default function CashSalesImportDialog({ open, onClose, onImported }: Pro
     if (fileRef.current) fileRef.current.value = "";
   };
 
-  const handleDrop = (e: React.DragEvent) => {
+  const handleDrop = async (e: React.DragEvent) => {
     e.preventDefault();
     setDragOver(false);
     const file = e.dataTransfer.files?.[0];
-    if (file) processFile(file);
+    if (file) await processFile(file);
   };
 
   const handleImport = async () => {
@@ -158,10 +129,10 @@ export default function CashSalesImportDialog({ open, onClose, onImported }: Pro
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-xl font-black">
             <FileSpreadsheet className="w-6 h-6 text-blue-600" />
-            受付入力 CSVインポート
+            受付入力 Excel/CSV インポート
           </DialogTitle>
           <DialogDescription>
-            ExcelやスプレッドシートのデータをCSV形式で一括取り込みできます。
+            Excel（.xlsx）またはCSV（.csv）で一括取り込みできます。
           </DialogDescription>
         </DialogHeader>
 
@@ -187,9 +158,9 @@ export default function CashSalesImportDialog({ open, onClose, onImported }: Pro
               <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">
                 Excelで開き、既存データを貼り付けて保存するだけで使えます。
               </p>
-              <Button variant="outline" onClick={downloadTemplate} className="border-blue-200 text-blue-600 hover:bg-blue-50 font-bold">
+              <Button variant="outline" onClick={() => downloadExcelTemplate(COLUMNS, SAMPLE_ROW, "受付入力テンプレート.xlsx")} className="border-blue-200 text-blue-600 hover:bg-blue-50 font-bold">
                 <Download className="w-4 h-4 mr-2" />
-                受付入力テンプレート.csv をダウンロード
+                受付入力テンプレート.xlsx をダウンロード
               </Button>
               <div className="mt-3 text-xs text-slate-400 space-y-0.5">
                 <p>• <span className="font-bold text-slate-600 dark:text-slate-300">日付</span>（必須）例: <span className="font-mono bg-slate-100 dark:bg-slate-700 px-1 rounded">2026/01/15</span></p>
@@ -202,7 +173,7 @@ export default function CashSalesImportDialog({ open, onClose, onImported }: Pro
               <p className="text-sm font-bold text-slate-700 dark:text-slate-200 mb-2">
                 ② CSVファイルをアップロード
               </p>
-              <input ref={fileRef} type="file" accept=".csv,.txt" className="hidden" onChange={handleFileChange} />
+              <input ref={fileRef} type="file" accept=".csv,.txt,.xlsx" className="hidden" onChange={handleFileChange} />
               <div
                 className={`border-2 border-dashed rounded-2xl p-10 text-center cursor-pointer transition-colors ${dragOver ? "border-blue-400 bg-blue-50 dark:bg-blue-950/30" : "border-slate-200 dark:border-white/10 hover:border-blue-300 hover:bg-blue-50/50 dark:hover:bg-blue-950/20"}`}
                 onClick={() => fileRef.current?.click()}
@@ -212,7 +183,7 @@ export default function CashSalesImportDialog({ open, onClose, onImported }: Pro
               >
                 <Upload className="w-10 h-10 mx-auto mb-3 text-slate-300" />
                 <p className="font-bold text-slate-600 dark:text-slate-300">クリックまたはドラッグ＆ドロップ</p>
-                <p className="text-xs text-slate-400 mt-1">.csv ファイルに対応</p>
+                <p className="text-xs text-slate-400 mt-1">.xlsx / .csv 対応</p>
               </div>
             </div>
           </div>

@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import ServiceWorkerRegistrar from "@/components/ServiceWorkerRegistrar";
 import { Toaster } from "@/components/ui/sonner";
+import { isFamilyGift } from "@/lib/app-mode";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -13,10 +14,15 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
-export const metadata: Metadata = {
-  title: "ボール接骨院 | Web予約システム",
-  description: "サッカー選手が通う、体のメンテナンスに特化したボール接骨院の予約システムです。24時間Webから予約・キャンセル待ちが可能です。",
-};
+export const metadata: Metadata = isFamilyGift
+  ? {
+      title: "家族カレンダー by V-ARC",
+      description: "家族みんなで使えるGoogleカレンダー風アプリ。予定を共有しよう。",
+    }
+  : {
+      title: "ボール接骨院 | Web予約システム",
+      description: "サッカー選手が通う、体のメンテナンスに特化したボール接骨院の予約システムです。24時間Webから予約・キャンセル待ちが可能です。",
+    };
 
 import { ThemeProvider } from "@/components/ThemeProvider";
 

@@ -8,12 +8,14 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Calendar as CalendarIcon, Plus, Trash2, Loader2, Receipt, Tag, AlertCircle, Save, Camera, Sparkles, Pencil, Check, X, Banknote } from "lucide-react";
+import { Calendar as CalendarIcon, Plus, Trash2, Loader2, Receipt, Tag, AlertCircle, Save, Camera, Sparkles, Pencil, Check, X, Banknote, Download, FileSpreadsheet } from "lucide-react";
 import { addExpense, getExpenses, deleteExpense, addPendingExpense, updateExpense, getMonthDetailedExpenses } from "@/app/actions/sales";
 import { createClient } from "@/lib/supabase/client";
 import { toast } from "sonner";
 import Image from "next/image";
 import Link from "next/link";
+import { exportToExcel } from "@/lib/excel";
+import ExpensesImportDialog from "@/components/admin/ExpensesImportDialog";
 
 const EXPENSE_CATEGORIES = [
   "光熱費",
@@ -49,6 +51,7 @@ export default function ExpensesPage() {
   const [cameraOpen, setCameraOpen] = useState(false);
   const [editingRow, setEditingRow] = useState<EditingState | null>(null);
   const [isSavingEdit, setIsSavingEdit] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
   const [formExpenseDate, setFormExpenseDate] = useState<string>("");
   const [currentImageUrl, setCurrentImageUrl] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
@@ -302,6 +305,26 @@ export default function ExpensesPage() {
     }
   };
 
+  const handleExport = () => {
+    exportToExcel(
+      expenses.map(e => ({
+        expense_date: e.expense_date,
+        category: e.category || "",
+        description: e.description || "",
+        amount: e.amount,
+        memo: e.memo || "",
+      })),
+      [
+        { key: "expense_date", label: "日付" },
+        { key: "category",     label: "カテゴリ" },
+        { key: "description",  label: "内容" },
+        { key: "amount",       label: "金額" },
+        { key: "memo",         label: "備考" },
+      ],
+      `経費_${format(date!, "yyyy-MM")}.xlsx`
+    );
+  };
+
   const totalAmount = expenses.reduce((sum, e) => sum + e.amount, 0);
 
   if (!date) {
@@ -333,8 +356,8 @@ export default function ExpensesPage() {
             </Link>
           </div>
         </div>
-      <div className="flex items-center justify-between">
-        <div className="flex gap-2">
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <div className="flex gap-2 flex-wrap">
           <Link href="/admin/expenses/triage">
             <Button variant="outline" className="flex items-center gap-2">
               <AlertCircle className="w-4 h-4 text-amber-500" />
@@ -350,6 +373,14 @@ export default function ExpensesPage() {
               onChange={(e) => setDate(new Date(e.target.value))}
             />
           </div>
+        </div>
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={() => setImportOpen(true)} className="flex items-center gap-1.5 border-emerald-200 text-emerald-700 hover:bg-emerald-50">
+            <FileSpreadsheet className="w-4 h-4" /> Excel取込
+          </Button>
+          <Button variant="outline" size="sm" onClick={handleExport} disabled={expenses.length === 0} className="flex items-center gap-1.5 border-slate-200 text-slate-600 hover:bg-slate-50">
+            <Download className="w-4 h-4" /> Excel出力
+          </Button>
         </div>
       </div>
 
@@ -688,6 +719,12 @@ export default function ExpensesPage() {
           </CardContent>
         </Card>
       </div>
+
+      <ExpensesImportDialog
+        open={importOpen}
+        onClose={() => setImportOpen(false)}
+        onDone={() => { setImportOpen(false); if (date) fetchExpenses(date); }}
+      />
     </div>
   );
 }

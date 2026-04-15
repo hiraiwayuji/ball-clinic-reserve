@@ -902,3 +902,103 @@ export async function finalizePendingExpense(id: string, finalData: any) {
     return { success: false, error: "正式登録に失敗しました" };
   }
 }
+
+// ─── 経費一括インポート ───────────────────────────────────
+export type ImportExpenseRow = {
+  expense_date: string;
+  category: string;
+  description: string;
+  amount: number;
+  memo: string;
+};
+
+export async function bulkImportExpenses(rows: ImportExpenseRow[]): Promise<{
+  success: boolean; inserted: number; skipped: number;
+  errors: { row: number; description: string; reason: string }[];
+}> {
+  const { clinicId } = await checkAdminAuth();
+  const supabase = await getSupabase();
+  let inserted = 0, skipped = 0;
+  const errors: { row: number; description: string; reason: string }[] = [];
+
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    const rowNum = i + 2;
+    if (!row.expense_date) {
+      errors.push({ row: rowNum, description: row.description, reason: "日付が未入力です" });
+      skipped++; continue;
+    }
+    if (!row.category) {
+      errors.push({ row: rowNum, description: row.description, reason: "カテゴリが未入力です" });
+      skipped++; continue;
+    }
+    if (!row.amount || isNaN(row.amount) || row.amount <= 0) {
+      errors.push({ row: rowNum, description: row.description, reason: "金額が無効です" });
+      skipped++; continue;
+    }
+    try {
+      const { error } = await supabase.from("clinic_expenses").insert([{
+        expense_date: row.expense_date, category: row.category,
+        description: row.description || "", amount: row.amount,
+        memo: row.memo || null, clinic_id: clinicId,
+      }]);
+      if (error) throw error;
+      inserted++;
+    } catch (e: unknown) {
+      errors.push({ row: rowNum, description: row.description, reason: (e as Error).message || "登録エラー" });
+      skipped++;
+    }
+  }
+  revalidatePath("/admin/expenses");
+  return { success: true, inserted, skipped, errors };
+}
+
+// ─── 保険入金一括インポート ────────────────────────────────
+export type ImportInsuranceRow = {
+  payment_date: string;
+  insurance_name: string;
+  amount: number;
+  notes: string;
+};
+
+export async function bulkImportInsurancePayments(rows: ImportInsuranceRow[]): Promise<{
+  success: boolean; inserted: number; skipped: number;
+  errors: { row: number; name: string; reason: string }[];
+}> {
+  const { clinicId } = await checkAdminAuth();
+  const supabase = await getSupabase();
+  let inserted = 0, skipped = 0;
+  const errors: { row: number; name: string; reason: string }[] = [];
+
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    const rowNum = i + 2;
+    if (!row.payment_date) {
+      errors.push({ row: rowNum, name: row.insurance_name, reason: "日付が未入力です" });
+      skipped++; continue;
+    }
+    if (!row.insurance_name) {
+      errors.push({ row: rowNum, name: "（空欄）", reason: "保険種別が未入力です" });
+      skipped++; continue;
+    }
+    if (!row.amount || isNaN(row.amount) || row.amount <= 0) {
+      errors.push({ row: rowNum, name: row.insurance_name, reason: "金額が無効です" });
+      skipped++; continue;
+    }
+    try {
+      const paymentMonth = row.payment_date.slice(0, 7);
+      const { error } = await supabase.from("insurance_payments").insert([{
+        payment_date: row.payment_date, payment_month: paymentMonth,
+        insurance_name: row.insurance_name, amount: row.amount,
+        notes: row.notes || null, passbook_checked: false, clinic_id: clinicId,
+      }]);
+      if (error) throw error;
+      inserted++;
+    } catch (e: unknown) {
+      errors.push({ row: rowNum, name: row.insurance_name, reason: (e as Error).message || "登録エラー" });
+      skipped++;
+    }
+  }
+  revalidatePath("/admin/insurance");
+  return { success: true, inserted, skipped, errors };
+}

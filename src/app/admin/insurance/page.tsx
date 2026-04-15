@@ -12,7 +12,7 @@ import { Badge } from "@/components/ui/badge";
 import {
   FileText, Plus, Trash2, Loader2, Landmark, Calendar as CalendarIcon,
   Camera, Sparkles, BookOpen, CheckCircle2, Circle, Image as ImageIcon,
-  Pencil, Check, X, ClipboardList, Receipt
+  Pencil, Check, X, ClipboardList, Receipt, Download, FileSpreadsheet
 } from "lucide-react";
 import Link from "next/link";
 import {
@@ -21,12 +21,16 @@ import {
 } from "@/app/actions/sales";
 import { createClient } from "@/lib/supabase/client";
 import { toast } from "sonner";
+import { exportToExcel } from "@/lib/excel";
+import InsuranceImportDialog from "@/components/admin/InsuranceImportDialog";
 
 export default function InsurancePage() {
   const [currentMonth, setCurrentMonth] = useState<Date | null>(null);
   const [payments, setPayments] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [isPending, startTransition] = useTransition();
+
+  const [importOpen, setImportOpen] = useState(false);
 
   // 編集状態
   const [editingRow, setEditingRow] = useState<{
@@ -254,6 +258,25 @@ export default function InsurancePage() {
     setCameraOpen(false);
   };
 
+  const handleExport = () => {
+    if (!currentMonth) return;
+    exportToExcel(
+      payments.map(p => ({
+        payment_date: p.payment_date || "",
+        insurance_name: p.insurance_name,
+        amount: p.amount,
+        notes: p.notes || "",
+      })),
+      [
+        { key: "payment_date",   label: "振込日" },
+        { key: "insurance_name", label: "保険種別" },
+        { key: "amount",         label: "振込金額" },
+        { key: "notes",          label: "メモ" },
+      ],
+      `保険入金_${format(currentMonth, "yyyy-MM")}.xlsx`
+    );
+  };
+
   if (!currentMonth) return <div className="p-8 text-center text-slate-500">読み込み中...</div>;
 
   const totalAmount = payments.reduce((sum, p) => sum + p.amount, 0);
@@ -268,6 +291,12 @@ export default function InsurancePage() {
           <p className="text-slate-500 dark:text-slate-400">振込通知書の写真から自動入力・通帳との照合ができます</p>
         </div>
         <div className="flex items-center gap-3 flex-wrap justify-end">
+          <Button variant="outline" size="sm" onClick={() => setImportOpen(true)} className="flex items-center gap-1.5 border-blue-200 text-blue-700 hover:bg-blue-50">
+            <FileSpreadsheet className="w-4 h-4" /> Excel取込
+          </Button>
+          <Button variant="outline" size="sm" onClick={handleExport} disabled={payments.length === 0} className="flex items-center gap-1.5 border-slate-200 text-slate-600 hover:bg-slate-50">
+            <Download className="w-4 h-4" /> Excel出力
+          </Button>
           <Link href="/admin/expenses">
             <Button variant="outline" size="sm" className="border-emerald-200 text-emerald-600 hover:bg-emerald-50 dark:border-emerald-800 dark:text-emerald-400 dark:hover:bg-emerald-950/50 font-bold">
               <Receipt className="w-4 h-4 mr-1.5" />
@@ -621,6 +650,12 @@ export default function InsurancePage() {
           </Card>
         </div>
       </div>
+
+      <InsuranceImportDialog
+        open={importOpen}
+        onClose={() => setImportOpen(false)}
+        onDone={() => { setImportOpen(false); if (currentMonth) fetchPayments(currentMonth); }}
+      />
     </div>
   );
 }

@@ -2,8 +2,9 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { isFamilyGift } from "@/lib/app-mode";
 
-const NAV_ITEMS = [
+const CLINIC_NAV_ITEMS = [
   { href: "/admin/dashboard", label: "ダッシュボード" },
   { href: "/admin/appointments", label: "予約一覧" },
   { href: "/admin/customers", label: "顧客管理" },
@@ -13,8 +14,14 @@ const NAV_ITEMS = [
   { href: "/admin/settings", label: "設定" },
 ];
 
+const FAMILY_GIFT_NAV_ITEMS = [
+  { href: "/calendar", label: "カレンダーへ" },
+  { href: "/admin/settings", label: "設定" },
+];
+
 export default function AdminNavLinks() {
   const pathname = usePathname();
+  const NAV_ITEMS = isFamilyGift ? FAMILY_GIFT_NAV_ITEMS : CLINIC_NAV_ITEMS;
 
   return (
     <nav className="flex flex-wrap gap-x-1 gap-y-1 text-sm items-center">

@@ -8,11 +8,12 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Calendar as CalendarIcon, Plus, Trash2, Loader2, Coins, User, UserPlus, Landmark, Receipt, Upload } from "lucide-react";
+import { Calendar as CalendarIcon, Plus, Trash2, Loader2, Coins, User, UserPlus, Landmark, Receipt, Upload, Download } from "lucide-react";
 import { addCashSale, getCashSales, deleteCashSale } from "@/app/actions/sales";
 import { toast } from "sonner";
 import Link from "next/link";
 import CashSalesImportDialog from "@/components/admin/CashSalesImportDialog";
+import { exportToExcel } from "@/lib/excel";
 
 export default function SalesPage() {
   const [date, setDate] = useState<Date | null>(null);
@@ -78,6 +79,27 @@ export default function SalesPage() {
     }
   };
 
+  const handleExport = () => {
+    if (!date) return;
+    exportToExcel(
+      sales.map(s => ({
+        sale_date: s.sale_date,
+        customer_name: s.customer_name,
+        treatment_fee: s.treatment_fee,
+        memo: s.memo || "",
+        is_first_visit: s.is_first_visit ? "○" : "",
+      })),
+      [
+        { key: "sale_date",       label: "日付" },
+        { key: "customer_name",   label: "お名前" },
+        { key: "treatment_fee",   label: "金額（税込）" },
+        { key: "memo",            label: "備考" },
+        { key: "is_first_visit",  label: "新患" },
+      ],
+      `受付入力_${format(date, "yyyy-MM-dd")}.xlsx`
+    );
+  };
+
   const totalAmount = sales.reduce((sum, s) => sum + s.treatment_fee, 0);
   const newPatientCount = sales.filter(s => s.is_first_visit).length;
 
@@ -95,7 +117,11 @@ export default function SalesPage() {
         <div className="flex items-center gap-3 flex-wrap justify-end">
           <Button variant="outline" size="sm" onClick={() => setShowImport(true)} className="border-blue-200 text-blue-600 hover:bg-blue-50 dark:border-blue-800 dark:text-blue-400 dark:hover:bg-blue-950/50 font-bold">
             <Upload className="w-4 h-4 mr-1.5" />
-            CSVインポート
+            Excel/CSV取込
+          </Button>
+          <Button variant="outline" size="sm" onClick={handleExport} disabled={sales.length === 0} className="border-slate-200 text-slate-600 hover:bg-slate-50 font-bold">
+            <Download className="w-4 h-4 mr-1.5" />
+            Excel出力
           </Button>
           <Link href="/admin/expenses">
             <Button variant="outline" size="sm" className="border-emerald-200 text-emerald-600 hover:bg-emerald-50 dark:border-emerald-800 dark:text-emerald-400 dark:hover:bg-emerald-950/50 font-bold">
