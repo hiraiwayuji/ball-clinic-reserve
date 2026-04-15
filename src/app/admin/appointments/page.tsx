@@ -17,6 +17,7 @@ import { EditAppointmentDialog } from "@/components/admin/EditAppointmentDialog"
 import { AddAppointmentDialog } from "@/components/admin/AddAppointmentDialog";
 import { PatientSearchPanel } from "@/components/admin/PatientSearchPanel";
 import { ADMIN_TIME_SLOTS as TIME_SLOTS } from "@/lib/time-slots";
+import { getMyClinicId } from "@/app/actions/auth";
 
 export default function AdminWeeklyGridPage() {
   const [currentDate, setCurrentDate] = useState<Date | null>(null);
@@ -31,6 +32,7 @@ export default function AdminWeeklyGridPage() {
   const [selectedAddDate, setSelectedAddDate] = useState<Date | undefined>();
   const [selectedAddTime, setSelectedAddTime] = useState("");
   const [isSearchPanelOpen, setIsSearchPanelOpen] = useState(false);
+  const [clinicId, setClinicId] = useState<string | null>(null);
 
   const weekStart = useMemo(() => {
     if (!currentDate) return startOfWeek(new Date(), { weekStartsOn: 1 });
@@ -45,6 +47,7 @@ export default function AdminWeeklyGridPage() {
     const today = new Date();
     setCurrentDate(today);
     setSelectedDay(today);
+    getMyClinicId().then(setClinicId);
   }, []);
 
   const handleWeekChange = (newDate: Date) => {
@@ -58,13 +61,15 @@ export default function AdminWeeklyGridPage() {
 
   useEffect(() => {
     async function fetchData() {
+      if (clinicId === null) return; // clinic_id が取得できるまで待つ
       setLoading(true);
       const weekEnd = addDays(weekStart, 7);
       try {
         const supabase = createClient();
         const { data: aptData } = await supabase
           .from("appointments")
-          .select(`id, start_time, end_time, memo, is_first_visit, status, customers(name, phone)`)
+          .select(`id, start_time, end_time, memo, is_first_visit, status, customer_id, customers(name, phone)`)
+          .eq("clinic_id", clinicId)
           .gte("start_time", weekStart.toISOString())
           .lt("start_time", weekEnd.toISOString())
           .neq("status", "cancelled");
@@ -81,7 +86,7 @@ export default function AdminWeeklyGridPage() {
       }
     }
     fetchData();
-  }, [weekStart, refreshKey]);
+  }, [weekStart, refreshKey, clinicId]);
 
   useEffect(() => {
     const supabase = createClient();

@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Loader2, Clock, Trash2, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
+import { getMyClinicId } from "@/app/actions/auth";
 
 interface WaitlistEntry {
   id: string;
@@ -33,12 +34,15 @@ export default function WaitlistPage() {
     setLoading(true);
     try {
       const supabase = createClient();
-      const { data, error } = await supabase
+      const clinicId = await getMyClinicId();
+      let query = supabase
         .from("appointments")
         .select("id, start_time, is_first_visit, created_at, customers(name, phone)")
         .eq("status", "waiting")
         .order("start_time", { ascending: true })
         .order("created_at", { ascending: true });
+      if (clinicId) query = query.eq("clinic_id", clinicId);
+      const { data, error } = await query;
 
       if (error || !data) {
         toast.error("データの取得に失敗しました");

@@ -23,6 +23,23 @@ export async function checkAdminAuth(): Promise<{ clinicId: string }> {
   return { clinicId };
 }
 
+/** クライアントコンポーネントからログイン中ユーザーの clinic_id を取得する（リダイレクトなし） */
+export async function getMyClinicId(): Promise<string | null> {
+  const { createClient } = await import("@/lib/supabase/server");
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return null;
+
+  const { data } = await supabase
+    .from("clinic_users")
+    .select("clinic_id")
+    .eq("user_id", user.id)
+    .limit(1)
+    .single();
+
+  return data?.clinic_id ?? "00000000-0000-0000-0000-000000000001";
+}
+
 export async function loginAction(formData: FormData) {
   const email = formData.get("email") as string;
   const password = formData.get("password") as string;
