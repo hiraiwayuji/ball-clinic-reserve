@@ -74,7 +74,10 @@ export async function demoLoginAction() {
 
   const { error } = await supabase.auth.signInWithPassword({ email, password });
   if (error) {
-    return { error: "デモアカウントへのログインに失敗しました。" };
+    if (error.code === "email_not_confirmed") {
+      return { error: "デモアカウントのメールアドレスが未確認です。Supabase の Authentication → Users でユーザーを確認済みにしてください。" };
+    }
+    return { error: `デモアカウントへのログインに失敗しました: ${error.message}` };
   }
 
   return { success: true };
