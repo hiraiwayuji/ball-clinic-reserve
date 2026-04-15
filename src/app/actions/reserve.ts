@@ -31,13 +31,17 @@ async function notifyOwner(
   visitType: string,
   symptoms: string,
   reservationNumber: string,
-  isWaiting: boolean | null
+  isWaiting: boolean | null,
+  courseName?: string | null,
+  staffName?: string | null,
 ) {
   const ownerLineId = process.env.OWNER_LINE_USER_ID;
   console.log("[LINE-DEBUG] notifyOwner called, ownerLineId=", ownerLineId ? "SET" : "NOT SET");
-  const visitLabel = visitType === "new" ? "初診（60分）" : "再診（30分）";
+  const visitLabel = visitType === "new" ? "初診" : "再診";
   const statusLabel = isWaiting ? "⏳【キャンセル待ち登録】" : "🔔【新規予約】";
-  const messageText = `${statusLabel}\n\n患者名: ${name}\n日時: ${rawDate} ${time}\n電話: ${phone || "未入力"}\n種別: ${visitLabel}\n症状: ${symptoms || "なし"}\n予約番号: ${reservationNumber}`;
+  const courseLine = courseName ? `\nコース: ${courseName}` : "";
+  const staffLine = staffName ? `\n指名: ${staffName}` : "";
+  const messageText = `${statusLabel}\n\n患者名: ${name}\n日時: ${rawDate} ${time}\n電話: ${phone || "未入力"}\n種別: ${visitLabel}${courseLine}${staffLine}\n症状: ${symptoms || "なし"}\n予約番号: ${reservationNumber}`;
 
   if (ownerLineId) {
     try {
@@ -310,6 +314,11 @@ export async function createReservation(formData: FormData) {
     const visitType = formData.get("visitType") as string;
     const symptoms = formData.get("symptoms") as string;
     const isWaitlistIntent = formData.get("isWaitlistIntent") === "true";
+    const courseId = (formData.get("courseId") as string) || null;
+    const courseName = (formData.get("courseName") as string) || null;
+    const courseDurationStr = formData.get("courseDurationMinutes") as string | null;
+    const staffId = (formData.get("staffId") as string) || null;
+    const staffName = (formData.get("staffName") as string) || null;
 
     const isFirstVisit = visitType === "new";
 
@@ -427,9 +436,11 @@ export async function createReservation(formData: FormData) {
 
       // 予約の作成
       const isFirstVisit = visitType === "new";
-      
-      // 初診は60分、再診は30分枠を確保
-      const durationMinutes = isFirstVisit ? 60 : 30;
+
+      // コースが選択されていればその所要時間、なければ初診60分/再診30分
+      const durationMinutes = courseDurationStr
+        ? Number(courseDurationStr)
+        : isFirstVisit ? 60 : 30;
       const jstDate = new Date(startDateTimeStr);
       const endDate = new Date(jstDate.getTime() + durationMinutes * 60000);
       const endDateTimeStr = endDate.toISOString();
@@ -443,7 +454,9 @@ export async function createReservation(formData: FormData) {
           memo: symptoms,
           is_first_visit: isFirstVisit,
           status: finalStatus,
-          clinic_id: DEFAULT_CLINIC_ID
+          clinic_id: DEFAULT_CLINIC_ID,
+          ...(courseId ? { course_id: courseId, course_name: courseName } : {}),
+          ...(staffId ? { staff_id: staffId, staff_name: staffName } : {}),
         }])
         .select()
         .single();
@@ -454,7 +467,7 @@ export async function createReservation(formData: FormData) {
       }
       
       const reservationNumber = appointmentData.id.split('-')[0].toUpperCase();
-        await notifyOwner(name, phone, rawDate, time, visitType, symptoms, reservationNumber, isCapacityFull);
+        await notifyOwner(name, phone, rawDate, time, visitType, symptoms, reservationNumber, isCapacityFull, courseName, staffName);
   return { success: true, isWaiting: isCapacityFull, reservationNumber };
     } else {
       // SupabaseのURLが設定されていない場合の動作保証（デモ用）

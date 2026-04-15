@@ -3,7 +3,8 @@
 import { useState, useEffect } from "react";
 import { format, parseISO } from "date-fns";
 import { ja } from "date-fns/locale";
-import { CalendarIcon, Trash2, MessageCircle, CheckCircle, X } from "lucide-react";
+import { CalendarIcon, Trash2, MessageCircle, CheckCircle, X, Clock } from "lucide-react";
+import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
 import { Input } from "@/components/ui/input";
@@ -43,12 +44,44 @@ export function EditAppointmentDialog({
   const [visitType, setVisitType] = useState<string>("return");
   const [memo, setMemo] = useState<string>("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [lastVisitDate, setLastVisitDate] = useState<Date | null>(null);
+  const [visitCount, setVisitCount] = useState<number | null>(null);
 
   useEffect(() => {
     if (open && appointment) {
       const startDateTime = parseISO(appointment.start_time);
       setDate(startDateTime);
       setTime(format(startDateTime, "HH:mm"));
+
+      // 前回来院日・来院回数を取得
+      if (appointment.customer_id) {
+        const supabase = createClient();
+        supabase
+          .from("appointments")
+          .select("start_time")
+          .eq("customer_id", appointment.customer_id)
+          .neq("status", "cancelled")
+          .neq("id", appointment.id)
+          .lt("start_time", appointment.start_time)
+          .order("start_time", { ascending: false })
+          .limit(1)
+          .then(({ data }) => {
+            setLastVisitDate(data && data.length > 0 ? new Date(data[0].start_time) : null);
+          });
+        supabase
+          .from("appointments")
+          .select("id", { count: "exact", head: true })
+          .eq("customer_id", appointment.customer_id)
+          .neq("status", "cancelled")
+          .neq("id", appointment.id)
+          .lt("start_time", appointment.start_time)
+          .then(({ count }) => {
+            setVisitCount(count ?? 0);
+          });
+      } else {
+        setLastVisitDate(null);
+        setVisitCount(null);
+      }
 
       let diffMinutes = 30;
       if (appointment.end_time) {
@@ -171,6 +204,22 @@ export function EditAppointmentDialog({
                   </span>
                 )}
               </p>
+              <div className="flex items-center gap-3 mt-1.5 flex-wrap">
+                <span className="flex items-center gap-1 text-xs text-slate-500">
+                  <Clock className="w-3 h-3" />
+                  前回来院:{" "}
+                  <span className="font-semibold text-slate-700">
+                    {lastVisitDate
+                      ? format(lastVisitDate, "yyyy年M月d日（E）", { locale: ja })
+                      : "初来院"}
+                  </span>
+                </span>
+                {visitCount !== null && (
+                  <span className="text-xs text-slate-400">
+                    通算 <span className="font-bold text-slate-600">{visitCount}</span> 回目
+                  </span>
+                )}
+              </div>
             </div>
             <button
               onClick={() => onOpenChange(false)}

@@ -16,6 +16,7 @@ import Image from "next/image";
 import { createClient } from "@/lib/supabase/client";
 import { createReservation, getDailyAvailability } from "@/app/actions/reserve";
 import { getClinicHolidays, type ClinicHoliday } from "@/app/actions/holidays";
+import { getActiveCourses, getActiveStaff, type ReservationCourse, type ReservationStaff } from "@/app/actions/courses";
 import { useSearchParams } from "next/navigation";
 import { getTimeSlots, isDateWithinAllowedRange } from "@/lib/time-slots";
 import { toast } from "sonner";
@@ -42,6 +43,10 @@ function ReserveContent() {
   const [visitType, setVisitType] = useState<string>("");
   const [lineRegistered, setLineRegistered] = useState(false);
   const [bookedTimes, setBookedTimes] = useState<string[]>([]);
+  const [courses, setCourses] = useState<ReservationCourse[]>([]);
+  const [staffList, setStaffList] = useState<ReservationStaff[]>([]);
+  const [selectedCourseId, setSelectedCourseId] = useState<string>("");
+  const [selectedStaffId, setSelectedStaffId] = useState<string>("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
   const [isWaitingResult, setIsWaitingResult] = useState(false);
@@ -50,6 +55,8 @@ function ReserveContent() {
 
   useEffect(() => {
     getClinicHolidays().then(setClinicHolidays);
+    getActiveCourses().then(setCourses);
+    getActiveStaff().then(setStaffList);
     const savedName = localStorage.getItem("ballClinic_savedName");
     const savedPhone = localStorage.getItem("ballClinic_savedPhone");
     if (savedName) setName(savedName);
@@ -112,6 +119,21 @@ function ReserveContent() {
       formData.append("visitType", visitType);
       formData.append("isWaitlistIntent", bookedTimes.includes(time).toString());
       formData.append("phone", phone || localStorage.getItem("ballClinic_savedPhone") || "");
+      if (selectedCourseId) {
+        const course = courses.find(c => c.id === selectedCourseId);
+        if (course) {
+          formData.append("courseId", course.id);
+          formData.append("courseName", course.name);
+          formData.append("courseDurationMinutes", course.duration_minutes.toString());
+        }
+      }
+      if (selectedStaffId) {
+        const staff = staffList.find(s => s.id === selectedStaffId);
+        if (staff) {
+          formData.append("staffId", staff.id);
+          formData.append("staffName", staff.name);
+        }
+      }
 
       const result = await createReservation(formData);
 
@@ -262,6 +284,85 @@ function ReserveContent() {
                     </div>
                   </div>
                 </section>
+
+                {/* コース・指名選択 */}
+                {courses.length > 0 && (
+                  <section className="space-y-4">
+                    <h2 className="text-xl font-bold text-white tracking-tight">施術コース</h2>
+                    <div className="grid gap-3">
+                      {courses.map(course => {
+                        const isSelected = selectedCourseId === course.id;
+                        return (
+                          <button
+                            key={course.id}
+                            type="button"
+                            onClick={() => setSelectedCourseId(isSelected ? "" : course.id)}
+                            className={`w-full text-left p-4 rounded-2xl border transition-all ${
+                              isSelected
+                                ? "bg-blue-600 border-blue-500 text-white"
+                                : "bg-white/5 border-white/10 text-blue-100/80 hover:bg-white/10"
+                            }`}
+                          >
+                            <div className="flex items-center justify-between">
+                              <div>
+                                <p className="font-bold text-sm">{course.name}</p>
+                                {course.description && (
+                                  <p className={`text-xs mt-0.5 ${isSelected ? "text-blue-100" : "text-blue-100/50"}`}>
+                                    {course.description}
+                                  </p>
+                                )}
+                              </div>
+                              <div className="text-right shrink-0 ml-4">
+                                <span className={`text-sm font-bold ${isSelected ? "text-white" : "text-blue-300"}`}>
+                                  {course.duration_minutes}分
+                                </span>
+                                {course.price != null && (
+                                  <p className={`text-xs ${isSelected ? "text-blue-100" : "text-blue-100/50"}`}>
+                                    ¥{course.price.toLocaleString()}
+                                  </p>
+                                )}
+                              </div>
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </section>
+                )}
+
+                {/* 指名選択 */}
+                {staffList.length > 0 && (
+                  <section className="space-y-4">
+                    <h2 className="text-xl font-bold text-white tracking-tight">スタッフ指名 <span className="text-sm font-normal text-blue-100/50">（任意）</span></h2>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setSelectedStaffId("")}
+                        className={`px-4 py-2.5 rounded-xl font-semibold text-sm border transition-all ${
+                          selectedStaffId === ""
+                            ? "bg-blue-600 border-blue-500 text-white"
+                            : "bg-white/5 border-white/10 text-blue-100/60 hover:bg-white/10"
+                        }`}
+                      >
+                        指名なし
+                      </button>
+                      {staffList.map(staff => (
+                        <button
+                          key={staff.id}
+                          type="button"
+                          onClick={() => setSelectedStaffId(staff.id)}
+                          className={`px-4 py-2.5 rounded-xl font-semibold text-sm border transition-all ${
+                            selectedStaffId === staff.id
+                              ? "bg-blue-600 border-blue-500 text-white"
+                              : "bg-white/5 border-white/10 text-blue-100/60 hover:bg-white/10"
+                          }`}
+                        >
+                          {staff.name}
+                        </button>
+                      ))}
+                    </div>
+                  </section>
+                )}
 
                 {/* お客様情報 */}
                 <section className="space-y-6">
