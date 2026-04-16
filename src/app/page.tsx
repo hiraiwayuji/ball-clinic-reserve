@@ -102,9 +102,9 @@ export default function Home() {
                 </div>
                 <h3 className="text-lg font-bold mb-2 text-white">営業時間</h3>
                 <p className="text-slate-400 text-sm">
-                  月・火・木・金: 12:00 ～ 23:00 (最終受付 22:30)<br />
-                  土: 10:00 ～ 18:00 (最終受付 17:30)<br />
-                  <span className="text-red-400 font-medium">※水・日・祝日は休診</span>
+                  {CLINIC_CONFIG.hoursLine1}<br />
+                  {CLINIC_CONFIG.hoursLine2 && <>{CLINIC_CONFIG.hoursLine2}<br /></>}
+                  <span className="text-red-400 font-medium">{CLINIC_CONFIG.hoursClosed}</span>
                 </p>
               </div>
 

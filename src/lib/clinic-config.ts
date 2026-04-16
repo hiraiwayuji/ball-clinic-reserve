@@ -14,4 +14,8 @@ export const CLINIC_CONFIG = {
   /** 外部URL（relaqなど）または /images/xxx.png（ローカル）*/
   logoUrl: process.env.NEXT_PUBLIC_CLINIC_LOGO_URL ?? "/images/logo_main_mini_white.png",
   logoSmallUrl: process.env.NEXT_PUBLIC_CLINIC_LOGO_SMALL_URL ?? "/images/logo-white.png",
+  /** 営業時間（1行目・2行目・休診日） */
+  hoursLine1: process.env.NEXT_PUBLIC_CLINIC_HOURS_1 ?? "月・火・木・金: 12:00 ～ 23:00（最終受付 22:30）",
+  hoursLine2: process.env.NEXT_PUBLIC_CLINIC_HOURS_2 ?? "土: 10:00 ～ 18:00（最終受付 17:30）",
+  hoursClosed: process.env.NEXT_PUBLIC_CLINIC_HOURS_CLOSED ?? "※水・日・祝日は休診",
 } as const;
