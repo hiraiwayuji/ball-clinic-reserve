@@ -2,6 +2,7 @@
 
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { revalidatePath } from "next/cache";
+import { PUBLIC_CLINIC_ID } from "@/lib/default-clinic-id";
 
 // 公開アクション（認証不要）
 function getAdminSupabase() {
@@ -27,7 +28,7 @@ export async function submitQuestionnaire(data: QuestionnaireData): Promise<{ su
   }
 
   const db = getAdminSupabase();
-  const DEFAULT_CLINIC_ID = "00000000-0000-0000-0000-000000000001";
+  const DEFAULT_CLINIC_ID = PUBLIC_CLINIC_ID;
 
   // 電話番号で既存顧客を照合
   const { data: existing } = await db

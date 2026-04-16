@@ -3,6 +3,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { checkAdminAuth } from "@/app/actions/auth";
 import { unstable_noStore as noStore } from "next/cache";
+import { PUBLIC_CLINIC_ID } from "@/lib/default-clinic-id";
 
 async function getSupabase() {
   return await createClient();
@@ -15,7 +16,7 @@ export type ClinicHoliday = {
   created_at: string;
 };
 
-const DEFAULT_CLINIC_ID = '00000000-0000-0000-0000-000000000001';
+const DEFAULT_CLINIC_ID = PUBLIC_CLINIC_ID;
 
 // 1. 休診日一覧を取得（患者向けページからも呼ばれるためデフォルトIDを使用）
 export async function getClinicHolidays(clinicId: string = DEFAULT_CLINIC_ID): Promise<ClinicHoliday[]> {

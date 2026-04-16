@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { checkAdminAuth } from "./auth";
+import { PUBLIC_CLINIC_ID } from "@/lib/default-clinic-id";
 
 export type ReservationCourse = {
   id: string;
@@ -43,7 +44,7 @@ export async function getActiveCourses(): Promise<ReservationCourse[]> {
   const { createClient } = await import("@/lib/supabase/server");
   const { createClient: createAdminClient } = await import("@supabase/supabase-js");
 
-  const DEFAULT_CLINIC_ID = "00000000-0000-0000-0000-000000000001";
+  const DEFAULT_CLINIC_ID = PUBLIC_CLINIC_ID;
 
   const adminClient = createAdminClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -80,7 +81,7 @@ export async function getStaffList(): Promise<ReservationStaff[]> {
 // ── スタッフ取得（患者側：有効なもののみ） ──
 export async function getActiveStaff(): Promise<ReservationStaff[]> {
   const { createClient: createAdminClient } = await import("@supabase/supabase-js");
-  const DEFAULT_CLINIC_ID = "00000000-0000-0000-0000-000000000001";
+  const DEFAULT_CLINIC_ID = PUBLIC_CLINIC_ID;
 
   const adminClient = createAdminClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,

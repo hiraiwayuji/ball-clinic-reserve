@@ -1,5 +1,7 @@
 "use server";
 
+import { PUBLIC_CLINIC_ID } from "@/lib/default-clinic-id";
+
 async function getLineToken(): Promise<string | null> {
   const channelId = process.env.LINE_CHANNEL_ID;
   const channelSecret = process.env.LINE_CHANNEL_SECRET;
@@ -99,7 +101,7 @@ function getAdminSupabase() {
   });
 }
 
-const DEFAULT_CLINIC_ID = '00000000-0000-0000-0000-000000000001';
+const DEFAULT_CLINIC_ID = PUBLIC_CLINIC_ID;
 const MAX_CAPACITY = 1; // 1枠あたりの最大受け入れ人数（1名入れば予約済みにする）
 
 // キャンセル待ちを時間帯範囲で登録するアクション（例: 15:00 〜 20:00）

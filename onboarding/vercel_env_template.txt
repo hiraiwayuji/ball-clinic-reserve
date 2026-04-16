@@ -11,6 +11,11 @@ SUPABASE_SERVICE_ROLE_KEY=【Supabase Dashboard → Settings → API → service
 # ── アプリモード ──
 NEXT_PUBLIC_APP_MODE=CLINIC
 
+# ── クリニックID（公開予約ページ用・Supabase STEP1 で取得した UUID）──
+# relaq:  021efe2a-a768-4fa6-9de8-62cae9a79d47
+# karada: d3b55abc-46a6-4cbe-8198-21c0392d9a2e
+NEXT_PUBLIC_CLINIC_ID=【STEP1で取得したUUID】
+
 # ── 登録セットアップコード（クリニックごとに異なる値を設定）──
 # 担当者だけに伝え、/auth/register 時に入力してもらう
 SETUP_PASSWORD=【クリニック固有のコード例: relaq2026 / karada2026】
