@@ -6,6 +6,7 @@ import { isFamilyGift, isDemo } from "@/lib/app-mode";
 
 const CLINIC_NAV_ITEMS = [
   { href: "/admin/dashboard", label: "ダッシュボード" },
+  { href: "/admin/counter", label: "受付" },
   { href: "/admin/appointments", label: "予約一覧" },
   { href: "/admin/customers", label: "顧客管理" },
   { href: "/admin/sales", label: "売上記帳" },

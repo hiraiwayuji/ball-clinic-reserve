@@ -237,6 +237,67 @@ export async function sendLineConfirmation(appointmentId: string) {
   }
 }
 
+// ===== 受付カウンター：チェックインステータス更新 =====
+
+export type CheckinStatus = "arrived" | "in_treatment" | "done" | null;
+
+export async function updateCheckinStatus(
+  appointmentId: string,
+  status: CheckinStatus,
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const { clinicId } = await checkAdminAuth();
+    const supabase = getAdminSupabase();
+    if (!supabase) return { success: false, error: "サーバー設定エラー" };
+
+    const { error } = await supabase
+      .from("appointments")
+      .update({ checkin_status: status })
+      .eq("id", appointmentId)
+      .eq("clinic_id", clinicId);
+
+    if (error) return { success: false, error: error.message };
+    revalidatePath("/admin/counter");
+    return { success: true };
+  } catch (err) {
+    console.error("updateCheckinStatus error:", err);
+    return { success: false, error: "予期せぬエラーが発生しました" };
+  }
+}
+
+// ===== 受付カウンター：今日の予約一覧取得 =====
+
+export async function getTodayAppointments() {
+  try {
+    const { clinicId } = await checkAdminAuth();
+    const supabase = getAdminSupabase();
+    if (!supabase) return { success: false, data: [] };
+
+    const now = new Date();
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0).toISOString();
+    const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59).toISOString();
+
+    const { data, error } = await supabase
+      .from("appointments")
+      .select(`
+        id, start_time, end_time, status, checkin_status,
+        is_first_visit, memo, course_name, staff_name,
+        customers(id, name, phone, line_user_id)
+      `)
+      .eq("clinic_id", clinicId)
+      .neq("status", "cancelled")
+      .gte("start_time", todayStart)
+      .lte("start_time", todayEnd)
+      .order("start_time", { ascending: true });
+
+    if (error) return { success: false, data: [] };
+    return { success: true, data: data ?? [] };
+  } catch (err) {
+    console.error("getTodayAppointments error:", err);
+    return { success: false, data: [] };
+  }
+}
+
 // 予約の削除アクション
 export async function deleteAppointment(appointmentId: string) {
   await checkAdminAuth();

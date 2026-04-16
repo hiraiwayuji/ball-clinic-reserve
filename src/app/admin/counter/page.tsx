@@ -1,0 +1,427 @@
+"use client";
+
+import { useEffect, useState, useTransition, useCallback } from "react";
+import { format, parseISO } from "date-fns";
+import { ja } from "date-fns/locale";
+import {
+  getTodayAppointments,
+  updateCheckinStatus,
+  type CheckinStatus,
+} from "@/app/actions/adminReserve";
+import { createClient } from "@/lib/supabase/client";
+import { getMyClinicId } from "@/app/actions/auth";
+import {
+  Clock, User, RefreshCw, Loader2, CheckCircle2,
+  Stethoscope, CreditCard, CalendarPlus, ArrowRight,
+  Phone, MessageCircleMore, ChevronRight,
+} from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { toast } from "sonner";
+import Link from "next/link";
+
+type Appointment = {
+  id: string;
+  start_time: string;
+  end_time: string;
+  status: string;
+  checkin_status: CheckinStatus;
+  is_first_visit: boolean;
+  memo: string | null;
+  course_name: string | null;
+  staff_name: string | null;
+  customers: { id: string; name: string; phone: string; line_user_id: string | null } | null;
+};
+
+// ステータス定義
+const CHECKIN_STEPS: {
+  value: CheckinStatus;
+  label: string;
+  shortLabel: string;
+  color: string;
+  bg: string;
+  border: string;
+  icon: React.ReactNode;
+}[] = [
+  {
+    value: null,
+    label: "未来院",
+    shortLabel: "未来院",
+    color: "text-slate-500",
+    bg: "bg-slate-50 dark:bg-slate-800/50",
+    border: "border-slate-200 dark:border-slate-700",
+    icon: <Clock className="w-4 h-4" />,
+  },
+  {
+    value: "arrived",
+    label: "来院済（待合）",
+    shortLabel: "待合中",
+    color: "text-blue-600",
+    bg: "bg-blue-50 dark:bg-blue-900/30",
+    border: "border-blue-300 dark:border-blue-700",
+    icon: <User className="w-4 h-4" />,
+  },
+  {
+    value: "in_treatment",
+    label: "施術中",
+    shortLabel: "施術中",
+    color: "text-emerald-600",
+    bg: "bg-emerald-50 dark:bg-emerald-900/30",
+    border: "border-emerald-300 dark:border-emerald-700",
+    icon: <Stethoscope className="w-4 h-4" />,
+  },
+  {
+    value: "done",
+    label: "会計完了",
+    shortLabel: "完了",
+    color: "text-slate-400",
+    bg: "bg-slate-50/50 dark:bg-slate-800/20",
+    border: "border-slate-200 dark:border-slate-800",
+    icon: <CheckCircle2 className="w-4 h-4" />,
+  },
+];
+
+function getStep(status: CheckinStatus) {
+  return CHECKIN_STEPS.find(s => s.value === status) ?? CHECKIN_STEPS[0];
+}
+
+function nextStatus(current: CheckinStatus): CheckinStatus {
+  const idx = CHECKIN_STEPS.findIndex(s => s.value === current);
+  if (idx < 0 || idx >= CHECKIN_STEPS.length - 1) return null;
+  return CHECKIN_STEPS[idx + 1].value;
+}
+
+// ── カードコンポーネント ────────────────────────────────────────────
+
+function AppointmentCard({
+  apt,
+  onStatusChange,
+}: {
+  apt: Appointment;
+  onStatusChange: (id: string, status: CheckinStatus) => void;
+}) {
+  const [isPending, startTransition] = useTransition();
+  const step = getStep(apt.checkin_status);
+  const next = nextStatus(apt.checkin_status);
+  const nextStep = next !== null ? getStep(next) : null;
+
+  const time = format(parseISO(apt.start_time), "HH:mm");
+  const endTime = format(parseISO(apt.end_time), "HH:mm");
+  const isDone = apt.checkin_status === "done";
+
+  const handleAdvance = () => {
+    if (!nextStep) return;
+    startTransition(async () => {
+      const res = await updateCheckinStatus(apt.id, next);
+      if (res.success) {
+        onStatusChange(apt.id, next);
+        toast.success(`${apt.customers?.name ?? "患者"}様を「${nextStep.label}」に更新しました`);
+      } else {
+        toast.error(res.error ?? "更新に失敗しました");
+      }
+    });
+  };
+
+  const handleReset = () => {
+    startTransition(async () => {
+      const res = await updateCheckinStatus(apt.id, null);
+      if (res.success) {
+        onStatusChange(apt.id, null);
+        toast.success("ステータスをリセットしました");
+      } else {
+        toast.error(res.error ?? "更新に失敗しました");
+      }
+    });
+  };
+
+  return (
+    <div
+      className={[
+        "rounded-2xl border-2 p-4 transition-all duration-200",
+        step.bg,
+        step.border,
+        isDone ? "opacity-60" : "",
+      ].join(" ")}
+    >
+      {/* 上段：時間・患者名・ステータス */}
+      <div className="flex items-start gap-3">
+        {/* 時間 */}
+        <div className="shrink-0 text-center min-w-[52px]">
+          <div className="text-xl font-black text-slate-900 dark:text-slate-100 leading-none">{time}</div>
+          <div className="text-xs text-slate-400 mt-0.5">〜{endTime}</div>
+        </div>
+
+        {/* 患者情報 */}
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-lg font-bold text-slate-900 dark:text-slate-100 truncate">
+              {apt.customers?.name ?? "—"}
+            </span>
+            {apt.is_first_visit && (
+              <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-rose-500 text-white uppercase tracking-wide">初診</span>
+            )}
+            {apt.course_name && (
+              <span className="text-xs text-slate-500 dark:text-slate-400 bg-white/60 dark:bg-slate-800/60 px-2 py-0.5 rounded-full border border-slate-200 dark:border-slate-700">
+                {apt.course_name}
+              </span>
+            )}
+            {apt.staff_name && (
+              <span className="text-xs text-slate-500 dark:text-slate-400">担当: {apt.staff_name}</span>
+            )}
+          </div>
+          {apt.customers?.phone && (
+            <div className="flex items-center gap-1 text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+              <Phone className="w-3 h-3" />{apt.customers.phone}
+            </div>
+          )}
+          {apt.memo && (
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 line-clamp-1">{apt.memo}</p>
+          )}
+        </div>
+
+        {/* 現在ステータスバッジ */}
+        <div className={`shrink-0 flex items-center gap-1 text-xs font-bold px-2.5 py-1 rounded-full ${step.color}`}>
+          {step.icon}
+          <span className="hidden sm:inline">{step.shortLabel}</span>
+        </div>
+      </div>
+
+      {/* 下段：アクションボタン */}
+      <div className="mt-3 flex items-center gap-2 flex-wrap">
+        {nextStep && (
+          <button
+            type="button"
+            onClick={handleAdvance}
+            disabled={isPending}
+            className={[
+              "flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-bold transition-all shadow-sm active:scale-95",
+              nextStep.value === "arrived" ? "bg-blue-600 hover:bg-blue-700 text-white" :
+              nextStep.value === "in_treatment" ? "bg-emerald-600 hover:bg-emerald-700 text-white" :
+              "bg-slate-700 hover:bg-slate-800 text-white",
+              isPending ? "opacity-60 cursor-not-allowed" : "",
+            ].join(" ")}
+          >
+            {isPending
+              ? <Loader2 className="w-4 h-4 animate-spin" />
+              : nextStep.icon}
+            {nextStep.label}へ
+            <ChevronRight className="w-3.5 h-3.5" />
+          </button>
+        )}
+
+        {/* 会計登録へリンク */}
+        {apt.checkin_status === "in_treatment" || apt.checkin_status === "arrived" ? (
+          <Link
+            href="/admin/sales"
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium text-slate-600 dark:text-slate-300 bg-white/70 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700 hover:bg-white dark:hover:bg-slate-700 transition-colors"
+          >
+            <CreditCard className="w-3.5 h-3.5" />
+            会計
+          </Link>
+        ) : null}
+
+        {/* リセットボタン（完了 or 施術中以降） */}
+        {apt.checkin_status !== null && (
+          <button
+            type="button"
+            onClick={handleReset}
+            disabled={isPending}
+            className="ml-auto text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 px-2 py-1.5 rounded-lg hover:bg-white/60 dark:hover:bg-slate-800/60 transition-colors"
+          >
+            リセット
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── メインページ ────────────────────────────────────────────────────
+
+export default function CounterPage() {
+  const [appointments, setAppointments] = useState<Appointment[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [currentTime, setCurrentTime] = useState<Date | null>(null);
+  const [clinicId, setClinicId] = useState<string | null>(null);
+
+  // 統計
+  const stats = {
+    total: appointments.length,
+    waiting: appointments.filter(a => a.checkin_status === null).length,
+    arrived: appointments.filter(a => a.checkin_status === "arrived").length,
+    inTreatment: appointments.filter(a => a.checkin_status === "in_treatment").length,
+    done: appointments.filter(a => a.checkin_status === "done").length,
+  };
+
+  const fetchAppointments = useCallback(async () => {
+    const res = await getTodayAppointments();
+    if (res.success) setAppointments(res.data as unknown as Appointment[]);
+    setLoading(false);
+  }, []);
+
+  useEffect(() => {
+    setCurrentTime(new Date());
+    getMyClinicId().then(setClinicId);
+    fetchAppointments();
+
+    // 時計更新
+    const clockInterval = setInterval(() => setCurrentTime(new Date()), 1000);
+    return () => clearInterval(clockInterval);
+  }, [fetchAppointments]);
+
+  // Supabase Realtime でリアルタイム更新
+  useEffect(() => {
+    if (!clinicId) return;
+    const supabase = createClient();
+    const channel = supabase
+      .channel("counter-realtime")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "appointments" },
+        () => { fetchAppointments(); },
+      )
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [clinicId, fetchAppointments]);
+
+  // ローカルステータス更新（楽観的UI）
+  const handleStatusChange = useCallback((id: string, status: CheckinStatus) => {
+    setAppointments(prev =>
+      prev.map(a => a.id === id ? { ...a, checkin_status: status } : a)
+    );
+  }, []);
+
+  // セクション分け：未完了 / 完了
+  const activeApts = appointments.filter(a => a.checkin_status !== "done");
+  const doneApts = appointments.filter(a => a.checkin_status === "done");
+
+  return (
+    <div className="space-y-6 max-w-4xl mx-auto">
+      {/* ヘッダー */}
+      <div className="flex items-start justify-between flex-wrap gap-4">
+        <div>
+          <h1 className="text-2xl font-black text-slate-900 dark:text-slate-100">
+            受付カウンター
+          </h1>
+          <p className="text-sm text-slate-500 dark:text-slate-400 mt-0.5">
+            {currentTime
+              ? format(currentTime, "yyyy年M月d日（E）", { locale: ja })
+              : "—"}
+            {currentTime && (
+              <span className="ml-2 font-mono font-bold text-slate-700 dark:text-slate-300">
+                {format(currentTime, "HH:mm:ss")}
+              </span>
+            )}
+          </p>
+        </div>
+
+        {/* クイックアクション */}
+        <div className="flex items-center gap-2 flex-wrap">
+          <Link
+            href="/admin/appointments"
+            className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-medium bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors shadow-sm"
+          >
+            <CalendarPlus className="w-4 h-4" />
+            予約追加
+          </Link>
+          <Link
+            href="/admin/sales"
+            className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-bold bg-blue-600 hover:bg-blue-700 text-white rounded-xl transition-colors shadow-sm"
+          >
+            <CreditCard className="w-4 h-4" />
+            売上記帳
+          </Link>
+          <button
+            type="button"
+            onClick={fetchAppointments}
+            className="p-2 rounded-xl text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
+          >
+            <RefreshCw className="w-4 h-4" />
+          </button>
+        </div>
+      </div>
+
+      {/* 統計バー */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        {[
+          { label: "本日合計", value: stats.total, color: "text-slate-700 dark:text-slate-200", bg: "bg-white dark:bg-slate-800" },
+          { label: "待合中", value: stats.arrived, color: "text-blue-700 dark:text-blue-300", bg: "bg-blue-50 dark:bg-blue-900/30" },
+          { label: "施術中", value: stats.inTreatment, color: "text-emerald-700 dark:text-emerald-300", bg: "bg-emerald-50 dark:bg-emerald-900/30" },
+          { label: "完了", value: stats.done, color: "text-slate-500 dark:text-slate-400", bg: "bg-slate-50 dark:bg-slate-800/50" },
+        ].map(s => (
+          <div key={s.label} className={`${s.bg} rounded-xl border border-slate-200 dark:border-white/10 p-4 text-center shadow-sm`}>
+            <div className={`text-3xl font-black ${s.color}`}>{s.value}</div>
+            <div className="text-xs text-slate-500 dark:text-slate-400 mt-1">{s.label}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* 予約リスト */}
+      {loading ? (
+        <div className="flex items-center justify-center h-40 text-slate-400">
+          <Loader2 className="w-6 h-6 animate-spin mr-2" />
+          読み込み中...
+        </div>
+      ) : appointments.length === 0 ? (
+        <div className="text-center py-16 text-slate-400 bg-white dark:bg-slate-900/50 rounded-2xl border border-slate-200 dark:border-white/10">
+          <Clock className="w-10 h-10 mx-auto mb-3 opacity-30" />
+          <p className="font-medium">本日の予約はありません</p>
+          <Link href="/admin/appointments" className="mt-3 inline-flex items-center gap-1 text-sm text-blue-500 hover:text-blue-600">
+            予約を追加する <ArrowRight className="w-3.5 h-3.5" />
+          </Link>
+        </div>
+      ) : (
+        <div className="space-y-6">
+          {/* アクティブな予約 */}
+          {activeApts.length > 0 && (
+            <div className="space-y-3">
+              {activeApts.map(apt => (
+                <AppointmentCard
+                  key={apt.id}
+                  apt={apt}
+                  onStatusChange={handleStatusChange}
+                />
+              ))}
+            </div>
+          )}
+
+          {/* 完了済み */}
+          {doneApts.length > 0 && (
+            <details className="group" open={doneApts.length > 0 && activeApts.length === 0}>
+              <summary className="cursor-pointer flex items-center gap-2 text-sm font-bold text-slate-400 select-none list-none py-2">
+                <CheckCircle2 className="w-4 h-4 text-slate-300" />
+                会計完了（{doneApts.length}名）
+                <span className="text-xs font-normal text-slate-300 ml-1 group-open:hidden">▶ 展開</span>
+                <span className="text-xs font-normal text-slate-300 ml-1 hidden group-open:inline">▼ 折りたたむ</span>
+              </summary>
+              <div className="mt-2 space-y-2">
+                {doneApts.map(apt => (
+                  <AppointmentCard
+                    key={apt.id}
+                    apt={apt}
+                    onStatusChange={handleStatusChange}
+                  />
+                ))}
+              </div>
+            </details>
+          )}
+        </div>
+      )}
+
+      {/* ステータスフロー説明 */}
+      <div className="bg-white/50 dark:bg-slate-900/30 rounded-xl border border-slate-100 dark:border-white/5 p-4">
+        <p className="text-xs font-bold text-slate-400 uppercase tracking-wide mb-3">ステータスフロー</p>
+        <div className="flex items-center gap-2 flex-wrap text-xs text-slate-500 dark:text-slate-400">
+          {CHECKIN_STEPS.map((s, i) => (
+            <span key={i} className="flex items-center gap-1.5">
+              {i > 0 && <ArrowRight className="w-3 h-3 text-slate-300 shrink-0" />}
+              <span className={`flex items-center gap-1 px-2 py-0.5 rounded-full ${s.bg} ${s.color} border ${s.border}`}>
+                {s.icon}{s.label}
+              </span>
+            </span>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
