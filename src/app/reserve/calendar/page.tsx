@@ -13,6 +13,7 @@ import { Label } from "@/components/ui/label";
 import { createClient } from "@/lib/supabase/client";
 
 import { getTimeSlots, getMaxSlots, isDateWithinAllowedRange, isTimeSlotWithinTwoHours } from "@/lib/time-slots";
+import { CLINIC_CONFIG } from "@/lib/clinic-config";
 
 // 静的なTIME_SLOTS, MAX_SLOTSを削除
 
@@ -375,7 +376,7 @@ export default function ReserveCalendarPage() {
             <ArrowLeft className="w-4 h-4 text-zinc-300" />
           </Link>
           <div className="flex-1 min-w-0">
-            <p className="text-xs text-zinc-500 font-bold">ボール接骨院</p>
+            <p className="text-xs text-zinc-500 font-bold">{CLINIC_CONFIG.nameShort}</p>
             <h1 className="text-sm font-black text-white truncate">予約空き状況カレンダー</h1>
           </div>
           <div className="shrink-0 text-right">

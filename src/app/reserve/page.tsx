@@ -20,6 +20,9 @@ import { getActiveCourses, getActiveStaff, type ReservationCourse, type Reservat
 import { useSearchParams } from "next/navigation";
 import { getTimeSlots, isDateWithinAllowedRange } from "@/lib/time-slots";
 import { toast } from "sonner";
+import { CLINIC_CONFIG } from "@/lib/clinic-config";
+
+const isExternalLogo = CLINIC_CONFIG.logoSmallUrl.startsWith("http");
 
 function ReserveContent() {
   const searchParams = useSearchParams();
@@ -159,7 +162,11 @@ function ReserveContent() {
         <div className="max-w-lg w-full bg-white/10 backdrop-blur-xl p-8 md:p-10 rounded-[2.5rem] shadow-2xl border border-white/20 text-center">
           <div className="mb-6 flex flex-col items-center gap-4">
             <div className="relative w-40 h-16">
-              <Image src="/images/logo-white.png" alt="ボール接骨院" fill className="object-contain" />
+              {isExternalLogo ? (
+                <img src={CLINIC_CONFIG.logoSmallUrl} alt={CLINIC_CONFIG.name} className="h-full w-auto object-contain mx-auto" />
+              ) : (
+                <Image src={CLINIC_CONFIG.logoSmallUrl} alt={CLINIC_CONFIG.name} fill className="object-contain" />
+              )}
             </div>
             <div className="w-20 h-20 bg-emerald-500 rounded-full flex items-center justify-center shadow-lg shadow-emerald-500/40">
               <CheckCircle2 className="w-12 h-12 text-white" />
@@ -175,7 +182,7 @@ function ReserveContent() {
               <MessageCircle className="w-5 h-5 text-green-400" />
               LINEで予約を完了する
             </p>
-            <p className="text-blue-100/70 text-sm text-center">以下のボタンからボール接骨院のLINEを友だち追加して、予約内容をお伝えください。</p>
+            <p className="text-blue-100/70 text-sm text-center">以下のボタンから{CLINIC_CONFIG.nameShort}のLINEを友だち追加して、予約内容をお伝えください。</p>
             <a
               href="https://line.me/ti/p/%40shc8761q"
               target="_blank"
@@ -199,8 +206,12 @@ function ReserveContent() {
     return (
       <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center p-4 gap-4">
         <div className="max-w-md w-full bg-white/5 backdrop-blur-2xl p-10 rounded-[3rem] shadow-2xl border border-white/10 text-center">
-          <div className="relative w-48 h-20 mx-auto mb-8">
-            <Image src="/images/logo-white.png" alt="ボール接骨院" fill className="object-contain" />
+          <div className="relative w-48 h-20 mx-auto mb-8 flex items-center justify-center">
+            {isExternalLogo ? (
+              <img src={CLINIC_CONFIG.logoSmallUrl} alt={CLINIC_CONFIG.name} className="max-h-20 w-auto object-contain" />
+            ) : (
+              <Image src={CLINIC_CONFIG.logoSmallUrl} alt={CLINIC_CONFIG.name} fill className="object-contain" />
+            )}
           </div>
           <h1 className="text-3xl font-extrabold text-white mb-2 tracking-tight">予約日時を選ぶ</h1>
           <p className="text-blue-200/60 text-sm mb-6">カレンダーから空きをご確認ください</p>
@@ -228,8 +239,12 @@ function ReserveContent() {
     <div className="min-h-screen bg-slate-900 text-slate-200" data-dark-page>
       <div className="relative max-w-4xl mx-auto py-12 px-4 md:px-8">
         <div className="flex flex-col items-center mb-12">
-          <div className="relative w-56 h-24 mb-4">
-            <Image src="/images/logo-white.png" alt="ボール接骨院 ロゴ" fill className="object-contain" />
+          <div className="relative w-56 h-24 mb-4 flex items-center justify-center">
+            {isExternalLogo ? (
+              <img src={CLINIC_CONFIG.logoSmallUrl} alt={CLINIC_CONFIG.name} className="max-h-24 w-auto object-contain" />
+            ) : (
+              <Image src={CLINIC_CONFIG.logoSmallUrl} alt={CLINIC_CONFIG.name} fill className="object-contain" />
+            )}
           </div>
           <p className="text-blue-200/50 text-xs tracking-widest uppercase">Body ALL care.</p>
         </div>
@@ -470,8 +485,12 @@ function ReserveContent() {
           {/* サイドバー */}
           <div className="lg:col-span-4 space-y-6">
             <div className="bg-white/5 backdrop-blur-xl rounded-[2.5rem] border border-white/10 p-8 shadow-2xl space-y-8">
-              <div className="relative w-full h-16">
-                <Image src="/images/logo-white.png" alt="ボール接骨院" fill className="object-contain" />
+              <div className="relative w-full h-16 flex items-center justify-center">
+                {isExternalLogo ? (
+                  <img src={CLINIC_CONFIG.logoSmallUrl} alt={CLINIC_CONFIG.name} className="max-h-16 w-auto object-contain" />
+                ) : (
+                  <Image src={CLINIC_CONFIG.logoSmallUrl} alt={CLINIC_CONFIG.name} fill className="object-contain" />
+                )}
               </div>
               <div>
                 <h3 className="text-white font-bold mb-4 flex items-center gap-2">
@@ -481,7 +500,7 @@ function ReserveContent() {
                 <div className="space-y-3 text-sm text-blue-100/60">
                   <p className="flex justify-between border-b border-white/5 pb-2"><span>日曜日 / 水曜日</span><span className="text-rose-400 font-bold">休診</span></p>
                   <p className="flex justify-between border-b border-white/5 pb-2"><span>祝日</span><span className="text-rose-400 font-bold">休診</span></p>
-                  <p className="flex justify-between"><span>ボール接骨院</span><span className="text-white">板野郡藍住町</span></p>
+                  <p className="flex justify-between"><span>{CLINIC_CONFIG.nameShort}</span><span className="text-white">{CLINIC_CONFIG.address}</span></p>
                 </div>
               </div>
               <div className="pt-6 border-t border-white/5">
@@ -489,7 +508,7 @@ function ReserveContent() {
                   <Phone className="w-4 h-4 text-blue-400" />
                   お電話でのご予約
                 </h3>
-                <p className="text-2xl font-black text-white tracking-widest mb-1">088-635-5344</p>
+                <p className="text-2xl font-black text-white tracking-widest mb-1">{CLINIC_CONFIG.phone}</p>
                 <p className="text-[10px] text-blue-100/40 uppercase tracking-widest">お気軽にお電話ください</p>
               </div>
             </div>

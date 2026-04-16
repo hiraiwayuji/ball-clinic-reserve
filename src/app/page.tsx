@@ -4,6 +4,10 @@ import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { CalendarDays, Clock, MapPin, Phone } from "lucide-react";
 import Image from "next/image";
+import { CLINIC_CONFIG } from "@/lib/clinic-config";
+
+const isExternalLogo = CLINIC_CONFIG.logoUrl.startsWith("http");
+const isExternalLogoSmall = CLINIC_CONFIG.logoSmallUrl.startsWith("http");
 
 export default function Home() {
   if (isFamilyGift) redirect("/calendar");
@@ -16,20 +20,28 @@ export default function Home() {
         <div className="container mx-auto px-4 h-16 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <Link href="/">
-              <div className="relative w-40 h-12">
-                <Image
-                  src="/images/logo_main_mini_white.png"
-                  alt="ボール接骨院"
-                  fill
-                  className="object-contain"
+              {isExternalLogo ? (
+                <img
+                  src={CLINIC_CONFIG.logoUrl}
+                  alt={CLINIC_CONFIG.name}
+                  className="h-10 w-auto object-contain"
                 />
-              </div>
+              ) : (
+                <div className="relative w-40 h-12">
+                  <Image
+                    src={CLINIC_CONFIG.logoUrl}
+                    alt={CLINIC_CONFIG.name}
+                    fill
+                    className="object-contain"
+                  />
+                </div>
+              )}
             </Link>
           </div>
           <nav className="hidden md:flex gap-6 text-sm font-medium text-slate-400">
             <Link href="#about" className="hover:text-white transition">当院について</Link>
             <Link href="#services" className="hover:text-white transition">施術メニュー</Link>
-            <a href="https://maps.app.goo.gl/y8zBCQGFiWgS4SXv6" target="_blank" rel="noopener noreferrer" className="hover:text-white transition">アクセス</a>
+            <a href={CLINIC_CONFIG.mapsUrl} target="_blank" rel="noopener noreferrer" className="hover:text-white transition">アクセス</a>
           </nav>
           <Button asChild className="bg-blue-600 hover:bg-blue-700 text-white">
             <Link href="/reserve/calendar">Web予約</Link>
@@ -44,11 +56,10 @@ export default function Home() {
 
           <div className="container mx-auto relative z-10 max-w-4xl text-center">
             <h1 className="text-4xl md:text-6xl font-extrabold tracking-tight mb-6 leading-tight">
-              痛み根本改善、<br className="md:hidden" />
-              <span className="text-blue-400">パフォーマンス向上</span>をサポート
+              {CLINIC_CONFIG.catchcopy}
             </h1>
             <p className="text-lg md:text-xl text-slate-300 mb-10 max-w-2xl mx-auto leading-relaxed">
-              プロスポーツ経験のある院長が、一人ひとりの身体の状態に合わせた最適なトータルボディケアを提供します。
+              {CLINIC_CONFIG.description}
             </p>
             <div className="flex flex-col sm:flex-row gap-4 justify-center">
               <Button asChild size="lg" className="bg-blue-600 hover:bg-blue-700 text-white text-lg h-14 px-8 shadow-lg">
@@ -57,9 +68,9 @@ export default function Home() {
                   今すぐWeb予約する
                 </Link>
               </Button>
-              <a href="tel:088-635-5344" className="flex items-center justify-center gap-2 border-2 border-white/30 text-white text-lg h-14 px-8 rounded-md hover:bg-white/10 transition">
+              <a href={`tel:${CLINIC_CONFIG.phone}`} className="flex items-center justify-center gap-2 border-2 border-white/30 text-white text-lg h-14 px-8 rounded-md hover:bg-white/10 transition">
                 <Phone className="h-5 w-5" />
-                088-635-5344
+                {CLINIC_CONFIG.phone}
               </a>
               <Link href="/check" className="flex items-center justify-center gap-2 border border-white/20 text-white/70 text-sm h-10 px-6 rounded-md hover:bg-white/10 transition">
                 予約を確認する
@@ -95,9 +106,8 @@ export default function Home() {
                 </div>
                 <h3 className="text-lg font-bold mb-2 text-white">アクセス</h3>
                 <p className="text-slate-400 text-sm">
-                  徳島県板野郡藍住町<br />
-                  駐車場5台完備<br />
-                  <a href="https://maps.app.goo.gl/y8zBCQGFiWgS4SXv6" target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline mt-1 inline-block">詳細な地図を見る</a>
+                  {CLINIC_CONFIG.address}<br />
+                  <a href={CLINIC_CONFIG.mapsUrl} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline mt-1 inline-block">詳細な地図を見る</a>
                 </p>
               </div>
 
@@ -123,18 +133,26 @@ export default function Home() {
       <footer className="bg-slate-950 text-slate-400 py-12 border-t border-zinc-800">
         <div className="container mx-auto px-4 text-center">
           <div className="flex items-center justify-center gap-3 mb-6">
-            <div className="relative w-8 h-8">
-              <Image
-                src="/images/logo-white.png"
-                alt="ボール接骨院"
-                fill
-                className="object-contain"
+            {isExternalLogoSmall ? (
+              <img
+                src={CLINIC_CONFIG.logoSmallUrl}
+                alt={CLINIC_CONFIG.name}
+                className="h-8 w-auto object-contain"
               />
-            </div>
-            <span className="text-lg font-bold text-slate-200">ボール接骨院</span>
+            ) : (
+              <div className="relative w-8 h-8">
+                <Image
+                  src={CLINIC_CONFIG.logoSmallUrl}
+                  alt={CLINIC_CONFIG.name}
+                  fill
+                  className="object-contain"
+                />
+              </div>
+            )}
+            <span className="text-lg font-bold text-slate-200">{CLINIC_CONFIG.nameShort}</span>
           </div>
-          <p className="text-sm mb-4">身体の痛み・違和感でお悩みの方、パフォーマンスを向上させたい方はお気軽にご相談ください。</p>
-          <p className="text-xs">&copy; {new Date().getFullYear()} ボール接骨院. All rights reserved.</p>
+          <p className="text-sm mb-4">{CLINIC_CONFIG.description}</p>
+          <p className="text-xs">&copy; {new Date().getFullYear()} {CLINIC_CONFIG.nameShort}. All rights reserved.</p>
         </div>
       </footer>
     </div>
