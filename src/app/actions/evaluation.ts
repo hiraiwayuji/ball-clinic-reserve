@@ -312,6 +312,87 @@ export async function deleteCashSaleRecord(id: string) {
   return { success: true };
 }
 
+// ===== 月次レポート出力用データ取得 =====
+
+import type { MonthlyReportData } from "@/lib/monthly-report";
+
+export async function getMonthlyReportData(
+  year: number,
+  month: number,
+): Promise<{ success: boolean; data?: MonthlyReportData; error?: string }> {
+  const { clinicId } = await checkAdminAuth();
+  try {
+    const supabase = await getSupabase();
+    const monthStr = `${year}-${String(month).padStart(2, "0")}`;
+    const startDate = `${monthStr}-01`;
+    const daysInMonth = new Date(year, month, 0).getDate();
+    const endDate = `${monthStr}-${String(daysInMonth).padStart(2, "0")}`;
+
+    // 並列でデータ取得
+    const [evalRes, breakdownRes, settingsRes] = await Promise.all([
+      getMonthlyEvaluation(year, month),
+      getMonthDetailedBreakdown(year, month),
+      supabase.from("clinic_settings").select("name").eq("clinic_id", clinicId).maybeSingle(),
+    ]);
+
+    if (!evalRes.success || !evalRes.data) return { success: false, error: evalRes.error };
+    if (!breakdownRes.success || !breakdownRes.data) return { success: false, error: breakdownRes.error };
+
+    const evalData = evalRes.data;
+    const bd = breakdownRes.data;
+    const clinicName = (settingsRes.data as any)?.name ?? "クリニック";
+
+    const data: MonthlyReportData = {
+      year,
+      month,
+      clinicName,
+      summary: {
+        targetIncome: evalData.targets?.target_income ?? 0,
+        actualIncome: evalData.actualIncome,
+        cashIncome: bd.cashTotal,
+        insuranceIncome: bd.insuranceTotal,
+        targetPatients: evalData.targets?.target_patients ?? 0,
+        actualPatients: evalData.actualPatients,
+        targetNewPatients: evalData.targets?.target_new_patients ?? 0,
+        actualNewPatients: evalData.actualNewPatients,
+        targetSnsTasks: evalData.targets?.target_sns_tasks ?? 0,
+        actualSnsTasks: evalData.actualSnsTasks,
+        googleReviewCount: evalData.evalData?.google_review_count ?? 0,
+        googleRating: evalData.evalData?.google_rating ?? 0,
+        selfEvaluation: evalData.evalData?.self_evaluation ?? "",
+        aiSuggestions: evalData.evalData?.ai_suggestions ?? "",
+      },
+      cashSales: bd.cashSales.map(r => ({
+        date: r.sale_date,
+        name: r.customer_name,
+        amount: r.treatment_fee,
+        isFirstVisit: r.is_first_visit ?? false,
+        memo: r.memo,
+      })),
+      insurancePayments: bd.insurancePayments.map(r => ({
+        name: r.insurance_name,
+        amount: r.amount,
+      })),
+      appointments: bd.appointments.map(r => {
+        const dt = new Date(r.start_time);
+        const jst = new Date(dt.getTime() + 9 * 60 * 60 * 1000);
+        const dateStr = `${jst.getUTCMonth() + 1}/${jst.getUTCDate()}(${["日","月","火","水","木","金","土"][jst.getUTCDay()]}) ${String(jst.getUTCHours()).padStart(2,"0")}:${String(jst.getUTCMinutes()).padStart(2,"0")}`;
+        return {
+          datetime: dateStr,
+          name: r.customer_name,
+          type: r.is_first_visit ? "初診" : "再診",
+          status: r.status === "confirmed" ? "確定" : r.status === "pending" ? "確認待ち" : r.status,
+        };
+      }),
+    };
+
+    return { success: true, data };
+  } catch (err) {
+    console.error("getMonthlyReportData error:", err);
+    return { success: false, error: "レポートデータの取得に失敗しました" };
+  }
+}
+
 export async function toggleFirstVisit(id: string, isFirstVisit: boolean) {
   const { clinicId } = await checkAdminAuth();
   const supabase = await getSupabase();

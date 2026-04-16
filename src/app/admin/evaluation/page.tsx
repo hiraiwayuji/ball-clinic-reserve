@@ -7,12 +7,14 @@ import { Label } from "@/components/ui/label";
 import {
   TrendingUp, Users, Target, MessageSquare,
   Calendar, Sparkles, Star,
-  Award, ArrowUpRight, Loader2, Save, Search, Pencil, Trash2, Check, X, ChevronDown, ChevronUp
+  Award, ArrowUpRight, Loader2, Save, Search, Pencil, Trash2, Check, X, ChevronDown, ChevronUp,
+  FileSpreadsheet,
 } from "lucide-react";
 import { useState, useMemo, useEffect, useCallback } from "react";
-import { getMonthlyEvaluation, saveEvaluationTargets, saveAiSuggestion, getMonthDetailedBreakdown, updateCashSale, deleteCashSaleRecord, type MonthDetailedBreakdown, type DailySaleRow } from "@/app/actions/evaluation";
+import { getMonthlyEvaluation, saveEvaluationTargets, saveAiSuggestion, getMonthDetailedBreakdown, updateCashSale, deleteCashSaleRecord, getMonthlyReportData, type MonthDetailedBreakdown, type DailySaleRow } from "@/app/actions/evaluation";
 import { getBusinessContext } from "@/app/actions/sales";
 import { toast } from "sonner";
+import { downloadMonthlyReport } from "@/lib/monthly-report";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import Link from "next/link";
 
@@ -417,6 +419,7 @@ export default function EvaluationPage() {
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isDetailOpen, setIsDetailOpen] = useState(false);
   const [isGeneratingAi, setIsGeneratingAi] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
 
   const monthOptions = useMemo(() => {
     const opts = [];
@@ -484,6 +487,24 @@ export default function EvaluationPage() {
       toast.error(`AI提案の生成に失敗しました: ${error?.message || ""}`);
     } finally {
       setIsGeneratingAi(false);
+    }
+  };
+
+  const handleExportReport = async () => {
+    setIsExporting(true);
+    try {
+      const res = await getMonthlyReportData(activeYear, activeMonth);
+      if (!res.success || !res.data) {
+        toast.error(res.error ?? "レポートデータの取得に失敗しました");
+        return;
+      }
+      downloadMonthlyReport(res.data);
+      toast.success(`${activeYear}年${activeMonth}月のレポートをダウンロードしました`);
+    } catch (err) {
+      console.error(err);
+      toast.error("レポート出力中にエラーが発生しました");
+    } finally {
+      setIsExporting(false);
     }
   };
 
@@ -562,6 +583,19 @@ export default function EvaluationPage() {
               </option>
             ))}
           </select>
+
+          {/* 月次レポート出力 */}
+          <Button
+            variant="outline"
+            onClick={handleExportReport}
+            disabled={isExporting}
+            className="border-emerald-300 dark:border-emerald-700 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 bg-white dark:bg-slate-800 font-bold"
+          >
+            {isExporting
+              ? <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+              : <FileSpreadsheet className="w-4 h-4 mr-2" />}
+            月次レポート出力
+          </Button>
 
           {/* 数字の根拠ボタン */}
           <Button
