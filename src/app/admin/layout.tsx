@@ -26,15 +26,22 @@ export default async function AdminLayout({
           <div className="flex items-center gap-4">
             <Link href={isFamilyGift ? "/calendar" : "/admin/dashboard"} className="flex items-center gap-2 group">
               {!isFamilyGift && (
-                <div className="relative w-8 h-8 flex items-center justify-center">
-                  {isExternalAdminLogo ? (
-                    <img src={CLINIC_CONFIG.logoSmallUrl} alt={CLINIC_CONFIG.nameShort} className="max-h-8 w-auto object-contain" />
-                  ) : (
+                isExternalAdminLogo ? (
+                  <img
+                    src={CLINIC_CONFIG.logoSmallUrl}
+                    alt={CLINIC_CONFIG.nameShort}
+                    className="h-8 w-auto object-contain max-w-[120px]"
+                    onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                  />
+                ) : (
+                  <div className="relative w-8 h-8">
                     <Image src="/images/logo-black.png" alt={CLINIC_CONFIG.nameShort} fill className="object-contain dark:invert" />
-                  )}
-                </div>
+                  </div>
+                )
               )}
-              <span className="text-xl font-bold text-slate-900 dark:text-blue-50 group-hover:text-blue-600 transition-colors">{APP_TITLE}</span>
+              <span className="text-xl font-bold text-slate-900 dark:text-blue-50 group-hover:text-blue-600 transition-colors">
+                {isFamilyGift ? APP_TITLE : CLINIC_CONFIG.nameShort}
+              </span>
             </Link>
             <div className="h-6 w-px bg-slate-200 dark:bg-slate-800 mx-2 hidden md:block" />
             <span className="text-sm font-medium text-slate-500 hidden md:block uppercase tracking-widest">{APP_SUBTITLE}</span>
