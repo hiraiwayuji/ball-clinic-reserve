@@ -12,7 +12,7 @@ import { Badge } from "@/components/ui/badge";
 import {
   FileText, Plus, Trash2, Loader2, Landmark, Calendar as CalendarIcon,
   Camera, Sparkles, BookOpen, CheckCircle2, Circle, Image as ImageIcon,
-  Pencil, Check, X, ClipboardList, Receipt, Download, FileSpreadsheet
+  Pencil, Check, X, ClipboardList, Receipt, Download, FileSpreadsheet, ZoomIn
 } from "lucide-react";
 import Link from "next/link";
 import {
@@ -31,6 +31,9 @@ export default function InsurancePage() {
   const [isPending, startTransition] = useTransition();
 
   const [importOpen, setImportOpen] = useState(false);
+
+  // 画像ビューア
+  const [viewingImageUrl, setViewingImageUrl] = useState<string | null>(null);
 
   // 編集状態
   const [editingRow, setEditingRow] = useState<{
@@ -588,9 +591,14 @@ export default function InsurancePage() {
                           >
                             <TableCell className="pr-0">
                               {p.image_url ? (
-                                <a href={p.image_url} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:text-blue-600">
+                                <button
+                                  type="button"
+                                  onClick={() => setViewingImageUrl(p.image_url)}
+                                  className="text-blue-400 hover:text-blue-600 transition-colors"
+                                  title="写真を確認"
+                                >
                                   <ImageIcon className="w-4 h-4" />
-                                </a>
+                                </button>
                               ) : (
                                 <span className="text-slate-200 dark:text-slate-700"><ImageIcon className="w-4 h-4" /></span>
                               )}
@@ -656,6 +664,55 @@ export default function InsurancePage() {
         onClose={() => setImportOpen(false)}
         onDone={() => { setImportOpen(false); if (currentMonth) fetchPayments(currentMonth); }}
       />
+
+      {/* 画像ライトボックス */}
+      {viewingImageUrl && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4"
+          onClick={() => setViewingImageUrl(null)}
+        >
+          <div
+            className="relative max-w-3xl w-full max-h-[90dvh] flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* ヘッダー */}
+            <div className="flex items-center justify-between bg-slate-900 rounded-t-xl px-4 py-2.5">
+              <p className="text-sm font-bold text-white flex items-center gap-2">
+                <ImageIcon className="w-4 h-4 text-blue-400" />
+                振込通知書・通帳の写真
+              </p>
+              <div className="flex items-center gap-2">
+                <a
+                  href={viewingImageUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-xs text-blue-300 hover:text-blue-100 flex items-center gap-1 px-2 py-1 rounded-lg hover:bg-white/10 transition-colors"
+                >
+                  <ZoomIn className="w-3.5 h-3.5" />
+                  別タブで開く
+                </a>
+                <button
+                  type="button"
+                  onClick={() => setViewingImageUrl(null)}
+                  className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition-colors"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+
+            {/* 画像 */}
+            <div className="bg-slate-800 rounded-b-xl overflow-hidden flex items-center justify-center max-h-[80dvh]">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={viewingImageUrl}
+                alt="振込通知書"
+                className="max-w-full max-h-[80dvh] object-contain"
+              />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
