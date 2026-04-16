@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { XCircle, Search, CheckCircle, CalendarDays } from "lucide-react";
 import Link from "next/link";
+import { CLINIC_CONFIG } from "@/lib/clinic-config";
 
 export default function CancelPage() {
   const [searchType, setSearchType] = useState<"number" | "phone" | "name">("phone");
@@ -84,7 +85,7 @@ export default function CancelPage() {
     <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
-          <Link href="/" className="text-xl font-bold text-slate-900">ボール接骨院</Link>
+          <Link href="/" className="text-xl font-bold text-slate-900">{CLINIC_CONFIG.nameShort}</Link>
           <h1 className="text-2xl font-bold text-slate-800 mt-4">予約キャンセル</h1>
           <p className="text-slate-500 text-sm mt-2">予約を検索してキャンセルする予約を選んでください</p>
         </div>

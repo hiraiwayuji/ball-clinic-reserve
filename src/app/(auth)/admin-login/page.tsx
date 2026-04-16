@@ -8,6 +8,8 @@ import { Input } from "@/components/ui/input";
 import { Lock, Mail, Eye, EyeOff, Shield, ArrowRight, FlaskConical } from "lucide-react";
 import Image from "next/image";
 import { isDemo, isFamilyGift, APP_TITLE } from "@/lib/app-mode";
+import { CLINIC_CONFIG } from "@/lib/clinic-config";
+const isExternalLogo = CLINIC_CONFIG.logoSmallUrl.startsWith("http");
 
 export default function AdminLoginPage() {
   const [error, setError] = useState<string | null>(null);
@@ -105,17 +107,16 @@ export default function AdminLoginPage() {
               boxShadow: '0 0 40px rgba(59, 130, 246, 0.3)',
             }}
           >
-            <div className="relative w-14 h-14">
-              <Image 
-                src="/images/logo-white.png" 
-                alt="ボール接骨院" 
-                fill 
-                className="object-contain"
-              />
+            <div className="relative w-14 h-14 flex items-center justify-center">
+              {isExternalLogo ? (
+                <img src={CLINIC_CONFIG.logoSmallUrl} alt={CLINIC_CONFIG.nameShort} className="max-h-12 w-auto object-contain" />
+              ) : (
+                <Image src={CLINIC_CONFIG.logoSmallUrl} alt={CLINIC_CONFIG.nameShort} fill className="object-contain" />
+              )}
             </div>
           </div>
           <h1 className="text-3xl font-black text-white tracking-tight">
-            {isFamilyGift ? APP_TITLE : "ボール接骨院"}
+            {isFamilyGift ? APP_TITLE : CLINIC_CONFIG.nameShort}
           </h1>
           <p className="text-blue-300/70 text-sm mt-2 font-medium tracking-wide">
             {isDemo ? "デモ環境 - 自由にお試しいただけます" : "予約管理システム"}

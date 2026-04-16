@@ -7,6 +7,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Search, CalendarDays } from "lucide-react";
 import Link from "next/link";
 import Image from "next/image";
+import { CLINIC_CONFIG } from "@/lib/clinic-config";
+const _isExternalLogo = CLINIC_CONFIG.logoSmallUrl.startsWith("http");
 
 export default function CheckPage() {
   const [searchType, setSearchType] = useState<"number" | "phone" | "name">("number");
@@ -52,8 +54,12 @@ export default function CheckPage() {
     <div className="min-h-screen bg-[#0F172A] text-slate-200 flex items-center justify-center p-4">
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
-          <div className="relative w-48 h-20 mx-auto mb-4">
-            <Image src="/images/logo-white.png" alt="ボール接骨院" fill className="object-contain" />
+          <div className="relative w-48 h-20 mx-auto mb-4 flex items-center justify-center">
+            {_isExternalLogo ? (
+              <img src={CLINIC_CONFIG.logoSmallUrl} alt={CLINIC_CONFIG.nameShort} className="max-h-20 w-auto object-contain" />
+            ) : (
+              <Image src={CLINIC_CONFIG.logoSmallUrl} alt={CLINIC_CONFIG.nameShort} fill className="object-contain" />
+            )}
           </div>
           <h1 className="text-2xl font-bold text-white mt-4 tracking-tight">予約確認</h1>
           <p className="text-blue-200/60 text-sm mt-2">予約番号・電話番号・お名前で確認できます</p>

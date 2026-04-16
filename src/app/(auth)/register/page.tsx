@@ -7,6 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Lock, Mail, Eye, EyeOff, Building2, KeyRound, ArrowRight, CheckCircle2 } from "lucide-react";
 import Image from "next/image";
+import { CLINIC_CONFIG } from "@/lib/clinic-config";
+const _isExternalLogo = CLINIC_CONFIG.logoSmallUrl.startsWith("http");
 
 export default function RegisterPage() {
   const [error, setError]         = useState<string | null>(null);
@@ -85,7 +87,11 @@ export default function RegisterPage() {
             style={{ boxShadow: "0 0 40px rgba(16, 185, 129, 0.3)" }}
           >
             <div className="relative w-14 h-14">
-              <Image src="/images/logo-white.png" alt="ロゴ" fill className="object-contain" />
+              {_isExternalLogo ? (
+                  <img src={CLINIC_CONFIG.logoSmallUrl} alt={CLINIC_CONFIG.nameShort} className="max-h-12 w-auto object-contain" />
+                ) : (
+                  <Image src={CLINIC_CONFIG.logoSmallUrl} alt={CLINIC_CONFIG.nameShort} fill className="object-contain" />
+                )}
             </div>
           </div>
           <h1 className="text-3xl font-black text-white tracking-tight">接骨院管理システム</h1>

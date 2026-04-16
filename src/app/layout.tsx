@@ -20,8 +20,8 @@ export const metadata: Metadata = isFamilyGift
       description: "家族みんなで使えるGoogleカレンダー風アプリ。予定を共有しよう。",
     }
   : {
-      title: "ボール接骨院 | Web予約システム",
-      description: "サッカー選手が通う、体のメンテナンスに特化したボール接骨院の予約システムです。24時間Webから予約・キャンセル待ちが可能です。",
+      title: `${process.env.NEXT_PUBLIC_CLINIC_NAME ?? "ボール接骨院"} | Web予約システム`,
+      description: `${process.env.NEXT_PUBLIC_CLINIC_NAME ?? "ボール接骨院"}のWeb予約システムです。24時間オンラインで予約・確認が可能です。`,
     };
 
 import { ThemeProvider } from "@/components/ThemeProvider";

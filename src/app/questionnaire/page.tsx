@@ -6,6 +6,8 @@ import Link from "next/link";
 import { CheckCircle2, MessageCircle, ArrowLeft, ChevronRight } from "lucide-react";
 import { submitQuestionnaire } from "@/app/actions/questionnaire";
 import { toast } from "sonner";
+import { CLINIC_CONFIG } from "@/lib/clinic-config";
+const _isExternalLogo = CLINIC_CONFIG.logoSmallUrl.startsWith("http");
 
 const MONTHS = Array.from({ length: 12 }, (_, i) => i + 1);
 const AGE_GROUPS = ["19歳以下", "20代", "30代", "40代", "50代", "60代以上"];
@@ -65,7 +67,11 @@ export default function QuestionnairePage() {
           {/* ヘッダー */}
           <div className="text-center space-y-3">
             <div className="relative w-40 h-14 mx-auto">
-              <Image src="/images/logo-white.png" alt="ボール接骨院" fill className="object-contain" />
+              {_isExternalLogo ? (
+                <img src={CLINIC_CONFIG.logoSmallUrl} alt={CLINIC_CONFIG.nameShort} className="max-h-full w-auto object-contain mx-auto" />
+              ) : (
+                <Image src={CLINIC_CONFIG.logoSmallUrl} alt={CLINIC_CONFIG.nameShort} fill className="object-contain" />
+              )}
             </div>
             <div className="w-16 h-16 bg-emerald-500 rounded-full flex items-center justify-center mx-auto shadow-lg shadow-emerald-500/40">
               <CheckCircle2 className="w-10 h-10 text-white" />
@@ -141,7 +147,11 @@ export default function QuestionnairePage() {
         {/* ロゴ */}
         <div className="flex flex-col items-center mb-10">
           <div className="relative w-48 h-16 mb-3">
-            <Image src="/images/logo-white.png" alt="ボール接骨院" fill className="object-contain" />
+            {_isExternalLogo ? (
+                <img src={CLINIC_CONFIG.logoSmallUrl} alt={CLINIC_CONFIG.nameShort} className="max-h-full w-auto object-contain mx-auto" />
+              ) : (
+                <Image src={CLINIC_CONFIG.logoSmallUrl} alt={CLINIC_CONFIG.nameShort} fill className="object-contain" />
+              )}
           </div>
           <p className="text-blue-200/50 text-xs tracking-widest uppercase">Body ALL care.</p>
         </div>

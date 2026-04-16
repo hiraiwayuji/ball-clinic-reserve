@@ -7,6 +7,8 @@ import { LogOut } from "lucide-react";
 import AiChatPanel from "@/components/AiChatPanel";
 import AdminNavLinks from "@/components/admin/AdminNavLinks";
 import { isFamilyGift, isDemo, APP_TITLE, APP_SUBTITLE } from "@/lib/app-mode";
+import { CLINIC_CONFIG } from "@/lib/clinic-config";
+const isExternalAdminLogo = CLINIC_CONFIG.logoSmallUrl.startsWith("http");
 import { FlaskConical } from "lucide-react";
 
 export default async function AdminLayout({
@@ -24,13 +26,12 @@ export default async function AdminLayout({
           <div className="flex items-center gap-4">
             <Link href={isFamilyGift ? "/calendar" : "/admin/dashboard"} className="flex items-center gap-2 group">
               {!isFamilyGift && (
-                <div className="relative w-8 h-8 dark:invert">
-                  <Image
-                    src="/images/logo-black.png"
-                    alt="ボール接骨院"
-                    fill
-                    className="object-contain"
-                  />
+                <div className="relative w-8 h-8 flex items-center justify-center">
+                  {isExternalAdminLogo ? (
+                    <img src={CLINIC_CONFIG.logoSmallUrl} alt={CLINIC_CONFIG.nameShort} className="max-h-8 w-auto object-contain" />
+                  ) : (
+                    <Image src="/images/logo-black.png" alt={CLINIC_CONFIG.nameShort} fill className="object-contain dark:invert" />
+                  )}
                 </div>
               )}
               <span className="text-xl font-bold text-slate-900 dark:text-blue-50 group-hover:text-blue-600 transition-colors">{APP_TITLE}</span>
