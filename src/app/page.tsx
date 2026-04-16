@@ -6,6 +6,8 @@ import { CalendarDays, Clock, MapPin, Phone } from "lucide-react";
 import Image from "next/image";
 import { CLINIC_CONFIG } from "@/lib/clinic-config";
 
+// NEXT_PUBLIC_CLINIC_NAME が未設定 = ボール接骨院（デフォルト）
+const isDefaultClinic = !process.env.NEXT_PUBLIC_CLINIC_NAME;
 const isExternalLogo = CLINIC_CONFIG.logoUrl.startsWith("http");
 const isExternalLogoSmall = CLINIC_CONFIG.logoSmallUrl.startsWith("http");
 
@@ -56,7 +58,14 @@ export default function Home() {
 
           <div className="container mx-auto relative z-10 max-w-4xl text-center">
             <h1 className="text-4xl md:text-6xl font-extrabold tracking-tight mb-6 leading-tight">
-              {CLINIC_CONFIG.catchcopy}
+              {isDefaultClinic ? (
+                <>
+                  痛み根本改善、<br className="md:hidden" />
+                  <span className="text-blue-400">パフォーマンス向上</span>をサポート
+                </>
+              ) : (
+                CLINIC_CONFIG.catchcopy
+              )}
             </h1>
             <p className="text-lg md:text-xl text-slate-300 mb-10 max-w-2xl mx-auto leading-relaxed">
               {CLINIC_CONFIG.description}

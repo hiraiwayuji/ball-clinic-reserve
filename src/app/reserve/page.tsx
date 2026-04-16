@@ -23,6 +23,7 @@ import { toast } from "sonner";
 import { CLINIC_CONFIG } from "@/lib/clinic-config";
 
 const isExternalLogo = CLINIC_CONFIG.logoSmallUrl.startsWith("http");
+const LINE_URL = process.env.NEXT_PUBLIC_LINE_OFFICIAL_ACCOUNT_URL ?? "https://line.me/ti/p/%40shc8761q";
 
 function ReserveContent() {
   const searchParams = useSearchParams();
@@ -184,7 +185,7 @@ function ReserveContent() {
             </p>
             <p className="text-blue-100/70 text-sm text-center">以下のボタンから{CLINIC_CONFIG.nameShort}のLINEを友だち追加して、予約内容をお伝えください。</p>
             <a
-              href="https://line.me/ti/p/%40shc8761q"
+              href={LINE_URL}
               target="_blank"
               rel="noreferrer"
               className="mt-4 inline-flex w-full items-center justify-center bg-[#06C755] hover:bg-[#05b34c] text-white font-bold py-5 px-4 rounded-2xl transition-all shadow-xl shadow-[#06C755]/20 gap-2"
@@ -435,12 +436,12 @@ function ReserveContent() {
                           className="w-5 h-5 accent-green-500"
                         />
                         <label htmlFor="lineRegistered" className="text-sm text-green-200 cursor-pointer">
-                          ボール接骨院のLINE公式アカウントを友だち追加済み
+                          {CLINIC_CONFIG.nameShort}のLINE公式アカウントを友だち追加済み
                         </label>
                       </div>
                       {!lineRegistered && (
                         <a
-                          href="https://line.me/ti/p/%40shc8761q"
+                          href={LINE_URL}
                           target="_blank"
                           rel="noreferrer"
                           className="inline-flex w-full items-center justify-center bg-[#06C755] hover:bg-[#05b34c] text-white font-bold py-3 px-4 rounded-xl transition-all gap-2 text-sm"
