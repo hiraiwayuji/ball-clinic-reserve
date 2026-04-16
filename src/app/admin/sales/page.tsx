@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect, useTransition, useRef, useCallback } from "react";
+import { useState, useEffect, useTransition, useRef, useCallback, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 import { format } from "date-fns";
 import { ja } from "date-fns/locale";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -15,7 +16,8 @@ import Link from "next/link";
 import CashSalesImportDialog from "@/components/admin/CashSalesImportDialog";
 import { exportToExcel } from "@/lib/excel";
 
-export default function SalesPage() {
+function SalesPageInner() {
+  const searchParams = useSearchParams();
   const [date, setDate] = useState<Date | null>(null);
   const [sales, setSales] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -32,6 +34,32 @@ export default function SalesPage() {
   const [isSearching, setIsSearching] = useState(false);
   const searchTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
   const suggestionsRef = useRef<HTMLDivElement>(null);
+
+  // 受付カウンターからの遷移: URLパラメータで名前・初診フラグを受け取り、金額を過去履歴から予測
+  useEffect(() => {
+    const presetName = searchParams.get("name");
+    const presetFirstVisit = searchParams.get("first_visit") === "true";
+    if (!presetName) return;
+
+    setIsFirstVisit(presetFirstVisit);
+    setNameValue(presetName);
+
+    // 過去履歴から金額を予測（初診は空欄のまま）
+    if (!presetFirstVisit) {
+      searchSalesPatients(presetName).then((results) => {
+        // 名前が完全一致するものを優先、なければ最初の候補
+        const exact = results.find(
+          (r) => r.customer_name === presetName
+        );
+        const best = exact ?? results[0];
+        if (best) {
+          setAmountValue(String(best.lastAmount));
+          toast.info(`${presetName}様の前回金額（${best.lastAmount.toLocaleString()}円）を入力しました`);
+        }
+      });
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     setDate(new Date());
@@ -400,6 +428,14 @@ export default function SalesPage() {
         onImported={() => date && fetchSales(date)}
       />
     </div>
+  );
+}
+
+export default function SalesPage() {
+  return (
+    <Suspense fallback={<div className="p-8 text-center text-slate-500">読み込み中...</div>}>
+      <SalesPageInner />
+    </Suspense>
   );
 }
 

@@ -209,10 +209,10 @@ function AppointmentCard({
           </button>
         )}
 
-        {/* 会計登録へリンク */}
+        {/* 会計登録へリンク（名前・初診フラグをクエリパラメータで渡して自動入力） */}
         {apt.checkin_status === "in_treatment" || apt.checkin_status === "arrived" ? (
           <Link
-            href="/admin/sales"
+            href={`/admin/sales?name=${encodeURIComponent(apt.customers?.name ?? "")}&first_visit=${apt.is_first_visit}`}
             className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium text-slate-600 dark:text-slate-300 bg-white/70 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700 hover:bg-white dark:hover:bg-slate-700 transition-colors"
           >
             <CreditCard className="w-3.5 h-3.5" />
