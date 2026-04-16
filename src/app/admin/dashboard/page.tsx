@@ -2,7 +2,10 @@
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Calendar, TrendingUp, CheckCircle2, AlertCircle, Sparkles, Clock, Loader2, Coins, Plus } from "lucide-react";
+import {
+  Calendar, TrendingUp, CheckCircle2, AlertCircle, Sparkles, Clock, Loader2, Coins, Plus,
+  Users, Stethoscope, CreditCard, ArrowRight, User, ChevronRight,
+} from "lucide-react";
 import Link from "next/link";
 import { useState, useEffect } from "react";
 import { getTodayDashboardData } from "@/app/actions/sales";
@@ -98,6 +101,14 @@ export default function DashboardPrototype() {
     );
   }
 
+  // 今日の来院統計
+  const todayTotal = data?.appointments?.length ?? 0;
+  const todayArrived = data?.appointments?.filter((a: any) => a.checkin_status === "arrived").length ?? 0;
+  const todayInTreatment = data?.appointments?.filter((a: any) => a.checkin_status === "in_treatment").length ?? 0;
+  const todayDone = data?.appointments?.filter((a: any) => a.checkin_status === "done").length ?? 0;
+  const todayWaiting = data?.appointments?.filter((a: any) => !a.checkin_status).length ?? 0;
+  const todayFirstVisit = data?.appointments?.filter((a: any) => a.type === "初診").length ?? 0;
+
   const monthlyProgress = data && data.monthlyRevenue && data.targetIncome
     ? Math.min(100, Math.round((data.monthlyRevenue.total / data.targetIncome) * 100))
     : 0;
@@ -130,6 +141,100 @@ export default function DashboardPrototype() {
           </div>
         </div>
       </div>
+
+      {/* ── 今日モード ヒーロー帯 ───────────────────────────────────── */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+        {/* 本日予約 */}
+        <Link href="/admin/counter" className="group col-span-1 sm:col-span-1 lg:col-span-1 bg-gradient-to-br from-blue-600 to-violet-700 rounded-2xl p-5 text-white shadow-lg hover:shadow-xl hover:scale-[1.02] transition-all">
+          <div className="flex items-start justify-between">
+            <Users className="w-5 h-5 opacity-80" />
+            <ChevronRight className="w-4 h-4 opacity-60 group-hover:translate-x-0.5 transition-transform" />
+          </div>
+          <div className="mt-3">
+            <div className="text-4xl font-black leading-none">{todayTotal}</div>
+            <div className="text-xs mt-1 opacity-80 font-medium">本日の予約</div>
+          </div>
+        </Link>
+
+        {/* 待合中 */}
+        <Link href="/admin/counter" className="group bg-blue-50 dark:bg-blue-900/30 border-2 border-blue-200 dark:border-blue-700 rounded-2xl p-5 hover:scale-[1.02] transition-all">
+          <div className="flex items-start justify-between">
+            <User className="w-5 h-5 text-blue-500" />
+            <ChevronRight className="w-4 h-4 text-blue-300 group-hover:translate-x-0.5 transition-transform" />
+          </div>
+          <div className="mt-3">
+            <div className="text-4xl font-black text-blue-700 dark:text-blue-300 leading-none">{todayArrived}</div>
+            <div className="text-xs mt-1 text-blue-500 font-medium">待合中</div>
+          </div>
+        </Link>
+
+        {/* 施術中 */}
+        <Link href="/admin/counter" className="group bg-emerald-50 dark:bg-emerald-900/30 border-2 border-emerald-200 dark:border-emerald-700 rounded-2xl p-5 hover:scale-[1.02] transition-all">
+          <div className="flex items-start justify-between">
+            <Stethoscope className="w-5 h-5 text-emerald-500" />
+            <ChevronRight className="w-4 h-4 text-emerald-300 group-hover:translate-x-0.5 transition-transform" />
+          </div>
+          <div className="mt-3">
+            <div className="text-4xl font-black text-emerald-700 dark:text-emerald-300 leading-none">{todayInTreatment}</div>
+            <div className="text-xs mt-1 text-emerald-600 font-medium">施術中</div>
+          </div>
+        </Link>
+
+        {/* 会計完了 */}
+        <Link href="/admin/counter" className="group bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-2xl p-5 hover:scale-[1.02] transition-all">
+          <div className="flex items-start justify-between">
+            <CheckCircle2 className="w-5 h-5 text-slate-400" />
+            <ChevronRight className="w-4 h-4 text-slate-300 group-hover:translate-x-0.5 transition-transform" />
+          </div>
+          <div className="mt-3">
+            <div className="text-4xl font-black text-slate-600 dark:text-slate-300 leading-none">{todayDone}</div>
+            <div className="text-xs mt-1 text-slate-400 font-medium">会計完了</div>
+          </div>
+        </Link>
+
+        {/* 本日売上 */}
+        <Link href="/admin/sales" className="group col-span-1 sm:col-span-1 lg:col-span-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-5 hover:scale-[1.02] transition-all shadow-sm">
+          <div className="flex items-start justify-between">
+            <CreditCard className="w-5 h-5 text-amber-500" />
+            <ChevronRight className="w-4 h-4 text-slate-300 group-hover:translate-x-0.5 transition-transform" />
+          </div>
+          <div className="mt-3">
+            <div className="text-2xl font-black text-slate-900 dark:text-slate-100 leading-none">
+              ¥{(data?.todaySales ?? 0).toLocaleString()}
+            </div>
+            <div className="text-xs mt-1 text-slate-400 font-medium">本日自費売上</div>
+          </div>
+        </Link>
+
+        {/* 今月達成率 */}
+        <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-5 shadow-sm">
+          <div className="flex items-start justify-between">
+            <TrendingUp className="w-5 h-5 text-violet-500" />
+            <span className="text-[10px] font-bold text-violet-500 bg-violet-50 dark:bg-violet-900/30 px-1.5 py-0.5 rounded-full">今月</span>
+          </div>
+          <div className="mt-3">
+            <div className="text-3xl font-black text-violet-700 dark:text-violet-300 leading-none">{monthlyProgress}<span className="text-sm font-normal text-slate-400 ml-0.5">%</span></div>
+            <div className="text-xs mt-1 text-slate-400 font-medium">月次目標達成率</div>
+            <div className="mt-2 h-1.5 w-full bg-slate-100 dark:bg-slate-700 rounded-full overflow-hidden">
+              <div className="h-full bg-gradient-to-r from-violet-500 to-blue-500 rounded-full transition-all duration-1000" style={{ width: `${monthlyProgress}%` }} />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* 初診バッジ */}
+      {todayFirstVisit > 0 && (
+        <div className="flex items-center gap-2 -mt-2">
+          <span className="flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 bg-rose-500 text-white rounded-full shadow-sm">
+            <Star className="w-3.5 h-3.5 fill-white" />
+            本日 初診 {todayFirstVisit}名
+          </span>
+          <span className="text-xs text-slate-400">— カウンターで来院状況を管理できます</span>
+          <Link href="/admin/counter" className="text-xs text-blue-500 hover:text-blue-600 font-medium flex items-center gap-0.5">
+            受付カウンターへ <ArrowRight className="w-3 h-3" />
+          </Link>
+        </div>
+      )}
 
       {data && data.appointments && (
         <AISecretaryBriefing
@@ -260,41 +365,51 @@ export default function DashboardPrototype() {
                   <p className="text-sm">本日の予約はありません</p>
                 </div>
               ) : (
-                <div className="space-y-4 relative pl-6 before:absolute before:left-[11px] before:top-2 before:bottom-2 before:w-[2px] before:bg-slate-100 dark:before:bg-slate-800">
-                  {data.appointments.map((res: any, i: number) => (
-                    <div key={i} className="relative flex gap-3 items-start">
-                      <div className="shrink-0 w-6 h-6 rounded-full bg-blue-100 flex items-center justify-center border-2 border-white z-10 absolute -left-6">
-                        <div className="w-2 h-2 rounded-full bg-blue-600" />
+                <div className="space-y-2">
+                  {data.appointments.map((res: any, i: number) => {
+                    const cs = res.checkin_status;
+                    const statusStyle =
+                      cs === "done"         ? { bar: "bg-slate-300", badge: "bg-slate-100 text-slate-400", label: "完了" } :
+                      cs === "in_treatment" ? { bar: "bg-emerald-400", badge: "bg-emerald-100 text-emerald-700", label: "施術中" } :
+                      cs === "arrived"      ? { bar: "bg-blue-400", badge: "bg-blue-100 text-blue-700", label: "待合中" } :
+                                              { bar: "bg-slate-200", badge: "bg-slate-100 text-slate-500", label: "未来院" };
+                    return (
+                      <div
+                        key={i}
+                        className={`flex items-center gap-3 rounded-xl border p-3 transition-colors ${cs === "done" ? "opacity-50" : "bg-white dark:bg-slate-800/50 border-slate-100 dark:border-slate-700"}`}
+                      >
+                        {/* ステータスバー */}
+                        <div className={`w-1 h-10 rounded-full shrink-0 ${statusStyle.bar}`} />
+                        {/* 時間 */}
+                        <div className="font-mono text-sm font-bold text-slate-700 dark:text-slate-200 w-10 shrink-0">{res.time}</div>
+                        {/* 患者名 */}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (res.customer_id) {
+                              setSelectedPatientId(res.customer_id);
+                              setPatientPanelOpen(true);
+                            }
+                          }}
+                          className="flex-1 text-left truncate font-semibold text-slate-800 dark:text-slate-100 hover:text-blue-600 text-sm"
+                        >
+                          {res.name} 様
+                        </button>
+                        {/* 初診バッジ */}
+                        {res.type === "初診" && (
+                          <span className="shrink-0 text-[9px] font-black px-1.5 py-0.5 rounded-full bg-rose-500 text-white">初診</span>
+                        )}
+                        {/* チェックインバッジ */}
+                        <span className={`shrink-0 text-[10px] font-bold px-2 py-0.5 rounded-full ${statusStyle.badge}`}>{statusStyle.label}</span>
                       </div>
-                      <div className="flex-1 bg-white rounded-lg border border-slate-100 p-3 shadow-sm">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              if (res.customer_id) {
-                                setSelectedPatientId(res.customer_id);
-                                setPatientPanelOpen(true);
-                              }
-                            }}
-                            className="font-bold text-blue-700 text-sm truncate mr-1 hover:underline text-left"
-                          >
-                            {res.name} 様
-                          </button>
-                          {(res.type === '初回' || i === 0) && (
-                            <Star className="w-3.5 h-3.5 text-amber-500 fill-amber-400 animate-pulse shrink-0" />
-                          )}
-                          <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium shrink-0 ${res.type === '初回' ? 'bg-amber-100 text-amber-800' : 'bg-green-100 text-green-800'}`}>
-                            {res.type}
-                          </span>
-                        </div>
-                        <p className="text-[10px] text-slate-500">{res.status === 'confirmed' ? '確認済み' : '確認中'}</p>
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
-              <Link href="/admin/appointments">
-                <Button variant="ghost" size="sm" className="w-full text-slate-500 text-xs mt-2 underline">予約一覧で詳しく見る</Button>
+              <Link href="/admin/counter">
+                <Button variant="ghost" size="sm" className="w-full text-slate-500 text-xs mt-2">
+                  受付カウンターで管理 <ArrowRight className="w-3 h-3 ml-1" />
+                </Button>
               </Link>
             </div>
 

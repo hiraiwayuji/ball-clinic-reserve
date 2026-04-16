@@ -659,7 +659,9 @@ export async function getTodayDashboardData() {
           id,
           start_time,
           status,
+          checkin_status,
           is_first_visit,
+          course_name,
           customer_id,
           customers (
             name,
@@ -761,7 +763,9 @@ export async function getTodayDashboardData() {
           phone: (a.customers as any)?.phone || "",
           customer_id: a.customer_id || null,
           type: a.is_first_visit ? "初診" : "再診",
-          status: a.status
+          status: a.status,
+          checkin_status: a.checkin_status ?? null,
+          course_name: a.course_name ?? null,
         })),
         targetIncome,
         targetSnsTasks,
