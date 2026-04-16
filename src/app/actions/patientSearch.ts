@@ -25,15 +25,88 @@ export async function getPatientById(id: string) {
 
 // 患者名で検索
 export async function searchPatients(name: string) {
-  await checkAdminAuth();
+  const { clinicId } = await checkAdminAuth();
   if (!name.trim()) return [];
   const supabase = await createClient();
   const { data } = await supabase
     .from("customers")
     .select("id, name, phone, line_user_id")
+    .eq("clinic_id", clinicId)
     .ilike("name", `%${name.trim()}%`)
     .limit(10);
   return data || [];
+}
+
+// 予約追加用: 患者名で検索して最終来院日も返す
+export type PatientSuggestion = {
+  id: string;
+  name: string;
+  phone: string;
+  lastVisitDate: string | null; // "yyyy-MM-dd"
+  daysSinceLastVisit: number | null;
+  totalVisits: number;
+};
+
+export async function searchPatientsForBooking(name: string): Promise<PatientSuggestion[]> {
+  const { clinicId } = await checkAdminAuth();
+  if (!name.trim()) return [];
+  const supabase = await createClient();
+
+  const { data: customers } = await supabase
+    .from("customers")
+    .select("id, name, phone")
+    .eq("clinic_id", clinicId)
+    .ilike("name", `%${name.trim()}%`)
+    .limit(8);
+
+  if (!customers || customers.length === 0) return [];
+
+  // 各顧客の最終来院日と来院回数を取得
+  const results: PatientSuggestion[] = await Promise.all(
+    customers.map(async (c) => {
+      const { data: apts } = await supabase
+        .from("appointments")
+        .select("start_time")
+        .eq("customer_id", c.id)
+        .eq("clinic_id", clinicId)
+        .neq("status", "cancelled")
+        .lt("start_time", new Date().toISOString())
+        .order("start_time", { ascending: false })
+        .limit(1);
+
+      const { count } = await supabase
+        .from("appointments")
+        .select("id", { count: "exact", head: true })
+        .eq("customer_id", c.id)
+        .eq("clinic_id", clinicId)
+        .neq("status", "cancelled");
+
+      const lastApt = apts?.[0];
+      let lastVisitDate: string | null = null;
+      let daysSinceLastVisit: number | null = null;
+      if (lastApt) {
+        const d = new Date(lastApt.start_time);
+        lastVisitDate = d.toISOString().slice(0, 10);
+        daysSinceLastVisit = Math.floor((Date.now() - d.getTime()) / (1000 * 60 * 60 * 24));
+      }
+
+      return {
+        id: c.id,
+        name: c.name,
+        phone: c.phone,
+        lastVisitDate,
+        daysSinceLastVisit,
+        totalVisits: count ?? 0,
+      };
+    })
+  );
+
+  // 最終来院日が新しい順にソート
+  return results.sort((a, b) => {
+    if (!a.lastVisitDate) return 1;
+    if (!b.lastVisitDate) return -1;
+    return b.lastVisitDate.localeCompare(a.lastVisitDate);
+  });
 }
 
 // 患者の予約一覧（過去＋今後）

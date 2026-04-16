@@ -10,23 +10,11 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Loader2, Receipt, Image as ImageIcon, Check, Ban, AlertCircle, Save, ExternalLink } from "lucide-react";
 import { getPendingExpenses, finalizePendingExpense, updatePendingExpense } from "@/app/actions/sales";
+import { getCustomExpenseCategories } from "@/app/actions/settings";
+import { BASE_EXPENSE_CATEGORIES } from "@/lib/expense-categories";
 import Image from "next/image";
 import { toast } from "sonner";
 import Link from "next/link";
-
-const EXPENSE_CATEGORIES = [
-  "光熱費",
-  "消耗品",
-  "備品購入",
-  "交通費",
-  "通信費",
-  "家賃",
-  "広告費",
-  "教育・研修",
-  "リース料",
-  "雑費",
-  "その他",
-];
 
 const STATUS_LABELS: Record<string, string> = {
   unprocessed: "未処理",
@@ -40,13 +28,17 @@ export default function ExpenseTriagePage() {
   const [isPending, startTransition] = useTransition();
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<any>({});
+  const [customCategories, setCustomCategories] = useState<string[]>([]);
+
+  const allCategories = [...BASE_EXPENSE_CATEGORIES, ...customCategories];
 
   const fetchItems = async () => {
     setLoading(true);
-    const res = await getPendingExpenses();
+    const [res, custom] = await Promise.all([getPendingExpenses(), getCustomExpenseCategories()]);
     if (res.success) {
       setPendingItems(res.data || []);
     }
+    setCustomCategories(custom);
     setLoading(false);
   };
 
@@ -217,7 +209,7 @@ export default function ExpenseTriagePage() {
                                 onChange={(e) => setEditForm({ ...editForm, category: e.target.value })}
                               >
                                 <option value="">カテゴリ選択</option>
-                                {EXPENSE_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                                {allCategories.map(c => <option key={c} value={c}>{c}</option>)}
                               </select>
                             </div>
                           ) : (

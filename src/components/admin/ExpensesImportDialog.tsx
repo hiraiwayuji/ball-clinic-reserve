@@ -1,19 +1,16 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Upload, Download, FileSpreadsheet, CheckCircle2, AlertCircle, Loader2, X } from "lucide-react";
 import { bulkImportExpenses, ImportExpenseRow } from "@/app/actions/sales";
+import { getCustomExpenseCategories } from "@/app/actions/settings";
+import { BASE_EXPENSE_CATEGORIES } from "@/lib/expense-categories";
 import { parseUploadedFile, downloadExcelTemplate } from "@/lib/excel";
 import { toast } from "sonner";
-
-const EXPENSE_CATEGORIES = [
-  "光熱費", "消耗品", "備品購入", "交通費", "通信費",
-  "家賃", "広告費", "教育・研修", "リース料", "雑費", "その他",
-];
 
 const COLUMNS = [
   { key: "expense_date", label: "日付(YYYY/MM/DD)" },
@@ -56,7 +53,17 @@ export default function ExpensesImportDialog({ open, onClose, onDone }: Props) {
   const [rows, setRows] = useState<ImportExpenseRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<{ inserted: number; skipped: number; errors: { row: number; description: string; reason: string }[] } | null>(null);
+  const [customCategories, setCustomCategories] = useState<string[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  const allCategories = [...BASE_EXPENSE_CATEGORIES, ...customCategories];
+
+  // ダイアログが開いたときにカスタムカテゴリを読み込む
+  useEffect(() => {
+    if (open) {
+      getCustomExpenseCategories().then(setCustomCategories);
+    }
+  }, [open]);
 
   const reset = () => { setStep("upload"); setRows([]); setResult(null); };
 
@@ -123,7 +130,7 @@ export default function ExpensesImportDialog({ open, onClose, onDone }: Props) {
               {COLUMNS.map((c, i) => (
                 <p key={c.key}>{i + 1}列目: {c.label}{["expense_date","category","amount"].includes(c.key) ? " ※必須" : ""}</p>
               ))}
-              <p className="mt-2">カテゴリ: {EXPENSE_CATEGORIES.join(" / ")}</p>
+              <p className="mt-2">カテゴリ: {allCategories.join(" / ")}</p>
             </div>
           </div>
         )}

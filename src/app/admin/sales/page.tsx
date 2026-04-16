@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useTransition, useRef } from "react";
+import { useState, useEffect, useTransition, useRef, useCallback } from "react";
 import { format } from "date-fns";
 import { ja } from "date-fns/locale";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -8,8 +8,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Calendar as CalendarIcon, Plus, Trash2, Loader2, Coins, User, UserPlus, Landmark, Receipt, Upload, Download } from "lucide-react";
-import { addCashSale, getCashSales, deleteCashSale } from "@/app/actions/sales";
+import { Calendar as CalendarIcon, Plus, Trash2, Loader2, Coins, User, UserPlus, Landmark, Receipt, Upload, Download, Clock } from "lucide-react";
+import { addCashSale, getCashSales, deleteCashSale, searchSalesPatients, SalesPatientSuggestion } from "@/app/actions/sales";
 import { toast } from "sonner";
 import Link from "next/link";
 import CashSalesImportDialog from "@/components/admin/CashSalesImportDialog";
@@ -23,6 +23,15 @@ export default function SalesPage() {
   const [isFirstVisit, setIsFirstVisit] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const formRef = useRef<HTMLFormElement>(null);
+
+  // 患者名サジェスト
+  const [nameValue, setNameValue] = useState("");
+  const [amountValue, setAmountValue] = useState("");
+  const [suggestions, setSuggestions] = useState<SalesPatientSuggestion[]>([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [isSearching, setIsSearching] = useState(false);
+  const searchTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const suggestionsRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     setDate(new Date());
@@ -58,6 +67,9 @@ export default function SalesPage() {
           toast.success(isFirstVisit ? "登録しました（新患）" : "登録しました");
           formRef.current?.reset();
           setIsFirstVisit(false);
+          setNameValue("");
+          setAmountValue("");
+          setSuggestions([]);
           fetchSales(date);
         } else {
           toast.error(res.error || "エラーが発生しました");
@@ -78,6 +90,42 @@ export default function SalesPage() {
       toast.error(res.error || "削除に失敗しました");
     }
   };
+
+  // 名前入力でデバウンス検索
+  const handleNameChange = useCallback((value: string) => {
+    setNameValue(value);
+    setSuggestions([]);
+    if (searchTimeout.current) clearTimeout(searchTimeout.current);
+    if (!value.trim()) { setShowSuggestions(false); return; }
+    searchTimeout.current = setTimeout(async () => {
+      setIsSearching(true);
+      try {
+        const results = await searchSalesPatients(value);
+        setSuggestions(results);
+        setShowSuggestions(results.length > 0);
+      } finally {
+        setIsSearching(false);
+      }
+    }, 300);
+  }, []);
+
+  // 候補を選択したとき
+  const handleSelectSuggestion = (p: SalesPatientSuggestion) => {
+    setNameValue(p.customer_name);
+    setAmountValue(String(p.lastAmount));
+    setShowSuggestions(false);
+  };
+
+  // サジェスト外クリックで閉じる
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (suggestionsRef.current && !suggestionsRef.current.contains(e.target as Node)) {
+        setShowSuggestions(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
 
   const handleExport = () => {
     if (!date) return;
@@ -159,18 +207,85 @@ export default function SalesPage() {
           </CardHeader>
           <CardContent>
             <form ref={formRef} onSubmit={handleSubmit} className="space-y-4">
+              {/* お名前（サジェスト付き） */}
               <div className="space-y-2">
                 <Label htmlFor="customer_name">お名前</Label>
-                <div className="relative">
-                  <User className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
-                  <Input id="customer_name" name="customer_name" placeholder="やまだ たろう" className="pl-9" required lang="ja" autoComplete="off" />
+                <div className="relative" ref={suggestionsRef}>
+                  <div className="relative">
+                    <User className="absolute left-3 top-2.5 h-4 w-4 text-slate-400 z-10" />
+                    <Input
+                      id="customer_name"
+                      name="customer_name"
+                      placeholder="やまだ たろう"
+                      className="pl-9"
+                      required
+                      lang="ja"
+                      autoComplete="off"
+                      value={nameValue}
+                      onChange={(e) => handleNameChange(e.target.value)}
+                      onFocus={() => suggestions.length > 0 && setShowSuggestions(true)}
+                    />
+                    {isSearching && (
+                      <div className="absolute right-3 top-2.5 w-4 h-4 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
+                    )}
+                  </div>
+
+                  {/* サジェストドロップダウン */}
+                  {showSuggestions && suggestions.length > 0 && (
+                    <div className="absolute z-50 top-full mt-1 left-0 right-0 bg-white border border-slate-200 rounded-xl shadow-xl overflow-hidden">
+                      <div className="px-3 py-1.5 bg-slate-50 border-b text-xs text-slate-500 font-medium">
+                        直近の来院（タップで入力）
+                      </div>
+                      {suggestions.map((p, i) => (
+                        <button
+                          key={i}
+                          type="button"
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => handleSelectSuggestion(p)}
+                          className="w-full text-left px-3 py-2.5 hover:bg-blue-50 transition-colors border-b border-slate-100 last:border-0"
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="flex items-center gap-2 min-w-0">
+                              <User className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                              <span className="font-bold text-slate-800 text-sm truncate">{p.customer_name}</span>
+                            </div>
+                            <div className="text-right shrink-0 space-y-0.5">
+                              <p className="text-sm font-bold text-blue-600">¥{p.lastAmount.toLocaleString()}</p>
+                              <div className="flex items-center gap-1 justify-end">
+                                <Clock className="w-3 h-3 text-slate-400" />
+                                <span className={`text-xs font-semibold ${
+                                  p.daysSinceLastVisit <= 7 ? "text-green-600" :
+                                  p.daysSinceLastVisit <= 30 ? "text-blue-600" :
+                                  p.daysSinceLastVisit <= 90 ? "text-amber-600" : "text-red-500"
+                                }`}>
+                                  {p.daysSinceLastVisit}日前
+                                </span>
+                                <span className="text-xs text-slate-400">計{p.visitCount}回</span>
+                              </div>
+                            </div>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
+
+              {/* 金額 */}
               <div className="space-y-2">
                 <Label htmlFor="treatment_fee">金額（税込）</Label>
                 <div className="relative">
                   <Coins className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
-                  <Input id="treatment_fee" name="treatment_fee" type="number" placeholder="5000" className="pl-9" required />
+                  <Input
+                    id="treatment_fee"
+                    name="treatment_fee"
+                    type="number"
+                    placeholder="5000"
+                    className="pl-9"
+                    required
+                    value={amountValue}
+                    onChange={(e) => setAmountValue(e.target.value)}
+                  />
                 </div>
               </div>
               <div className="space-y-2">

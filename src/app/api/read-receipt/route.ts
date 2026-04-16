@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { GoogleGenerativeAI } from "@google/generative-ai";
-
-const CATEGORIES = ["光熱費","消耗品","備品購入","交通費","通信費","家賃","広告費","教育・研修","リース料","雑費","その他"];
+import { BASE_EXPENSE_CATEGORIES } from "@/lib/expense-categories";
+import { getCustomExpenseCategories } from "@/app/actions/settings";
 
 export async function POST(req: NextRequest) {
   const apiKey = process.env.GEMINI_API_KEY;
@@ -10,6 +10,10 @@ export async function POST(req: NextRequest) {
   const { base64, mimeType } = await req.json();
   if (!base64) return NextResponse.json({ error: "画像がありません" }, { status: 400 });
 
+  // カスタムカテゴリを含めた全カテゴリリストを取得
+  const customCategories = await getCustomExpenseCategories().catch(() => []);
+  const allCategories = [...BASE_EXPENSE_CATEGORIES, ...customCategories];
+
   const genAI = new GoogleGenerativeAI(apiKey);
   const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
@@ -17,7 +21,7 @@ export async function POST(req: NextRequest) {
   const prompt = `このレシート・領収書の画像から以下の情報をJSONで返してください。
 - amount: 合計金額（税込）の数値のみ（例: 1980）
 - description: 購入内容・店名（例: コンビニ消耗品、ホームセンター備品）
-- category: 以下の中から最も適切なもの1つ → ${CATEGORIES.join("、")}
+- category: 以下の中から最も適切なもの1つ → ${allCategories.join("、")}
 - expense_date: レシートに記載された日付をyyyy-MM-dd形式で。読み取れない場合は今日の日付 ${today}
 - memo: その他特記事項（なければ空文字）
 

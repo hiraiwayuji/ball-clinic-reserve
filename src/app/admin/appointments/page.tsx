@@ -10,7 +10,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
-  ChevronLeft, ChevronRight, Calendar, Settings, Loader2, Plus, User, CalendarDays, Search,
+  ChevronLeft, ChevronRight, Calendar, Settings, Loader2, Plus, User, CalendarDays, Search, LayoutList,
 } from "lucide-react";
 import Link from "next/link";
 import { EditAppointmentDialog } from "@/components/admin/EditAppointmentDialog";
@@ -33,6 +33,7 @@ export default function AdminWeeklyGridPage() {
   const [selectedAddTime, setSelectedAddTime] = useState("");
   const [isSearchPanelOpen, setIsSearchPanelOpen] = useState(false);
   const [clinicId, setClinicId] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<"week" | "day">("week"); // PC表示モード
 
   const weekStart = useMemo(() => {
     if (!currentDate) return startOfWeek(new Date(), { weekStartsOn: 1 });
@@ -432,7 +433,7 @@ export default function AdminWeeklyGridPage() {
       </div>
 
       {/* ====================================================
-          DESKTOP VIEW (≥ md) — original weekly grid
+          DESKTOP VIEW (≥ md)
       ==================================================== */}
       <div
         className="hidden md:flex flex-col gap-4"
@@ -445,17 +446,26 @@ export default function AdminWeeklyGridPage() {
               <Button
                 variant="outline"
                 size="icon"
-                onClick={() => handleWeekChange(subWeeks(currentDate, 1))}
+                onClick={() => viewMode === "week"
+                  ? handleWeekChange(subWeeks(currentDate, 1))
+                  : setSelectedDay(d => d ? addDays(d, -1) : d)
+                }
               >
                 <ChevronLeft className="h-4 w-4" />
               </Button>
-              <Button variant="outline" onClick={() => handleWeekChange(new Date())}>
-                今週
+              <Button variant="outline" onClick={() => {
+                handleWeekChange(new Date());
+                setSelectedDay(new Date());
+              }}>
+                今日
               </Button>
               <Button
                 variant="outline"
                 size="icon"
-                onClick={() => handleWeekChange(addWeeks(currentDate, 1))}
+                onClick={() => viewMode === "week"
+                  ? handleWeekChange(addWeeks(currentDate, 1))
+                  : setSelectedDay(d => d ? addDays(d, 1) : d)
+                }
               >
                 <ChevronRight className="h-4 w-4" />
               </Button>
@@ -463,26 +473,86 @@ export default function AdminWeeklyGridPage() {
 
             <div className="text-lg font-bold text-slate-800 dark:text-slate-100 flex items-center">
               <Calendar className="w-5 h-5 mr-2 text-slate-400 dark:text-slate-500 shrink-0" />
-              <span>{format(weekDays[0], "yyyy年 M月 d日", { locale: ja })}</span>
-              <span className="text-slate-400 dark:text-slate-500 mx-2">〜</span>
-              <span>{format(weekDays[6], "M月 d日", { locale: ja })}</span>
+              {viewMode === "week" ? (
+                <>
+                  <span>{format(weekDays[0], "yyyy年 M月 d日", { locale: ja })}</span>
+                  <span className="text-slate-400 dark:text-slate-500 mx-2">〜</span>
+                  <span>{format(weekDays[6], "M月 d日", { locale: ja })}</span>
+                </>
+              ) : (
+                <span>{selectedDay ? format(selectedDay, "yyyy年M月d日（E）", { locale: ja }) : ""}</span>
+              )}
             </div>
 
-            <div className="flex items-center gap-2 text-sm">
-              <div className="flex items-center">
-                <div className="w-3 h-3 bg-blue-100 border border-blue-200 rounded-sm mr-1" />
-                確定
+            <div className="flex items-center gap-3">
+              {/* ビュー切り替えタブ */}
+              <div className="flex bg-slate-100 dark:bg-slate-800 rounded-lg p-0.5 gap-0.5">
+                <button
+                  onClick={() => setViewMode("week")}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition-all ${
+                    viewMode === "week"
+                      ? "bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 shadow-sm"
+                      : "text-slate-500 hover:text-slate-700"
+                  }`}
+                >
+                  <Calendar className="w-3.5 h-3.5" /> 週間
+                </button>
+                <button
+                  onClick={() => setViewMode("day")}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition-all ${
+                    viewMode === "day"
+                      ? "bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 shadow-sm"
+                      : "text-slate-500 hover:text-slate-700"
+                  }`}
+                >
+                  <LayoutList className="w-3.5 h-3.5" /> 日別
+                </button>
               </div>
-              <div className="flex items-center">
-                <div className="w-3 h-3 bg-orange-100 border border-orange-200 rounded-sm mr-1" />
-                C待ち
+              <div className="flex items-center gap-2 text-sm">
+                <div className="flex items-center">
+                  <div className="w-3 h-3 bg-blue-100 border border-blue-200 rounded-sm mr-1" />
+                  確定
+                </div>
+                <div className="flex items-center">
+                  <div className="w-3 h-3 bg-orange-100 border border-orange-200 rounded-sm mr-1" />
+                  C待ち
+                </div>
               </div>
             </div>
           </div>
         </Card>
 
-        {/* Weekly grid */}
-        <Card className="flex-1 overflow-auto rounded-t-none border-t bg-slate-50">
+        {/* 日別ビュー（PC）: 日付セレクターバー */}
+        {viewMode === "day" && (
+          <div className="shrink-0 flex gap-1.5 overflow-x-auto pb-1 px-1">
+            {weekDays.map((date, i) => {
+              const dayStr = format(date, "E", { locale: ja });
+              const isSelected = selectedDay ? isSameDay(date, selectedDay) : false;
+              const isToday = isSameDay(date, new Date());
+              const isOff = isDayOff(date);
+              const dayApptCount = appointments.filter(a => isSameDay(new Date(a.start_time), date)).length;
+              return (
+                <button
+                  key={i}
+                  onClick={() => setSelectedDay(date)}
+                  className={`flex flex-col items-center rounded-xl px-4 py-2 min-w-[60px] flex-shrink-0 transition-all
+                    ${isSelected ? "bg-blue-600 text-white shadow-md" : isToday ? "bg-blue-50 text-blue-700 ring-1 ring-blue-300" : "bg-white border border-slate-200 text-slate-600 hover:bg-slate-50"}
+                    ${isOff && !isSelected ? "opacity-40" : ""}
+                  `}
+                >
+                  <span className={`text-[11px] font-semibold ${dayStr === "土" && !isSelected ? "text-blue-500" : dayStr === "日" && !isSelected ? "text-rose-500" : ""}`}>{dayStr}</span>
+                  <span className="text-base font-black">{format(date, "d")}</span>
+                  {dayApptCount > 0 ? (
+                    <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${isSelected ? "bg-white/25 text-white" : "bg-blue-100 text-blue-600"}`}>{dayApptCount}</span>
+                  ) : <span className="h-[18px]" />}
+                </button>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Weekly grid（週間モード） */}
+        {viewMode === "week" && <Card className="flex-1 overflow-auto rounded-t-none border-t bg-slate-50">
           {loading ? (
             <div className="h-full flex items-center justify-center">
               <Loader2 className="h-8 w-8 animate-spin text-blue-500" />
@@ -617,7 +687,112 @@ export default function AdminWeeklyGridPage() {
               </div>
             </div>
           )}
-        </Card>
+        </Card>}
+
+        {/* 日別リストビュー（日別モード） */}
+        {viewMode === "day" && (
+          <Card className="flex-1 overflow-auto rounded-t-none border-t bg-slate-50">
+            {loading ? (
+              <div className="h-full flex items-center justify-center">
+                <Loader2 className="h-8 w-8 animate-spin text-blue-500" />
+              </div>
+            ) : !selectedDay ? null : (
+              <div className="p-4">
+                {/* 日付ヘッダー */}
+                <div className="flex items-center justify-between mb-4">
+                  <div>
+                    <h2 className="text-xl font-bold text-slate-800 dark:text-slate-100">
+                      {format(selectedDay, "M月d日（E）", { locale: ja })}
+                    </h2>
+                    {isDayOff(selectedDay) && (
+                      <span className="text-sm text-rose-500 font-semibold">休診日</span>
+                    )}
+                  </div>
+                  {!isDayOff(selectedDay) && (
+                    <Button
+                      size="sm"
+                      onClick={() => {
+                        setSelectedAddDate(selectedDay);
+                        setSelectedAddTime("12:00");
+                        setIsAddDialogOpen(true);
+                      }}
+                      className="bg-blue-600 hover:bg-blue-700 text-white"
+                    >
+                      <Plus className="w-4 h-4 mr-1" />
+                      予約追加
+                    </Button>
+                  )}
+                </div>
+
+                {selectedDayAppointments.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-20 text-slate-400">
+                    <CalendarDays className="w-16 h-16 mb-3 opacity-20" />
+                    <p className="text-base font-semibold text-slate-400">この日の予約はありません</p>
+                    {!isDayOff(selectedDay) && (
+                      <button
+                        onClick={() => { setSelectedAddDate(selectedDay); setSelectedAddTime("12:00"); setIsAddDialogOpen(true); }}
+                        className="mt-4 text-blue-500 text-sm underline underline-offset-2 font-medium"
+                      >
+                        予約を追加する
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {selectedDayAppointments.map((apt) => {
+                      const cust = Array.isArray(apt.customers) ? apt.customers[0] : apt.customers;
+                      const name = cust?.name || "名前なし";
+                      const phone = cust?.phone || "";
+                      const startTime = new Date(apt.start_time);
+                      const endTime = apt.end_time ? new Date(apt.end_time) : new Date(startTime.getTime() + 30 * 60000);
+                      const accentColor = apt.status === "confirmed" ? "bg-blue-500" : apt.status === "pending" ? "bg-amber-400" : "bg-orange-400";
+                      const cardBg = apt.status === "confirmed" ? "bg-white border-slate-200" : apt.status === "pending" ? "bg-amber-50 border-amber-200" : "bg-orange-50 border-orange-200";
+
+                      return (
+                        <button
+                          key={apt.id}
+                          className="w-full text-left"
+                          onClick={() => {
+                            setSelectedAppointment({ ...apt, customers: Array.isArray(apt.customers) ? apt.customers[0] : apt.customers });
+                            setIsEditDialogOpen(true);
+                          }}
+                        >
+                          <Card className={`border ${cardBg} transition-all hover:shadow-md`}>
+                            <div className="flex items-stretch gap-0 overflow-hidden rounded-xl">
+                              <div className={`w-1.5 ${accentColor} shrink-0`} />
+                              <div className="flex items-center gap-4 px-4 py-3 flex-1">
+                                <div className="text-center min-w-[64px]">
+                                  <p className="text-xl font-black text-slate-800 tabular-nums">{format(startTime, "HH:mm")}</p>
+                                  <p className="text-xs text-slate-400 tabular-nums">〜{format(endTime, "HH:mm")}</p>
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <span className="font-bold text-slate-900 text-base">{name}</span>
+                                    {apt.is_first_visit && (
+                                      <span className="text-[10px] font-black bg-amber-500 text-white px-2 py-0.5 rounded-full">初診</span>
+                                    )}
+                                    <Badge variant="outline" className={`text-xs py-0 h-5 ${getStatusColor(apt.status)}`}>
+                                      {getStatusText(apt.status)}
+                                    </Badge>
+                                  </div>
+                                  <div className="flex items-center gap-3 mt-1 text-sm text-slate-500">
+                                    {phone && <span className="flex items-center gap-1"><User className="w-3 h-3" />{phone}</span>}
+                                    {apt.memo && <span className="truncate">{apt.memo}</span>}
+                                  </div>
+                                </div>
+                                <ChevronRight className="w-4 h-4 text-slate-300 shrink-0" />
+                              </div>
+                            </div>
+                          </Card>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+          </Card>
+        )}
 
         {/* iCal sync card (desktop) */}
         <Card className="shrink-0 bg-blue-50 border-blue-200">

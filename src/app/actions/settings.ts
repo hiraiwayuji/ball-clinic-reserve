@@ -6,6 +6,7 @@ import { checkAdminAuth } from "./auth";
 export type ClinicSettings = {
   id: string;
   clinic_name: string;
+  custom_expense_categories?: string[];
   hero_title: string;
   primary_color: string;
   max_beds: number;
@@ -166,5 +167,79 @@ export async function updateClinicSettings(settings: Partial<ClinicSettings>) {
   revalidatePath("/admin/dashboard");
   revalidatePath("/admin/evaluation");
 
+  return { success: true };
+}
+
+// --- カスタム経費カテゴリ ---
+
+export async function getCustomExpenseCategories(): Promise<string[]> {
+  const { clinicId } = await checkAdminAuth();
+  noStore();
+  const { createClient } = await import("@/lib/supabase/server");
+  const supabase = await createClient();
+
+  const { data } = await supabase
+    .from("clinic_settings")
+    .select("custom_expense_categories")
+    .eq("id", clinicId)
+    .maybeSingle();
+
+  return data?.custom_expense_categories ?? [];
+}
+
+export async function addCustomExpenseCategory(name: string): Promise<{ success: boolean; error?: string }> {
+  const { clinicId } = await checkAdminAuth();
+  name = name.trim();
+  if (!name) return { success: false, error: "カテゴリ名を入力してください" };
+
+  const { createClient } = await import("@/lib/supabase/server");
+  const supabase = await createClient();
+
+  // 既存カテゴリ取得して重複チェック
+  const { data } = await supabase
+    .from("clinic_settings")
+    .select("custom_expense_categories")
+    .eq("id", clinicId)
+    .maybeSingle();
+
+  const current: string[] = data?.custom_expense_categories ?? [];
+  if (current.includes(name)) return { success: false, error: "すでに同じカテゴリが存在します" };
+
+  const { error } = await supabase
+    .from("clinic_settings")
+    .update({ custom_expense_categories: [...current, name] })
+    .eq("id", clinicId);
+
+  if (error) return { success: false, error: "保存に失敗しました: " + error.message };
+
+  revalidatePath("/admin/expenses");
+  revalidatePath("/admin/expenses/triage");
+  return { success: true };
+}
+
+export async function deleteCustomExpenseCategory(name: string): Promise<{ success: boolean; error?: string }> {
+  const { clinicId } = await checkAdminAuth();
+
+  const { createClient } = await import("@/lib/supabase/server");
+  const supabase = await createClient();
+
+  const { data } = await supabase
+    .from("clinic_settings")
+    .select("custom_expense_categories")
+    .eq("id", clinicId)
+    .maybeSingle();
+
+  const current: string[] = data?.custom_expense_categories ?? [];
+  const updated = current.filter(c => c !== name);
+
+  const { error } = await supabase
+    .from("clinic_settings")
+    .update({ custom_expense_categories: updated })
+    .eq("id", clinicId);
+
+  if (error) return { success: false, error: "削除に失敗しました: " + error.message };
+
+  revalidatePath("/admin/expenses");
+  revalidatePath("/admin/expenses/triage");
   return { success: true };
 }

@@ -11,6 +11,59 @@ async function getSupabase() {
 
 // --- Cash Sales Actions ---
 
+// 売上登録用: 患者名で過去の cash_sales から候補を返す
+export type SalesPatientSuggestion = {
+  customer_name: string;
+  lastAmount: number;        // 直近の金額
+  lastSaleDate: string;      // "yyyy-MM-dd"
+  daysSinceLastVisit: number;
+  visitCount: number;
+};
+
+export async function searchSalesPatients(name: string): Promise<SalesPatientSuggestion[]> {
+  const { clinicId } = await checkAdminAuth();
+  if (!name.trim()) return [];
+
+  const supabase = await getSupabase();
+
+  // 名前部分一致で過去の売上を取得（直近20件）
+  const { data } = await supabase
+    .from("cash_sales")
+    .select("customer_name, treatment_fee, sale_date")
+    .eq("clinic_id", clinicId)
+    .ilike("customer_name", `%${name.trim()}%`)
+    .order("sale_date", { ascending: false })
+    .limit(50);
+
+  if (!data || data.length === 0) return [];
+
+  // 名前ごとに集約
+  const byName: Record<string, { lastAmount: number; lastSaleDate: string; visitCount: number }> = {};
+  for (const row of data) {
+    const n = row.customer_name as string;
+    if (!byName[n]) {
+      byName[n] = { lastAmount: row.treatment_fee, lastSaleDate: row.sale_date, visitCount: 1 };
+    } else {
+      byName[n].visitCount++;
+      // sale_date 降順で取得しているので最初のレコードが最新
+    }
+  }
+
+  const today = new Date();
+  return Object.entries(byName)
+    .map(([customer_name, info]) => ({
+      customer_name,
+      lastAmount: info.lastAmount,
+      lastSaleDate: info.lastSaleDate,
+      daysSinceLastVisit: Math.floor(
+        (today.getTime() - new Date(info.lastSaleDate).getTime()) / (1000 * 60 * 60 * 24)
+      ),
+      visitCount: info.visitCount,
+    }))
+    .sort((a, b) => a.daysSinceLastVisit - b.daysSinceLastVisit)
+    .slice(0, 8);
+}
+
 export async function addCashSale(formData: FormData) {
   const { clinicId } = await checkAdminAuth();
   try {

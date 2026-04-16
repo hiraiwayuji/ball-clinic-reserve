@@ -8,28 +8,16 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Calendar as CalendarIcon, Plus, Trash2, Loader2, Receipt, Tag, AlertCircle, Save, Camera, Sparkles, Pencil, Check, X, Banknote, Download, FileSpreadsheet } from "lucide-react";
+import { Calendar as CalendarIcon, Plus, Trash2, Loader2, Receipt, Tag, AlertCircle, Save, Camera, Sparkles, Pencil, Check, X, Banknote, Download, FileSpreadsheet, Settings2 } from "lucide-react";
 import { addExpense, getExpenses, deleteExpense, addPendingExpense, updateExpense, getMonthDetailedExpenses } from "@/app/actions/sales";
+import { getCustomExpenseCategories, addCustomExpenseCategory, deleteCustomExpenseCategory } from "@/app/actions/settings";
+import { BASE_EXPENSE_CATEGORIES } from "@/lib/expense-categories";
 import { createClient } from "@/lib/supabase/client";
 import { toast } from "sonner";
 import Image from "next/image";
 import Link from "next/link";
 import { exportToExcel } from "@/lib/excel";
 import ExpensesImportDialog from "@/components/admin/ExpensesImportDialog";
-
-const EXPENSE_CATEGORIES = [
-  "光熱費",
-  "消耗品",
-  "備品購入",
-  "交通費",
-  "通信費",
-  "家賃",
-  "広告費",
-  "教育・研修",
-  "リース料",
-  "雑費",
-  "その他",
-];
 
 type EditingState = {
   id: string;
@@ -59,12 +47,47 @@ export default function ExpensesPage() {
   const formRef = useRef<HTMLFormElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  // カスタムカテゴリ
+  const [customCategories, setCustomCategories] = useState<string[]>([]);
+  const [categoryPanelOpen, setCategoryPanelOpen] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState("");
+  const [isSavingCategory, setIsSavingCategory] = useState(false);
+
+  const allCategories = [...BASE_EXPENSE_CATEGORIES, ...customCategories];
 
   useEffect(() => {
     const today = new Date();
     setDate(today);
     setFormExpenseDate(format(today, "yyyy-MM-dd"));
+    // カスタムカテゴリ読み込み
+    getCustomExpenseCategories().then(setCustomCategories);
   }, []);
+
+  const handleAddCategory = async () => {
+    if (!newCategoryName.trim()) return;
+    setIsSavingCategory(true);
+    const res = await addCustomExpenseCategory(newCategoryName.trim());
+    if (res.success) {
+      const updated = await getCustomExpenseCategories();
+      setCustomCategories(updated);
+      setNewCategoryName("");
+      toast.success("カテゴリを追加しました");
+    } else {
+      toast.error(res.error || "追加に失敗しました");
+    }
+    setIsSavingCategory(false);
+  };
+
+  const handleDeleteCategory = async (name: string) => {
+    const res = await deleteCustomExpenseCategory(name);
+    if (res.success) {
+      const updated = await getCustomExpenseCategories();
+      setCustomCategories(updated);
+      toast.success(`「${name}」を削除しました`);
+    } else {
+      toast.error(res.error || "削除に失敗しました");
+    }
+  };
 
   const fetchExpenses = async (d: Date) => {
     setLoading(true);
@@ -375,6 +398,9 @@ export default function ExpensesPage() {
           </div>
         </div>
         <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={() => setCategoryPanelOpen(v => !v)} className="flex items-center gap-1.5 border-slate-200 text-slate-600 hover:bg-slate-50">
+            <Settings2 className="w-4 h-4" /> カテゴリ管理
+          </Button>
           <Button variant="outline" size="sm" onClick={() => setImportOpen(true)} className="flex items-center gap-1.5 border-emerald-200 text-emerald-700 hover:bg-emerald-50">
             <FileSpreadsheet className="w-4 h-4" /> Excel取込
           </Button>
@@ -383,6 +409,66 @@ export default function ExpensesPage() {
           </Button>
         </div>
       </div>
+
+      {/* カテゴリ管理パネル */}
+      {categoryPanelOpen && (
+        <Card className="shadow-sm border-slate-200 dark:border-white/10 dark:bg-slate-900/50">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base flex items-center gap-2">
+              <Settings2 className="w-4 h-4 text-slate-500" />
+              経費カテゴリ管理
+            </CardTitle>
+            <CardDescription>よく使うカテゴリを自由に追加できます。標準カテゴリは削除できません。</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {/* 追加フォーム */}
+            <div className="flex gap-2">
+              <Input
+                placeholder="新しいカテゴリ名（例: 医薬品・サプリ）"
+                value={newCategoryName}
+                onChange={(e) => setNewCategoryName(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); handleAddCategory(); } }}
+                className="flex-1"
+              />
+              <Button onClick={handleAddCategory} disabled={isSavingCategory || !newCategoryName.trim()} size="sm" className="bg-emerald-600 hover:bg-emerald-700">
+                {isSavingCategory ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+                追加
+              </Button>
+            </div>
+            {/* カテゴリ一覧 */}
+            <div>
+              <p className="text-xs font-medium text-slate-500 mb-2">標準カテゴリ</p>
+              <div className="flex flex-wrap gap-1.5 mb-4">
+                {BASE_EXPENSE_CATEGORIES.map(cat => (
+                  <span key={cat} className="inline-flex items-center px-2.5 py-1 rounded-full text-xs bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
+                    {cat}
+                  </span>
+                ))}
+              </div>
+              {customCategories.length > 0 && (
+                <>
+                  <p className="text-xs font-medium text-slate-500 mb-2">追加カテゴリ</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {customCategories.map(cat => (
+                      <span key={cat} className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-700">
+                        {cat}
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteCategory(cat)}
+                          className="ml-0.5 hover:text-red-500 transition-colors"
+                          aria-label={`${cat}を削除`}
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* 入力フォーム */}
@@ -488,7 +574,7 @@ export default function ExpensesPage() {
                     className="w-full border border-slate-200 dark:border-slate-800 rounded-md pl-9 pr-3 py-2 text-sm bg-white dark:bg-slate-950 text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-emerald-500 outline-none"
                   >
                     <option value="">（後で決める）</option>
-                    {EXPENSE_CATEGORIES.map((cat) => (
+                    {allCategories.map((cat) => (
                       <option key={cat} value={cat}>{cat}</option>
                     ))}
                   </select>
@@ -597,7 +683,7 @@ export default function ExpensesPage() {
                                   className="w-full border border-emerald-300 rounded px-1.5 py-1 text-xs bg-white text-slate-800 focus:outline-none focus:ring-1 focus:ring-emerald-500"
                                 >
                                   <option value="">未分類</option>
-                                  {EXPENSE_CATEGORIES.map(cat => (
+                                  {allCategories.map(cat => (
                                     <option key={cat} value={cat}>{cat}</option>
                                   ))}
                                 </select>
