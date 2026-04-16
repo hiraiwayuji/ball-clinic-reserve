@@ -1,0 +1,57 @@
+# ================================================================
+# Vercel 環境変数テンプレート — 新規クリニック導入用
+# Vercel Dashboard → Project → Settings → Environment Variables に設定
+# ================================================================
+
+# ── Supabase（全クリニック共通・本番プロジェクトのキーを使用）──
+NEXT_PUBLIC_SUPABASE_URL=https://uatmzcnoumafeuzprkdo.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=【Supabase Dashboard → Settings → API → anon public】
+SUPABASE_SERVICE_ROLE_KEY=【Supabase Dashboard → Settings → API → service_role secret】
+
+# ── アプリモード ──
+NEXT_PUBLIC_APP_MODE=CLINIC
+
+# ── 登録セットアップコード（クリニックごとに異なる値を設定）──
+# 担当者だけに伝え、/auth/register 時に入力してもらう
+SETUP_PASSWORD=【クリニック固有のコード例: relaq2026 / karada2026】
+
+# ── LINE Messaging API（クリニックごとに異なる）──
+# LINE Developers → チャネル基本設定 から取得
+LINE_CHANNEL_SECRET=【LINE Channel Secret】
+LINE_CHANNEL_ACCESS_TOKEN=【LINE Channel Access Token（長期）】
+NEXT_PUBLIC_LINE_OFFICIAL_ACCOUNT_URL=https://lin.ee/【友達追加URL】
+
+# ── LINE 通知（院長・オーナーへの予約通知用）──
+# LINE公式アカウントに「友達追加」した院長のUserID
+# LINE Developers → Messaging API → Webhook で確認、または /api/line/webhook のログから取得
+OWNER_LINE_USER_ID=【院長のLINE User ID（任意）】
+
+# ── AI機能（OCR読取・AI提案 共通）──
+GEMINI_API_KEY=【Google AI Studio → API Keys から取得】
+
+# ── Web Push 通知（任意・共通キーでも可）──
+NEXT_PUBLIC_VAPID_PUBLIC_KEY=【vapidキー】
+VAPID_PRIVATE_KEY=【vapidシークレット】
+VAPID_SUBJECT=mailto:【管理者メールアドレス】
+
+# ── Cron リマインド（Vercel Cron 用）──
+# vercel.json の crons 設定と合わせること
+REMIND_SECRET=【任意のランダム文字列】
+
+# ================================================================
+# 【relaq 鍼灸マッサージ治療院】用メモ欄
+# ================================================================
+# Vercel Project 名: relaq-clinic（任意）
+# 本番URL: relaq.vercel.app（またはカスタムドメイン）
+# SETUP_PASSWORD: relaq2026（例）
+# LINE Channel: 【取得後に記入】
+# clinic_id: 【setup.sql STEP1 実行後に記入】
+
+# ================================================================
+# 【karada 鍼灸整骨院（川内）】用メモ欄
+# ================================================================
+# Vercel Project 名: karada-clinic（任意）
+# 本番URL: karada-clinic.vercel.app（またはカスタムドメイン）
+# SETUP_PASSWORD: karada2026（例）
+# LINE Channel: 【取得後に記入】
+# clinic_id: 【setup.sql STEP1 実行後に記入】
