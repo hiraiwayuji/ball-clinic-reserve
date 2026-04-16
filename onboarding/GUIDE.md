@@ -113,8 +113,10 @@ karada_setup.sql → STEP1 だけ実行 → clinic_id をメモ
 | | relaq | karada |
 |--|-------|--------|
 | clinic_id | 021efe2a-a768-4fa6-9de8-62cae9a79d47 | d3b55abc-46a6-4cbe-8198-21c0392d9a2e |
-| Vercel URL | | |
-| SETUP_PASSWORD | | |
+| Vercel URL | https://relaq-clinic.vercel.app | https://karada-clinic.vercel.app |
+| SETUP_PASSWORD | relaq123 | karada2026 |
 | 担当者メール | | |
 | LINE Channel ID | | |
 | 導入日 | | |
+| 営業時間 | | 月火木金土 10:00〜20:00（水・日・祝休診） |
+| 備考 | | ランチタイム営業・訪問治療あり[10:00〜16:00] |
