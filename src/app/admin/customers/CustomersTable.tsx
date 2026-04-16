@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition, useMemo } from "react";
-import { format } from "date-fns";
+import { format, differenceInDays } from "date-fns";
 import { ja } from "date-fns/locale";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
@@ -13,11 +13,12 @@ import {
 } from "@/components/ui/dialog";
 import { SuspendToggle } from "./SuspendToggle";
 import { LinkLineDialog } from "./LinkLineDialog";
-import { updateCustomerInfo, mergeCustomers } from "@/app/actions/adminCustomers";
+import { updateCustomerInfo, mergeCustomers, sendDormantLinePush } from "@/app/actions/adminCustomers";
 import { QuestionnaireDialog } from "./QuestionnaireDialog";
 import {
   Search, Pencil, Check, X, Loader2, ClipboardList,
   AlertTriangle, ArrowUpDown, Hash, GitMerge, Calendar, Phone, Upload,
+  BellRing, MessageCircle, Send, Users,
 } from "lucide-react";
 import { toast } from "sonner";
 import CustomerImportDialog from "@/components/admin/CustomerImportDialog";
@@ -533,15 +534,320 @@ function EditableRow({
   );
 }
 
+// ── 休眠患者アラートタブ ────────────────────────────────────────────
+
+const LINE_TEMPLATES = [
+  {
+    label: "ご無沙汰のご連絡",
+    text: (name: string) =>
+      `${name}様\n\nいつもありがとうございます。\nしばらくご来院されていないご様子で、お体の具合はいかがでしょうか？\n\nお身体に気になることがございましたら、お気軽にご来院・ご連絡ください。\nスタッフ一同、お待ちしております。`,
+  },
+  {
+    label: "キャンペーンのご案内",
+    text: (name: string) =>
+      `${name}様\n\nこんにちは！いつもありがとうございます。\nこの度、久しぶりにご来院のお客様向けに特別キャンペーンを実施しております。\n\nぜひこの機会にご来院ください。ご予約はいつでも受け付けております。\nお待ちしております。`,
+  },
+  {
+    label: "体調確認メッセージ",
+    text: (name: string) =>
+      `${name}様\n\nお元気ですか？最近ご来院がないためご連絡差し上げました。\n\nお身体の不調や気になる症状があれば、いつでもご相談ください。\n引き続きよろしくお願いいたします。`,
+  },
+];
+
+type DormantThreshold = 30 | 60 | 90;
+
+function DormantAlertsTab({ customers }: { customers: Customer[] }) {
+  const [threshold, setThreshold] = useState<DormantThreshold>(30);
+  const [lineModalCustomer, setLineModalCustomer] = useState<Customer | null>(null);
+  const [selectedTemplate, setSelectedTemplate] = useState(0);
+  const [customMessage, setCustomMessage] = useState("");
+  const [isSending, setIsSending] = useState(false);
+  const [batchSending, setBatchSending] = useState(false);
+  const [sentIds, setSentIds] = useState<Set<string>>(new Set());
+  const today = useMemo(() => new Date(), []);
+
+  const dormantPatients = useMemo(() => {
+    return customers
+      .filter(c => {
+        if (!c.lastVisit) return false;
+        const days = differenceInDays(today, new Date(c.lastVisit));
+        return days >= threshold;
+      })
+      .map(c => ({
+        ...c,
+        daysSince: differenceInDays(today, new Date(c.lastVisit!)),
+      }))
+      .sort((a, b) => b.daysSince - a.daysSince);
+  }, [customers, threshold, today]);
+
+  const withLine = dormantPatients.filter(c => c.line_user_id);
+  const withoutLine = dormantPatients.filter(c => !c.line_user_id);
+
+  const getDaysColor = (days: number) => {
+    if (days >= 180) return "text-red-600 bg-red-50 border-red-200";
+    if (days >= 90) return "text-orange-600 bg-orange-50 border-orange-200";
+    if (days >= 60) return "text-amber-600 bg-amber-50 border-amber-200";
+    return "text-yellow-700 bg-yellow-50 border-yellow-200";
+  };
+
+  const openLineModal = (customer: Customer) => {
+    setLineModalCustomer(customer);
+    setSelectedTemplate(0);
+    setCustomMessage(LINE_TEMPLATES[0].text(customer.name));
+  };
+
+  const handleTemplateSelect = (idx: number, name: string) => {
+    setSelectedTemplate(idx);
+    setCustomMessage(LINE_TEMPLATES[idx].text(name));
+  };
+
+  const handleSend = async () => {
+    if (!lineModalCustomer?.line_user_id || !customMessage.trim()) return;
+    setIsSending(true);
+    const res = await sendDormantLinePush(
+      lineModalCustomer.line_user_id,
+      lineModalCustomer.name,
+      customMessage.trim(),
+    );
+    setIsSending(false);
+    if (res.success) {
+      toast.success(`${lineModalCustomer.name}様にLINEを送信しました`);
+      setSentIds(prev => new Set(prev).add(lineModalCustomer.id));
+      setLineModalCustomer(null);
+    } else {
+      toast.error(res.error ?? "送信に失敗しました");
+    }
+  };
+
+  const handleBatchSend = async () => {
+    const targets = withLine.filter(c => !sentIds.has(c.id));
+    if (targets.length === 0) { toast.info("送信対象がありません"); return; }
+    setBatchSending(true);
+    let ok = 0;
+    for (const c of targets) {
+      if (!c.line_user_id) continue;
+      const msg = LINE_TEMPLATES[0].text(c.name);
+      const res = await sendDormantLinePush(c.line_user_id, c.name, msg);
+      if (res.success) {
+        ok++;
+        setSentIds(prev => new Set(prev).add(c.id));
+      }
+    }
+    setBatchSending(false);
+    toast.success(`${ok}名にLINEを送信しました`);
+  };
+
+  return (
+    <div className="space-y-5">
+      {/* フィルター */}
+      <div className="flex items-center gap-3 flex-wrap">
+        <span className="text-sm font-medium text-slate-600 dark:text-slate-400">未来院期間：</span>
+        {([30, 60, 90] as DormantThreshold[]).map(d => (
+          <button
+            key={d}
+            onClick={() => setThreshold(d)}
+            className={[
+              "px-4 py-1.5 rounded-full text-sm font-medium border transition-colors",
+              threshold === d
+                ? "bg-rose-500 text-white border-rose-500"
+                : "bg-white text-slate-600 border-slate-300 hover:bg-rose-50 hover:border-rose-300 dark:bg-slate-900 dark:text-slate-300 dark:border-slate-600",
+            ].join(" ")}
+          >
+            {d}日以上
+          </button>
+        ))}
+        <span className="ml-auto text-sm text-slate-400">
+          {dormantPatients.length}名（LINE連携: {withLine.length}名）
+        </span>
+        {withLine.length > 0 && (
+          <Button
+            size="sm"
+            onClick={handleBatchSend}
+            disabled={batchSending || withLine.filter(c => !sentIds.has(c.id)).length === 0}
+            className="bg-green-600 hover:bg-green-700 text-white text-xs"
+          >
+            {batchSending
+              ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+              : <Send className="w-3.5 h-3.5 mr-1.5" />}
+            LINE一括送信（{withLine.filter(c => !sentIds.has(c.id)).length}名）
+          </Button>
+        )}
+      </div>
+
+      {dormantPatients.length === 0 ? (
+        <div className="bg-white dark:bg-slate-900/50 rounded-xl border border-slate-200 dark:border-white/10 p-12 text-center text-slate-400">
+          <BellRing className="w-8 h-8 mx-auto mb-3 opacity-30" />
+          <p>{threshold}日以上来院がない患者はいません</p>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {withLine.length > 0 && (
+            <div>
+              <p className="text-xs font-bold text-slate-400 uppercase tracking-wide mb-2 flex items-center gap-1.5">
+                <MessageCircle className="w-3.5 h-3.5 text-green-500" />
+                LINE連携あり — {withLine.length}名
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {withLine.map(c => (
+                  <div
+                    key={c.id}
+                    className="bg-white dark:bg-slate-900/50 rounded-xl border border-slate-200 dark:border-white/10 p-4 flex items-start gap-3"
+                  >
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-semibold text-slate-900 dark:text-slate-100 truncate">{c.name}</span>
+                        <span className={`text-xs font-bold px-2 py-0.5 rounded-full border ${getDaysColor(c.daysSince)}`}>
+                          {c.daysSince}日経過
+                        </span>
+                        {sentIds.has(c.id) && (
+                          <span className="text-xs text-green-600 flex items-center gap-0.5">
+                            <Check className="w-3 h-3" />送信済
+                          </span>
+                        )}
+                      </div>
+                      <div className="mt-1 flex gap-3 text-xs text-slate-500 dark:text-slate-400 flex-wrap">
+                        <span className="flex items-center gap-1">
+                          <Calendar className="w-3 h-3" />
+                          最終: {c.lastVisit ? format(new Date(c.lastVisit), "yyyy/MM/dd", { locale: ja }) : "—"}
+                        </span>
+                        <span>{c.appointmentCount}回来院</span>
+                        {c.phone && <span className="flex items-center gap-1"><Phone className="w-3 h-3" />{c.phone}</span>}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => openLineModal(c)}
+                      disabled={sentIds.has(c.id)}
+                      className={[
+                        "shrink-0 flex items-center gap-1 text-xs px-3 py-1.5 rounded-lg font-medium transition-colors",
+                        sentIds.has(c.id)
+                          ? "bg-slate-100 text-slate-400 cursor-not-allowed"
+                          : "bg-green-500 hover:bg-green-600 text-white",
+                      ].join(" ")}
+                    >
+                      <MessageCircle className="w-3.5 h-3.5" />
+                      LINE
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {withoutLine.length > 0 && (
+            <div>
+              <p className="text-xs font-bold text-slate-400 uppercase tracking-wide mb-2 flex items-center gap-1.5">
+                <Phone className="w-3.5 h-3.5 text-slate-400" />
+                LINE未連携 — {withoutLine.length}名
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {withoutLine.map(c => (
+                  <div
+                    key={c.id}
+                    className="bg-white dark:bg-slate-900/50 rounded-xl border border-slate-200 dark:border-white/10 p-4"
+                  >
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-semibold text-slate-900 dark:text-slate-100 truncate">{c.name}</span>
+                      <span className={`text-xs font-bold px-2 py-0.5 rounded-full border ${getDaysColor(c.daysSince)}`}>
+                        {c.daysSince}日経過
+                      </span>
+                    </div>
+                    <div className="mt-1 flex gap-3 text-xs text-slate-500 dark:text-slate-400 flex-wrap">
+                      <span className="flex items-center gap-1">
+                        <Calendar className="w-3 h-3" />
+                        最終: {c.lastVisit ? format(new Date(c.lastVisit), "yyyy/MM/dd", { locale: ja }) : "—"}
+                      </span>
+                      <span>{c.appointmentCount}回来院</span>
+                      {c.phone && <span className="flex items-center gap-1"><Phone className="w-3 h-3" />{c.phone}</span>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* LINE送信モーダル */}
+      <Dialog open={!!lineModalCustomer} onOpenChange={v => { if (!v) setLineModalCustomer(null); }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-green-700">
+              <MessageCircle className="w-5 h-5" />
+              LINE追客メッセージ送信
+            </DialogTitle>
+            <DialogDescription>
+              {lineModalCustomer?.name}様へ送信するメッセージを選択・編集してください
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 mt-2">
+            {/* テンプレート選択 */}
+            <div className="flex gap-2 flex-wrap">
+              {LINE_TEMPLATES.map((t, idx) => (
+                <button
+                  key={idx}
+                  type="button"
+                  onClick={() => handleTemplateSelect(idx, lineModalCustomer?.name ?? "")}
+                  className={[
+                    "text-xs px-3 py-1.5 rounded-full border transition-colors",
+                    selectedTemplate === idx
+                      ? "bg-green-500 text-white border-green-500"
+                      : "bg-white text-slate-600 border-slate-300 hover:bg-green-50",
+                  ].join(" ")}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
+            {/* メッセージ編集 */}
+            <textarea
+              value={customMessage}
+              onChange={e => setCustomMessage(e.target.value)}
+              rows={8}
+              className="w-full border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-green-400 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 resize-none"
+            />
+            <p className="text-xs text-slate-400">{customMessage.length} 文字</p>
+            <div className="flex gap-2">
+              <Button
+                onClick={handleSend}
+                disabled={isSending || !customMessage.trim()}
+                className="flex-1 bg-green-600 hover:bg-green-700 text-white"
+              >
+                {isSending ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Send className="w-4 h-4 mr-2" />}
+                送信する
+              </Button>
+              <Button variant="outline" onClick={() => setLineModalCustomer(null)} disabled={isSending}>
+                キャンセル
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
 // ── テーブル本体 ────────────────────────────────────────────────────
 
+type TabType = "all" | "dormant";
+
 export function CustomersTable({ customers }: { customers: Customer[] }) {
+  const [activeTab, setActiveTab] = useState<TabType>("all");
   const [query, setQuery] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("created_at");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [showDuplicatesOnly, setShowDuplicatesOnly] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const router = useRouter();
+
+  // 休眠患者数（30日以上）をバッジ用に計算
+  const dormantCount = useMemo(() => {
+    const today = new Date();
+    return customers.filter(c => {
+      if (!c.lastVisit) return false;
+      return differenceInDays(today, new Date(c.lastVisit)) >= 30;
+    }).length;
+  }, [customers]);
 
   const duplicateIds = useMemo(() => buildDuplicateSet(customers), [customers]);
 
@@ -590,100 +896,142 @@ export function CustomersTable({ customers }: { customers: Customer[] }) {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center gap-3 flex-wrap">
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
-          <input type="text" value={query} onChange={e => setQuery(e.target.value)}
-            placeholder="名前・電話番号・カルテNOで検索..."
-            className="h-10 pl-9 pr-4 w-72 border border-slate-200 dark:border-slate-800 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100" />
-        </div>
-
-        {duplicateIds.size > 0 && (
-          <button type="button" onClick={() => setShowDuplicatesOnly(v => !v)}
-            className={[
-              "flex items-center gap-1.5 h-10 px-4 rounded-lg text-sm font-medium border transition-colors",
-              showDuplicatesOnly
-                ? "bg-amber-500 text-white border-amber-500"
-                : "bg-amber-50 text-amber-700 border-amber-300 hover:bg-amber-100",
-            ].join(" ")}>
-            <AlertTriangle className="w-4 h-4" />
-            重複のみ表示（{duplicateIds.size} 件）
-          </button>
-        )}
-
-        <span className="text-sm text-slate-400 ml-auto">{processed.length} / {customers.length} 件</span>
-
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => setShowImport(true)}
-          className="border-emerald-200 text-emerald-600 hover:bg-emerald-50 dark:border-emerald-800 dark:text-emerald-400 font-bold"
+      {/* タブ切り替え */}
+      <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 rounded-xl p-1 w-fit">
+        <button
+          type="button"
+          onClick={() => setActiveTab("all")}
+          className={[
+            "flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-colors",
+            activeTab === "all"
+              ? "bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 shadow-sm"
+              : "text-slate-500 hover:text-slate-700 dark:hover:text-slate-300",
+          ].join(" ")}
         >
-          <Upload className="w-4 h-4 mr-1.5" />
-          CSVインポート
-        </Button>
+          <Users className="w-4 h-4" />
+          全患者
+          <span className="text-xs text-slate-400 font-normal">({customers.length})</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab("dormant")}
+          className={[
+            "flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-colors",
+            activeTab === "dormant"
+              ? "bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 shadow-sm"
+              : "text-slate-500 hover:text-slate-700 dark:hover:text-slate-300",
+          ].join(" ")}
+        >
+          <BellRing className="w-4 h-4" />
+          休眠患者アラート
+          {dormantCount > 0 && (
+            <span className="text-xs px-1.5 py-0.5 bg-rose-500 text-white rounded-full font-bold">
+              {dormantCount}
+            </span>
+          )}
+        </button>
       </div>
 
-      <CustomerImportDialog
-        open={showImport}
-        onClose={() => setShowImport(false)}
-        onImported={() => router.refresh()}
-      />
+      {activeTab === "dormant" ? (
+        <DormantAlertsTab customers={customers} />
+      ) : (
+        <>
+          <div className="flex items-center gap-3 flex-wrap">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+              <input type="text" value={query} onChange={e => setQuery(e.target.value)}
+                placeholder="名前・電話番号・カルテNOで検索..."
+                className="h-10 pl-9 pr-4 w-72 border border-slate-200 dark:border-slate-800 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100" />
+            </div>
 
-      <div className="bg-white dark:bg-slate-900/50 rounded-xl shadow-sm border border-slate-200 dark:border-white/10 overflow-x-auto">
-        <Table className="min-w-[1100px]">
-          <TableHeader className="bg-slate-50 dark:bg-slate-800/50">
-            <TableRow>
-              <TableHead className="w-[40px] text-center">No.</TableHead>
-              <TableHead className="cursor-pointer select-none w-[110px]" onClick={() => handleSort("medical_record_number")}>
-                <Hash className="w-3 h-3 inline mr-0.5 text-slate-400" />カルテNO<SortIcon k="medical_record_number" />
-              </TableHead>
-              <TableHead className="cursor-pointer select-none" onClick={() => handleSort("name")}>
-                患者名<SortIcon k="name" />
-              </TableHead>
-              <TableHead>電話番号</TableHead>
-              <TableHead className="text-center cursor-pointer select-none" onClick={() => handleSort("appointmentCount")}>
-                予約回数<SortIcon k="appointmentCount" />
-              </TableHead>
-              <TableHead className="text-center">キャンセル</TableHead>
-              <TableHead className="cursor-pointer select-none" onClick={() => handleSort("lastVisit")}>
-                最終来院日<SortIcon k="lastVisit" />
-              </TableHead>
-              <TableHead className="cursor-pointer select-none" onClick={() => handleSort("created_at")}>
-                初回登録日<SortIcon k="created_at" />
-              </TableHead>
-              <TableHead className="text-center">LINE</TableHead>
-              <TableHead>アンケート</TableHead>
-              <TableHead className="w-[60px]">編集</TableHead>
-              <TableHead>予約</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {processed.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={12} className="h-32 text-center text-slate-500">
-                  {query
-                    ? "「" + query + "」に一致する患者が見つかりません"
-                    : showDuplicatesOnly ? "重複データはありません"
-                    : "顧客データがありません"}
-                </TableCell>
-              </TableRow>
-            ) : (
-              processed.map((customer, i) => (
-                <EditableRow
-                  key={customer.id}
-                  customer={customer}
-                  index={i}
-                  isDuplicate={duplicateIds.has(customer.id)}
-                  allRecordNumbers={allRecordNumbers}
-                  allPhones={allPhones}
-                  allCustomers={customers}
-                />
-              ))
+            {duplicateIds.size > 0 && (
+              <button type="button" onClick={() => setShowDuplicatesOnly(v => !v)}
+                className={[
+                  "flex items-center gap-1.5 h-10 px-4 rounded-lg text-sm font-medium border transition-colors",
+                  showDuplicatesOnly
+                    ? "bg-amber-500 text-white border-amber-500"
+                    : "bg-amber-50 text-amber-700 border-amber-300 hover:bg-amber-100",
+                ].join(" ")}>
+                <AlertTriangle className="w-4 h-4" />
+                重複のみ表示（{duplicateIds.size} 件）
+              </button>
             )}
-          </TableBody>
-        </Table>
-      </div>
+
+            <span className="text-sm text-slate-400 ml-auto">{processed.length} / {customers.length} 件</span>
+
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setShowImport(true)}
+              className="border-emerald-200 text-emerald-600 hover:bg-emerald-50 dark:border-emerald-800 dark:text-emerald-400 font-bold"
+            >
+              <Upload className="w-4 h-4 mr-1.5" />
+              CSVインポート
+            </Button>
+          </div>
+
+          <CustomerImportDialog
+            open={showImport}
+            onClose={() => setShowImport(false)}
+            onImported={() => router.refresh()}
+          />
+
+          <div className="bg-white dark:bg-slate-900/50 rounded-xl shadow-sm border border-slate-200 dark:border-white/10 overflow-x-auto">
+            <Table className="min-w-[1100px]">
+              <TableHeader className="bg-slate-50 dark:bg-slate-800/50">
+                <TableRow>
+                  <TableHead className="w-[40px] text-center">No.</TableHead>
+                  <TableHead className="cursor-pointer select-none w-[110px]" onClick={() => handleSort("medical_record_number")}>
+                    <Hash className="w-3 h-3 inline mr-0.5 text-slate-400" />カルテNO<SortIcon k="medical_record_number" />
+                  </TableHead>
+                  <TableHead className="cursor-pointer select-none" onClick={() => handleSort("name")}>
+                    患者名<SortIcon k="name" />
+                  </TableHead>
+                  <TableHead>電話番号</TableHead>
+                  <TableHead className="text-center cursor-pointer select-none" onClick={() => handleSort("appointmentCount")}>
+                    予約回数<SortIcon k="appointmentCount" />
+                  </TableHead>
+                  <TableHead className="text-center">キャンセル</TableHead>
+                  <TableHead className="cursor-pointer select-none" onClick={() => handleSort("lastVisit")}>
+                    最終来院日<SortIcon k="lastVisit" />
+                  </TableHead>
+                  <TableHead className="cursor-pointer select-none" onClick={() => handleSort("created_at")}>
+                    初回登録日<SortIcon k="created_at" />
+                  </TableHead>
+                  <TableHead className="text-center">LINE</TableHead>
+                  <TableHead>アンケート</TableHead>
+                  <TableHead className="w-[60px]">編集</TableHead>
+                  <TableHead>予約</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {processed.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={12} className="h-32 text-center text-slate-500">
+                      {query
+                        ? "「" + query + "」に一致する患者が見つかりません"
+                        : showDuplicatesOnly ? "重複データはありません"
+                        : "顧客データがありません"}
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  processed.map((customer, i) => (
+                    <EditableRow
+                      key={customer.id}
+                      customer={customer}
+                      index={i}
+                      isDuplicate={duplicateIds.has(customer.id)}
+                      allRecordNumbers={allRecordNumbers}
+                      allPhones={allPhones}
+                      allCustomers={customers}
+                    />
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          </div>
+        </>
+      )}
     </div>
   );
 }

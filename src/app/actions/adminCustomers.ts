@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createClient as createAdminClient } from "@supabase/supabase-js";
 import { checkAdminAuth } from "./auth";
 import { revalidatePath } from "next/cache";
+import { getClinicSettings } from "./settings";
 
 type CustomerWithStats = {
   id: string;
@@ -340,6 +341,50 @@ export async function toggleBookingSuspension(customerId: string, suspend: boole
 
   if (error) throw new Error(error.message);
   revalidatePath("/admin/customers");
+}
+
+// ===== 休眠患者への LINE 追客メッセージ送信 =====
+
+export async function sendDormantLinePush(
+  lineUserId: string,
+  customerName: string,
+  message: string,
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    await checkAdminAuth();
+
+    const settings = await getClinicSettings();
+    const token =
+      settings?.line_channel_access_token ||
+      process.env.LINE_CHANNEL_ACCESS_TOKEN;
+
+    if (!token) {
+      return { success: false, error: "LINE_CHANNEL_ACCESS_TOKEN が未設定です" };
+    }
+
+    const res = await fetch("https://api.line.me/v2/bot/message/push", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        to: lineUserId,
+        messages: [{ type: "text", text: message }],
+      }),
+    });
+
+    if (!res.ok) {
+      const body = await res.json();
+      console.error("[LINE追客送信失敗]", customerName, body);
+      return { success: false, error: "LINE送信に失敗しました" };
+    }
+
+    return { success: true };
+  } catch (err) {
+    console.error("sendDormantLinePush error:", err);
+    return { success: false, error: "予期せぬエラーが発生しました" };
+  }
 }
 
 // ===== CSV一括インポート =====
