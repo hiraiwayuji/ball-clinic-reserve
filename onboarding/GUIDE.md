@@ -32,8 +32,8 @@ karada_setup.sql → STEP1 だけ実行 → clinic_id をメモ
 ### STEP A: アカウント作成（5分）
 
 1. 事前に用意した Vercel URL を担当者に共有
-   - relaq: `https://relaq-clinic.vercel.app/auth/register`
-   - karada: `https://karada-clinic.vercel.app/auth/register`
+   - relaq: `https://relaq-clinic.vercel.app/register`
+   - karada: `https://karada-clinic.vercel.app/register`
 
 2. 登録フォームに入力してもらう：
    - **クリニック名**: 正式名称
