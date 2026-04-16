@@ -155,8 +155,12 @@ NEXT_PUBLIC_CLINIC_LOGO_URL=${logoUrl}
 NEXT_PUBLIC_CLINIC_LOGO_SMALL_URL=${logoUrl}
 NEXT_PUBLIC_CLINIC_PHONE=${phone}
 NEXT_PUBLIC_CLINIC_ADDRESS=${address}
+NEXT_PUBLIC_CLINIC_MAPS_URL=【Google Maps URL（地図で院名検索 → 共有 → リンクをコピー）】
 NEXT_PUBLIC_CLINIC_CATCHCOPY=${catchcopy}
 NEXT_PUBLIC_CLINIC_DESCRIPTION=${catchcopy}
+NEXT_PUBLIC_CLINIC_HOURS_1=【例: 月・火・木・金: 9:00 〜 18:00（最終受付 17:30）】
+NEXT_PUBLIC_CLINIC_HOURS_2=【例: 土: 9:00 〜 13:00（任意・不要なら削除）】
+NEXT_PUBLIC_CLINIC_HOURS_CLOSED=【例: ※水・日・祝日は休診】
 SETUP_PASSWORD=${setupPassword}
 LINE_CHANNEL_SECRET=【当日取得】
 LINE_CHANNEL_ACCESS_TOKEN=【当日取得】
@@ -166,7 +170,7 @@ REMIND_SECRET=remind_${slug}_${Math.random().toString(36).slice(2, 8)}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 📝 導入当日URL:
-  登録ページ : ${vercelUrl}/auth/register  （SETUP_PASSWORD: ${setupPassword}）
+  登録ページ : ${vercelUrl}/register  （SETUP_PASSWORD: ${setupPassword}）
   管理画面   : ${vercelUrl}/admin/dashboard
   予約ページ : ${vercelUrl}/reserve
 `);
