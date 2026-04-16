@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition, useMemo } from "react";
+import { useState, useEffect, useTransition, useMemo } from "react";
 import { format, differenceInDays } from "date-fns";
 import { ja } from "date-fns/locale";
 import {
@@ -13,12 +13,12 @@ import {
 } from "@/components/ui/dialog";
 import { SuspendToggle } from "./SuspendToggle";
 import { LinkLineDialog } from "./LinkLineDialog";
-import { updateCustomerInfo, mergeCustomers, sendDormantLinePush } from "@/app/actions/adminCustomers";
+import { updateCustomerInfo, mergeCustomers, sendDormantLinePush, getMonthlyVisitStats, type MonthlyVisitStat } from "@/app/actions/adminCustomers";
 import { QuestionnaireDialog } from "./QuestionnaireDialog";
 import {
   Search, Pencil, Check, X, Loader2, ClipboardList,
   AlertTriangle, ArrowUpDown, Hash, GitMerge, Calendar, Phone, Upload,
-  BellRing, MessageCircle, Send, Users,
+  BellRing, MessageCircle, Send, Users, TrendingUp, TrendingDown, BarChart3, Star, RefreshCw,
 } from "lucide-react";
 import { toast } from "sonner";
 import CustomerImportDialog from "@/components/admin/CustomerImportDialog";
@@ -534,6 +534,243 @@ function EditableRow({
   );
 }
 
+// ── リピート率・失客率分析タブ ─────────────────────────────────────
+
+function KpiCard({
+  label, value, sub, color, icon,
+}: {
+  label: string;
+  value: string;
+  sub?: string;
+  color: string;
+  icon: React.ReactNode;
+}) {
+  return (
+    <div className={`rounded-2xl border-2 p-5 ${color}`}>
+      <div className="flex items-center gap-2 text-sm font-bold opacity-70 mb-2">{icon}{label}</div>
+      <div className="text-4xl font-black leading-none">{value}</div>
+      {sub && <div className="text-xs mt-1.5 opacity-60">{sub}</div>}
+    </div>
+  );
+}
+
+function MiniBarChart({ stats }: { stats: MonthlyVisitStat[] }) {
+  const maxTotal = Math.max(...stats.map(s => s.total), 1);
+  return (
+    <div className="flex items-end gap-1.5 h-28">
+      {stats.map(s => {
+        const pct = (s.total / maxTotal) * 100;
+        const newPct = s.total > 0 ? (s.newPatients / s.total) * 100 : 0;
+        return (
+          <div key={s.month} className="flex-1 flex flex-col items-center gap-1">
+            <div className="w-full relative flex flex-col justify-end" style={{ height: "80px" }}>
+              {s.total > 0 && (
+                <div
+                  className="w-full rounded-t-md overflow-hidden"
+                  style={{ height: `${pct}%` }}
+                >
+                  {/* 新患（上部）*/}
+                  <div className="w-full bg-rose-400" style={{ height: `${newPct}%` }} />
+                  {/* 再来院（下部）*/}
+                  <div className="w-full bg-blue-400 flex-1" style={{ height: `${100 - newPct}%` }} />
+                </div>
+              )}
+              {s.total === 0 && (
+                <div className="w-full h-1 bg-slate-200 rounded-t-md" />
+              )}
+            </div>
+            <span className="text-[10px] text-slate-500 font-medium">{s.label}</span>
+            <span className="text-[10px] font-bold text-slate-700 dark:text-slate-300">{s.total}</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function RetentionAnalyticsTab({ customers }: { customers: Customer[] }) {
+  const [monthlyStats, setMonthlyStats] = useState<MonthlyVisitStat[]>([]);
+  const [loadingStats, setLoadingStats] = useState(true);
+  const today = useMemo(() => new Date(), []);
+
+  useEffect(() => {
+    getMonthlyVisitStats(6).then(data => {
+      setMonthlyStats(data);
+      setLoadingStats(false);
+    });
+  }, []);
+
+  // クライアントサイドで計算できる指標
+  const stats = useMemo(() => {
+    const total = customers.length;
+    if (total === 0) return null;
+
+    const repeaters   = customers.filter(c => c.appointmentCount >= 2).length;
+    const oneTime     = customers.filter(c => c.appointmentCount === 1).length;
+    const neverVisit  = customers.filter(c => c.appointmentCount === 0).length;
+    const churn90     = customers.filter(c => {
+      if (!c.lastVisit) return true;
+      return differenceInDays(today, new Date(c.lastVisit)) > 90;
+    }).length;
+    const avgVisits   = (customers.reduce((s, c) => s + c.appointmentCount, 0) / total);
+    const lineLinked  = customers.filter(c => c.line_user_id).length;
+    const repeatRate  = total > 0 ? Math.round((repeaters / total) * 100) : 0;
+    const churnRate   = total > 0 ? Math.round((churn90 / total) * 100) : 0;
+
+    // 来院回数分布
+    const dist = [
+      { label: "0回", count: neverVisit, color: "bg-slate-300" },
+      { label: "1回", count: oneTime,    color: "bg-amber-400" },
+      { label: "2〜5回", count: customers.filter(c => c.appointmentCount >= 2 && c.appointmentCount <= 5).length, color: "bg-blue-400" },
+      { label: "6〜10回", count: customers.filter(c => c.appointmentCount >= 6 && c.appointmentCount <= 10).length, color: "bg-emerald-400" },
+      { label: "11回以上", count: customers.filter(c => c.appointmentCount >= 11).length, color: "bg-violet-500" },
+    ];
+
+    // リピーター上位10名
+    const topRepeaters = [...customers]
+      .filter(c => c.appointmentCount > 0)
+      .sort((a, b) => b.appointmentCount - a.appointmentCount)
+      .slice(0, 10);
+
+    return { total, repeaters, oneTime, churn90, avgVisits, lineLinked, repeatRate, churnRate, dist, topRepeaters };
+  }, [customers, today]);
+
+  if (!stats) return (
+    <div className="text-center py-16 text-slate-400">顧客データがありません</div>
+  );
+
+  const distMax = Math.max(...stats.dist.map(d => d.count), 1);
+
+  return (
+    <div className="space-y-6">
+
+      {/* KPIカード */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <KpiCard
+          label="リピート率"
+          value={`${stats.repeatRate}%`}
+          sub={`${stats.repeaters}名 / ${stats.total}名`}
+          color="bg-blue-50 dark:bg-blue-900/30 border-blue-200 dark:border-blue-700 text-blue-800 dark:text-blue-200"
+          icon={<TrendingUp className="w-4 h-4" />}
+        />
+        <KpiCard
+          label="失客率（90日超）"
+          value={`${stats.churnRate}%`}
+          sub={`${stats.churn90}名 未来院`}
+          color="bg-rose-50 dark:bg-rose-900/30 border-rose-200 dark:border-rose-700 text-rose-800 dark:text-rose-200"
+          icon={<TrendingDown className="w-4 h-4" />}
+        />
+        <KpiCard
+          label="平均来院回数"
+          value={`${stats.avgVisits.toFixed(1)}回`}
+          sub={`1回のみ: ${stats.oneTime}名`}
+          color="bg-slate-50 dark:bg-slate-800/50 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200"
+          icon={<BarChart3 className="w-4 h-4" />}
+        />
+        <KpiCard
+          label="LINE連携率"
+          value={`${stats.total > 0 ? Math.round((stats.lineLinked / stats.total) * 100) : 0}%`}
+          sub={`${stats.lineLinked}名 連携済み`}
+          color="bg-green-50 dark:bg-green-900/30 border-green-200 dark:border-green-700 text-green-800 dark:text-green-200"
+          icon={<Users className="w-4 h-4" />}
+        />
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+
+        {/* 来院回数分布 */}
+        <div className="bg-white dark:bg-slate-900/50 rounded-2xl border border-slate-200 dark:border-white/10 p-5">
+          <h3 className="text-sm font-bold text-slate-700 dark:text-slate-200 mb-4 flex items-center gap-2">
+            <BarChart3 className="w-4 h-4 text-blue-500" />
+            来院回数分布
+          </h3>
+          <div className="space-y-2.5">
+            {stats.dist.map(d => (
+              <div key={d.label} className="flex items-center gap-3">
+                <span className="text-xs text-slate-500 dark:text-slate-400 w-16 shrink-0 text-right">{d.label}</span>
+                <div className="flex-1 bg-slate-100 dark:bg-slate-800 rounded-full h-5 overflow-hidden">
+                  <div
+                    className={`h-full rounded-full ${d.color} transition-all duration-700`}
+                    style={{ width: `${(d.count / distMax) * 100}%` }}
+                  />
+                </div>
+                <span className="text-xs font-bold text-slate-700 dark:text-slate-200 w-10 shrink-0">
+                  {d.count}<span className="font-normal text-slate-400 ml-0.5">名</span>
+                </span>
+                <span className="text-[10px] text-slate-400 w-8 shrink-0">
+                  {stats.total > 0 ? Math.round((d.count / stats.total) * 100) : 0}%
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* 月別来院推移 */}
+        <div className="bg-white dark:bg-slate-900/50 rounded-2xl border border-slate-200 dark:border-white/10 p-5">
+          <h3 className="text-sm font-bold text-slate-700 dark:text-slate-200 mb-1 flex items-center gap-2">
+            <TrendingUp className="w-4 h-4 text-emerald-500" />
+            月別来院推移（自費）
+            {loadingStats && <RefreshCw className="w-3 h-3 animate-spin text-slate-400 ml-1" />}
+          </h3>
+          <div className="flex items-center gap-3 mb-4 text-[10px]">
+            <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-rose-400 inline-block" />新患</span>
+            <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-blue-400 inline-block" />再来院</span>
+          </div>
+          {loadingStats ? (
+            <div className="h-28 flex items-center justify-center text-slate-400 text-sm">読み込み中...</div>
+          ) : monthlyStats.length > 0 ? (
+            <>
+              <MiniBarChart stats={monthlyStats} />
+              <div className="mt-3 grid grid-cols-3 gap-2">
+                {monthlyStats.slice(-3).map(s => (
+                  <div key={s.month} className="text-center bg-slate-50 dark:bg-slate-800 rounded-lg p-2">
+                    <div className="text-[10px] text-slate-400">{s.label}</div>
+                    <div className="font-black text-slate-800 dark:text-slate-100">{s.total}</div>
+                    <div className="text-[9px] text-slate-400">
+                      新{s.newPatients} / 再{s.returnPatients}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </>
+          ) : (
+            <div className="h-28 flex items-center justify-center text-slate-400 text-sm">データなし</div>
+          )}
+        </div>
+      </div>
+
+      {/* リピーター上位 */}
+      <div className="bg-white dark:bg-slate-900/50 rounded-2xl border border-slate-200 dark:border-white/10 p-5">
+        <h3 className="text-sm font-bold text-slate-700 dark:text-slate-200 mb-4 flex items-center gap-2">
+          <Star className="w-4 h-4 text-amber-400 fill-amber-400" />
+          来院回数TOP10
+        </h3>
+        <div className="space-y-2">
+          {stats.topRepeaters.map((c, i) => (
+            <div key={c.id} className="flex items-center gap-3">
+              <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-black shrink-0 ${
+                i === 0 ? "bg-amber-400 text-white" :
+                i === 1 ? "bg-slate-300 text-slate-700" :
+                i === 2 ? "bg-amber-700/70 text-white" :
+                "bg-slate-100 dark:bg-slate-800 text-slate-500"
+              }`}>{i + 1}</span>
+              <span className="flex-1 text-sm font-semibold text-slate-800 dark:text-slate-100 truncate">{c.name}</span>
+              {c.lastVisit && (
+                <span className="text-xs text-slate-400 shrink-0">
+                  最終: {format(new Date(c.lastVisit), "yyyy/MM/dd", { locale: ja })}
+                </span>
+              )}
+              <span className="text-sm font-black text-blue-600 dark:text-blue-400 shrink-0 w-14 text-right">
+                {c.appointmentCount}回
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── 休眠患者アラートタブ ────────────────────────────────────────────
 
 const LINE_TEMPLATES = [
@@ -829,7 +1066,7 @@ function DormantAlertsTab({ customers }: { customers: Customer[] }) {
 
 // ── テーブル本体 ────────────────────────────────────────────────────
 
-type TabType = "all" | "dormant";
+type TabType = "all" | "dormant" | "retention";
 
 export function CustomersTable({ customers }: { customers: Customer[] }) {
   const [activeTab, setActiveTab] = useState<TabType>("all");
@@ -930,9 +1167,24 @@ export function CustomersTable({ customers }: { customers: Customer[] }) {
             </span>
           )}
         </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab("retention")}
+          className={[
+            "flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-colors",
+            activeTab === "retention"
+              ? "bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 shadow-sm"
+              : "text-slate-500 hover:text-slate-700 dark:hover:text-slate-300",
+          ].join(" ")}
+        >
+          <TrendingUp className="w-4 h-4" />
+          リピート・失客分析
+        </button>
       </div>
 
-      {activeTab === "dormant" ? (
+      {activeTab === "retention" ? (
+        <RetentionAnalyticsTab customers={customers} />
+      ) : activeTab === "dormant" ? (
         <DormantAlertsTab customers={customers} />
       ) : (
         <>

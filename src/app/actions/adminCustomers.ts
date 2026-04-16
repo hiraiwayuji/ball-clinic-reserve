@@ -387,6 +387,59 @@ export async function sendDormantLinePush(
   }
 }
 
+// ===== リピート率・失客率 月別推移 =====
+
+export type MonthlyVisitStat = {
+  month: string;      // "2026-04"
+  label: string;      // "4月"
+  newPatients: number;
+  returnPatients: number;
+  total: number;
+};
+
+export async function getMonthlyVisitStats(months = 6): Promise<MonthlyVisitStat[]> {
+  const { clinicId } = await checkAdminAuth();
+
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) return [];
+  const supabase = createAdminClient(url, key);
+
+  const result: MonthlyVisitStat[] = [];
+  const now = new Date();
+
+  for (let i = months - 1; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const year = d.getFullYear();
+    const month = d.getMonth() + 1;
+    const monthStr = `${year}-${String(month).padStart(2, "0")}`;
+    const startDate = `${monthStr}-01`;
+    const daysInMonth = new Date(year, month, 0).getDate();
+    const endDate = `${monthStr}-${String(daysInMonth).padStart(2, "0")}`;
+
+    const { data } = await supabase
+      .from("cash_sales")
+      .select("is_first_visit")
+      .eq("clinic_id", clinicId)
+      .gte("sale_date", startDate)
+      .lte("sale_date", endDate);
+
+    const rows = data ?? [];
+    const newP = rows.filter((r: any) => r.is_first_visit).length;
+    const returnP = rows.filter((r: any) => !r.is_first_visit).length;
+
+    result.push({
+      month: monthStr,
+      label: `${month}月`,
+      newPatients: newP,
+      returnPatients: returnP,
+      total: rows.length,
+    });
+  }
+
+  return result;
+}
+
 // ===== CSV一括インポート =====
 
 export type ImportCustomerRow = {
