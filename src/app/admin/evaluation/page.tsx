@@ -8,13 +8,14 @@ import {
   TrendingUp, Users, Target, MessageSquare,
   Calendar, Sparkles, Star,
   Award, ArrowUpRight, Loader2, Save, Search, Pencil, Trash2, Check, X, ChevronDown, ChevronUp,
-  FileSpreadsheet,
+  FileSpreadsheet, FileClock,
 } from "lucide-react";
 import { useState, useMemo, useEffect, useCallback } from "react";
 import { getMonthlyEvaluation, saveEvaluationTargets, saveAiSuggestion, getMonthDetailedBreakdown, updateCashSale, deleteCashSaleRecord, getMonthlyReportData, type MonthDetailedBreakdown, type DailySaleRow } from "@/app/actions/evaluation";
-import { getBusinessContext } from "@/app/actions/sales";
+import { getBusinessContext, getAnnualTaxData } from "@/app/actions/sales";
 import { toast } from "sonner";
 import { downloadMonthlyReport } from "@/lib/monthly-report";
+import { downloadAnnualTaxReport } from "@/lib/annual-tax-report";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import Link from "next/link";
 
@@ -420,6 +421,8 @@ export default function EvaluationPage() {
   const [isDetailOpen, setIsDetailOpen] = useState(false);
   const [isGeneratingAi, setIsGeneratingAi] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
+  const [isTaxExporting, setIsTaxExporting] = useState(false);
+  const [taxYear, setTaxYear] = useState(new Date().getFullYear());
 
   const monthOptions = useMemo(() => {
     const opts = [];
@@ -505,6 +508,24 @@ export default function EvaluationPage() {
       toast.error("レポート出力中にエラーが発生しました");
     } finally {
       setIsExporting(false);
+    }
+  };
+
+  const handleExportTaxReport = async () => {
+    setIsTaxExporting(true);
+    try {
+      const res = await getAnnualTaxData(taxYear);
+      if (!res.success || !res.data) {
+        toast.error(res.error ?? "年間データの取得に失敗しました");
+        return;
+      }
+      downloadAnnualTaxReport(res.data);
+      toast.success(`${taxYear}年度の確定申告サポートデータをダウンロードしました`);
+    } catch (err) {
+      console.error(err);
+      toast.error("出力中にエラーが発生しました");
+    } finally {
+      setIsTaxExporting(false);
     }
   };
 
@@ -596,6 +617,30 @@ export default function EvaluationPage() {
               : <FileSpreadsheet className="w-4 h-4 mr-2" />}
             月次レポート出力
           </Button>
+
+          {/* 確定申告サポート出力 */}
+          <div className="flex items-center gap-1 bg-white dark:bg-slate-800 border border-violet-200 dark:border-violet-700 rounded-lg overflow-hidden">
+            <select
+              value={taxYear}
+              onChange={e => setTaxYear(Number(e.target.value))}
+              className="h-10 pl-3 pr-1 text-sm bg-transparent text-violet-700 dark:text-violet-300 focus:outline-none border-r border-violet-200 dark:border-violet-700"
+            >
+              {Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - i).map(y => (
+                <option key={y} value={y}>{y}年度</option>
+              ))}
+            </select>
+            <Button
+              variant="ghost"
+              onClick={handleExportTaxReport}
+              disabled={isTaxExporting}
+              className="h-10 px-3 text-violet-700 dark:text-violet-300 hover:bg-violet-50 dark:hover:bg-violet-950/40 font-bold rounded-none"
+            >
+              {isTaxExporting
+                ? <Loader2 className="w-4 h-4 mr-1.5 animate-spin" />
+                : <FileClock className="w-4 h-4 mr-1.5" />}
+              確定申告サポート出力
+            </Button>
+          </div>
 
           {/* 数字の根拠ボタン */}
           <Button

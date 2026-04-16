@@ -780,6 +780,139 @@ export async function getTodayDashboardData() {
   }
 }
 
+// ===== 確定申告サポート: 年間データ取得 =====
+
+import type { AnnualTaxReportData } from "@/lib/annual-tax-report";
+
+export async function getAnnualTaxData(
+  year: number,
+): Promise<{ success: boolean; data?: AnnualTaxReportData; error?: string }> {
+  const { clinicId } = await checkAdminAuth();
+  try {
+    const supabase = await getSupabase();
+
+    // クリニック名取得
+    const { data: settings } = await supabase
+      .from("clinic_settings")
+      .select("name")
+      .eq("clinic_id", clinicId)
+      .maybeSingle();
+    const clinicName = (settings as any)?.name ?? "クリニック";
+
+    // 12ヶ月分を並列取得
+    const monthlyResults = await Promise.all(
+      Array.from({ length: 12 }, async (_, i) => {
+        const month = i + 1;
+        const monthStr = `${year}-${String(month).padStart(2, "0")}`;
+        const startDate = `${monthStr}-01`;
+        const daysInMonth = new Date(year, month, 0).getDate();
+        const endDate = `${monthStr}-${String(daysInMonth).padStart(2, "0")}`;
+
+        const [cashRes, insRes, expRes, salesRes] = await Promise.all([
+          // 自費収入
+          supabase
+            .from("cash_sales")
+            .select("treatment_fee, is_first_visit")
+            .eq("clinic_id", clinicId)
+            .gte("sale_date", startDate)
+            .lte("sale_date", endDate),
+          // 保険収入
+          supabase
+            .from("insurance_payments")
+            .select("amount")
+            .eq("clinic_id", clinicId)
+            .eq("payment_month", startDate),
+          // 経費
+          supabase
+            .from("clinic_expenses")
+            .select("amount, category")
+            .eq("clinic_id", clinicId)
+            .gte("expense_date", startDate)
+            .lte("expense_date", endDate),
+          // 来院数（自費）
+          supabase
+            .from("cash_sales")
+            .select("is_first_visit")
+            .eq("clinic_id", clinicId)
+            .gte("sale_date", startDate)
+            .lte("sale_date", endDate),
+        ]);
+
+        const cashIncome     = (cashRes.data ?? []).reduce((s: number, r: any) => s + r.treatment_fee, 0);
+        const insuranceIncome = (insRes.data ?? []).reduce((s: number, r: any) => s + r.amount, 0);
+        const totalIncome    = cashIncome + insuranceIncome;
+        const expenseTotal   = (expRes.data ?? []).reduce((s: number, r: any) => s + r.amount, 0);
+        const newPatients    = (salesRes.data ?? []).filter((r: any) => r.is_first_visit).length;
+        const returnPatients = (salesRes.data ?? []).filter((r: any) => !r.is_first_visit).length;
+
+        return {
+          month,
+          cashIncome,
+          insuranceIncome,
+          totalIncome,
+          expenseTotal,
+          profit: totalIncome - expenseTotal,
+          newPatients,
+          returnPatients,
+          // カテゴリ別経費（ピボット用）
+          expenseByCategory: (expRes.data ?? []) as { amount: number; category: string }[],
+        };
+      })
+    );
+
+    // 経費カテゴリ別月別ピボット構築
+    const categorySet = new Set<string>();
+    monthlyResults.forEach(m => m.expenseByCategory.forEach((e) => categorySet.add(e.category)));
+    const categories = Array.from(categorySet).sort();
+
+    const categoryRows = categories.map(cat => {
+      const monthlyAmounts = monthlyResults.map(m =>
+        m.expenseByCategory
+          .filter((e) => e.category === cat)
+          .reduce((s, e) => s + e.amount, 0)
+      );
+      return {
+        category: cat,
+        monthlyAmounts,
+        total: monthlyAmounts.reduce((s, v) => s + v, 0),
+      };
+    });
+
+    // 経費全件取得
+    const startOfYear = `${year}-01-01`;
+    const endOfYear   = `${year}-12-31`;
+    const { data: allExpenses } = await supabase
+      .from("clinic_expenses")
+      .select("expense_date, category, description, amount, memo")
+      .eq("clinic_id", clinicId)
+      .gte("expense_date", startOfYear)
+      .lte("expense_date", endOfYear)
+      .order("expense_date", { ascending: true });
+
+    const expenseDetails = (allExpenses ?? []).map((r: any) => ({
+      date: r.expense_date,
+      category: r.category,
+      description: r.description ?? "",
+      amount: r.amount,
+      memo: r.memo ?? "",
+    }));
+
+    return {
+      success: true,
+      data: {
+        year,
+        clinicName,
+        months: monthlyResults.map(({ expenseByCategory: _, ...rest }) => rest),
+        categoryRows,
+        expenseDetails,
+      },
+    };
+  } catch (err) {
+    console.error("getAnnualTaxData error:", err);
+    return { success: false, error: "年間データの取得に失敗しました" };
+  }
+}
+
 // --- Cash Sales Bulk Import ---
 
 export interface ImportCashSaleRow {
