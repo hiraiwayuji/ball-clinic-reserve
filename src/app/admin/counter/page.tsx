@@ -13,12 +13,14 @@ import { getMyClinicId } from "@/app/actions/auth";
 import {
   Clock, User, RefreshCw, Loader2, CheckCircle2,
   Stethoscope, CreditCard, CalendarPlus, ArrowRight,
-  Phone, MessageCircleMore, ChevronRight,
+  Phone, MessageCircleMore, ChevronRight, Bot,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import Link from "next/link";
+import { recordAction, COUNTER_DONE_KEY, SALES_PAGE_KEY } from "@/lib/next-action";
+import DailyCompletionCelebration from "@/components/admin/DailyCompletionCelebration";
 
 type Appointment = {
   id: string;
@@ -101,6 +103,8 @@ function AppointmentCard({
   onStatusChange: (id: string, status: CheckinStatus) => void;
 }) {
   const [isPending, startTransition] = useTransition();
+  const [justDone, setJustDone] = useState(false);
+  const [showSecretaryTip, setShowSecretaryTip] = useState(false);
   const step = getStep(apt.checkin_status);
   const next = nextStatus(apt.checkin_status);
   const nextStep = next !== null ? getStep(next) : null;
@@ -109,6 +113,16 @@ function AppointmentCard({
   const endTime = format(parseISO(apt.end_time), "HH:mm");
   const isDone = apt.checkin_status === "done";
 
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout>;
+    if (justDone) {
+      timer = setTimeout(() => {
+        setShowSecretaryTip(true);
+      }, 2500);
+    }
+    return () => clearTimeout(timer);
+  }, [justDone]);
+
   const handleAdvance = () => {
     if (!nextStep) return;
     startTransition(async () => {
@@ -116,6 +130,10 @@ function AppointmentCard({
       if (res.success) {
         onStatusChange(apt.id, next);
         toast.success(`${apt.customers?.name ?? "患者"}様を「${nextStep.label}」に更新しました`);
+        if (next === "done") {
+          recordAction(COUNTER_DONE_KEY, SALES_PAGE_KEY);
+          setJustDone(true);
+        }
       } else {
         toast.error(res.error ?? "更新に失敗しました");
       }
@@ -210,15 +228,54 @@ function AppointmentCard({
         )}
 
         {/* 会計登録へリンク（名前・初診フラグをクエリパラメータで渡して自動入力） */}
-        {apt.checkin_status === "in_treatment" || apt.checkin_status === "arrived" ? (
-          <Link
-            href={`/admin/sales?name=${encodeURIComponent(apt.customers?.name ?? "")}&first_visit=${apt.is_first_visit}`}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium text-slate-600 dark:text-slate-300 bg-white/70 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700 hover:bg-white dark:hover:bg-slate-700 transition-colors"
-          >
-            <CreditCard className="w-3.5 h-3.5" />
-            会計
-          </Link>
-        ) : null}
+        {(apt.checkin_status === "in_treatment" || apt.checkin_status === "arrived" || apt.checkin_status === "done") && (
+          <div className="relative">
+            <Link
+              href={`/admin/sales?name=${encodeURIComponent(apt.customers?.name ?? "")}&first_visit=${apt.is_first_visit}`}
+              onClick={() => recordAction(COUNTER_DONE_KEY, SALES_PAGE_KEY)}
+              className={[
+                "flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium transition-all",
+                justDone
+                  ? "bg-indigo-600 text-white font-bold shadow-lg [animation:var(--animate-glow-pulse)]"
+                  : "text-slate-600 dark:text-slate-300 bg-white/70 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700 hover:bg-white dark:hover:bg-slate-700",
+              ].join(" ")}
+            >
+              <CreditCard className={["w-3.5 h-3.5", justDone ? "animate-bounce" : ""].join(" ")} />
+              {justDone ? "売上入力へ ✨" : "会計"}
+            </Link>
+
+            {/* AI秘書ツールチップ */}
+            {showSecretaryTip && (
+              <div
+                className="absolute bottom-full left-0 mb-2 w-52 z-20 [animation:var(--animate-secretary-pop)]"
+                onMouseEnter={() => setShowSecretaryTip(true)}
+              >
+                {/* 吹き出し三角 */}
+                <div className="absolute -bottom-1.5 left-4 w-3 h-3 bg-indigo-950 rotate-45 border-b border-r border-indigo-700" />
+                <div className="bg-indigo-950 border border-indigo-700 rounded-xl px-3 py-2.5 shadow-xl">
+                  <div className="flex items-start gap-2">
+                    <div className="w-6 h-6 bg-violet-500 rounded-full flex items-center justify-center shrink-0 mt-0.5">
+                      <Bot className="w-3.5 h-3.5 text-white" />
+                    </div>
+                    <div>
+                      <p className="text-[10px] font-black text-violet-400 uppercase tracking-wider leading-none mb-1">AI秘書</p>
+                      <p className="text-xs text-indigo-100 leading-snug font-medium">
+                        売上入力はお済みですか？<br />
+                        <span className="text-indigo-300">{apt.customers?.name ?? "この方"}様の履歴から金額を自動入力できます。</span>
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setShowSecretaryTip(false)}
+                    className="mt-2 w-full text-[10px] text-indigo-400 hover:text-indigo-200 text-right"
+                  >
+                    ✕ 閉じる
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* リセットボタン（完了 or 施術中以降） */}
         {apt.checkin_status !== null && (
@@ -252,6 +309,20 @@ export default function CounterPage() {
     inTreatment: appointments.filter(a => a.checkin_status === "in_treatment").length,
     done: appointments.filter(a => a.checkin_status === "done").length,
   };
+
+  const allDone = stats.total > 0 && stats.done === stats.total;
+  const [celebrationShown, setCelebrationShown] = useState(false);
+  const [showCelebration, setShowCelebration] = useState(false);
+
+  useEffect(() => {
+    if (allDone && !celebrationShown) {
+      const timer = setTimeout(() => {
+        setShowCelebration(true);
+        setCelebrationShown(true);
+      }, 800);
+      return () => clearTimeout(timer);
+    }
+  }, [allDone, celebrationShown]);
 
   const fetchAppointments = useCallback(async () => {
     const res = await getTodayAppointments();
@@ -422,6 +493,13 @@ export default function CounterPage() {
           ))}
         </div>
       </div>
+
+      {showCelebration && (
+        <DailyCompletionCelebration
+          totalCount={stats.total}
+          onClose={() => setShowCelebration(false)}
+        />
+      )}
     </div>
   );
 }
