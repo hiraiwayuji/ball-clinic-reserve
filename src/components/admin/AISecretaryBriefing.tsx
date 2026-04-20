@@ -22,7 +22,12 @@ import {
   Loader2,
   Minus,
   Megaphone,
+  Moon,
+  CalendarCheck,
+  ReceiptText,
+  ExternalLink,
 } from "lucide-react";
+import Link from "next/link";
 import { cn } from "@/lib/utils";
 import { getBriefingContext } from "@/app/actions/ai-secretary";
 
@@ -111,31 +116,88 @@ export default function AISecretaryBriefing({
               </DialogDescription>
             </DialogHeader>
 
-            {/* 今日の予約サマリ */}
-            <div className="bg-white/5 border border-white/10 rounded-2xl p-4 flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 bg-violet-500/20 rounded-xl flex items-center justify-center">
-                  <CalendarDays className="w-5 h-5 text-violet-400" />
+            {/* 今日の予約サマリ / 休診日表示 */}
+            {ctx?.isClosedDay ? (
+              <div className="space-y-3">
+                {/* 休診日メッセージ */}
+                <div className="bg-slate-800/60 border border-slate-700/60 rounded-2xl p-4 flex items-center gap-3">
+                  <div className="w-10 h-10 bg-slate-700/60 rounded-xl flex items-center justify-center shrink-0">
+                    <Moon className="w-5 h-5 text-slate-400" />
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-wider">
+                      本日は{ctx.closedDayReason}
+                    </p>
+                    <p className="text-sm font-bold text-white">
+                      {tone === "polite"
+                        ? "ゆっくりお休みください。事務作業のサポートをします。"
+                        : "休日モード！事務作業を片付けよう。"}
+                    </p>
+                  </div>
                 </div>
-                <div>
-                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-wider">本日の予約</p>
-                  <p className="text-xl font-black text-white">
-                    {todayCount}<span className="text-sm text-slate-400 ml-1">件</span>
-                    {todayNew > 0 && (
-                      <span className="ml-2 text-xs bg-amber-500/20 text-amber-400 px-2 py-0.5 rounded-full font-bold">
-                        初診 {todayNew}名
-                      </span>
-                    )}
-                  </p>
+
+                {/* 翌日予約カード */}
+                <div className="bg-white/5 border border-white/10 rounded-2xl p-4 flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 bg-blue-500/20 rounded-xl flex items-center justify-center shrink-0">
+                      <CalendarCheck className="w-5 h-5 text-blue-400" />
+                    </div>
+                    <div>
+                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-wider">翌日の予約</p>
+                      <p className="text-xl font-black text-white">
+                        {ctx.tomorrowAppointmentsCount}
+                        <span className="text-sm text-slate-400 ml-1">件</span>
+                      </p>
+                    </div>
+                  </div>
+                  {ctx.tomorrowAppointmentsCount > 0 && (
+                    <span className="text-xs text-blue-400 font-bold">明日の準備を</span>
+                  )}
                 </div>
+
+                {/* 未処理経費カード（件数が1以上の時のみ） */}
+                {ctx.pendingExpensesCount > 0 && (
+                  <div className="bg-amber-950/40 border border-amber-800/40 rounded-2xl p-4 flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 bg-amber-500/20 rounded-xl flex items-center justify-center shrink-0">
+                        <ReceiptText className="w-5 h-5 text-amber-400" />
+                      </div>
+                      <div>
+                        <p className="text-[10px] font-black text-amber-400 uppercase tracking-wider">未処理の経費</p>
+                        <p className="text-sm font-bold text-white">
+                          {ctx.pendingExpensesCount}件の経費が未入力です
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
-              {todayCount > 5 && (
-                <div className="flex items-center gap-1 text-amber-400">
-                  <Zap className="w-4 h-4" />
-                  <span className="text-xs font-black">混雑</span>
+            ) : (
+              <div className="bg-white/5 border border-white/10 rounded-2xl p-4 flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 bg-violet-500/20 rounded-xl flex items-center justify-center">
+                    <CalendarDays className="w-5 h-5 text-violet-400" />
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-wider">本日の予約</p>
+                    <p className="text-xl font-black text-white">
+                      {todayCount}<span className="text-sm text-slate-400 ml-1">件</span>
+                      {todayNew > 0 && (
+                        <span className="ml-2 text-xs bg-amber-500/20 text-amber-400 px-2 py-0.5 rounded-full font-bold">
+                          初診 {todayNew}名
+                        </span>
+                      )}
+                    </p>
+                  </div>
                 </div>
-              )}
-            </div>
+                {todayCount > 5 && (
+                  <div className="flex items-center gap-1 text-amber-400">
+                    <Zap className="w-4 h-4" />
+                    <span className="text-xs font-black">混雑</span>
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* データ読み込み中 */}
             {loadingCtx && (
@@ -285,12 +347,65 @@ export default function AISecretaryBriefing({
           </div>
 
           {/* 常に見えるボタンエリア（スクロール外） */}
-          <div className="relative z-10 px-7 pb-7 pt-3 shrink-0">
+          <div className="relative z-10 px-7 pb-7 pt-3 shrink-0 space-y-3">
+            {/* 休診日ショートカットボタン群 */}
+            {ctx?.isClosedDay && (
+              <div className="space-y-2">
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-wider px-1">
+                  休日にできること
+                </p>
+                <div className="grid grid-cols-1 gap-2">
+                  <Link
+                    href="/admin/appointments"
+                    onClick={handleClose}
+                    className="flex items-center gap-3 px-4 py-3 bg-blue-600/20 border border-blue-600/30 rounded-xl hover:bg-blue-600/30 transition-colors group"
+                  >
+                    <CalendarCheck className="w-4 h-4 text-blue-400 shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-bold text-white">明日の予約を確認する</p>
+                      <p className="text-[10px] text-blue-400">{ctx.tomorrowAppointmentsCount}件の予約</p>
+                    </div>
+                    <ExternalLink className="w-3.5 h-3.5 text-blue-500 group-hover:text-blue-300" />
+                  </Link>
+
+                  <Link
+                    href="/admin/sales"
+                    onClick={handleClose}
+                    className="flex items-center gap-3 px-4 py-3 bg-emerald-600/20 border border-emerald-600/30 rounded-xl hover:bg-emerald-600/30 transition-colors group"
+                  >
+                    <TrendingUp className="w-4 h-4 text-emerald-400 shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-bold text-white">今週の売上を確認する</p>
+                      <p className="text-[10px] text-emerald-400">売上管理ページへ</p>
+                    </div>
+                    <ExternalLink className="w-3.5 h-3.5 text-emerald-500 group-hover:text-emerald-300" />
+                  </Link>
+
+                  {ctx.pendingExpensesCount > 0 && (
+                    <Link
+                      href="/admin/expenses/triage"
+                      onClick={handleClose}
+                      className="flex items-center gap-3 px-4 py-3 bg-amber-600/20 border border-amber-600/30 rounded-xl hover:bg-amber-600/30 transition-colors group"
+                    >
+                      <ReceiptText className="w-4 h-4 text-amber-400 shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-bold text-white">未入力の経費を処理する</p>
+                        <p className="text-[10px] text-amber-400">{ctx.pendingExpensesCount}件待機中</p>
+                      </div>
+                      <ExternalLink className="w-3.5 h-3.5 text-amber-500 group-hover:text-amber-300" />
+                    </Link>
+                  )}
+                </div>
+              </div>
+            )}
+
             <Button
               onClick={handleClose}
               className="w-full h-13 bg-white text-slate-950 hover:bg-slate-100 rounded-2xl font-black text-base shadow-xl py-4"
             >
-              {tone === "polite" ? "業務を開始する" : "よし、いこう！"}
+              {ctx?.isClosedDay
+                ? (tone === "polite" ? "確認して閉じる" : "よし、やろう！")
+                : (tone === "polite" ? "業務を開始する" : "よし、いこう！")}
               <ChevronRight className="w-5 h-5 ml-2" />
             </Button>
           </div>

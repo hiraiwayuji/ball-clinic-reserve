@@ -9,12 +9,12 @@ import { getClinicSettings } from "./settings";
 async function getSupabase() { return await createClient(); }
 
 export async function getAIMemos() {
-  await checkAdminAuth();
+  const { clinicId } = await checkAdminAuth();
   try {
     const supabase = await getSupabase();
     const { data, error } = await supabase
       .from("ai_memos").select("*")
-      .eq("clinic_id", "00000000-0000-0000-0000-000000000001")
+      .eq("clinic_id", clinicId)
       .order("created_at", { ascending: false });
     if (error) throw error;
     return { success: true, data };
@@ -25,7 +25,7 @@ export async function getAIMemos() {
 }
 
 export async function upsertAIMemo(content: string, id?: string) {
-  await checkAdminAuth();
+  const { clinicId } = await checkAdminAuth();
   try {
     const supabase = await getSupabase();
     if (id) {
@@ -34,7 +34,7 @@ export async function upsertAIMemo(content: string, id?: string) {
       if (error) throw error;
     } else {
       const { error } = await supabase.from("ai_memos")
-        .insert([{ content, clinic_id: "00000000-0000-0000-0000-000000000001" }]);
+        .insert([{ content, clinic_id: clinicId }]);
       if (error) throw error;
     }
     revalidatePath("/admin/dashboard");
@@ -60,12 +60,12 @@ export async function deleteAIMemo(id: string) {
 }
 
 export async function getWeeklyBlogProposals() {
-  await checkAdminAuth();
+  const { clinicId } = await checkAdminAuth();
   try {
     const supabase = await getSupabase();
     const { data, error } = await supabase
       .from("ai_blog_proposals").select("*")
-      .eq("clinic_id", "00000000-0000-0000-0000-000000000001")
+      .eq("clinic_id", clinicId)
       .order("week_start", { ascending: false });
     if (error) throw error;
     return { success: true, data };
@@ -93,7 +93,7 @@ export async function generateAnalyticsComment(comparisonJson: string, customerD
 }
 
 export async function generateWeeklyBlogProposal(clinicContext: string) {
-  await checkAdminAuth();
+  const { clinicId } = await checkAdminAuth();
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) return { success: false, error: "APIキーが未設定です" };
   try {
@@ -116,7 +116,7 @@ export async function generateWeeklyBlogProposal(clinicContext: string) {
     const { data, error } = await supabase.from("ai_blog_proposals").insert([{
       week_start: weekStart.toISOString().split("T")[0], title,
       content_draft: contentDraft, keywords, status: "proposed",
-      clinic_id: "00000000-0000-0000-0000-000000000001",
+      clinic_id: clinicId,
     }]).select().single();
     if (error) throw error;
     revalidatePath("/admin/dashboard");
@@ -312,9 +312,64 @@ export async function getBriefingContext() {
   const dayOfMonth = jst.getUTCDate();
   const year = jst.getUTCFullYear();
   const month = jst.getUTCMonth() + 1;
+  const todayStr = jst.toISOString().split("T")[0];
 
   const isWeekStart = dayOfWeek === 1; // 月曜
   const isMonthStart = dayOfMonth <= 2; // 月初め2日以内
+
+  // ── 休診日判定 ──────────────────────────────────────────────────
+  // 定休日: 水(3)・日(0) をデフォルトとして設定する
+  const WEEKLY_CLOSED_DAYS = [0, 3]; // Sun=0, Wed=3
+  const isWeeklyClosed = WEEKLY_CLOSED_DAYS.includes(dayOfWeek);
+
+  // clinic_holidays テーブルで今日が特別休診日かチェック
+  let isSpecialHoliday = false;
+  let holidayDescription: string | null = null;
+  try {
+    const { data } = await supabase
+      .from("clinic_holidays")
+      .select("description")
+      .eq("clinic_id", clinicId)
+      .eq("date", todayStr)
+      .single();
+    if (data) {
+      isSpecialHoliday = true;
+      holidayDescription = data.description ?? "臨時休診";
+    }
+  } catch {}
+
+  const isClosedDay = isWeeklyClosed || isSpecialHoliday;
+  const closedDayReason = isSpecialHoliday
+    ? (holidayDescription ?? "臨時休診")
+    : dayOfWeek === 0 ? "日曜定休" : "水曜定休";
+
+  // 翌日の予約数（休診日は翌営業日の準備情報として表示）
+  let tomorrowAppointmentsCount = 0;
+  if (isClosedDay) {
+    try {
+      const tomorrow = new Date(jst.getTime() + 86400000);
+      const tomorrowStr = tomorrow.toISOString().split("T")[0];
+      const { count } = await supabase
+        .from("appointments")
+        .select("id", { count: "exact", head: true })
+        .eq("clinic_id", clinicId)
+        .gte("start_time", `${tomorrowStr}T00:00:00+09:00`)
+        .lte("start_time", `${tomorrowStr}T23:59:59+09:00`)
+        .neq("status", "cancelled");
+      tomorrowAppointmentsCount = count ?? 0;
+    } catch {}
+  }
+
+  // 未入力経費（pending_expenses）の件数
+  let pendingExpensesCount = 0;
+  try {
+    const { count } = await supabase
+      .from("pending_expenses")
+      .select("id", { count: "exact", head: true })
+      .eq("clinic_id", clinicId)
+      .eq("status", "unprocessed");
+    pendingExpensesCount = count ?? 0;
+  } catch {}
 
   // 日付ユーティリティ
   const toJstDate = (d: Date) => d.toISOString().split("T")[0];
@@ -436,10 +491,12 @@ export async function getBriefingContext() {
       const genAI = new GoogleGenerativeAI(apiKey);
       const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
+      const morningAdvicePrompt = isClosedDay
+        ? `あなたは接骨院の専属AI秘書です。今日は${closedDayReason}の休診日です。翌日の予約は${tomorrowAppointmentsCount}件あります。未処理の経費が${pendingExpensesCount}件あります。院長への休日のひと言を1〜2文で生成してください。「明日の準備」「事務作業」「集計確認」のいずれかを前向きに提案してください。敬語で。\nデータ: ${briefCtx}`
+        : `あなたは接骨院の専属AI秘書です。以下のデータをもとに、院長への朝のひと言アドバイスを1〜2文で生成してください。数字を必ず1つ使い、具体的で前向きな内容にしてください。敬語で。\nデータ: ${briefCtx}`;
+
       const [adviceResult, snsResult] = await Promise.all([
-        model.generateContent(
-          `あなたは接骨院の専属AI秘書です。以下のデータをもとに、院長への朝のひと言アドバイスを1〜2文で生成してください。数字を必ず1つ使い、具体的で前向きな内容にしてください。敬語で。\nデータ: ${briefCtx}`
-        ),
+        model.generateContent(morningAdvicePrompt),
         model.generateContent(
           `あなたは接骨院のSNS・LINE集客の専門家です。以下の院のデータをもとに、今日（または今週）取るべき具体的なSNS・LINE配信アクションを1つだけ、2〜3文で提案してください。
 ルール:
@@ -472,5 +529,10 @@ export async function getBriefingContext() {
     latestMemo,
     aiAdvice,
     snsAdvice,
+    // 休診日フィールド
+    isClosedDay,
+    closedDayReason,
+    tomorrowAppointmentsCount,
+    pendingExpensesCount,
   };
 }
