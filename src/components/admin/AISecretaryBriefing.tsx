@@ -84,12 +84,13 @@ export default function AISecretaryBriefing({
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="max-w-md p-0 overflow-hidden border-none bg-slate-900 rounded-[32px] ring-1 ring-white/10 shadow-2xl">
-        <div className="relative">
-          <div className="absolute top-0 left-0 w-full h-40 bg-gradient-to-br from-violet-600/30 via-indigo-600/20 to-transparent pointer-events-none" />
-          <div className="absolute top-10 right-10 w-20 h-20 bg-blue-500/10 blur-3xl rounded-full" />
+      <DialogContent className="max-w-md p-0 overflow-hidden border-none bg-slate-900 rounded-[32px] ring-1 ring-white/10 shadow-2xl max-h-[90dvh] flex flex-col">
+        <div className="relative flex flex-col flex-1 min-h-0">
+          <div className="absolute top-0 left-0 w-full h-40 bg-gradient-to-br from-violet-600/30 via-indigo-600/20 to-transparent pointer-events-none z-0" />
+          <div className="absolute top-10 right-10 w-20 h-20 bg-blue-500/10 blur-3xl rounded-full z-0" />
 
-          <div className="relative p-7 space-y-6">
+          {/* スクロール可能コンテンツエリア */}
+          <div className="relative flex-1 overflow-y-auto p-7 pb-4 space-y-6 z-10">
             {/* ヘッダー */}
             <DialogHeader className="space-y-3">
               <div className="flex items-center gap-3">
@@ -281,6 +282,10 @@ export default function AISecretaryBriefing({
               </div>
             )}
 
+          </div>
+
+          {/* 常に見えるボタンエリア（スクロール外） */}
+          <div className="relative z-10 px-7 pb-7 pt-3 shrink-0">
             <Button
               onClick={handleClose}
               className="w-full h-13 bg-white text-slate-950 hover:bg-slate-100 rounded-2xl font-black text-base shadow-xl py-4"
