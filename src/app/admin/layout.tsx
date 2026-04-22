@@ -38,7 +38,7 @@ export default async function AdminLayout({
                   <Image src={CLINIC_CONFIG.logoSmallUrl} alt={CLINIC_CONFIG.nameShort} fill className="object-contain dark:invert" />
                 </div>
               )}
-              {(!CLINIC_CONFIG.usesWordmarkLogo || isFamilyGift) && (
+              {(!hasCustomLogo || isFamilyGift) && (
                 <span className="text-xl font-bold text-slate-900 dark:text-blue-50 group-hover:text-blue-600 transition-colors">
                   {isFamilyGift ? APP_TITLE : CLINIC_CONFIG.nameShort}
                 </span>
