@@ -57,7 +57,9 @@ export default function CheckPage() {
           {(CLINIC_CONFIG.hasCustomLogo || CLINIC_CONFIG.isDefaultClinic) && (
             <div className="relative w-48 h-20 mx-auto mb-4 flex items-center justify-center">
               {CLINIC_CONFIG.hasCustomLogo ? (
-                <img src={CLINIC_CONFIG.logoSmallUrl} alt={CLINIC_CONFIG.nameShort} className="max-h-20 w-auto object-contain" />
+                <div className="bg-white rounded-xl px-3 py-2 inline-flex items-center justify-center">
+                  <img src={CLINIC_CONFIG.logoSmallUrl} alt={CLINIC_CONFIG.nameShort} className="max-h-16 w-auto object-contain" />
+                </div>
               ) : (
                 <Image src={CLINIC_CONFIG.logoSmallUrl} alt={CLINIC_CONFIG.nameShort} fill className="object-contain" />
               )}

@@ -29,11 +29,13 @@ export default async function AdminLayout({
           <div className="flex items-center gap-4">
             <Link href={isFamilyGift ? "/calendar" : "/admin/dashboard"} className="flex items-center gap-2 group">
               {!isFamilyGift && showLogoIcon && hasCustomLogo && (
-                <img
-                  src={CLINIC_CONFIG.logoSmallUrl}
-                  alt={CLINIC_CONFIG.nameShort}
-                  className="h-10 w-auto object-contain max-w-[200px]"
-                />
+                <div className="bg-white rounded-lg px-2 py-1">
+                  <img
+                    src={CLINIC_CONFIG.logoSmallUrl}
+                    alt={CLINIC_CONFIG.nameShort}
+                    className="h-8 w-auto object-contain max-w-[180px]"
+                  />
+                </div>
               )}
               {!isFamilyGift && showLogoIcon && !hasCustomLogo && isDefaultClinic && (
                 <div className="relative w-8 h-8">
