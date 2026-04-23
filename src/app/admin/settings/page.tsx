@@ -4,6 +4,7 @@ import { getMyEmail } from "@/app/actions/auth";
 import SettingsForm from "@/components/admin/SettingsForm";
 import CourseStaffSettings from "@/components/admin/CourseStaffSettings";
 import AccountSettingsForm from "@/components/admin/AccountSettingsForm";
+import TermsAndPolicySection from "@/components/admin/TermsAndPolicySection";
 
 export default async function SettingsPage() {
   const [initialSettings, initialCourses, initialStaff, initialRooms, currentEmail] = await Promise.all([
@@ -30,6 +31,9 @@ export default async function SettingsPage() {
         <p className="text-sm text-slate-500 mb-6">ログイン用のメールアドレスとパスワードを変更できます。</p>
         <AccountSettingsForm currentEmail={currentEmail} />
       </div>
+
+      {/* 個人情報・利用規約 */}
+      <TermsAndPolicySection />
     </div>
   );
 }
