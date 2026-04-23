@@ -197,3 +197,104 @@ export async function deleteStaff(id: string) {
   revalidatePath("/admin/settings");
   return { success: true };
 }
+
+// ─────────────────────────────────────────────────────────
+// 個室（ReservationRoom）
+// ─────────────────────────────────────────────────────────
+
+export type ReservationRoom = {
+  id: string;
+  clinic_id: string;
+  name: string;
+  description: string | null;
+  capacity: number;
+  is_active: boolean;
+  sort_order: number;
+};
+
+// ── 個室取得（管理側：全件） ──
+export async function getRooms(): Promise<ReservationRoom[]> {
+  const { clinicId } = await checkAdminAuth();
+  const { createClient } = await import("@/lib/supabase/server");
+  const supabase = await createClient();
+
+  const { data } = await supabase
+    .from("reservation_rooms")
+    .select("*")
+    .eq("clinic_id", clinicId)
+    .order("sort_order")
+    .order("created_at");
+
+  return data ?? [];
+}
+
+// ── 個室取得（患者側：有効なもののみ） ──
+export async function getActiveRooms(): Promise<ReservationRoom[]> {
+  const { createClient: createAdminClient } = await import("@supabase/supabase-js");
+  const DEFAULT_CLINIC_ID = PUBLIC_CLINIC_ID;
+
+  const adminClient = createAdminClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  );
+
+  const { data } = await adminClient
+    .from("reservation_rooms")
+    .select("*")
+    .eq("clinic_id", DEFAULT_CLINIC_ID)
+    .eq("is_active", true)
+    .order("sort_order")
+    .order("created_at");
+
+  return data ?? [];
+}
+
+// ── 個室保存（upsert） ──
+export async function saveRoom(room: Partial<ReservationRoom> & { name: string }) {
+  const { clinicId } = await checkAdminAuth();
+  const { createClient } = await import("@/lib/supabase/server");
+  const supabase = await createClient();
+
+  const payload = {
+    clinic_id: clinicId,
+    name: room.name,
+    description: room.description ?? null,
+    capacity: room.capacity ?? 1,
+    is_active: room.is_active ?? true,
+    sort_order: room.sort_order ?? 0,
+  };
+
+  if (room.id) {
+    const { error } = await supabase
+      .from("reservation_rooms")
+      .update(payload)
+      .eq("id", room.id)
+      .eq("clinic_id", clinicId);
+    if (error) return { success: false, error: error.message };
+  } else {
+    const { error } = await supabase
+      .from("reservation_rooms")
+      .insert(payload);
+    if (error) return { success: false, error: error.message };
+  }
+
+  revalidatePath("/admin/settings");
+  return { success: true };
+}
+
+// ── 個室削除 ──
+export async function deleteRoom(id: string) {
+  const { clinicId } = await checkAdminAuth();
+  const { createClient } = await import("@/lib/supabase/server");
+  const supabase = await createClient();
+
+  const { error } = await supabase
+    .from("reservation_rooms")
+    .delete()
+    .eq("id", id)
+    .eq("clinic_id", clinicId);
+
+  if (error) return { success: false, error: error.message };
+  revalidatePath("/admin/settings");
+  return { success: true };
+}
