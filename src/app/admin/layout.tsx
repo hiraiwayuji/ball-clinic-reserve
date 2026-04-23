@@ -9,6 +9,9 @@ import AdminNavLinks from "@/components/admin/AdminNavLinks";
 import { isFamilyGift, isDemo, APP_TITLE, APP_SUBTITLE } from "@/lib/app-mode";
 import { CLINIC_CONFIG } from "@/lib/clinic-config";
 const hasCustomLogo = CLINIC_CONFIG.logoSmallUrl !== "/images/logo-white.png";
+// デフォルトロゴ（ボール接骨院のロゴマーク）はボール接骨院専用
+const isDefaultClinic = CLINIC_CONFIG.name === "ボール接骨院";
+const showLogoIcon = hasCustomLogo || isDefaultClinic;
 import { FlaskConical } from "lucide-react";
 
 export default async function AdminLayout({
@@ -25,7 +28,7 @@ export default async function AdminLayout({
         <div className="container mx-auto px-4 h-16 flex items-center justify-between">
           <div className="flex items-center gap-4">
             <Link href={isFamilyGift ? "/calendar" : "/admin/dashboard"} className="flex items-center gap-2 group">
-              {!isFamilyGift && hasCustomLogo && (
+              {!isFamilyGift && showLogoIcon && hasCustomLogo && (
                 <img
                   src={CLINIC_CONFIG.logoSmallUrl}
                   alt={CLINIC_CONFIG.nameShort}
@@ -33,7 +36,7 @@ export default async function AdminLayout({
                   onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
                 />
               )}
-              {!isFamilyGift && !hasCustomLogo && (
+              {!isFamilyGift && showLogoIcon && !hasCustomLogo && isDefaultClinic && (
                 <div className="relative w-8 h-8">
                   <Image src={CLINIC_CONFIG.logoSmallUrl} alt={CLINIC_CONFIG.nameShort} fill className="object-contain dark:invert" />
                 </div>
