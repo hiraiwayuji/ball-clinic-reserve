@@ -141,34 +141,50 @@ export default function SettingsForm({ initialSettings }: { initialSettings: Cli
                 <h4 className="text-sm font-bold text-slate-700 dark:text-slate-300 border-b border-slate-200 dark:border-white/10 pb-2 flex items-center">
                   <Clock className="w-4 h-4 mr-2" />営業時間
                 </h4>
-                <div className="space-y-3">
+                <div className="space-y-2">
+                  <Label className="text-slate-700 dark:text-slate-300">営業時間（行を自由に追加できます）</Label>
                   <div className="space-y-2">
-                    <Label htmlFor="hours_line1" className="text-slate-700 dark:text-slate-300">営業時間（1行目）</Label>
-                    <Input
-                      id="hours_line1"
-                      placeholder="例：月〜金: 9:00〜18:00"
-                      value={settings?.hours_line1 || ""}
-                      onChange={(e) => updateField("hours_line1", e.target.value)}
-                    />
+                    {(settings?.hours_lines || [""]).map((line, i) => (
+                      <div key={i} className="flex gap-2 items-center">
+                        <Input
+                          placeholder={i === 0 ? "例：月〜金: 9:00〜18:00" : "例：土: 9:00〜13:00"}
+                          value={line}
+                          onChange={(e) => {
+                            const lines = [...(settings?.hours_lines || [""])];
+                            lines[i] = e.target.value;
+                            updateField("hours_lines", lines);
+                          }}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const lines = (settings?.hours_lines || [""]).filter((_, idx) => idx !== i);
+                            updateField("hours_lines", lines.length ? lines : [""]);
+                          }}
+                          className="text-slate-400 hover:text-red-500 dark:hover:text-red-400 transition-colors shrink-0 text-lg leading-none"
+                          title="この行を削除"
+                        >
+                          ×
+                        </button>
+                      </div>
+                    ))}
                   </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="hours_line2" className="text-slate-700 dark:text-slate-300">営業時間（2行目・任意）</Label>
-                    <Input
-                      id="hours_line2"
-                      placeholder="例：土: 9:00〜13:00"
-                      value={settings?.hours_line2 || ""}
-                      onChange={(e) => updateField("hours_line2", e.target.value)}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="hours_closed" className="text-slate-700 dark:text-slate-300">休診日・注意事項</Label>
-                    <Input
-                      id="hours_closed"
-                      placeholder="例：※日・祝休診"
-                      value={settings?.hours_closed || ""}
-                      onChange={(e) => updateField("hours_closed", e.target.value)}
-                    />
-                  </div>
+                  <button
+                    type="button"
+                    onClick={() => updateField("hours_lines", [...(settings?.hours_lines || [""]), ""])}
+                    className="text-sm text-blue-600 dark:text-blue-400 hover:underline mt-1"
+                  >
+                    ＋ 行を追加
+                  </button>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="hours_closed" className="text-slate-700 dark:text-slate-300">休診日・注意事項（赤字で表示）</Label>
+                  <Input
+                    id="hours_closed"
+                    placeholder="例：※月曜定休・祝日休診"
+                    value={settings?.hours_closed || ""}
+                    onChange={(e) => updateField("hours_closed", e.target.value)}
+                  />
                 </div>
                 <div className="text-xs text-slate-500 dark:text-slate-400 bg-slate-50 dark:bg-slate-800/50 rounded-lg p-3">
                   予約ページのトップに表示されます。未入力の場合は環境変数の値が使用されます。
@@ -176,8 +192,12 @@ export default function SettingsForm({ initialSettings }: { initialSettings: Cli
                 <div className="mt-2">
                   <div className="text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">プレビュー</div>
                   <div className="text-sm text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 rounded-lg p-3 leading-relaxed">
-                    {settings?.hours_line1 || <span className="text-slate-400 dark:text-slate-500 italic">（1行目未入力）</span>}
-                    {settings?.hours_line2 && <><br />{settings.hours_line2}</>}
+                    {(settings?.hours_lines || []).filter(Boolean).length > 0
+                      ? (settings?.hours_lines || []).filter(Boolean).map((line, i, arr) => (
+                          <span key={i}>{line}{i < arr.length - 1 && <br />}</span>
+                        ))
+                      : <span className="text-slate-400 dark:text-slate-500 italic">（未入力）</span>
+                    }
                     {settings?.hours_closed && (
                       <><br /><span className="text-red-500 dark:text-red-400 font-medium">{settings.hours_closed}</span></>
                     )}

@@ -17,8 +17,10 @@ export default async function Home() {
   if (isDemo) redirect("/admin-login");
 
   const dbHours = await getPublicClinicHours();
-  const hoursLine1 = dbHours.hours_line1 || CLINIC_CONFIG.hoursLine1;
-  const hoursLine2 = dbHours.hours_line2 !== null ? dbHours.hours_line2 : CLINIC_CONFIG.hoursLine2;
+  // DBに値があればDB優先、なければenv varのデフォルト値を配列に変換して使用
+  const hoursLines: string[] = (dbHours.hours_lines && dbHours.hours_lines.length > 0)
+    ? dbHours.hours_lines
+    : [CLINIC_CONFIG.hoursLine1, ...(CLINIC_CONFIG.hoursLine2 ? [CLINIC_CONFIG.hoursLine2] : [])];
   const hoursClosed = dbHours.hours_closed || CLINIC_CONFIG.hoursClosed;
 
   return (
@@ -101,9 +103,10 @@ export default async function Home() {
                 </div>
                 <h3 className="text-lg font-bold mb-2 text-white">営業時間</h3>
                 <p className="text-slate-400 text-sm">
-                  {hoursLine1}<br />
-                  {hoursLine2 && <>{hoursLine2}<br /></>}
-                  <span className="text-red-400 font-medium">{hoursClosed}</span>
+                  {hoursLines.map((line, i) => (
+                    <span key={i}>{line}{i < hoursLines.length - 1 && <br />}</span>
+                  ))}
+                  {hoursClosed && <><br /><span className="text-red-400 font-medium">{hoursClosed}</span></>}
                 </p>
               </div>
 
