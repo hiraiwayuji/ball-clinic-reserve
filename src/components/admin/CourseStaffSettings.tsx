@@ -110,16 +110,16 @@ function CourseRow({
   }
 
   return (
-    <div className={`flex items-center gap-3 border rounded-xl px-3 py-2.5 transition-colors ${course.is_active ? "bg-white" : "bg-slate-50 opacity-60"}`}>
+    <div className={`flex items-center gap-3 border rounded-xl px-3 py-2.5 transition-colors ${course.is_active ? "bg-white dark:bg-slate-800" : "bg-slate-50 dark:bg-slate-800/50 opacity-60"}`}>
       <GripVertical className="w-4 h-4 text-slate-300 shrink-0" />
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 flex-wrap">
-          <span className="font-semibold text-slate-800">{course.name}</span>
-          <span className="flex items-center gap-1 text-xs text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full">
+          <span className="font-semibold text-slate-800 dark:text-slate-100">{course.name}</span>
+          <span className="flex items-center gap-1 text-xs text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-700 px-2 py-0.5 rounded-full">
             <Clock className="w-3 h-3" />{course.duration_minutes}分
           </span>
           {course.price != null && (
-            <span className="text-xs text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full">
+            <span className="text-xs text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-700 px-2 py-0.5 rounded-full">
               ¥{course.price.toLocaleString()}
             </span>
           )}
@@ -205,10 +205,10 @@ function StaffRow({
   }
 
   return (
-    <div className={`flex items-center gap-3 border rounded-xl px-3 py-2.5 transition-colors ${staff.is_active ? "bg-white" : "bg-slate-50 opacity-60"}`}>
+    <div className={`flex items-center gap-3 border rounded-xl px-3 py-2.5 transition-colors ${staff.is_active ? "bg-white dark:bg-slate-800" : "bg-slate-50 dark:bg-slate-800/50 opacity-60"}`}>
       <GripVertical className="w-4 h-4 text-slate-300 shrink-0" />
       <User className="w-4 h-4 text-slate-400 shrink-0" />
-      <span className="font-semibold text-slate-800 flex-1">{staff.name}</span>
+      <span className="font-semibold text-slate-800 dark:text-slate-100 flex-1">{staff.name}</span>
       <div className="flex items-center gap-1 shrink-0">
         <button
           onClick={handleToggleActive}
@@ -317,13 +317,13 @@ function RoomRow({
   }
 
   return (
-    <div className={`flex items-center gap-3 border rounded-xl px-3 py-2.5 transition-colors ${room.is_active ? "bg-white" : "bg-slate-50 opacity-60"}`}>
+    <div className={`flex items-center gap-3 border rounded-xl px-3 py-2.5 transition-colors ${room.is_active ? "bg-white dark:bg-slate-800" : "bg-slate-50 dark:bg-slate-800/50 opacity-60"}`}>
       <GripVertical className="w-4 h-4 text-slate-300 shrink-0" />
       <DoorOpen className="w-4 h-4 text-slate-400 shrink-0" />
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 flex-wrap">
-          <span className="font-semibold text-slate-800">{room.name}</span>
-          <span className="text-xs text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full">
+          <span className="font-semibold text-slate-800 dark:text-slate-100">{room.name}</span>
+          <span className="text-xs text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-700 px-2 py-0.5 rounded-full">
             定員 {room.capacity}名
           </span>
         </div>
