@@ -1,0 +1,648 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>初回設定マニュアル｜予約管理システム</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: "Hiragino Kaku Gothic ProN", "Noto Sans JP", "Yu Gothic", sans-serif;
+      color: #1e293b;
+      background: #f8fafc;
+      font-size: 14px;
+      line-height: 1.8;
+    }
+
+    /* ── 印刷設定 ── */
+    @media print {
+      body { background: white; }
+      .no-print { display: none; }
+      .page-break { page-break-before: always; }
+      .card { box-shadow: none !important; border: 1px solid #e2e8f0 !important; }
+      a { color: #2563eb !important; }
+    }
+
+    /* ── レイアウト ── */
+    .wrapper { max-width: 860px; margin: 0 auto; padding: 40px 20px; }
+
+    /* ── 表紙 ── */
+    .cover {
+      background: linear-gradient(135deg, #1e3a5f 0%, #2563eb 60%, #0ea5e9 100%);
+      color: white;
+      border-radius: 20px;
+      padding: 60px 40px;
+      text-align: center;
+      margin-bottom: 40px;
+    }
+    .cover .badge {
+      display: inline-block;
+      background: rgba(255,255,255,0.2);
+      border: 1px solid rgba(255,255,255,0.4);
+      border-radius: 100px;
+      padding: 4px 16px;
+      font-size: 12px;
+      letter-spacing: 2px;
+      margin-bottom: 20px;
+    }
+    .cover h1 { font-size: 32px; font-weight: 900; margin-bottom: 12px; line-height: 1.4; }
+    .cover p { font-size: 15px; opacity: 0.85; }
+    .cover .logo-area {
+      width: 72px; height: 72px;
+      background: rgba(255,255,255,0.15);
+      border-radius: 18px;
+      margin: 0 auto 24px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 36px;
+    }
+
+    /* ── セクション ── */
+    .section-title {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 3px;
+      color: #64748b;
+      text-transform: uppercase;
+      margin: 48px 0 16px;
+      padding-bottom: 8px;
+      border-bottom: 2px solid #e2e8f0;
+    }
+
+    /* ── カード ── */
+    .card {
+      background: white;
+      border-radius: 16px;
+      padding: 28px 32px;
+      margin-bottom: 20px;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.07);
+    }
+    .card-header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+    .step-badge {
+      width: 36px; height: 36px;
+      background: #2563eb;
+      color: white;
+      border-radius: 10px;
+      font-weight: 900;
+      font-size: 16px;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+    }
+    .card-title { font-size: 18px; font-weight: 800; color: #0f172a; }
+    .card-sub { font-size: 12px; color: #64748b; margin-top: 2px; }
+
+    /* ── ステップリスト ── */
+    .steps { list-style: none; }
+    .steps li {
+      display: flex;
+      gap: 14px;
+      padding: 10px 0;
+      border-bottom: 1px solid #f1f5f9;
+    }
+    .steps li:last-child { border-bottom: none; }
+    .step-num {
+      width: 26px; height: 26px;
+      background: #eff6ff;
+      color: #2563eb;
+      border-radius: 50%;
+      font-size: 12px;
+      font-weight: 800;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+      margin-top: 2px;
+    }
+    .step-text strong { display: block; font-size: 14px; color: #0f172a; margin-bottom: 2px; }
+    .step-text span { font-size: 13px; color: #475569; }
+
+    /* ── ハイライトボックス ── */
+    .highlight {
+      border-radius: 12px;
+      padding: 16px 20px;
+      margin: 16px 0;
+      display: flex;
+      gap: 12px;
+      align-items: flex-start;
+    }
+    .highlight.blue { background: #eff6ff; border-left: 4px solid #2563eb; }
+    .highlight.green { background: #f0fdf4; border-left: 4px solid #16a34a; }
+    .highlight.amber { background: #fffbeb; border-left: 4px solid #d97706; }
+    .highlight.red { background: #fff1f2; border-left: 4px solid #e11d48; }
+    .highlight .icon { font-size: 20px; flex-shrink: 0; margin-top: 2px; }
+    .highlight .text { font-size: 13px; line-height: 1.7; color: #334155; }
+    .highlight .text strong { color: #0f172a; }
+
+    /* ── 画面UI説明 ── */
+    .ui-box {
+      background: #0f172a;
+      border-radius: 12px;
+      padding: 20px 24px;
+      margin: 16px 0;
+      color: #e2e8f0;
+      font-size: 13px;
+    }
+    .ui-box .ui-label {
+      font-size: 10px;
+      color: #64748b;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      margin-bottom: 12px;
+    }
+    .ui-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 8px;
+      padding: 10px 14px;
+      margin-bottom: 8px;
+    }
+    .ui-row:last-child { margin-bottom: 0; }
+    .ui-icon { font-size: 16px; }
+    .ui-btn {
+      background: linear-gradient(90deg, #2563eb, #0ea5e9);
+      color: white;
+      border-radius: 8px;
+      padding: 10px 16px;
+      text-align: center;
+      font-weight: 700;
+      font-size: 14px;
+      margin-top: 12px;
+    }
+
+    /* ── URL表示 ── */
+    .url-box {
+      background: #f8fafc;
+      border: 2px dashed #cbd5e1;
+      border-radius: 12px;
+      padding: 20px 24px;
+      text-align: center;
+      margin: 16px 0;
+    }
+    .url-box .label { font-size: 11px; color: #94a3b8; letter-spacing: 1px; margin-bottom: 6px; }
+    .url-box .url { font-size: 18px; font-weight: 800; color: #2563eb; word-break: break-all; }
+
+    /* ── テーブル ── */
+    table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+    th {
+      background: #f1f5f9;
+      text-align: left;
+      padding: 10px 14px;
+      font-size: 12px;
+      font-weight: 700;
+      color: #475569;
+    }
+    td {
+      padding: 10px 14px;
+      border-bottom: 1px solid #f1f5f9;
+      font-size: 13px;
+      vertical-align: top;
+    }
+    tr:last-child td { border-bottom: none; }
+
+    /* ── FAQ ── */
+    .faq-item { margin-bottom: 16px; }
+    .faq-q {
+      font-weight: 700;
+      color: #1e40af;
+      margin-bottom: 6px;
+      display: flex;
+      gap: 8px;
+    }
+    .faq-q::before { content: "Q"; background: #2563eb; color: white; width: 22px; height: 22px; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 12px; flex-shrink: 0; margin-top: 1px; }
+    .faq-a {
+      color: #334155;
+      display: flex;
+      gap: 8px;
+      padding-left: 4px;
+    }
+    .faq-a::before { content: "A"; background: #16a34a; color: white; width: 22px; height: 22px; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 12px; flex-shrink: 0; margin-top: 1px; }
+
+    /* ── フッター ── */
+    .footer {
+      text-align: center;
+      padding: 32px;
+      color: #94a3b8;
+      font-size: 12px;
+      line-height: 2;
+    }
+
+    /* ── 印刷ボタン ── */
+    .print-btn {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      background: #2563eb;
+      color: white;
+      border: none;
+      border-radius: 12px;
+      padding: 14px 24px;
+      font-size: 15px;
+      font-weight: 700;
+      cursor: pointer;
+      box-shadow: 0 4px 20px rgba(37,99,235,0.4);
+      z-index: 100;
+    }
+    .print-btn:hover { background: #1d4ed8; }
+  </style>
+</head>
+<body>
+
+<div class="wrapper">
+
+  <!-- 印刷ボタン -->
+  <button class="print-btn no-print" onclick="window.print()">🖨️ PDFで保存</button>
+
+  <!-- ── 表紙 ── -->
+  <div class="cover">
+    <div class="logo-area">📋</div>
+    <div class="badge">FIRST SETUP GUIDE</div>
+    <h1>初回設定マニュアル<br>予約管理システム</h1>
+    <p style="margin-top:16px; opacity:0.7; font-size:13px;">
+      このマニュアルは初めてシステムを使い始める方向けです。<br>
+      順番通りに進めるだけで設定が完了します。
+    </p>
+  </div>
+
+  <!-- ── はじめに ── -->
+  <p class="section-title">はじめに</p>
+  <div class="card">
+    <div class="highlight blue">
+      <div class="icon">💡</div>
+      <div class="text">
+        <strong>このマニュアルでできること</strong><br>
+        ログイン → パスワード変更 → 院情報の入力 → コース・スタッフの登録 まで、約30分で初期設定が完了します。<br>
+        スマートフォンよりも <strong>パソコンでの操作を推奨</strong> します。
+      </div>
+    </div>
+
+    <table>
+      <tr>
+        <th>項目</th>
+        <th>内容</th>
+      </tr>
+      <tr>
+        <td>⏱️ 所要時間</td>
+        <td>約 20〜30分</td>
+      </tr>
+      <tr>
+        <td>💻 推奨環境</td>
+        <td>Google Chrome（最新版）/ Microsoft Edge</td>
+      </tr>
+      <tr>
+        <td>📋 事前に用意するもの</td>
+        <td>担当者から受け取ったログインURL・メールアドレス・パスワード</td>
+      </tr>
+    </table>
+  </div>
+
+  <!-- ── STEP 1 ── -->
+  <p class="section-title">STEP 1 ／ ログイン</p>
+  <div class="card">
+    <div class="card-header">
+      <div class="step-badge">1</div>
+      <div>
+        <div class="card-title">管理画面にログインする</div>
+        <div class="card-sub">担当者から受け取ったURLを開いてください</div>
+      </div>
+    </div>
+
+    <div class="url-box">
+      <div class="label">ログインURL（担当者から受け取ったURLを入力）</div>
+      <div class="url">https://〇〇-clinic.vercel.app/admin-login</div>
+    </div>
+
+    <ul class="steps">
+      <li>
+        <div class="step-num">1</div>
+        <div class="step-text">
+          <strong>URLをブラウザのアドレスバーに入力して開く</strong>
+          <span>ログイン画面が表示されます</span>
+        </div>
+      </li>
+      <li>
+        <div class="step-num">2</div>
+        <div class="step-text">
+          <strong>メールアドレスとパスワードを入力する</strong>
+          <span>担当者から受け取った仮のメールアドレス・パスワードを入力してください</span>
+        </div>
+      </li>
+      <li>
+        <div class="step-num">3</div>
+        <div class="step-text">
+          <strong>「ログイン」ボタンをクリック</strong>
+          <span>ダッシュボード（管理画面のトップ）が表示されれば成功です</span>
+        </div>
+      </li>
+    </ul>
+
+    <div class="ui-box">
+      <div class="ui-label">ログイン画面のイメージ</div>
+      <div class="ui-row"><div class="ui-icon">✉️</div>メールアドレス　　admin@example.com</div>
+      <div class="ui-row"><div class="ui-icon">🔒</div>パスワード　　　　••••••••</div>
+      <div class="ui-btn">ログイン →</div>
+    </div>
+
+    <div class="highlight amber">
+      <div class="icon">⚠️</div>
+      <div class="text">
+        <strong>ログインできない場合</strong><br>
+        メールアドレスやパスワードを確認してください。解決しない場合は担当者（ボール接骨院）にご連絡ください。
+      </div>
+    </div>
+  </div>
+
+  <!-- ── STEP 2 ── -->
+  <div class="page-break"></div>
+  <p class="section-title">STEP 2 ／ パスワード・メールアドレスの変更</p>
+  <div class="card">
+    <div class="card-header">
+      <div class="step-badge">2</div>
+      <div>
+        <div class="card-title">自分のメール・パスワードに変更する</div>
+        <div class="card-sub">セキュリティのため、最初に必ず変更してください</div>
+      </div>
+    </div>
+
+    <ul class="steps">
+      <li>
+        <div class="step-num">1</div>
+        <div class="step-text">
+          <strong>左のメニューまたは上部から「設定」を開く</strong>
+          <span>⚙️ 設定アイコンをクリックします</span>
+        </div>
+      </li>
+      <li>
+        <div class="step-num">2</div>
+        <div class="step-text">
+          <strong>ページ下部の「アカウント設定」までスクロールする</strong>
+          <span>「メールアドレスの変更」と「パスワードの変更」が表示されます</span>
+        </div>
+      </li>
+      <li>
+        <div class="step-num">3</div>
+        <div class="step-text">
+          <strong>新しいメールアドレスを入力して「変更する」をクリック</strong>
+          <span>新しいメールアドレスに確認メールが届くので、リンクをクリックして完了</span>
+        </div>
+      </li>
+      <li>
+        <div class="step-num">4</div>
+        <div class="step-text">
+          <strong>パスワードを変更する</strong>
+          <span>現在のパスワード → 新しいパスワード（8文字以上）→ 確認入力 の順に入力して「変更」</span>
+        </div>
+      </li>
+    </ul>
+
+    <div class="highlight red">
+      <div class="icon">🔐</div>
+      <div class="text">
+        <strong>パスワードの注意点</strong><br>
+        • 8文字以上で設定してください<br>
+        • 誕生日・電話番号など推測されやすいものは避けてください<br>
+        • <strong>スタッフや家族を含む第三者には絶対に教えないでください</strong>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── STEP 3 ── -->
+  <p class="section-title">STEP 3 ／ 院情報の入力</p>
+  <div class="card">
+    <div class="card-header">
+      <div class="step-badge">3</div>
+      <div>
+        <div class="card-title">院の基本情報を設定する</div>
+        <div class="card-sub">予約ページや通知メッセージに使われます</div>
+      </div>
+    </div>
+
+    <ul class="steps">
+      <li>
+        <div class="step-num">1</div>
+        <div class="step-text">
+          <strong>「設定」ページを開く</strong>
+          <span>左メニューの「設定」をクリック</span>
+        </div>
+      </li>
+      <li>
+        <div class="step-num">2</div>
+        <div class="step-text">
+          <strong>「クリニック基本情報」の各項目を入力する</strong>
+          <span>下の表を参考に入力してください</span>
+        </div>
+      </li>
+      <li>
+        <div class="step-num">3</div>
+        <div class="step-text">
+          <strong>「保存する」ボタンをクリック</strong>
+          <span>「保存しました」と表示されれば完了です</span>
+        </div>
+      </li>
+    </ul>
+
+    <table>
+      <tr>
+        <th>項目</th>
+        <th>入力例</th>
+        <th>説明</th>
+      </tr>
+      <tr>
+        <td>クリニック名</td>
+        <td>からだ鍼灸整骨院</td>
+        <td>正式名称をそのまま入力</td>
+      </tr>
+      <tr>
+        <td>電話番号</td>
+        <td>090-1234-5678</td>
+        <td>代表番号</td>
+      </tr>
+      <tr>
+        <td>住所</td>
+        <td>〒000-0000 ○○県○○市…</td>
+        <td>予約ページに表示されます</td>
+      </tr>
+      <tr>
+        <td>営業時間</td>
+        <td>月〜金 10:00〜20:00</td>
+        <td>患者様向けの表示用</td>
+      </tr>
+      <tr>
+        <td>休診日</td>
+        <td>水曜・日曜・祝日</td>
+        <td>予約カレンダーに反映</td>
+      </tr>
+    </table>
+  </div>
+
+  <!-- ── STEP 4 ── -->
+  <div class="page-break"></div>
+  <p class="section-title">STEP 4 ／ コース・スタッフの登録</p>
+  <div class="card">
+    <div class="card-header">
+      <div class="step-badge">4</div>
+      <div>
+        <div class="card-title">予約メニューとスタッフを登録する</div>
+        <div class="card-sub">患者様がWeb予約時に選択する項目です</div>
+      </div>
+    </div>
+
+    <ul class="steps">
+      <li>
+        <div class="step-num">1</div>
+        <div class="step-text">
+          <strong>「設定」ページの「予約コース・スタッフ設定」を開く</strong>
+          <span>設定ページ内にコース設定のセクションがあります</span>
+        </div>
+      </li>
+      <li>
+        <div class="step-num">2</div>
+        <div class="step-text">
+          <strong>「＋ コースを追加」をクリックして施術メニューを登録する</strong>
+          <span>コース名・所要時間・料金を入力して保存</span>
+        </div>
+      </li>
+      <li>
+        <div class="step-num">3</div>
+        <div class="step-text">
+          <strong>「＋ スタッフを追加」をクリックして担当者を登録する</strong>
+          <span>院長・スタッフ名を入力（「指名なし」も自動で表示されます）</span>
+        </div>
+      </li>
+    </ul>
+
+    <div class="highlight green">
+      <div class="icon">✅</div>
+      <div class="text">
+        <strong>登録例</strong><br>
+        【コース】初回施術（60分）・再診施術（30分）・鍼灸治療（45分）<br>
+        【スタッフ】院長名・ご自身のお名前
+      </div>
+    </div>
+  </div>
+
+  <!-- ── STEP 5 ── -->
+  <p class="section-title">STEP 5 ／ 動作確認</p>
+  <div class="card">
+    <div class="card-header">
+      <div class="step-badge">5</div>
+      <div>
+        <div class="card-title">実際に予約が取れるか確認する</div>
+        <div class="card-sub">設定完了後にテスト予約を行いましょう</div>
+      </div>
+    </div>
+
+    <ul class="steps">
+      <li>
+        <div class="step-num">1</div>
+        <div class="step-text">
+          <strong>別のブラウザ（またはスマートフォン）で予約ページを開く</strong>
+          <span>URL: https://〇〇-clinic.vercel.app/reserve</span>
+        </div>
+      </li>
+      <li>
+        <div class="step-num">2</div>
+        <div class="step-text">
+          <strong>テスト予約を入れてみる</strong>
+          <span>自分の名前・電話番号でテスト予約を実施</span>
+        </div>
+      </li>
+      <li>
+        <div class="step-num">3</div>
+        <div class="step-text">
+          <strong>管理画面の「受付」または「予約一覧」で確認できればOK</strong>
+          <span>テスト予約が表示されていれば設定完了です 🎉</span>
+        </div>
+      </li>
+      <li>
+        <div class="step-num">4</div>
+        <div class="step-text">
+          <strong>テスト予約を削除する</strong>
+          <span>予約詳細画面からキャンセル処理をしておきましょう</span>
+        </div>
+      </li>
+    </ul>
+
+    <div class="highlight green">
+      <div class="icon">🎉</div>
+      <div class="text">
+        <strong>設定完了です！</strong><br>
+        これで患者様がWeb予約できる状態になりました。<br>
+        予約ページのURLをホームページやLINEで案内してください。
+      </div>
+    </div>
+  </div>
+
+  <!-- ── よくある質問 ── -->
+  <div class="page-break"></div>
+  <p class="section-title">よくある質問（FAQ）</p>
+  <div class="card">
+
+    <div class="faq-item">
+      <div class="faq-q">パスワードを忘れてしまいました</div>
+      <div class="faq-a">ログイン画面の「パスワードをお忘れの方はこちら」をクリックし、メールアドレスを入力するとリセット用メールが届きます。</div>
+    </div>
+
+    <div class="faq-item">
+      <div class="faq-q">スマートフォンからも操作できますか？</div>
+      <div class="faq-a">はい、スマートフォンのブラウザからもアクセスできます。ただし詳細な設定や売上入力はパソコンが使いやすいです。</div>
+    </div>
+
+    <div class="faq-item">
+      <div class="faq-q">予約が来たときに通知を受け取れますか？</div>
+      <div class="faq-a">LINE通知の設定が完了していれば、予約が入ると院長のLINEに通知が届きます。設定方法は担当者にお問い合わせください。</div>
+    </div>
+
+    <div class="faq-item">
+      <div class="faq-q">スタッフにも使わせることはできますか？</div>
+      <div class="faq-a">現在はオーナーアカウントのみです。ログイン情報の共有はセキュリティ上お控えください。スタッフ向けアカウントについては担当者にご相談ください。</div>
+    </div>
+
+    <div class="faq-item">
+      <div class="faq-q">画面の使い方がわからない場合は？</div>
+      <div class="faq-a">担当者（ボール接骨院）までLINEまたはお電話でお気軽にお問い合わせください。</div>
+    </div>
+
+  </div>
+
+  <!-- ── お問い合わせ ── -->
+  <p class="section-title">サポート・お問い合わせ</p>
+  <div class="card" style="text-align:center; padding: 40px;">
+    <div style="font-size: 40px; margin-bottom: 16px;">🤝</div>
+    <div style="font-size: 20px; font-weight: 800; margin-bottom: 8px; color: #0f172a;">お困りのことがあればいつでもご連絡ください</div>
+    <div style="color: #64748b; font-size: 14px; margin-bottom: 24px;">システムのご不明点・トラブルは担当者が対応いたします</div>
+    <table style="max-width: 400px; margin: 0 auto;">
+      <tr>
+        <th style="text-align:center;">窓口</th>
+        <th style="text-align:center;">連絡先</th>
+      </tr>
+      <tr>
+        <td style="text-align:center;">📞 電話</td>
+        <td style="text-align:center; font-weight:700;">088-635-5344</td>
+      </tr>
+      <tr>
+        <td style="text-align:center;">🕐 受付時間</td>
+        <td style="text-align:center;">月〜土 12:00〜22:00</td>
+      </tr>
+      <tr>
+        <td style="text-align:center;">🏥 担当</td>
+        <td style="text-align:center;">ボール接骨院</td>
+      </tr>
+    </table>
+  </div>
+
+  <!-- フッター -->
+  <div class="footer">
+    <div style="font-weight: 700; color: #475569; margin-bottom: 4px;">予約管理システム 初回設定マニュアル</div>
+    © 2026 ボール接骨院　All rights reserved.<br>
+    本マニュアルの内容は予告なく変更される場合があります。
+  </div>
+
+</div>
+</body>
+</html>
