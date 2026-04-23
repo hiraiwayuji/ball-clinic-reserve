@@ -1,99 +1,85 @@
-# 新規クリニック導入ガイド
+# 新規クリニック導入ガイド（最終更新: 2026-04-23）
 
-## 導入当日までにやること（あなた側の準備）
+---
 
-### 1. Supabase に事前レコード作成（15分）
+## 📊 現在の導入状況
 
-[Supabase SQL Editor](https://supabase.com/dashboard/project/uatmzcnoumafeuzprkdo/sql/new) を開き、以下を実行：
+| クリニック | Vercel | Supabase | 管理者アカウント | 配布資料 |
+|---|---|---|---|---|
+| からだ鍼灸整骨院 | ✅ https://karada-clinic.vercel.app | ✅ 作成済み | ✅ 設定済み (karada@gmail.com) | ✅ handover_karada.html |
+| relaq 鍼灸マッサージ治療院 | ✅ https://relaq-clinic.vercel.app | ✅ 作成済み (clinic_id: 021efe2a-a768-4fa6-9de8-62cae9a79d47) | ⚠️ 要確認 | ✅ handover_relaq.html |
+| マッスル整体 | ❌ 未作成 | ⚠️ 要実行 (muscle_setup.sql) | ❌ 未作成 | ✅ handover_muscle.html |
 
-```
-relaq_setup.sql  → STEP1 だけ実行 → clinic_id をメモ
-karada_setup.sql → STEP1 だけ実行 → clinic_id をメモ
-```
+---
 
-### 2. Vercel プロジェクトを新規作成（各10分）
+## ✅ マッスル整体 — 残り作業（優先順）
 
+### STEP 1: Supabase に clinic_settings レコード作成
+1. [Supabase SQL Editor](https://supabase.com/dashboard/project/uatmzcnoumafeuzprkdo/sql/new) を開く
+2. `muscle_setup.sql` の STEP1 を実行
+3. 表示された `id`（UUID）をメモ
+
+### STEP 2: Vercel プロジェクト作成
 1. [Vercel Dashboard](https://vercel.com) → **Add New Project**
-2. `hiraiwayuji/ball-clinic-reserve` リポジトリを選択
-3. Project Name を設定（例: `relaq-clinic`, `karada-clinic`）
-4. **Environment Variables** を `vercel_env_template.txt` に沿って入力
-   - LINE 情報以外はすべて入力可能
-   - `SETUP_PASSWORD` は各クリニック固有のコードを設定
-5. **Deploy** → URLを確認
+2. リポジトリ: `hiraiwayuji/ball-clinic-reserve` を選択
+3. Project Name: `muscle-clinic`
+4. `muscle_vercel_env.txt` の内容を環境変数に入力（STEP1のUUIDを `NEXT_PUBLIC_CLINIC_ID` に設定）
+5. **Deploy** → `https://muscle-clinic.vercel.app` で確認
+
+### STEP 3: コース設定（任意・導入当日でも可）
+`muscle_setup.sql` の STEP2（コメントアウト部分）を解除して実行
 
 ---
 
-## 導入当日の手順（クリニック担当者と一緒に実施）
+## ✅ relaq — 残り作業確認
 
-### 所要時間の目安: 30〜45分
-
----
-
-### STEP A: アカウント作成（5分）
-
-1. 事前に用意した Vercel URL を担当者に共有
-   - relaq: `https://relaq-clinic.vercel.app/register`
-   - karada: `https://karada-clinic.vercel.app/register`
-
-2. 登録フォームに入力してもらう：
-   - **クリニック名**: 正式名称
-   - **メールアドレス**: 普段使いのもの
-   - **パスワード**: 8文字以上
-   - **セットアップコード**: 事前に設定した `SETUP_PASSWORD` を伝える
-
-3. 登録完了 → 自動でダッシュボードへ
+- [ ] 管理者アカウントが作成済みか確認
+- [ ] 未作成の場合: `https://relaq-clinic.vercel.app/register` でセットアップコード `relaq123` で登録
+- [ ] LINE チャネル設定（任意・後から可）
 
 ---
 
-### STEP B: 院情報の設定（10分）
+## ✅ からだ鍼灸整骨院 — 完了事項
 
-`/admin/settings` で以下を入力：
-
-| 項目 | 内容 |
-|------|------|
-| クリニック名 | 正式名称 |
-| 電話番号 | 代表番号 |
-| 住所 | 所在地 |
-| HP URL | 公式サイト |
-| エリア名 | 例: 川内市、鹿児島市 |
+- ✅ Vercel デプロイ済み
+- ✅ 管理者アカウント作成済み (karada@gmail.com)
+- ✅ ロゴ設定済み (/images/karadalogo.png)
+- [ ] LINE チャネル設定（任意・後から可）
 
 ---
 
-### STEP C: LINE連携（10分）
+## 配布資料一覧
 
-**事前に必要なもの**: LINE Developers アカウント + Messaging API チャネル
-
-1. [LINE Developers](https://developers.line.biz/) でチャネルを確認
-2. `/admin/settings` → LINE設定タブ に入力：
-   - Channel Access Token（長期）
-   - Channel Secret
-   - 公式アカウントURL
-3. Vercel Dashboard の環境変数も更新して再デプロイ
-
----
-
-### STEP D: コース・スタッフ設定（5分）
-
-`/admin/settings` → コース設定・スタッフ設定 タブで追加
-
-**relaq 参考コース:**
-- 鍼灸治療 / 60分
-- マッサージ（30分）
-- 鍼灸＋マッサージ / 90分
-
-**karada 参考コース:**
-- 初回検査・施術 / 60分
-- 再診施術 / 30分
-- 鍼灸治療 / 45分
+| ファイル | 対象 | 内容 |
+|---|---|---|
+| `handover_karada.html` | からだ鍼灸整骨院 院長 | ログイン情報・初回設定手順（PDF印刷可） |
+| `handover_relaq.html` | relaq 担当者 | 登録URL・セットアップコード・手順（PDF印刷可） |
+| `handover_muscle.html` | マッスル整体 川上様 | 登録URL・セットアップコード・手順（PDF印刷可） |
+| `manual_first_setup.html` | 全院共通 | 詳細な初回設定マニュアル（PDF印刷可） |
+| `muscle_vercel_env.txt` | 開発者（自分） | マッスル整体Vercel環境変数（コピペ用） |
+| `muscle_setup.sql` | 開発者（自分） | マッスル整体 Supabase SQL |
+| `relaq_setup.sql` | 参照用 | relaq Supabase SQL（実行済み） |
+| `karada_setup.sql` | 参照用 | karada Supabase SQL（実行済み） |
 
 ---
 
-### STEP E: 動作確認（5分）
+## 導入当日の手順（各院共通）
 
-- `/admin/dashboard` — ダッシュボード表示
-- `/admin/appointments` — 予約カレンダー（テスト予約追加）
-- `/admin/counter` — 受付カウンター
-- 予約ページ（公開側）: `https://【url】/reserve`
+### 所要時間の目安: 20〜30分
+
+**STEP A: アカウント登録（5分）**
+- 事前に配布した `handover_xxx.html` の登録URLを開く
+- メールアドレス・パスワード・セットアップコードを入力
+
+**STEP B: 院情報の設定（5分）**
+- `/admin/settings` で院名・電話番号・住所・営業時間を入力
+
+**STEP C: コース・スタッフ設定（5分）**
+- `/admin/settings` → 予約コース・スタッフ設定でメニューを追加
+
+**STEP D: 動作確認（5分）**
+- `/admin/dashboard` → ダッシュボード確認
+- `/reserve` → 患者向け予約ページ確認
 
 ---
 
@@ -101,22 +87,22 @@ karada_setup.sql → STEP1 だけ実行 → clinic_id をメモ
 
 | 問題 | 原因 | 対処 |
 |------|------|------|
-| ログインできない | clinic_users に紐付けなし | Supabase Dashboard → SQL Editor で `clinic_users` を確認 |
-| 予約データが見えない | clinic_id フィルタ | clinic_users の clinic_id を確認 |
-| LINE通知が来ない | 環境変数未設定 | Vercel → Environment Variables を確認・再デプロイ |
-| デプロイエラー | 環境変数不足 | Vercel ビルドログを確認 |
+| ログインできない | clinic_usersに紐付けなし | Supabase → clinic_users テーブルを確認 |
+| セットアップコードエラー | SETUP_PASSWORD環境変数と不一致 | Vercel → Environment Variablesを確認 |
+| 予約データが見えない | clinic_idフィルタ | clinic_usersのclinic_idを確認 |
+| LINE通知が来ない | 環境変数未設定 | Vercel → Environment Variablesを確認・再デプロイ |
 
 ---
 
-## メモ欄
+## クリニック別メモ
 
 | | relaq | karada | マッスル整体 |
 |--|-------|--------|------------|
 | clinic_id | 021efe2a-a768-4fa6-9de8-62cae9a79d47 | d3b55abc-46a6-4cbe-8198-21c0392d9a2e | ※STEP1実行後に記入 |
 | Vercel URL | https://relaq-clinic.vercel.app | https://karada-clinic.vercel.app | https://muscle-clinic.vercel.app |
 | SETUP_PASSWORD | relaq123 | karada2026 | muscle2026 |
-| 担当者メール | | | 川上貴士様 |
-| LINE Channel ID | | | |
+| 担当者メール | | karada@gmail.com | 川上様メール |
 | 導入日 | | | |
-| 営業時間 | 火水木 9:00〜18:30 / 金土 10:00〜17:30 | 月火木金土 10:00〜20:00（水・日・祝休診） | 要確認（月曜定休） |
-| 備考 | 月・祝休診。平日最終受付18:00・土曜最終受付17:00。〒771-0212 徳島県板野郡松茂町中喜来字前原東一番越1-7 | ランチタイム営業・訪問治療あり[10:00〜16:00] | 〒761-8078 香川県高松市仏生山町甲1667-1 / TEL: 087-888-8144 / Instagram: @muscle8144 |
+| 営業時間 | 火水木 9:00〜18:30 / 金土 10:00〜17:30（月・祝休診） | 月火木金土 10:00〜20:00（水・日・祝休診） | 月曜定休・要確認 |
+| 住所 | 〒771-0212 徳島県板野郡松茂町中喜来字前原東一番越1-7 | | 〒761-8078 香川県高松市仏生山町甲1667-1 |
+| 電話 | 088-678-7949 | | 087-888-8144 |

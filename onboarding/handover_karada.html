@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>システム利用開始のご案内 — からだ鍼灸整骨院</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Helvetica Neue', Arial, 'Hiragino Kaku Gothic ProN', sans-serif; background: #f4f6fa; color: #1e293b; font-size: 14px; }
+  .page { max-width: 780px; margin: 30px auto; background: #fff; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 24px rgba(0,0,0,0.10); }
+  .header { background: linear-gradient(135deg, #0f4c81, #1e88e5); color: #fff; padding: 36px 48px; }
+  .header .badge { display: inline-block; background: rgba(255,255,255,0.2); border: 1px solid rgba(255,255,255,0.4); border-radius: 20px; padding: 4px 14px; font-size: 11px; letter-spacing: 1px; margin-bottom: 14px; }
+  .header h1 { font-size: 26px; font-weight: 800; margin-bottom: 6px; }
+  .header p { font-size: 13px; opacity: 0.8; }
+  .body { padding: 40px 48px; }
+  .url-box { background: #e8f4ff; border: 2px solid #1e88e5; border-radius: 12px; padding: 20px 28px; margin-bottom: 32px; }
+  .url-box .label { font-size: 11px; font-weight: 700; color: #1e88e5; letter-spacing: 1px; margin-bottom: 6px; }
+  .url-box .url { font-size: 18px; font-weight: 800; color: #0f4c81; letter-spacing: 0.5px; word-break: break-all; }
+  .url-box .sub { font-size: 12px; color: #64748b; margin-top: 6px; }
+  .cred-box { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 32px; }
+  .cred-item { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 16px 20px; }
+  .cred-item .label { font-size: 11px; font-weight: 700; color: #64748b; letter-spacing: 1px; margin-bottom: 6px; }
+  .cred-item .value { font-size: 15px; font-weight: 700; color: #1e293b; }
+  .cred-item .note { font-size: 11px; color: #94a3b8; margin-top: 4px; }
+  .section-title { font-size: 13px; font-weight: 800; color: #1e293b; letter-spacing: 0.5px; margin-bottom: 16px; padding-bottom: 8px; border-bottom: 2px solid #e2e8f0; }
+  .steps { list-style: none; margin-bottom: 32px; }
+  .steps li { display: flex; gap: 16px; align-items: flex-start; margin-bottom: 14px; }
+  .steps li .num { width: 28px; height: 28px; background: #1e88e5; color: #fff; border-radius: 50%; font-size: 12px; font-weight: 800; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+  .steps li .text { padding-top: 4px; }
+  .steps li .text strong { display: block; font-size: 14px; color: #1e293b; margin-bottom: 2px; }
+  .steps li .text span { font-size: 12px; color: #64748b; }
+  .notice { background: #fffbeb; border: 1px solid #f59e0b; border-radius: 10px; padding: 16px 20px; margin-bottom: 32px; }
+  .notice .notice-title { font-size: 12px; font-weight: 700; color: #b45309; margin-bottom: 8px; }
+  .notice ul { list-style: none; }
+  .notice ul li { font-size: 12px; color: #78350f; margin-bottom: 4px; padding-left: 14px; position: relative; }
+  .notice ul li::before { content: '・'; position: absolute; left: 0; }
+  .support { background: #f0fdf4; border: 1px solid #86efac; border-radius: 10px; padding: 16px 20px; }
+  .support .support-title { font-size: 12px; font-weight: 700; color: #166534; margin-bottom: 8px; }
+  .support p { font-size: 12px; color: #15803d; margin-bottom: 4px; }
+  .footer { background: #f8fafc; border-top: 1px solid #e2e8f0; padding: 16px 48px; text-align: center; font-size: 11px; color: #94a3b8; }
+  @media print {
+    body { background: #fff; }
+    .page { box-shadow: none; margin: 0; border-radius: 0; max-width: 100%; }
+    .no-print { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<div class="no-print" style="text-align:center;padding:16px 0;">
+  <button onclick="window.print()" style="background:#1e88e5;color:#fff;border:none;padding:10px 28px;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;">🖨️ PDFとして保存・印刷</button>
+</div>
+
+<div class="page">
+  <div class="header">
+    <div class="badge">システム利用開始のご案内</div>
+    <h1>からだ鍼灸整骨院</h1>
+    <p>Web予約・経営管理システム ご利用ガイド</p>
+  </div>
+
+  <div class="body">
+
+    <!-- ログインURL -->
+    <div class="url-box">
+      <div class="label">🌐 管理画面ログインURL</div>
+      <div class="url">https://karada-clinic.vercel.app/admin-login</div>
+      <div class="sub">このURLをブラウザのブックマークに追加しておくと便利です</div>
+    </div>
+
+    <!-- ログイン情報 -->
+    <div style="margin-bottom:12px;">
+      <div class="section-title">🔑 ログイン情報</div>
+    </div>
+    <div class="cred-box">
+      <div class="cred-item">
+        <div class="label">メールアドレス</div>
+        <div class="value">karada@gmail.com</div>
+        <div class="note">設定済みのアドレス</div>
+      </div>
+      <div class="cred-item">
+        <div class="label">パスワード</div>
+        <div class="value">（初期設定済み）</div>
+        <div class="note">ログイン後すぐに変更してください</div>
+      </div>
+    </div>
+
+    <!-- 初回設定ステップ -->
+    <div style="margin-bottom:12px;">
+      <div class="section-title">📋 初回ログイン後の設定手順</div>
+    </div>
+    <ul class="steps">
+      <li>
+        <div class="num">1</div>
+        <div class="text">
+          <strong>ログイン & パスワード変更</strong>
+          <span>上記URLでログイン → 「設定」→「アカウント設定」でパスワードを自分だけが知るものに変更してください</span>
+        </div>
+      </li>
+      <li>
+        <div class="num">2</div>
+        <div class="text">
+          <strong>院情報の入力</strong>
+          <span>「設定」→ クリニック名・電話番号・住所・営業時間などを入力して保存</span>
+        </div>
+      </li>
+      <li>
+        <div class="num">3</div>
+        <div class="text">
+          <strong>予約コース・スタッフの登録</strong>
+          <span>「設定」→「予約コース・スタッフ設定」で施術メニューとスタッフ名を追加</span>
+        </div>
+      </li>
+      <li>
+        <div class="num">4</div>
+        <div class="text">
+          <strong>予約ページの動作確認</strong>
+          <span>https://karada-clinic.vercel.app/reserve にアクセスして予約フローを確認</span>
+        </div>
+      </li>
+      <li>
+        <div class="num">5</div>
+        <div class="text">
+          <strong>患者様への案内開始</strong>
+          <span>Web予約URLを院内ポスター・LINE・Instagramなどでご案内ください</span>
+        </div>
+      </li>
+    </ul>
+
+    <!-- 注意事項 -->
+    <div class="notice">
+      <div class="notice-title">⚠️ セキュリティに関するお願い</div>
+      <ul>
+        <li>ログイン情報（メール・パスワード）はスタッフ・ご家族を含む第三者には共有しないでください</li>
+        <li>パスワードは初回ログイン後、必ず変更してください</li>
+        <li>使用後はブラウザを閉じる前にログアウトしてください</li>
+      </ul>
+    </div>
+
+    <!-- サポート -->
+    <div class="support">
+      <div class="support-title">📞 困ったときのサポート</div>
+      <p>開発・サポート担当：ボール接骨院（平岩）</p>
+      <p>何かご不明な点があればお気軽にご連絡ください</p>
+    </div>
+
+  </div>
+
+  <div class="footer">
+    © 2026 ボール接骨院 — 本書はシステム導入時の配布資料です。取り扱いにご注意ください。
+  </div>
+</div>
+
+</body>
+</html>

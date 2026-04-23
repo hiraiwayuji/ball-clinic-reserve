@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>システム利用開始のご案内 — relaq 鍼灸マッサージ治療院</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Helvetica Neue', Arial, 'Hiragino Kaku Gothic ProN', sans-serif; background: #f4f6fa; color: #1e293b; font-size: 14px; }
+  .page { max-width: 780px; margin: 30px auto; background: #fff; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 24px rgba(0,0,0,0.10); }
+  .header { background: linear-gradient(135deg, #4f46e5, #7c3aed); color: #fff; padding: 36px 48px; }
+  .header .badge { display: inline-block; background: rgba(255,255,255,0.2); border: 1px solid rgba(255,255,255,0.4); border-radius: 20px; padding: 4px 14px; font-size: 11px; letter-spacing: 1px; margin-bottom: 14px; }
+  .header h1 { font-size: 26px; font-weight: 800; margin-bottom: 6px; }
+  .header p { font-size: 13px; opacity: 0.8; }
+  .body { padding: 40px 48px; }
+  .url-box { background: #f5f3ff; border: 2px solid #7c3aed; border-radius: 12px; padding: 20px 28px; margin-bottom: 32px; }
+  .url-box .label { font-size: 11px; font-weight: 700; color: #7c3aed; letter-spacing: 1px; margin-bottom: 6px; }
+  .url-box .url { font-size: 18px; font-weight: 800; color: #4f46e5; letter-spacing: 0.5px; word-break: break-all; }
+  .url-box .sub { font-size: 12px; color: #64748b; margin-top: 6px; }
+  .setup-box { background: #fef3c7; border: 2px solid #f59e0b; border-radius: 12px; padding: 20px 28px; margin-bottom: 32px; }
+  .setup-box .label { font-size: 11px; font-weight: 700; color: #d97706; letter-spacing: 1px; margin-bottom: 6px; }
+  .setup-box .code { font-size: 28px; font-weight: 900; color: #92400e; letter-spacing: 4px; font-family: monospace; }
+  .setup-box .sub { font-size: 12px; color: #78350f; margin-top: 6px; }
+  .section-title { font-size: 13px; font-weight: 800; color: #1e293b; letter-spacing: 0.5px; margin-bottom: 16px; padding-bottom: 8px; border-bottom: 2px solid #e2e8f0; }
+  .steps { list-style: none; margin-bottom: 32px; }
+  .steps li { display: flex; gap: 16px; align-items: flex-start; margin-bottom: 14px; }
+  .steps li .num { width: 28px; height: 28px; background: #7c3aed; color: #fff; border-radius: 50%; font-size: 12px; font-weight: 800; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+  .steps li .text { padding-top: 4px; }
+  .steps li .text strong { display: block; font-size: 14px; color: #1e293b; margin-bottom: 2px; }
+  .steps li .text span { font-size: 12px; color: #64748b; }
+  .steps li .text .url-inline { font-size: 12px; color: #4f46e5; font-weight: 600; }
+  .notice { background: #fffbeb; border: 1px solid #f59e0b; border-radius: 10px; padding: 16px 20px; margin-bottom: 32px; }
+  .notice .notice-title { font-size: 12px; font-weight: 700; color: #b45309; margin-bottom: 8px; }
+  .notice ul { list-style: none; }
+  .notice ul li { font-size: 12px; color: #78350f; margin-bottom: 4px; padding-left: 14px; position: relative; }
+  .notice ul li::before { content: '・'; position: absolute; left: 0; }
+  .support { background: #f0fdf4; border: 1px solid #86efac; border-radius: 10px; padding: 16px 20px; }
+  .support .support-title { font-size: 12px; font-weight: 700; color: #166534; margin-bottom: 8px; }
+  .support p { font-size: 12px; color: #15803d; margin-bottom: 4px; }
+  .footer { background: #f8fafc; border-top: 1px solid #e2e8f0; padding: 16px 48px; text-align: center; font-size: 11px; color: #94a3b8; }
+  @media print {
+    body { background: #fff; }
+    .page { box-shadow: none; margin: 0; border-radius: 0; max-width: 100%; }
+    .no-print { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<div class="no-print" style="text-align:center;padding:16px 0;">
+  <button onclick="window.print()" style="background:#7c3aed;color:#fff;border:none;padding:10px 28px;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;">🖨️ PDFとして保存・印刷</button>
+</div>
+
+<div class="page">
+  <div class="header">
+    <div class="badge">システム利用開始のご案内</div>
+    <h1>relaq 鍼灸マッサージ治療院</h1>
+    <p>Web予約・経営管理システム ご利用ガイド</p>
+  </div>
+
+  <div class="body">
+
+    <!-- ログインURL -->
+    <div class="url-box">
+      <div class="label">🌐 アカウント登録・ログインURL</div>
+      <div class="url">https://relaq-clinic.vercel.app/register</div>
+      <div class="sub">初回のみ「register（登録）」ページで。2回目以降は /admin-login からログイン</div>
+    </div>
+
+    <!-- セットアップコード -->
+    <div class="setup-box">
+      <div class="label">🔑 初回登録時に必要なセットアップコード</div>
+      <div class="code">relaq123</div>
+      <div class="sub">登録フォームの「セットアップコード」欄に入力してください（他の方には教えないでください）</div>
+    </div>
+
+    <!-- 初回設定ステップ -->
+    <div style="margin-bottom:12px;">
+      <div class="section-title">📋 初回ログイン後の設定手順</div>
+    </div>
+    <ul class="steps">
+      <li>
+        <div class="num">1</div>
+        <div class="text">
+          <strong>アカウント登録（初回のみ）</strong>
+          <span class="url-inline">https://relaq-clinic.vercel.app/register</span>
+          <span> にアクセス → メールアドレス・パスワード・セットアップコード（上記）を入力して登録</span>
+        </div>
+      </li>
+      <li>
+        <div class="num">2</div>
+        <div class="text">
+          <strong>パスワードの確認・変更</strong>
+          <span>「設定」→「アカウント設定」で、ご自身が覚えやすい安全なパスワードに変更してください</span>
+        </div>
+      </li>
+      <li>
+        <div class="num">3</div>
+        <div class="text">
+          <strong>院情報の入力</strong>
+          <span>「設定」→ クリニック名・電話番号・住所・営業時間などを入力して保存</span>
+        </div>
+      </li>
+      <li>
+        <div class="num">4</div>
+        <div class="text">
+          <strong>予約コース・スタッフの登録</strong>
+          <span>「設定」→「予約コース・スタッフ設定」で施術メニューとスタッフ名を追加</span>
+        </div>
+      </li>
+      <li>
+        <div class="num">5</div>
+        <div class="text">
+          <strong>予約ページの動作確認</strong>
+          <span class="url-inline">https://relaq-clinic.vercel.app/reserve</span>
+          <span> にアクセスして予約の流れを確認。問題なければ患者様への案内を開始してください</span>
+        </div>
+      </li>
+    </ul>
+
+    <!-- 注意事項 -->
+    <div class="notice">
+      <div class="notice-title">⚠️ セキュリティに関するお願い</div>
+      <ul>
+        <li>セットアップコードは初回登録にのみ使用します。登録後は不要です</li>
+        <li>ログイン情報（メール・パスワード）はスタッフ・ご家族を含む第三者には共有しないでください</li>
+        <li>使用後はブラウザを閉じる前にログアウトしてください</li>
+        <li>公共の場所（カフェ・図書館）や共有PCからのログインはお控えください</li>
+      </ul>
+    </div>
+
+    <!-- サポート -->
+    <div class="support">
+      <div class="support-title">📞 困ったときのサポート</div>
+      <p>開発・サポート担当：ボール接骨院（平岩）</p>
+      <p>何かご不明な点があればお気軽にご連絡ください</p>
+    </div>
+
+  </div>
+
+  <div class="footer">
+    © 2026 ボール接骨院 — 本書はシステム導入時の配布資料です。取り扱いにご注意ください。
+  </div>
+</div>
+
+</body>
+</html>

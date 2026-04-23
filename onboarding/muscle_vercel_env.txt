@@ -1,0 +1,64 @@
+# ================================================================
+# マッスル整体 — Vercel 環境変数設定ファイル
+# Vercel Dashboard → muscle-clinic プロジェクト → Settings → Environment Variables
+# ================================================================
+# ✅ = 設定済み（コピペOK）
+# ⚠️ = 要確認・要取得
+# ================================================================
+
+# ── Supabase（全クリニック共通）✅ ──────────────────────────────
+NEXT_PUBLIC_SUPABASE_URL=https://uatmzcnoumafeuzprkdo.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=【Supabase Dashboard → Settings → API → anon public】
+SUPABASE_SERVICE_ROLE_KEY=【Supabase Dashboard → Settings → API → service_role secret】
+
+# ── アプリモード ✅ ─────────────────────────────────────────────
+NEXT_PUBLIC_APP_MODE=CLINIC
+
+# ── クリニック名・ロゴ ✅ ───────────────────────────────────────
+NEXT_PUBLIC_CLINIC_NAME=マッスル整体
+NEXT_PUBLIC_CLINIC_NAME_SHORT=マッスル整体
+# ロゴ画像: public/images/ に配置後に設定（なければ省略→テキスト表示）
+# NEXT_PUBLIC_CLINIC_LOGO_URL=/images/muscle-logo.png
+# NEXT_PUBLIC_CLINIC_LOGO_SMALL_URL=/images/muscle-logo.png
+
+# ── クリニックID ⚠️ 要設定 ─────────────────────────────────────
+# muscle_setup.sql の STEP1 を Supabase SQL Editor で実行して取得した UUID を設定
+NEXT_PUBLIC_CLINIC_ID=【muscle_setup.sql STEP1 実行後に取得したUUID】
+
+# ── セットアップコード ✅ ────────────────────────────────────────
+SETUP_PASSWORD=muscle2026
+
+# ── LINE Messaging API ⚠️ 要取得 ────────────────────────────────
+# LINE Developers → マッスル整体チャネル → チャネル基本設定 から取得
+LINE_CHANNEL_SECRET=【マッスル整体のLINE Channel Secret】
+LINE_CHANNEL_ACCESS_TOKEN=【マッスル整体のLINE Channel Access Token（長期）】
+NEXT_PUBLIC_LINE_OFFICIAL_ACCOUNT_URL=https://lin.ee/【マッスル整体の友達追加URL】
+
+# ── LINE 院長通知用 ⚠️ 任意 ────────────────────────────────────
+# 院長がLINE公式アカウントを友達追加後、webhookログから取得
+OWNER_LINE_USER_ID=【川上様のLINE User ID（任意・後から設定可）】
+
+# ── AI機能 ✅（共通キー流用可）─────────────────────────────────
+GEMINI_API_KEY=【Google AI Studio → API Keys から取得 / ボール接骨院と共通でも可】
+
+# ── Web Push通知 ✅（共通キー流用可）───────────────────────────
+NEXT_PUBLIC_VAPID_PUBLIC_KEY=【ボール接骨院の値と共通でも可 / 新規生成する場合は npx web-push generate-vapid-keys】
+VAPID_PRIVATE_KEY=【ボール接骨院の値と共通でも可】
+VAPID_SUBJECT=mailto:admin@ball-clinic.jp
+
+# ── Cron リマインド ✅ ──────────────────────────────────────────
+REMIND_SECRET=muscle-remind-2026
+
+# ================================================================
+# Vercel プロジェクト作成手順（まだ作成していない場合）
+# ================================================================
+# 1. https://vercel.com → Add New Project
+# 2. リポジトリ: hiraiwayuji/ball-clinic-reserve を選択
+# 3. Project Name: muscle-clinic
+# 4. Framework: Next.js（自動検出）
+# 5. 上記の環境変数をすべて入力（⚠️ 以外）
+# 6. Deploy → https://muscle-clinic.vercel.app
+#
+# ⚠️ の項目は後からでも Vercel Dashboard → Settings → Environment Variables で追加・変更可能
+# 変更後は Deployments → Redeploy で反映
+# ================================================================
