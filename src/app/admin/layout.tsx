@@ -33,7 +33,6 @@ export default async function AdminLayout({
                   src={CLINIC_CONFIG.logoSmallUrl}
                   alt={CLINIC_CONFIG.nameShort}
                   className="h-10 w-auto object-contain max-w-[200px]"
-                  onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
                 />
               )}
               {!isFamilyGift && showLogoIcon && !hasCustomLogo && isDefaultClinic && (

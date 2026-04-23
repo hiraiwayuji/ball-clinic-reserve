@@ -107,6 +107,57 @@ export async function logoutAction() {
   redirect("/admin-login");
 }
 
+/** ログイン中ユーザーのメールアドレスを取得 */
+export async function getMyEmail(): Promise<string | null> {
+  const { createClient } = await import("@/lib/supabase/server");
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  return user?.email ?? null;
+}
+
+/** メールアドレス変更（確認メールが届く） */
+export async function updateEmailAction(formData: FormData) {
+  const newEmail = formData.get("email") as string;
+  if (!newEmail?.trim()) return { error: "メールアドレスを入力してください" };
+
+  const { createClient } = await import("@/lib/supabase/server");
+  const supabase = await createClient();
+  const { error } = await supabase.auth.updateUser({ email: newEmail.trim() });
+  if (error) return { error: `変更に失敗しました: ${error.message}` };
+  return { success: "確認メールを送信しました。リンクをクリックして変更を完了してください。" };
+}
+
+/** パスワード変更（現在のパスワードで再認証してから変更） */
+export async function updatePasswordAction(formData: FormData) {
+  const currentPassword = formData.get("currentPassword") as string;
+  const newPassword = formData.get("newPassword") as string;
+  const confirmPassword = formData.get("confirmPassword") as string;
+
+  if (!currentPassword || !newPassword || !confirmPassword)
+    return { error: "すべての項目を入力してください" };
+  if (newPassword !== confirmPassword)
+    return { error: "新しいパスワードが一致しません" };
+  if (newPassword.length < 8)
+    return { error: "パスワードは8文字以上で設定してください" };
+
+  const { createClient } = await import("@/lib/supabase/server");
+  const supabase = await createClient();
+
+  // 現在のパスワードで再認証
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user?.email) return { error: "ユーザー情報を取得できませんでした" };
+
+  const { error: signInError } = await supabase.auth.signInWithPassword({
+    email: user.email,
+    password: currentPassword,
+  });
+  if (signInError) return { error: "現在のパスワードが正しくありません" };
+
+  const { error } = await supabase.auth.updateUser({ password: newPassword });
+  if (error) return { error: `変更に失敗しました: ${error.message}` };
+  return { success: "パスワードを変更しました" };
+}
+
 export async function signUpAction(formData: FormData) {
   const email        = formData.get("email") as string;
   const password     = formData.get("password") as string;
