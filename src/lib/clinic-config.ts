@@ -16,6 +16,10 @@ export const CLINIC_CONFIG = {
   logoSmallUrl: process.env.NEXT_PUBLIC_CLINIC_LOGO_SMALL_URL ?? "/images/logo-white.png",
   /** ロゴ画像にクリニック名テキストが含まれる場合 true → 隣のテキストを非表示 */
   usesWordmarkLogo: process.env.NEXT_PUBLIC_CLINIC_USES_WORDMARK_LOGO === "true",
+  /** カスタムロゴが設定されているか（ボール接骨院デフォルト以外） */
+  hasCustomLogo: !!process.env.NEXT_PUBLIC_CLINIC_LOGO_SMALL_URL,
+  /** ボール接骨院本体のデプロイかどうか（他院ではロゴマークを使用禁止） */
+  isDefaultClinic: !process.env.NEXT_PUBLIC_CLINIC_NAME,
   /** 営業時間（1行目・2行目・休診日） */
   hoursLine1: process.env.NEXT_PUBLIC_CLINIC_HOURS_1 ?? "月・火・木・金: 12:00 ～ 23:00（最終受付 22:30）",
   hoursLine2: process.env.NEXT_PUBLIC_CLINIC_HOURS_2 ?? "土: 10:00 ～ 18:00（最終受付 17:30）",

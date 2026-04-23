@@ -66,13 +66,15 @@ export default function QuestionnairePage() {
 
           {/* ヘッダー */}
           <div className="text-center space-y-3">
-            <div className="relative w-40 h-14 mx-auto">
-              {_isExternalLogo ? (
-                <img src={CLINIC_CONFIG.logoSmallUrl} alt={CLINIC_CONFIG.nameShort} className="max-h-full w-auto object-contain mx-auto" />
-              ) : (
-                <Image src={CLINIC_CONFIG.logoSmallUrl} alt={CLINIC_CONFIG.nameShort} fill className="object-contain" />
-              )}
-            </div>
+            {(CLINIC_CONFIG.hasCustomLogo || CLINIC_CONFIG.isDefaultClinic) && (
+              <div className="relative w-40 h-14 mx-auto">
+                {CLINIC_CONFIG.hasCustomLogo ? (
+                  <img src={CLINIC_CONFIG.logoSmallUrl} alt={CLINIC_CONFIG.nameShort} className="max-h-full w-auto object-contain mx-auto" />
+                ) : (
+                  <Image src={CLINIC_CONFIG.logoSmallUrl} alt={CLINIC_CONFIG.nameShort} fill className="object-contain" />
+                )}
+              </div>
+            )}
             <div className="w-16 h-16 bg-emerald-500 rounded-full flex items-center justify-center mx-auto shadow-lg shadow-emerald-500/40">
               <CheckCircle2 className="w-10 h-10 text-white" />
             </div>
@@ -148,7 +150,7 @@ export default function QuestionnairePage() {
         <div className="flex flex-col items-center mb-10">
           <div className="relative w-48 h-16 mb-3">
             {_isExternalLogo ? (
-                <img src={CLINIC_CONFIG.logoSmallUrl} alt={CLINIC_CONFIG.nameShort} className="max-h-full w-auto object-contain mx-auto" />
+                <img src={CLINIC_CONFIG.logoSmallUrl} alt={CLINIC_CONFIG.nameShort} className={`max-h-full w-auto object-contain mx-auto ${CLINIC_CONFIG.usesWordmarkLogo ? "bg-white rounded-lg px-3 py-2" : ""}`} />
               ) : (
                 <Image src={CLINIC_CONFIG.logoSmallUrl} alt={CLINIC_CONFIG.nameShort} fill className="object-contain" />
               )}

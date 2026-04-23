@@ -101,23 +101,27 @@ export default function AdminLoginPage() {
       {/* Login card */}
       <div className="relative z-10 w-full max-w-md">
         <div className="text-center mb-8">
-          <div 
-            className="inline-flex items-center justify-center w-20 h-20 rounded-2xl mb-6 shadow-2xl overflow-hidden bg-white/10 backdrop-blur-sm"
+          <div
+            className={`inline-flex items-center justify-center rounded-2xl mb-6 shadow-2xl overflow-hidden bg-white/10 backdrop-blur-sm ${CLINIC_CONFIG.hasCustomLogo && CLINIC_CONFIG.usesWordmarkLogo ? "px-4 py-3" : "w-20 h-20"}`}
             style={{
               boxShadow: '0 0 40px rgba(59, 130, 246, 0.3)',
             }}
           >
-            <div className="relative w-14 h-14 flex items-center justify-center">
-              {isExternalLogo ? (
+            <div className={`relative flex items-center justify-center ${CLINIC_CONFIG.hasCustomLogo && CLINIC_CONFIG.usesWordmarkLogo ? "w-40 h-12 bg-white rounded-lg px-2 py-1" : "w-14 h-14"}`}>
+              {CLINIC_CONFIG.hasCustomLogo ? (
                 <img src={CLINIC_CONFIG.logoSmallUrl} alt={CLINIC_CONFIG.nameShort} className="max-h-12 w-auto object-contain" />
-              ) : (
+              ) : CLINIC_CONFIG.isDefaultClinic ? (
                 <Image src={CLINIC_CONFIG.logoSmallUrl} alt={CLINIC_CONFIG.nameShort} fill className="object-contain" />
+              ) : (
+                <Shield className="w-10 h-10 text-blue-400" />
               )}
             </div>
           </div>
-          <h1 className="text-3xl font-black text-white tracking-tight">
-            {isFamilyGift ? APP_TITLE : CLINIC_CONFIG.nameShort}
-          </h1>
+          {!CLINIC_CONFIG.usesWordmarkLogo && (
+            <h1 className="text-3xl font-black text-white tracking-tight">
+              {isFamilyGift ? APP_TITLE : CLINIC_CONFIG.nameShort}
+            </h1>
+          )}
           <p className="text-blue-300/70 text-sm mt-2 font-medium tracking-wide">
             {isDemo ? "デモ環境 - 自由にお試しいただけます" : "予約管理システム"}
           </p>
@@ -307,7 +311,7 @@ export default function AdminLoginPage() {
 
         {/* Copyright */}
         <p className="text-center text-slate-600 text-xs mt-8">
-          © 2026 ボール接骨院 All rights reserved.
+          © {new Date().getFullYear()} {CLINIC_CONFIG.nameShort} All rights reserved.
         </p>
       </div>
 

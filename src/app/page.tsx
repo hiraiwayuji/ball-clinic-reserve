@@ -22,21 +22,14 @@ export default function Home() {
         <div className="container mx-auto px-4 h-16 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <Link href="/">
-              {isExternalLogo ? (
-                <img
-                  src={CLINIC_CONFIG.logoUrl}
-                  alt={CLINIC_CONFIG.name}
-                  className="h-10 w-auto object-contain"
-                />
-              ) : (
+              {CLINIC_CONFIG.hasCustomLogo ? (
+                <img src={CLINIC_CONFIG.logoUrl} alt={CLINIC_CONFIG.name} className="h-10 w-auto object-contain" />
+              ) : CLINIC_CONFIG.isDefaultClinic ? (
                 <div className="relative w-40 h-12">
-                  <Image
-                    src={CLINIC_CONFIG.logoUrl}
-                    alt={CLINIC_CONFIG.name}
-                    fill
-                    className="object-contain"
-                  />
+                  <Image src={CLINIC_CONFIG.logoUrl} alt={CLINIC_CONFIG.name} fill className="object-contain" />
                 </div>
+              ) : (
+                <span className="text-lg font-bold text-white">{CLINIC_CONFIG.name}</span>
               )}
             </Link>
           </div>
@@ -142,13 +135,13 @@ export default function Home() {
       <footer className="bg-slate-950 text-slate-400 py-12 border-t border-zinc-800">
         <div className="container mx-auto px-4 text-center">
           <div className="flex items-center justify-center gap-3 mb-6">
-            {isExternalLogoSmall ? (
+            {CLINIC_CONFIG.hasCustomLogo ? (
               <img
                 src={CLINIC_CONFIG.logoSmallUrl}
                 alt={CLINIC_CONFIG.name}
-                className="h-8 w-auto object-contain"
+                className={`h-10 w-auto object-contain ${CLINIC_CONFIG.usesWordmarkLogo ? "bg-white rounded-lg px-2 py-1" : ""}`}
               />
-            ) : (
+            ) : CLINIC_CONFIG.isDefaultClinic ? (
               <div className="relative w-8 h-8">
                 <Image
                   src={CLINIC_CONFIG.logoSmallUrl}
@@ -157,11 +150,13 @@ export default function Home() {
                   className="object-contain"
                 />
               </div>
+            ) : null}
+            {!CLINIC_CONFIG.usesWordmarkLogo && (
+              <span className="text-lg font-bold text-slate-200">{CLINIC_CONFIG.nameShort}</span>
             )}
-            <span className="text-lg font-bold text-slate-200">{CLINIC_CONFIG.nameShort}</span>
           </div>
           <p className="text-sm mb-4">{CLINIC_CONFIG.description}</p>
-          <p className="text-xs">&copy; {new Date().getFullYear()} {CLINIC_CONFIG.nameShort}. All rights reserved.</p>
+          <p className="text-xs">&copy; {new Date().getFullYear()} {CLINIC_CONFIG.usesWordmarkLogo ? CLINIC_CONFIG.name : CLINIC_CONFIG.nameShort}. All rights reserved.</p>
         </div>
       </footer>
     </div>
