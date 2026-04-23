@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Settings, Video, MapPin, Save, Loader2, MessageSquare, Instagram, Youtube, Twitter, Phone, Users, Building2, Target, Globe } from "lucide-react";
+import { Settings, Video, MapPin, Save, Loader2, MessageSquare, Instagram, Youtube, Twitter, Phone, Users, Building2, Target, Globe, Clock } from "lucide-react";
 import { updateClinicSettings, ClinicSettings } from "@/app/actions/settings";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
@@ -134,12 +134,63 @@ export default function SettingsForm({ initialSettings }: { initialSettings: Cli
                     <Label htmlFor="market_area" className="text-slate-700 dark:text-slate-300">マーケット範囲（商圏）</Label>
                     <Input id="market_area" placeholder="例：駅から徒歩10分圏内、○○市全域など" value={settings?.market_area || ""} onChange={(e) => updateField("market_area", e.target.value)} />
                   </div>
+                </div>
+              </div>
+
+              <div className="space-y-4 pt-4 border-t border-slate-100 dark:border-white/10">
+                <h4 className="text-sm font-bold text-slate-700 dark:text-slate-300 border-b border-slate-200 dark:border-white/10 pb-2 flex items-center">
+                  <Clock className="w-4 h-4 mr-2" />営業時間
+                </h4>
+                <div className="space-y-3">
                   <div className="space-y-2">
-                    <Label htmlFor="target_generation" className="text-slate-700 dark:text-slate-300">ターゲット年代</Label>
-                    <div className="relative">
-                      <Target className="absolute left-3 top-3 w-4 h-4 text-slate-400" />
-                      <Input id="target_generation" className="pl-9" placeholder="例：30代〜50代、主婦層など" value={settings?.target_generation || ""} onChange={(e) => updateField("target_generation", e.target.value)} />
-                    </div>
+                    <Label htmlFor="hours_line1" className="text-slate-700 dark:text-slate-300">営業時間（1行目）</Label>
+                    <Input
+                      id="hours_line1"
+                      placeholder="例：月〜金: 9:00〜18:00"
+                      value={settings?.hours_line1 || ""}
+                      onChange={(e) => updateField("hours_line1", e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="hours_line2" className="text-slate-700 dark:text-slate-300">営業時間（2行目・任意）</Label>
+                    <Input
+                      id="hours_line2"
+                      placeholder="例：土: 9:00〜13:00"
+                      value={settings?.hours_line2 || ""}
+                      onChange={(e) => updateField("hours_line2", e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="hours_closed" className="text-slate-700 dark:text-slate-300">休診日・注意事項</Label>
+                    <Input
+                      id="hours_closed"
+                      placeholder="例：※日・祝休診"
+                      value={settings?.hours_closed || ""}
+                      onChange={(e) => updateField("hours_closed", e.target.value)}
+                    />
+                  </div>
+                </div>
+                <div className="text-xs text-slate-500 dark:text-slate-400 bg-slate-50 dark:bg-slate-800/50 rounded-lg p-3">
+                  予約ページのトップに表示されます。未入力の場合は環境変数の値が使用されます。
+                </div>
+                <div className="mt-2">
+                  <div className="text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">プレビュー</div>
+                  <div className="text-sm text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 rounded-lg p-3 leading-relaxed">
+                    {settings?.hours_line1 || <span className="text-slate-400 dark:text-slate-500 italic">（1行目未入力）</span>}
+                    {settings?.hours_line2 && <><br />{settings.hours_line2}</>}
+                    {settings?.hours_closed && (
+                      <><br /><span className="text-red-500 dark:text-red-400 font-medium">{settings.hours_closed}</span></>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-4 pt-4 border-t border-slate-100 dark:border-white/10">
+                <div className="space-y-2">
+                  <Label htmlFor="target_generation" className="text-slate-700 dark:text-slate-300">ターゲット年代</Label>
+                  <div className="relative">
+                    <Target className="absolute left-3 top-3 w-4 h-4 text-slate-400" />
+                    <Input id="target_generation" className="pl-9" placeholder="例：30代〜50代、主婦層など" value={settings?.target_generation || ""} onChange={(e) => updateField("target_generation", e.target.value)} />
                   </div>
                 </div>
               </div>

@@ -39,6 +39,10 @@ export type ClinicSettings = {
   staff_count?: number;
   branch_count?: number;
   hp_url?: string;
+  // 営業時間
+  hours_line1?: string;
+  hours_line2?: string;
+  hours_closed?: string;
 };
 
 
@@ -115,6 +119,9 @@ export async function updateClinicSettings(settings: Partial<ClinicSettings>) {
     staff_count: settings.staff_count,
     branch_count: settings.branch_count,
     hp_url: settings.hp_url,
+    hours_line1: settings.hours_line1,
+    hours_line2: settings.hours_line2,
+    hours_closed: settings.hours_closed,
   };
 
   const targetData = {
@@ -167,6 +174,35 @@ export async function updateClinicSettings(settings: Partial<ClinicSettings>) {
   revalidatePath("/admin", "layout");
 
   return { success: true };
+}
+
+// --- 公開用クリニック情報（認証不要） ---
+
+export type PublicClinicHours = {
+  hours_line1: string | null;
+  hours_line2: string | null;
+  hours_closed: string | null;
+};
+
+export async function getPublicClinicHours(): Promise<PublicClinicHours> {
+  noStore();
+  const clinicId = process.env.NEXT_PUBLIC_CLINIC_ID;
+  if (!clinicId) return { hours_line1: null, hours_line2: null, hours_closed: null };
+
+  const { createClient } = await import("@/lib/supabase/server");
+  const supabase = await createClient();
+
+  const { data } = await supabase
+    .from("clinic_settings")
+    .select("hours_line1, hours_line2, hours_closed")
+    .eq("id", clinicId)
+    .maybeSingle();
+
+  return {
+    hours_line1: data?.hours_line1 ?? null,
+    hours_line2: data?.hours_line2 ?? null,
+    hours_closed: data?.hours_closed ?? null,
+  };
 }
 
 // --- カスタム経費カテゴリ ---

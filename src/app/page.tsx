@@ -5,15 +5,21 @@ import { Button } from "@/components/ui/button";
 import { CalendarDays, Clock, MapPin, Phone } from "lucide-react";
 import Image from "next/image";
 import { CLINIC_CONFIG } from "@/lib/clinic-config";
+import { getPublicClinicHours } from "@/app/actions/settings";
 
 // NEXT_PUBLIC_CLINIC_NAME が未設定 = ボール接骨院（デフォルト）
 const isDefaultClinic = !process.env.NEXT_PUBLIC_CLINIC_NAME;
 const isExternalLogo = CLINIC_CONFIG.logoUrl.startsWith("http");
 const isExternalLogoSmall = CLINIC_CONFIG.logoSmallUrl.startsWith("http");
 
-export default function Home() {
+export default async function Home() {
   if (isFamilyGift) redirect("/calendar");
   if (isDemo) redirect("/admin-login");
+
+  const dbHours = await getPublicClinicHours();
+  const hoursLine1 = dbHours.hours_line1 || CLINIC_CONFIG.hoursLine1;
+  const hoursLine2 = dbHours.hours_line2 !== null ? dbHours.hours_line2 : CLINIC_CONFIG.hoursLine2;
+  const hoursClosed = dbHours.hours_closed || CLINIC_CONFIG.hoursClosed;
 
   return (
     <div className="min-h-screen bg-slate-900" data-dark-page>
@@ -95,9 +101,9 @@ export default function Home() {
                 </div>
                 <h3 className="text-lg font-bold mb-2 text-white">営業時間</h3>
                 <p className="text-slate-400 text-sm">
-                  {CLINIC_CONFIG.hoursLine1}<br />
-                  {CLINIC_CONFIG.hoursLine2 && <>{CLINIC_CONFIG.hoursLine2}<br /></>}
-                  <span className="text-red-400 font-medium">{CLINIC_CONFIG.hoursClosed}</span>
+                  {hoursLine1}<br />
+                  {hoursLine2 && <>{hoursLine2}<br /></>}
+                  <span className="text-red-400 font-medium">{hoursClosed}</span>
                 </p>
               </div>
 
