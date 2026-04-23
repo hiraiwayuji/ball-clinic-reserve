@@ -115,7 +115,6 @@ export async function updateClinicSettings(settings: Partial<ClinicSettings>) {
     staff_count: settings.staff_count,
     branch_count: settings.branch_count,
     hp_url: settings.hp_url,
-    updated_at: new Date().toISOString()
   };
 
   const targetData = {
@@ -149,8 +148,7 @@ export async function updateClinicSettings(settings: Partial<ClinicSettings>) {
       clinic_id: clinicId,
       month: monthStr,
       ...targetData,
-      updated_at: new Date().toISOString()
-    }, { onConflict: 'clinic_id, month' });
+    }, { onConflict: 'clinic_id,month' });
 
   if (targetError) {
     console.error("Failed to update clinic_targets. Error details:", JSON.stringify(targetError, null, 2));
@@ -166,6 +164,7 @@ export async function updateClinicSettings(settings: Partial<ClinicSettings>) {
   revalidatePath("/admin/settings");
   revalidatePath("/admin/dashboard");
   revalidatePath("/admin/evaluation");
+  revalidatePath("/admin", "layout");
 
   return { success: true };
 }

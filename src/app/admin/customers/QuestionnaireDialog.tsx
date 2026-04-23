@@ -44,6 +44,7 @@ interface Props {
     city_name: string | null;
     birth_date: string | null;
     referral_source: string | null;
+    address: string | null;
   };
 }
 
@@ -55,6 +56,7 @@ export function QuestionnaireDialog({ open, onOpenChange, customerId, customerNa
   const [cityName, setCityName] = useState(initialData.city_name ?? "");
   const [birthDate, setBirthDate] = useState(initialData.birth_date ?? "");
   const [referralSource, setReferralSource] = useState(initialData.referral_source ?? "");
+  const [address, setAddress] = useState(initialData.address ?? "");
   const [isPending, startTransition] = useTransition();
 
   const handleSave = () => {
@@ -68,6 +70,7 @@ export function QuestionnaireDialog({ open, onOpenChange, customerId, customerNa
           city_name: cityName.trim() || null,
           birth_date: birthDate || null,
           referral_source: referralSource || null,
+          address: address.trim() || null,
         });
         toast.success("アンケート情報を保存しました");
         onOpenChange(false);
@@ -182,6 +185,18 @@ export function QuestionnaireDialog({ open, onOpenChange, customerId, customerNa
               type="date"
               value={birthDate}
               onChange={e => setBirthDate(e.target.value)}
+              className="w-full h-9 border border-slate-200 rounded-lg px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+            />
+          </div>
+
+          {/* 住所 */}
+          <div className="space-y-1.5">
+            <label className="text-xs font-bold text-slate-600">住所（番地まで）</label>
+            <input
+              type="text"
+              value={address}
+              onChange={e => setAddress(e.target.value)}
+              placeholder="〇〇市〇〇町1-2-3"
               className="w-full h-9 border border-slate-200 rounded-lg px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
             />
           </div>

@@ -110,13 +110,13 @@ karada_setup.sql → STEP1 だけ実行 → clinic_id をメモ
 
 ## メモ欄
 
-| | relaq | karada |
-|--|-------|--------|
-| clinic_id | 021efe2a-a768-4fa6-9de8-62cae9a79d47 | d3b55abc-46a6-4cbe-8198-21c0392d9a2e |
-| Vercel URL | https://relaq-clinic.vercel.app | https://karada-clinic.vercel.app |
-| SETUP_PASSWORD | relaq123 | karada2026 |
-| 担当者メール | | |
-| LINE Channel ID | | |
-| 導入日 | | |
-| 営業時間 | 火水木 9:00〜18:30 / 金土 10:00〜17:30 | 月火木金土 10:00〜20:00（水・日・祝休診） |
-| 備考 | 月・祝休診。平日最終受付18:00・土曜最終受付17:00。〒771-0212 徳島県板野郡松茂町中喜来字前原東一番越1-7 | ランチタイム営業・訪問治療あり[10:00〜16:00] |
+| | relaq | karada | マッスル整体 |
+|--|-------|--------|------------|
+| clinic_id | 021efe2a-a768-4fa6-9de8-62cae9a79d47 | d3b55abc-46a6-4cbe-8198-21c0392d9a2e | ※STEP1実行後に記入 |
+| Vercel URL | https://relaq-clinic.vercel.app | https://karada-clinic.vercel.app | https://muscle-clinic.vercel.app |
+| SETUP_PASSWORD | relaq123 | karada2026 | muscle2026 |
+| 担当者メール | | | 川上貴士様 |
+| LINE Channel ID | | | |
+| 導入日 | | | |
+| 営業時間 | 火水木 9:00〜18:30 / 金土 10:00〜17:30 | 月火木金土 10:00〜20:00（水・日・祝休診） | 要確認（月曜定休） |
+| 備考 | 月・祝休診。平日最終受付18:00・土曜最終受付17:00。〒771-0212 徳島県板野郡松茂町中喜来字前原東一番越1-7 | ランチタイム営業・訪問治療あり[10:00〜16:00] | 〒761-8078 香川県高松市仏生山町甲1667-1 / TEL: 087-888-8144 / Instagram: @muscle8144 |

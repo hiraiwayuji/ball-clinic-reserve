@@ -41,6 +41,7 @@ export type Customer = {
   city_name: string | null;
   birth_date: string | null;
   referral_source: string | null;
+  address: string | null;
   medical_record_number: string | null;
 };
 
@@ -493,6 +494,7 @@ function EditableRow({
               city_name: customer.city_name,
               birth_date: customer.birth_date,
               referral_source: customer.referral_source,
+              address: customer.address,
             }}
           />
         </TableCell>

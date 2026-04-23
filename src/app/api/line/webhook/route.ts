@@ -251,9 +251,12 @@ export async function POST(req: NextRequest) {
         const sb = getSupabase();
         if (sb) {
           if (customer?.line_user_id && customer.line_user_id !== lineUserId) {
-            // 別のLINEアカウントが既に紐づいている場合は上書き
-            await sb.from("customers").update({ line_user_id: lineUserId }).eq("id", apt.customer_id);
-            linkMessage = "\n\n✅ LINEアカウントを紐づけました。次回から予約リマインダーをお送りします。";
+            // 別のLINEアカウントが既に紐づいている → 上書き禁止・エラーを返す
+            await replyMessage(replyToken, [{
+              type: "text",
+              text: `予約番号「${userMessage}」の確認ができました。\n\nただし、この予約にはすでに別のLINEアカウントが紐づいています。\n\nお心当たりがない場合は、お手数ですが受付スタッフへお問い合わせください。`,
+            }]);
+            continue;
           } else if (!customer?.line_user_id) {
             await sb.from("customers").update({ line_user_id: lineUserId }).eq("id", apt.customer_id);
             linkMessage = "\n\n✅ LINEアカウントを紐づけました。次回から予約リマインダーをお送りします。";

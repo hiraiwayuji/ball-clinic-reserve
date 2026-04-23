@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { PUBLIC_CLINIC_ID } from "@/lib/default-clinic-id";
 
-const DEFAULT_CLINIC_ID = "00000000-0000-0000-0000-000000000001";
+const DEFAULT_CLINIC_ID = PUBLIC_CLINIC_ID;
 
 function getSupabase() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
@@ -79,42 +80,63 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ success: true, appointments: appointments.map(formatApt) });
   }
 
-  if (name) {
-    const { data: customers } = await supabase
-      .from("customers")
-      .select("id")
-      .eq("clinic_id", DEFAULT_CLINIC_ID)
-      .ilike("name", `%${name.trim()}%`);
-    if (!customers || customers.length === 0)
-      return NextResponse.json({ error: "この名前の予約が見つかりませんでした" }, { status: 404 });
-    const customerIds = customers.map((c: any) => c.id);
-    const { data: appointments } = await supabase
-      .from("appointments")
-      .select("id, start_time, is_first_visit, status, customers(name)")
-      .in("customer_id", customerIds)
-      .in("status", ["pending", "confirmed", "waiting"])
-      .order("start_time", { ascending: true });
-    if (!appointments || appointments.length === 0)
-      return NextResponse.json({ error: "有効な予約が見つかりませんでした" }, { status: 404 });
-    return NextResponse.json({ success: true, appointments: appointments.map(formatApt) });
-  }
+  // 名前のみでの予約一覧取得は廃止（同名別人の予約が見えるリスク）
+  // 電話番号または予約番号(id)での検索のみ許可
 
-  return NextResponse.json({ error: "検索条件が必要です" }, { status: 400 });
+  return NextResponse.json({ error: "電話番号または予約番号で検索してください" }, { status: 400 });
 }
 
 export async function POST(req: NextRequest) {
-  const { ids } = await req.json();
+  const { ids, phone, name } = await req.json();
   if (!ids || !Array.isArray(ids) || ids.length === 0)
     return NextResponse.json({ error: "予約IDが必要です" }, { status: 400 });
+
+  // 電話番号 or 名前のどちらかで本人確認を必須化
+  if (!phone && !name)
+    return NextResponse.json({ error: "本人確認のため電話番号または氏名が必要です" }, { status: 400 });
 
   const supabase = getSupabase();
   if (!supabase) return NextResponse.json({ error: "DB接続エラー" }, { status: 500 });
 
-  // キャンセル前に予約情報を取得（LINE通知用）
-  const { data: apts } = await supabase
+  // ── 所有者確認 ──
+  // 電話番号 or 名前でcustomer_idを特定し、対象予約が本人のものか検証する
+  let allowedCustomerIds: string[] = [];
+  if (phone) {
+    const cleanPhone = phone.replace(/-/g, "");
+    const { data: customers } = await supabase
+      .from("customers")
+      .select("id")
+      .eq("clinic_id", DEFAULT_CLINIC_ID)
+      .or(`phone.ilike.%${cleanPhone}%,phone.ilike.%${phone}%`);
+    allowedCustomerIds = (customers || []).map((c: any) => c.id);
+  } else if (name) {
+    const { data: customers } = await supabase
+      .from("customers")
+      .select("id")
+      .eq("clinic_id", DEFAULT_CLINIC_ID)
+      .ilike("name", name.trim());
+    allowedCustomerIds = (customers || []).map((c: any) => c.id);
+  }
+
+  if (allowedCustomerIds.length === 0)
+    return NextResponse.json({ error: "本人確認ができませんでした。電話番号または氏名をご確認ください。" }, { status: 403 });
+
+  // キャンセル対象の予約が本人のものかチェック
+  const { data: targetApts } = await supabase
     .from("appointments")
-    .select("id, start_time, is_first_visit, customers(name)")
-    .in("id", ids);
+    .select("id, customer_id, start_time, is_first_visit, customers(name)")
+    .in("id", ids)
+    .eq("clinic_id", DEFAULT_CLINIC_ID);
+
+  if (!targetApts || targetApts.length === 0)
+    return NextResponse.json({ error: "予約が見つかりませんでした" }, { status: 404 });
+
+  const unauthorized = targetApts.filter((a: any) => !allowedCustomerIds.includes(a.customer_id));
+  if (unauthorized.length > 0)
+    return NextResponse.json({ error: "キャンセル権限がありません。ご自身の予約のみキャンセルできます。" }, { status: 403 });
+
+  // キャンセル前に予約情報を取得済み（LINE通知用）
+  const apts = targetApts;
 
   const { error } = await supabase
     .from("appointments")

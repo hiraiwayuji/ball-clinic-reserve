@@ -11,6 +11,14 @@ SUPABASE_SERVICE_ROLE_KEY=【Supabase Dashboard → Settings → API → service
 # ── アプリモード ──
 NEXT_PUBLIC_APP_MODE=CLINIC
 
+# ── クリニック名・ロゴ（ロゴ・タイトル表示に使用）★導入ごとに必ず設定 ──
+NEXT_PUBLIC_CLINIC_NAME=【クリニック正式名称 例: マッスル整体】
+NEXT_PUBLIC_CLINIC_NAME_SHORT=【ロゴ表示名 例: マッスル整体】
+# ロゴ画像: PNG変換後 public/images/ に配置 → /images/ファイル名.png
+# 外部URL（Supabase Storage等）の場合は https:// から始めるとそのまま使用可
+NEXT_PUBLIC_CLINIC_LOGO_URL=【/images/xxx-logo.png または外部URL】
+NEXT_PUBLIC_CLINIC_LOGO_SMALL_URL=【/images/xxx-logo.png または外部URL】
+
 # ── クリニックID（公開予約ページ用・Supabase STEP1 で取得した UUID）──
 # relaq:  021efe2a-a768-4fa6-9de8-62cae9a79d47
 # karada: d3b55abc-46a6-4cbe-8198-21c0392d9a2e
@@ -44,6 +52,17 @@ VAPID_SUBJECT=mailto:【管理者メールアドレス】
 REMIND_SECRET=【任意のランダム文字列】
 
 # ================================================================
+# 【マッスル整体】用メモ欄
+# ================================================================
+# Vercel Project 名: muscle-clinic（任意）
+# 本番URL: muscle-clinic.vercel.app（またはカスタムドメイン）
+# NEXT_PUBLIC_CLINIC_NAME: マッスル整体
+# NEXT_PUBLIC_CLINIC_NAME_SHORT: マッスル整体
+# SETUP_PASSWORD: muscle2026（例）
+# LINE Channel: 【取得後に記入】
+# clinic_id: 【muscle_setup.sql STEP1 実行後に記入】
+
+# ================================================================
 # 【relaq 鍼灸マッサージ治療院】用メモ欄
 # ================================================================
 # Vercel Project 名: relaq-clinic（任意）
@@ -57,6 +76,11 @@ REMIND_SECRET=【任意のランダム文字列】
 # ================================================================
 # Vercel Project 名: karada-clinic（任意）
 # 本番URL: karada-clinic.vercel.app（またはカスタムドメイン）
+# NEXT_PUBLIC_CLINIC_NAME: からだ鍼灸整骨院
+# NEXT_PUBLIC_CLINIC_NAME_SHORT: からだ鍼灸整骨院
+# NEXT_PUBLIC_CLINIC_LOGO_URL: /images/karada-logo.png
+# NEXT_PUBLIC_CLINIC_LOGO_SMALL_URL: /images/karada-logo.png
 # SETUP_PASSWORD: karada2026（例）
 # LINE Channel: 【取得後に記入】
-# clinic_id: 【setup.sql STEP1 実行後に記入】
+# clinic_id: 【karada_setup.sql STEP1 実行後に記入】
+# ロゴ素材: karada_tag1.pdf → PNG変換後 public/images/karada-logo.png に配置

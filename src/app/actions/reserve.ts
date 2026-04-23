@@ -321,6 +321,8 @@ export async function createReservation(formData: FormData) {
     const courseDurationStr = formData.get("courseDurationMinutes") as string | null;
     const staffId = (formData.get("staffId") as string) || null;
     const staffName = (formData.get("staffName") as string) || null;
+    const roomId = (formData.get("roomId") as string) || null;
+    const roomName = (formData.get("roomName") as string) || null;
 
     const isFirstVisit = visitType === "new";
 
@@ -376,22 +378,15 @@ export async function createReservation(formData: FormData) {
           };
         }
       } else {
-        // 電話番号なし（再診・名前のみ）→ 名前で照合
-        const { data: existing } = await adminDb
+        // 電話番号なし（再診・名前のみ）→ 名前 + clinic_id で照合
+        const { data: existingList } = await adminDb
           .from("customers")
           .select("id, booking_suspended, line_user_id")
           .eq("name", name)
-          .order("created_at", { ascending: false })
-          .limit(1)
-          .maybeSingle();
+          .eq("clinic_id", PUBLIC_CLINIC_ID)
+          .order("created_at", { ascending: false });
 
-        if (existing) {
-          if (existing.booking_suspended) {
-            return { success: false, error: "現在、オンライン予約のご利用が停止されています。お電話またはLINEにてお問い合わせください。" };
-          }
-          // LINE未紐づけ かつ 顧客DB登録済み → 予約は通す（スタッフが手動管理）
-          customerId = existing.id;
-        } else {
+        if (!existingList || existingList.length === 0) {
           // 名前でも見つからない → アンケートへ誘導
           return {
             success: false,
@@ -399,6 +394,21 @@ export async function createReservation(formData: FormData) {
             requiresQuestionnaire: true,
           };
         }
+
+        if (existingList.length > 1) {
+          // 同名の顧客が複数存在 → 電話番号で特定が必要
+          return {
+            success: false,
+            error: "同じお名前の登録が複数あります。お手数ですが電話番号もご入力いただくか、お電話・LINEにてご予約ください。",
+          };
+        }
+
+        const existing = existingList[0];
+        if (existing.booking_suspended) {
+          return { success: false, error: "現在、オンライン予約のご利用が停止されています。お電話またはLINEにてお問い合わせください。" };
+        }
+        // LINE未紐づけ かつ 顧客DB登録済み → 予約は通す（スタッフが手動管理）
+        customerId = existing.id;
       }
 
       const startDateTimeStr = `${rawDate}T${time}:00+09:00`;
@@ -447,6 +457,38 @@ export async function createReservation(formData: FormData) {
       const endDate = new Date(jstDate.getTime() + durationMinutes * 60000);
       const endDateTimeStr = endDate.toISOString();
 
+      // ── 個室の重複チェック ──
+      // 同じ room_id で時間帯が重複するキャンセル以外の予約があればブロック
+      if (roomId && !isCapacityFull) {
+        const { data: roomConflict } = await adminDb
+          .from("appointments")
+          .select("id")
+          .eq("room_id", roomId)
+          .neq("status", "cancelled")
+          .lt("start_time", endDateTimeStr)   // 既存の開始 < 新規の終了
+          .gt("end_time", startDateTimeStr)   // 既存の終了 > 新規の開始
+          .limit(1);
+        if (roomConflict && roomConflict.length > 0) {
+          return { success: false, error: "選択された個室はその時間帯すでに使用中です。別のお部屋または時間帯をお選びください。" };
+        }
+      }
+
+      // ── スタッフの重複チェック ──
+      // 指名スタッフが同一時間帯に別予約を持つ場合はブロック
+      if (staffId && !isCapacityFull) {
+        const { data: staffConflict } = await adminDb
+          .from("appointments")
+          .select("id")
+          .eq("staff_id", staffId)
+          .neq("status", "cancelled")
+          .lt("start_time", endDateTimeStr)
+          .gt("end_time", startDateTimeStr)
+          .limit(1);
+        if (staffConflict && staffConflict.length > 0) {
+          return { success: false, error: "ご指名のスタッフはその時間帯に別のご予約が入っています。他の担当者または時間帯をお選びください。" };
+        }
+      }
+
       const { error: appointmentErr, data: appointmentData } = await adminDb
         .from("appointments")
         .insert([{
@@ -459,6 +501,7 @@ export async function createReservation(formData: FormData) {
           clinic_id: DEFAULT_CLINIC_ID,
           ...(courseId ? { course_id: courseId, course_name: courseName } : {}),
           ...(staffId ? { staff_id: staffId, staff_name: staffName } : {}),
+          ...(roomId ? { room_id: roomId, room_name: roomName } : {}),
         }])
         .select()
         .single();

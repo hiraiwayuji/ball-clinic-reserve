@@ -730,9 +730,13 @@ export default function EvaluationPage() {
               {m.unit === "円" ? `¥${m.actual.toLocaleString()}` : `${m.actual.toLocaleString()}${m.unit}`}
             </div>
             <div className="text-xs text-slate-400 mt-0.5">目標: {m.unit === "円" ? `¥${m.target.toLocaleString()}` : `${m.target}${m.unit}`}</div>
-            <div className="mt-2 h-1.5 bg-slate-100 rounded-full overflow-hidden">
-              <div className={`h-full ${getMetricBg(i)} transition-all`} style={{ width: `${m.score}%` }} />
-            </div>
+            {m.target === 0 ? (
+              <span className="text-xs text-slate-400 block mt-2">目標未設定</span>
+            ) : (
+              <div className="mt-2 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                <div className={`h-full ${getMetricBg(i)} transition-all`} style={{ width: `${m.score}%` }} />
+              </div>
+            )}
             <div className="text-[10px] text-amber-600 mt-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
               クリックして根拠を確認・修正 →
             </div>
@@ -743,6 +747,17 @@ export default function EvaluationPage() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         {/* --- Left: Score & Radar --- */}
         <div className="lg:col-span-2 space-y-8">
+          {data?.targets && data.targets.target_income === 0 && data.targets.target_patients === 0 && (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 dark:bg-amber-900/20 dark:border-amber-800 p-4 flex items-center justify-between gap-3 mb-4">
+              <div>
+                <p className="text-sm font-semibold text-amber-800 dark:text-amber-300">今月の目標が未設定です</p>
+                <p className="text-xs text-amber-600 dark:text-amber-400 mt-0.5">経営評価の精度を上げるため、目標値を設定してください。</p>
+              </div>
+              <a href="/admin/settings" className="shrink-0 text-xs font-bold text-amber-700 dark:text-amber-300 underline hover:no-underline">
+                設定画面へ →
+              </a>
+            </div>
+          )}
           <Card className="shadow-lg border-emerald-100 overflow-hidden bg-gradient-to-br from-white to-emerald-50/30">
             <div className="grid grid-cols-1 md:grid-cols-2">
               <div className="p-8 flex flex-col items-center justify-center border-b md:border-b-0 md:border-r border-emerald-100">

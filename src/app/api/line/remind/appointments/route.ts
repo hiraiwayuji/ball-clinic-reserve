@@ -33,7 +33,7 @@ export async function POST(req: NextRequest) {
   }
 
   const supabase = getAdminSupabase();
-  const DEFAULT_CLINIC_ID = "00000000-0000-0000-0000-000000000001";
+  const DEFAULT_CLINIC_ID = process.env.NEXT_PUBLIC_CLINIC_ID ?? "00000000-0000-0000-0000-000000000001";
 
   // 設定を取得
   const { data: settings } = await supabase

@@ -7,8 +7,6 @@ async function getSupabase() {
   return await createClient();
 }
 
-const DEFAULT_CLINIC_ID = '00000000-0000-0000-0000-000000000001';
-
 export type CalendarEvent = {
   id: string;
   calendar_id: string;
@@ -99,14 +97,14 @@ export async function createEvent(
   calendarId: string,
   event: Omit<CalendarEvent, "id" | "calendar_id" | "created_at">
 ): Promise<{ success: boolean; event?: CalendarEvent; error?: string }> {
-  await checkAdminAuth();
+  const { clinicId } = await checkAdminAuth();
   const supabase = await getSupabase();
   console.log("createEvent: params=", { calendarId, event });
   if (!supabase) return { success: false, error: "DB not configured" };
   try {
     const { data, error } = await supabase
       .from("calendar_events")
-      .insert([{ ...event, calendar_id: calendarId, clinic_id: DEFAULT_CLINIC_ID }])
+      .insert([{ ...event, calendar_id: calendarId, clinic_id: clinicId }])
       .select()
       .single();
     if (error) {

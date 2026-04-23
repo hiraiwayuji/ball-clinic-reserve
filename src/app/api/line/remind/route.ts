@@ -68,7 +68,7 @@ export async function POST(req: NextRequest) {
   const dayStart = `${dateStr}T00:00:00+09:00`;
   const dayEnd = `${dateStr}T23:59:59+09:00`;
 
-  const DEFAULT_CLINIC_ID = "00000000-0000-0000-0000-000000000001";
+  const DEFAULT_CLINIC_ID = process.env.NEXT_PUBLIC_CLINIC_ID ?? "00000000-0000-0000-0000-000000000001";
   const supabase = getAdminSupabase();
 
   // 家族カレンダーのイベントを取得

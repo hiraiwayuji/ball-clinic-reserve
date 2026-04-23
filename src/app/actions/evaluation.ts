@@ -25,18 +25,19 @@ export async function getMonthlyEvaluation(year: number, month: number) {
     let { data: targets, error: targetErr } = await supabase
       .from("clinic_targets")
       .select("*")
+      .eq("clinic_id", clinicId)
       .eq("month", firstDayStr)
       .maybeSingle();
 
     if (!targets && !targetErr) {
       const { data: newTargets, error: insertTargetErr } = await supabase
         .from("clinic_targets")
-        .insert([{ 
+        .insert([{
           clinic_id: clinicId,
-          month: firstDayStr, 
-          target_patients: 200, 
-          target_income: 1500000, 
-          target_sns_tasks: 100, 
+          month: firstDayStr,
+          target_patients: 200,
+          target_income: 1500000,
+          target_sns_tasks: 100,
           target_new_patients: 20
         }])
         .select()
@@ -48,6 +49,7 @@ export async function getMonthlyEvaluation(year: number, month: number) {
     let { data: evalData, error: evalErr } = await supabase
       .from("monthly_evaluations")
       .select("*")
+      .eq("clinic_id", clinicId)
       .eq("month", firstDayStr)
       .maybeSingle();
 
@@ -89,6 +91,7 @@ export async function getMonthlyEvaluation(year: number, month: number) {
     const { data: snsTasks } = await supabase
       .from("daily_tasks")
       .select("id")
+      .eq("clinic_id", clinicId)
       .gte("task_date", `${firstDayStr}`)
       .lte("task_date", `${monthStr}-${lastDay.toString().padStart(2, '0')}`)
       .eq("status", "completed");

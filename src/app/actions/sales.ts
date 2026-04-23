@@ -2,14 +2,241 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { checkAdminAuth } from "@/app/actions/auth";
+import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { revalidatePath } from "next/cache";
 
 async function getSupabase() {
   return await createClient();
 }
 
+function getAdminSupabase() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) return null;
+  return createSupabaseClient(url, key);
+}
+
 
 // --- Cash Sales Actions ---
+
+// AI売上予測: 過去3ヶ月の履歴から最頻パターンを返す
+export type SalesPrediction = {
+  predictedAmount: number;
+  predictedMemo: string;
+  confidence: number;    // 0-100 (最頻パターンの割合%)
+  historyCount: number;  // 3ヶ月の来院数
+  aiMessage: string;
+  lastAmount: number;
+  warning: string | null;
+};
+
+export async function getSalesPrediction(customerName: string): Promise<SalesPrediction | null> {
+  const { clinicId } = await checkAdminAuth();
+  if (!customerName.trim()) return null;
+
+  const supabase = await getSupabase();
+
+  // 過去3ヶ月の売上履歴（名前完全一致）
+  const threeMonthsAgo = new Date();
+  threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
+  const fromDate = threeMonthsAgo.toISOString().split("T")[0];
+
+  const { data } = await supabase
+    .from("cash_sales")
+    .select("treatment_fee, memo, sale_date")
+    .eq("clinic_id", clinicId)
+    .eq("customer_name", customerName.trim())
+    .gte("sale_date", fromDate)
+    .order("sale_date", { ascending: false });
+
+  if (!data || data.length === 0) return null;
+
+  // 最頻金額を特定
+  const amountFreq: Record<number, number> = {};
+  const memoFreq: Record<string, number> = {};
+  for (const row of data) {
+    amountFreq[row.treatment_fee] = (amountFreq[row.treatment_fee] || 0) + 1;
+    if (row.memo) memoFreq[row.memo] = (memoFreq[row.memo] || 0) + 1;
+  }
+
+  const topAmount = Object.entries(amountFreq).sort((a, b) => Number(b[1]) - Number(a[1]))[0];
+  const predictedAmount = Number(topAmount[0]);
+  const predictedMemo = Object.entries(memoFreq).sort((a, b) => Number(b[1]) - Number(a[1]))[0]?.[0] ?? "";
+  const confidence = Math.round((Number(topAmount[1]) / data.length) * 100);
+  const lastAmount = data[0].treatment_fee;
+
+  // 直近と予測に大きな乖離があれば警告
+  let warning: string | null = null;
+  if (lastAmount !== predictedAmount && Math.abs(predictedAmount - lastAmount) > predictedAmount * 0.3) {
+    warning = `前回（${lastAmount.toLocaleString()}円）と予測（${predictedAmount.toLocaleString()}円）に差があります。確認してください。`;
+  }
+
+  const timeLabel = data.length === 1 ? "前回" : `${data.length}回中${Number(topAmount[1])}回`;
+  const aiMessage = `${customerName}様は${timeLabel}このメニューです。仮入力しておきました！確認をお願いします。`;
+
+  return { predictedAmount, predictedMemo, confidence, historyCount: data.length, aiMessage, lastAmount, warning };
+}
+
+// 今日の売上未入力患者リスト（一括入力画面用）
+export type PendingSalePatient = {
+  appointmentId: string;
+  customerName: string;
+  isFirstVisit: boolean;
+  checkinTime: string;
+  checkinStatus: string | null;
+  confidence: "certain" | "likely" | "unknown";
+  prediction?: SalesPrediction | null;
+};
+
+function getJstDateString(date = new Date()) {
+  return date.toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" });
+}
+
+function buildJstDayRange(dateStr: string) {
+  return {
+    dayStart: `${dateStr}T00:00:00+09:00`,
+    dayEnd: `${dateStr}T23:59:59+09:00`,
+  };
+}
+
+function getAppointmentCustomerName(customer: { name?: string } | { name?: string }[] | null) {
+  if (Array.isArray(customer)) {
+    return customer[0]?.name?.trim() ?? "";
+  }
+  return customer?.name?.trim() ?? "";
+}
+
+function getConfidence(checkinStatus: string | null): "certain" | "likely" | "unknown" {
+  if (checkinStatus === "done" || checkinStatus === "in_treatment") return "certain";
+  if (checkinStatus === "arrived") return "likely";
+  return "unknown";
+}
+
+export async function getTodayPendingSales(dateStr?: string): Promise<{ success: boolean; data: PendingSalePatient[]; error?: string }> {
+  const { clinicId } = await checkAdminAuth();
+  try {
+    const supabase = getAdminSupabase() ?? await getSupabase();
+    const targetDate = dateStr ?? getJstDateString();
+    const { dayStart, dayEnd } = buildJstDayRange(targetDate);
+
+    // 指定日の「会計完了」予約を取得
+    const { data: appointments, error: aptError } = await supabase
+      .from("appointments")
+      .select("id, is_first_visit, start_time, checkin_status, status, customers(name)")
+      .eq("clinic_id", clinicId)
+      .neq("status", "cancelled")
+      .gte("start_time", dayStart)
+      .lte("start_time", dayEnd);
+
+    if (aptError) throw aptError;
+    if (!appointments || appointments.length === 0) return { success: true, data: [] };
+
+    // 指定日の既存売上を取得（名前で照合）
+    const { data: existingSales } = await supabase
+      .from("cash_sales")
+      .select("customer_name")
+      .eq("clinic_id", clinicId)
+      .eq("sale_date", targetDate);
+
+    const enteredCounts = new Map<string, number>();
+    for (const sale of existingSales ?? []) {
+      const normalizedName = sale.customer_name?.trim();
+      if (!normalizedName) continue;
+      enteredCounts.set(normalizedName, (enteredCounts.get(normalizedName) ?? 0) + 1);
+    }
+
+    // 売上未入力の患者だけ抽出して予測を添付
+    const pending: PendingSalePatient[] = [];
+    for (const apt of appointments) {
+      const customerName = getAppointmentCustomerName(apt.customers as { name?: string } | { name?: string }[] | null);
+      if (!customerName) continue;
+      const currentEnteredCount = enteredCounts.get(customerName) ?? 0;
+      if (currentEnteredCount > 0) {
+        enteredCounts.set(customerName, currentEnteredCount - 1);
+        continue;
+      }
+
+      // 予測取得（3ヶ月履歴）
+      let prediction: SalesPrediction | null = null;
+      if (!apt.is_first_visit) {
+        const { data: hist } = await supabase
+          .from("cash_sales")
+          .select("treatment_fee, memo, sale_date")
+          .eq("clinic_id", clinicId)
+          .eq("customer_name", customerName)
+          .gte("sale_date", getJstDateString(new Date(Date.now() - 90 * 24 * 60 * 60 * 1000)))
+          .order("sale_date", { ascending: false });
+
+        if (hist && hist.length > 0) {
+          const amtFreq: Record<number, number> = {};
+          const memoFreq: Record<string, number> = {};
+          for (const row of hist) {
+            amtFreq[row.treatment_fee] = (amtFreq[row.treatment_fee] || 0) + 1;
+            if (row.memo) memoFreq[row.memo] = (memoFreq[row.memo] || 0) + 1;
+          }
+          const topAmt = Object.entries(amtFreq).sort((a, b) => Number(b[1]) - Number(a[1]))[0];
+          const predAmt = Number(topAmt[0]);
+          const predMemo = Object.entries(memoFreq).sort((a, b) => Number(b[1]) - Number(a[1]))[0]?.[0] ?? "";
+          const conf = Math.round((Number(topAmt[1]) / hist.length) * 100);
+          const lastAmt = hist[0].treatment_fee;
+          const label = hist.length === 1 ? "前回" : `${hist.length}回中${Number(topAmt[1])}回`;
+          let warn: string | null = null;
+          if (lastAmt !== predAmt && Math.abs(predAmt - lastAmt) > predAmt * 0.3) {
+            warn = `前回（${lastAmt.toLocaleString()}円）と予測（${predAmt.toLocaleString()}円）に差があります`;
+          }
+          prediction = {
+            predictedAmount: predAmt,
+            predictedMemo: predMemo,
+            confidence: conf,
+            historyCount: hist.length,
+            aiMessage: `${customerName}様は${label}このメニューです。確認をお願いします！`,
+            lastAmount: lastAmt,
+            warning: warn,
+          };
+        }
+      }
+
+      pending.push({
+        appointmentId: apt.id,
+        customerName,
+        isFirstVisit: apt.is_first_visit ?? false,
+        checkinTime: apt.start_time,
+        checkinStatus: apt.checkin_status ?? null,
+        confidence: getConfidence(apt.checkin_status ?? null),
+        prediction,
+      });
+    }
+
+    return { success: true, data: pending };
+  } catch (error) {
+    console.error("Error fetching pending sales:", error);
+    return { success: false, data: [], error: "取得に失敗しました" };
+  }
+}
+
+// 一括売上登録
+export async function bulkAddCashSales(rows: Array<{
+  customer_name: string;
+  treatment_fee: number;
+  memo: string;
+  is_first_visit: boolean;
+  sale_date: string;
+}>) {
+  const { clinicId } = await checkAdminAuth();
+  try {
+    const supabase = await getSupabase();
+    const { error } = await supabase.from("cash_sales").insert(
+      rows.map(r => ({ ...r, clinic_id: clinicId }))
+    );
+    if (error) throw error;
+    revalidatePath("/admin/sales");
+    revalidatePath("/admin/dashboard");
+    return { success: true };
+  } catch (error) {
+    console.error("Error bulk adding cash sales:", error);
+    return { success: false, error: "一括保存に失敗しました" };
+  }
+}
 
 // 売上登録用: 患者名で過去の cash_sales から候補を返す
 export type SalesPatientSuggestion = {
@@ -1191,4 +1418,90 @@ export async function bulkImportInsurancePayments(rows: ImportInsuranceRow[]): P
   }
   revalidatePath("/admin/insurance");
   return { success: true, inserted, skipped, errors };
+}
+
+// ─── 重複チェック ─────────────────────────────────────────────
+
+export type DuplicateCheckRow = {
+  expense_date: string;
+  amount: number;
+  description: string;
+};
+
+export type DuplicateFlag = {
+  rowIndex: number;     // 0-based（EditableExpenseRow配列のインデックス）
+  isDuplicate: boolean;
+  confidence: number;   // 0.0〜1.0
+  reason: string;
+};
+
+/**
+ * アップロード予定行をDBの既存データと照合し、重複の疑いがある行を返す。
+ * 完全一致（日付+金額）は confidence=0.95、近似（金額+3日以内）は confidence=0.65。
+ */
+export async function checkDuplicateExpenses(
+  rows: DuplicateCheckRow[]
+): Promise<DuplicateFlag[]> {
+  const { clinicId } = await checkAdminAuth();
+  const supabase = await getSupabase();
+
+  const validDates = rows
+    .map((r) => r.expense_date)
+    .filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d))
+    .sort();
+
+  if (validDates.length === 0) {
+    return rows.map((_, i) => ({ rowIndex: i, isDuplicate: false, confidence: 0, reason: "" }));
+  }
+
+  const minDate = new Date(validDates[0]);
+  const maxDate = new Date(validDates[validDates.length - 1]);
+  minDate.setDate(minDate.getDate() - 14);
+  maxDate.setDate(maxDate.getDate() + 14);
+
+  const { data: existing } = await supabase
+    .from("clinic_expenses")
+    .select("id, expense_date, amount, description")
+    .eq("clinic_id", clinicId)
+    .gte("expense_date", minDate.toISOString().split("T")[0])
+    .lte("expense_date", maxDate.toISOString().split("T")[0]);
+
+  if (!existing || existing.length === 0) {
+    return rows.map((_, i) => ({ rowIndex: i, isDuplicate: false, confidence: 0, reason: "" }));
+  }
+
+  return rows.map((row, i) => {
+    // 完全一致: 同日 + 同金額
+    const exactMatch = existing.find(
+      (e) => e.expense_date === row.expense_date && e.amount === row.amount
+    );
+    if (exactMatch) {
+      return {
+        rowIndex: i,
+        isDuplicate: true,
+        confidence: 0.95,
+        reason: `同日（${row.expense_date}）・同金額（¥${row.amount.toLocaleString()}）が登録済みです`,
+      };
+    }
+
+    // 近似一致: 同金額 + 3日以内
+    const nearMatch = existing.find((e) => {
+      if (e.amount !== row.amount) return false;
+      if (!row.expense_date || !e.expense_date) return false;
+      const diff =
+        Math.abs(new Date(e.expense_date).getTime() - new Date(row.expense_date).getTime()) /
+        86400000;
+      return diff <= 3;
+    });
+    if (nearMatch) {
+      return {
+        rowIndex: i,
+        isDuplicate: true,
+        confidence: 0.65,
+        reason: `類似金額（¥${row.amount.toLocaleString()}）が${nearMatch.expense_date}に登録されている可能性があります`,
+      };
+    }
+
+    return { rowIndex: i, isDuplicate: false, confidence: 0, reason: "" };
+  });
 }

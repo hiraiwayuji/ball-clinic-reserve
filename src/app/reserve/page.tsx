@@ -16,7 +16,7 @@ import Image from "next/image";
 import { createClient } from "@/lib/supabase/client";
 import { createReservation, getDailyAvailability } from "@/app/actions/reserve";
 import { getClinicHolidays, type ClinicHoliday } from "@/app/actions/holidays";
-import { getActiveCourses, getActiveStaff, type ReservationCourse, type ReservationStaff } from "@/app/actions/courses";
+import { getActiveCourses, getActiveStaff, getActiveRooms, type ReservationCourse, type ReservationStaff, type ReservationRoom } from "@/app/actions/courses";
 import { useSearchParams } from "next/navigation";
 import { getTimeSlots, isDateWithinAllowedRange } from "@/lib/time-slots";
 import { toast } from "sonner";
@@ -49,8 +49,10 @@ function ReserveContent() {
   const [bookedTimes, setBookedTimes] = useState<string[]>([]);
   const [courses, setCourses] = useState<ReservationCourse[]>([]);
   const [staffList, setStaffList] = useState<ReservationStaff[]>([]);
+  const [rooms, setRooms] = useState<ReservationRoom[]>([]);
   const [selectedCourseId, setSelectedCourseId] = useState<string>("");
   const [selectedStaffId, setSelectedStaffId] = useState<string>("");
+  const [selectedRoomId, setSelectedRoomId] = useState<string>("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
   const [isWaitingResult, setIsWaitingResult] = useState(false);
@@ -61,6 +63,7 @@ function ReserveContent() {
     getClinicHolidays().then(setClinicHolidays);
     getActiveCourses().then(setCourses);
     getActiveStaff().then(setStaffList);
+    getActiveRooms().then(setRooms);
     const savedName = localStorage.getItem("ballClinic_savedName");
     const savedPhone = localStorage.getItem("ballClinic_savedPhone");
     if (savedName) setName(savedName);
@@ -138,6 +141,13 @@ function ReserveContent() {
           formData.append("staffName", staff.name);
         }
       }
+      if (selectedRoomId) {
+        const room = rooms.find(r => r.id === selectedRoomId);
+        if (room) {
+          formData.append("roomId", room.id);
+          formData.append("roomName", room.name);
+        }
+      }
 
       const result = await createReservation(formData);
 
@@ -164,7 +174,7 @@ function ReserveContent() {
           <div className="mb-6 flex flex-col items-center gap-4">
             <div className="relative w-40 h-16">
               {isExternalLogo ? (
-                <img src={CLINIC_CONFIG.logoSmallUrl} alt={CLINIC_CONFIG.name} className="h-full w-auto object-contain mx-auto" />
+                <img src={CLINIC_CONFIG.logoSmallUrl} alt={CLINIC_CONFIG.name} className={`h-full w-auto object-contain mx-auto ${CLINIC_CONFIG.usesWordmarkLogo ? "bg-white rounded-lg px-3 py-2" : ""}`} />
               ) : (
                 <Image src={CLINIC_CONFIG.logoSmallUrl} alt={CLINIC_CONFIG.name} fill className="object-contain" />
               )}
@@ -209,7 +219,7 @@ function ReserveContent() {
         <div className="max-w-md w-full bg-white/5 backdrop-blur-2xl p-10 rounded-[3rem] shadow-2xl border border-white/10 text-center">
           <div className="relative w-48 h-20 mx-auto mb-8 flex items-center justify-center">
             {isExternalLogo ? (
-              <img src={CLINIC_CONFIG.logoSmallUrl} alt={CLINIC_CONFIG.name} className="max-h-20 w-auto object-contain" />
+              <img src={CLINIC_CONFIG.logoSmallUrl} alt={CLINIC_CONFIG.name} className={`max-h-20 w-auto object-contain ${CLINIC_CONFIG.usesWordmarkLogo ? "bg-white rounded-lg px-3 py-2" : ""}`} />
             ) : (
               <Image src={CLINIC_CONFIG.logoSmallUrl} alt={CLINIC_CONFIG.name} fill className="object-contain" />
             )}
@@ -242,7 +252,7 @@ function ReserveContent() {
         <div className="flex flex-col items-center mb-12">
           <div className="relative w-56 h-24 mb-4 flex items-center justify-center">
             {isExternalLogo ? (
-              <img src={CLINIC_CONFIG.logoSmallUrl} alt={CLINIC_CONFIG.name} className="max-h-24 w-auto object-contain" />
+              <img src={CLINIC_CONFIG.logoSmallUrl} alt={CLINIC_CONFIG.name} className={`max-h-24 w-auto object-contain ${CLINIC_CONFIG.usesWordmarkLogo ? "bg-white rounded-lg px-3 py-2" : ""}`} />
             ) : (
               <Image src={CLINIC_CONFIG.logoSmallUrl} alt={CLINIC_CONFIG.name} fill className="object-contain" />
             )}
@@ -380,6 +390,40 @@ function ReserveContent() {
                   </section>
                 )}
 
+                {/* 個室選択 */}
+                {rooms.length > 0 && (
+                  <section className="space-y-4">
+                    <h2 className="text-xl font-bold text-white tracking-tight">ご希望のお部屋 <span className="text-sm font-normal text-blue-100/50">（任意）</span></h2>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setSelectedRoomId("")}
+                        className={`px-4 py-2.5 rounded-xl font-semibold text-sm border transition-all ${
+                          selectedRoomId === ""
+                            ? "bg-blue-600 border-blue-500 text-white"
+                            : "bg-white/5 border-white/10 text-blue-100/60 hover:bg-white/10"
+                        }`}
+                      >
+                        希望なし
+                      </button>
+                      {rooms.map(room => (
+                        <button
+                          key={room.id}
+                          type="button"
+                          onClick={() => setSelectedRoomId(room.id)}
+                          className={`px-4 py-2.5 rounded-xl font-semibold text-sm border transition-all ${
+                            selectedRoomId === room.id
+                              ? "bg-blue-600 border-blue-500 text-white"
+                              : "bg-white/5 border-white/10 text-blue-100/60 hover:bg-white/10"
+                          }`}
+                        >
+                          {room.name}
+                        </button>
+                      ))}
+                    </div>
+                  </section>
+                )}
+
                 {/* お客様情報 */}
                 <section className="space-y-6">
                   <h2 className="text-xl font-bold text-white tracking-tight">お客様情報</h2>
@@ -488,7 +532,7 @@ function ReserveContent() {
             <div className="bg-white/5 backdrop-blur-xl rounded-[2.5rem] border border-white/10 p-8 shadow-2xl space-y-8">
               <div className="relative w-full h-16 flex items-center justify-center">
                 {isExternalLogo ? (
-                  <img src={CLINIC_CONFIG.logoSmallUrl} alt={CLINIC_CONFIG.name} className="max-h-16 w-auto object-contain" />
+                  <img src={CLINIC_CONFIG.logoSmallUrl} alt={CLINIC_CONFIG.name} className={`max-h-16 w-auto object-contain ${CLINIC_CONFIG.usesWordmarkLogo ? "bg-white rounded-lg px-3 py-2" : ""}`} />
                 ) : (
                   <Image src={CLINIC_CONFIG.logoSmallUrl} alt={CLINIC_CONFIG.name} fill className="object-contain" />
                 )}

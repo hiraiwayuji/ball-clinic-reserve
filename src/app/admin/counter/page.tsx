@@ -1,24 +1,34 @@
 "use client";
 
 import { useEffect, useState, useTransition, useCallback } from "react";
-import { format, parseISO } from "date-fns";
+import { format, parseISO, isToday } from "date-fns";
 import { ja } from "date-fns/locale";
 import {
-  getTodayAppointments,
+  completeAllActiveAppointments,
+  getAppointmentsByDate,
+  markAppointmentNoShow,
   updateCheckinStatus,
   type CheckinStatus,
 } from "@/app/actions/adminReserve";
+import { getSalesPrediction, type SalesPrediction } from "@/app/actions/sales";
 import { createClient } from "@/lib/supabase/client";
 import { getMyClinicId } from "@/app/actions/auth";
 import {
   Clock, User, RefreshCw, Loader2, CheckCircle2,
   Stethoscope, CreditCard, CalendarPlus, ArrowRight,
-  Phone, MessageCircleMore, ChevronRight, Bot,
+  Phone, MessageCircleMore, ChevronRight, Bot, ChevronDown, ChevronLeft,
 } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { recordAction, COUNTER_DONE_KEY, SALES_PAGE_KEY } from "@/lib/next-action";
 import DailyCompletionCelebration from "@/components/admin/DailyCompletionCelebration";
 
@@ -98,13 +108,16 @@ function nextStatus(current: CheckinStatus): CheckinStatus {
 function AppointmentCard({
   apt,
   onStatusChange,
+  onRemove,
 }: {
   apt: Appointment;
   onStatusChange: (id: string, status: CheckinStatus) => void;
+  onRemove: (id: string) => void;
 }) {
   const [isPending, startTransition] = useTransition();
   const [justDone, setJustDone] = useState(false);
   const [showSecretaryTip, setShowSecretaryTip] = useState(false);
+  const [prediction, setPrediction] = useState<SalesPrediction | null>(null);
   const step = getStep(apt.checkin_status);
   const next = nextStatus(apt.checkin_status);
   const nextStep = next !== null ? getStep(next) : null;
@@ -116,11 +129,17 @@ function AppointmentCard({
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout>;
     if (justDone) {
+      // 予測を非同期で取得
+      const name = apt.customers?.name ?? "";
+      if (name && !apt.is_first_visit) {
+        getSalesPrediction(name).then(setPrediction);
+      }
       timer = setTimeout(() => {
         setShowSecretaryTip(true);
       }, 2500);
     }
     return () => clearTimeout(timer);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [justDone]);
 
   const handleAdvance = () => {
@@ -140,12 +159,31 @@ function AppointmentCard({
     });
   };
 
-  const handleReset = () => {
+  const handleStatusChange = (targetStatus: CheckinStatus) => {
     startTransition(async () => {
-      const res = await updateCheckinStatus(apt.id, null);
+      const res = await updateCheckinStatus(apt.id, targetStatus);
       if (res.success) {
-        onStatusChange(apt.id, null);
-        toast.success("ステータスをリセットしました");
+        onStatusChange(apt.id, targetStatus);
+        toast.success(`ステータスを「${getStep(targetStatus).label}」に変更しました`);
+        if (targetStatus === "done" && apt.checkin_status !== "done") {
+          recordAction(COUNTER_DONE_KEY, SALES_PAGE_KEY);
+          setJustDone(true);
+        }
+      } else {
+        toast.error(res.error ?? "更新に失敗しました");
+      }
+    });
+  };
+
+  const handleNoShow = () => {
+    const patientName = apt.customers?.name ?? "この患者";
+    if (!confirm(`${patientName}様を「来院なし」として受付一覧から外しますか？`)) return;
+
+    startTransition(async () => {
+      const res = await markAppointmentNoShow(apt.id);
+      if (res.success) {
+        onRemove(apt.id);
+        toast.success(`${patientName}様を来院なしとして受付から外しました`);
       } else {
         toast.error(res.error ?? "更新に失敗しました");
       }
@@ -158,7 +196,7 @@ function AppointmentCard({
         "rounded-2xl border-2 p-4 transition-all duration-200",
         step.bg,
         step.border,
-        isDone ? "opacity-60" : "",
+        isDone && !justDone ? "opacity-60" : "",
       ].join(" ")}
     >
       {/* 上段：時間・患者名・ステータス */}
@@ -206,6 +244,33 @@ function AppointmentCard({
 
       {/* 下段：アクションボタン */}
       <div className="mt-3 flex items-center gap-2 flex-wrap">
+        {/* ステータス変更ドロップダウン */}
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            disabled={isPending}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors shadow-sm disabled:opacity-60 disabled:cursor-not-allowed"
+          >
+            {isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : step.icon}
+            <span className="hidden sm:inline">{step.label}</span>
+            <ChevronDown className="w-3.5 h-3.5 opacity-50" />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="w-48">
+            {CHECKIN_STEPS.map((s) => (
+              <DropdownMenuItem
+                key={s.value === null ? "null" : s.value}
+                disabled={isPending || s.value === apt.checkin_status}
+                onClick={() => handleStatusChange(s.value)}
+                className={`gap-2 cursor-pointer ${s.value === apt.checkin_status ? "bg-slate-100 dark:bg-slate-800" : ""}`}
+              >
+                <div className={`flex items-center gap-2 ${s.color}`}>
+                  {s.icon}
+                  <span className="font-medium">{s.label}</span>
+                </div>
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
+
         {nextStep && (
           <button
             type="button"
@@ -227,16 +292,33 @@ function AppointmentCard({
           </button>
         )}
 
-        {/* 会計登録へリンク（名前・初診フラグをクエリパラメータで渡して自動入力） */}
+        {!isDone && (
+          <button
+            type="button"
+            onClick={handleNoShow}
+            disabled={isPending}
+            className="ml-auto px-3 py-2 rounded-xl text-sm font-medium text-rose-600 bg-rose-50 hover:bg-rose-100 border border-rose-200 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+          >
+            {isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : "来院なし"}
+          </button>
+        )}
+
+        {/* 会計登録へリンク（名前・初診フラグ・予測データをクエリパラメータで渡す） */}
         {(apt.checkin_status === "in_treatment" || apt.checkin_status === "arrived" || apt.checkin_status === "done") && (
           <div className="relative">
             <Link
-              href={`/admin/sales?name=${encodeURIComponent(apt.customers?.name ?? "")}&first_visit=${apt.is_first_visit}`}
+              href={(() => {
+                const base = `/admin/sales?name=${encodeURIComponent(apt.customers?.name ?? "")}&first_visit=${apt.is_first_visit}`;
+                if (prediction) {
+                  return `${base}&predicted_amount=${prediction.predictedAmount}&predicted_memo=${encodeURIComponent(prediction.predictedMemo)}&ai_message=${encodeURIComponent(prediction.aiMessage)}&confidence=${prediction.confidence}`;
+                }
+                return base;
+              })()}
               onClick={() => recordAction(COUNTER_DONE_KEY, SALES_PAGE_KEY)}
               className={[
                 "flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium transition-all",
                 justDone
-                  ? "bg-indigo-600 text-white font-bold shadow-lg [animation:var(--animate-glow-pulse)]"
+                  ? "bg-indigo-600 text-white font-bold shadow-lg animate-glow-pulse"
                   : "text-slate-600 dark:text-slate-300 bg-white/70 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700 hover:bg-white dark:hover:bg-slate-700",
               ].join(" ")}
             >
@@ -244,25 +326,51 @@ function AppointmentCard({
               {justDone ? "売上入力へ ✨" : "会計"}
             </Link>
 
-            {/* AI秘書ツールチップ */}
+            {/* AI秘書ツールチップ（予測あり／なしで内容を切り替え） */}
             {showSecretaryTip && (
               <div
-                className="absolute bottom-full left-0 mb-2 w-52 z-20 [animation:var(--animate-secretary-pop)]"
+                className="absolute bottom-full left-0 mb-2 w-64 z-20 [animation:var(--animate-secretary-pop)]"
                 onMouseEnter={() => setShowSecretaryTip(true)}
               >
-                {/* 吹き出し三角 */}
                 <div className="absolute -bottom-1.5 left-4 w-3 h-3 bg-indigo-950 rotate-45 border-b border-r border-indigo-700" />
                 <div className="bg-indigo-950 border border-indigo-700 rounded-xl px-3 py-2.5 shadow-xl">
                   <div className="flex items-start gap-2">
                     <div className="w-6 h-6 bg-violet-500 rounded-full flex items-center justify-center shrink-0 mt-0.5">
                       <Bot className="w-3.5 h-3.5 text-white" />
                     </div>
-                    <div>
+                    <div className="flex-1 min-w-0">
                       <p className="text-[10px] font-black text-violet-400 uppercase tracking-wider leading-none mb-1">AI秘書</p>
-                      <p className="text-xs text-indigo-100 leading-snug font-medium">
-                        売上入力はお済みですか？<br />
-                        <span className="text-indigo-300">{apt.customers?.name ?? "この方"}様の履歴から金額を自動入力できます。</span>
-                      </p>
+                      {prediction ? (
+                        <>
+                          <p className="text-xs text-indigo-100 leading-snug font-medium mb-2">
+                            {prediction.aiMessage}
+                          </p>
+                          <div className="bg-indigo-900/60 rounded-lg px-2.5 py-1.5 mb-1">
+                            <div className="flex items-center justify-between">
+                              <span className="text-[10px] text-indigo-300">予測金額</span>
+                              <span className="text-xs font-black text-white">¥{prediction.predictedAmount.toLocaleString()}</span>
+                            </div>
+                            {prediction.predictedMemo && (
+                              <div className="flex items-center justify-between mt-0.5">
+                                <span className="text-[10px] text-indigo-300">備考</span>
+                                <span className="text-[10px] text-indigo-200 truncate max-w-[100px]">{prediction.predictedMemo}</span>
+                              </div>
+                            )}
+                            <div className="flex items-center justify-between mt-0.5">
+                              <span className="text-[10px] text-indigo-300">確度</span>
+                              <span className="text-[10px] text-emerald-400 font-bold">{prediction.confidence}%</span>
+                            </div>
+                          </div>
+                          {prediction.warning && (
+                            <p className="text-[10px] text-amber-400 leading-snug">⚠ {prediction.warning}</p>
+                          )}
+                        </>
+                      ) : (
+                        <p className="text-xs text-indigo-100 leading-snug font-medium">
+                          売上入力はお済みですか？<br />
+                          <span className="text-indigo-300">{apt.customers?.name ?? "この方"}様の履歴から金額を自動入力できます。</span>
+                        </p>
+                      )}
                     </div>
                   </div>
                   <button
@@ -277,17 +385,6 @@ function AppointmentCard({
           </div>
         )}
 
-        {/* リセットボタン（完了 or 施術中以降） */}
-        {apt.checkin_status !== null && (
-          <button
-            type="button"
-            onClick={handleReset}
-            disabled={isPending}
-            className="ml-auto text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 px-2 py-1.5 rounded-lg hover:bg-white/60 dark:hover:bg-slate-800/60 transition-colors"
-          >
-            リセット
-          </button>
-        )}
       </div>
     </div>
   );
@@ -296,10 +393,15 @@ function AppointmentCard({
 // ── メインページ ────────────────────────────────────────────────────
 
 export default function CounterPage() {
+  const router = useRouter();
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [loading, setLoading] = useState(true);
   const [currentTime, setCurrentTime] = useState<Date | null>(null);
+  const [targetDate, setTargetDate] = useState<Date>(new Date());
   const [clinicId, setClinicId] = useState<string | null>(null);
+  const [isClosingDay, startClosingDayTransition] = useTransition();
+
+  const isViewingToday = isToday(targetDate);
 
   // 統計
   const stats = {
@@ -325,10 +427,12 @@ export default function CounterPage() {
   }, [allDone, celebrationShown]);
 
   const fetchAppointments = useCallback(async () => {
-    const res = await getTodayAppointments();
+    setLoading(true);
+    const dateStr = format(targetDate, "yyyy-MM-dd");
+    const res = await getAppointmentsByDate(dateStr);
     if (res.success) setAppointments(res.data as unknown as Appointment[]);
     setLoading(false);
-  }, []);
+  }, [targetDate]);
 
   useEffect(() => {
     setCurrentTime(new Date());
@@ -362,9 +466,34 @@ export default function CounterPage() {
     );
   }, []);
 
+  const handleRemoveAppointment = useCallback((id: string) => {
+    setAppointments(prev => prev.filter(a => a.id !== id));
+  }, []);
+
   // セクション分け：未完了 / 完了
   const activeApts = appointments.filter(a => a.checkin_status !== "done");
   const doneApts = appointments.filter(a => a.checkin_status === "done");
+  const hasActiveAppointments = activeApts.length > 0;
+  const canSuggestClosing = hasActiveAppointments && doneApts.length > 0;
+
+  const handleCloseDay = () => {
+    if (!canSuggestClosing) return;
+    const targetIds = activeApts.map(a => a.id);
+    if (!confirm(`残り${targetIds.length}名を会計完了にして、一括入力へ進みますか？`)) return;
+
+    startClosingDayTransition(async () => {
+      const res = await completeAllActiveAppointments(targetIds);
+      if (res.success) {
+        setAppointments(prev =>
+          prev.map(a => targetIds.includes(a.id) ? { ...a, checkin_status: "done" } : a)
+        );
+        toast.success(`残り${res.updatedCount ?? targetIds.length}名を会計完了にしました`);
+        router.push(`/admin/sales/bulk?date=${format(targetDate, "yyyy-MM-dd")}`);
+      } else {
+        toast.error(res.error ?? "一括更新に失敗しました");
+      }
+    });
+  };
 
   return (
     <div className="space-y-6 max-w-4xl mx-auto">
@@ -374,16 +503,34 @@ export default function CounterPage() {
           <h1 className="text-2xl font-black text-slate-900 dark:text-slate-100">
             受付カウンター
           </h1>
-          <p className="text-sm text-slate-500 dark:text-slate-400 mt-0.5">
-            {currentTime
-              ? format(currentTime, "yyyy年M月d日（E）", { locale: ja })
-              : "—"}
+          <div className="flex items-center gap-2 mt-2">
+            <button
+              onClick={() => setTargetDate(prev => new Date(prev.getFullYear(), prev.getMonth(), prev.getDate() - 1))}
+              className="p-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 transition-colors"
+            >
+              <ChevronLeft className="w-4 h-4 text-slate-600 dark:text-slate-300" />
+            </button>
+            <p className="text-sm font-bold text-slate-700 dark:text-slate-300 min-w-[130px] text-center">
+              {format(targetDate, "yyyy年M月d日（E）", { locale: ja })}
+            </p>
+            <button
+              onClick={() => setTargetDate(prev => new Date(prev.getFullYear(), prev.getMonth(), prev.getDate() + 1))}
+              className="p-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 transition-colors"
+            >
+              <ChevronRight className="w-4 h-4 text-slate-600 dark:text-slate-300" />
+            </button>
+            <button
+              onClick={() => setTargetDate(new Date())}
+              className="px-2.5 py-1 text-xs font-bold rounded-lg bg-blue-50 text-blue-600 hover:bg-blue-100 dark:bg-blue-900/30 dark:text-blue-400 transition-colors ml-1"
+            >
+              今日
+            </button>
             {currentTime && (
-              <span className="ml-2 font-mono font-bold text-slate-700 dark:text-slate-300">
+              <span className="ml-3 font-mono text-sm font-bold text-slate-500 dark:text-slate-400">
                 {format(currentTime, "HH:mm:ss")}
               </span>
             )}
-          </p>
+          </div>
         </div>
 
         {/* クイックアクション */}
@@ -397,11 +544,29 @@ export default function CounterPage() {
           </Link>
           <Link
             href="/admin/sales"
-            className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-bold bg-blue-600 hover:bg-blue-700 text-white rounded-xl transition-colors shadow-sm"
+            className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-bold bg-blue-600 hover:bg-blue-700 text-white transition-colors shadow-sm"
           >
             <CreditCard className="w-4 h-4" />
             売上記帳
           </Link>
+          <Link
+            href={`/admin/sales/bulk?date=${format(targetDate, "yyyy-MM-dd")}`}
+            className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-bold bg-amber-500 hover:bg-amber-600 text-white transition-colors shadow-sm"
+          >
+            <MessageCircleMore className="w-4 h-4" />
+            一括入力
+          </Link>
+          {hasActiveAppointments && (
+            <Button
+              type="button"
+              onClick={handleCloseDay}
+              disabled={isClosingDay}
+              className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold shadow-sm"
+            >
+              {isClosingDay ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <CheckCircle2 className="w-4 h-4 mr-2" />}
+              本日の施術はすべて終了
+            </Button>
+          )}
           <button
             type="button"
             onClick={fetchAppointments}
@@ -415,7 +580,7 @@ export default function CounterPage() {
       {/* 統計バー */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         {[
-          { label: "本日合計", value: stats.total, color: "text-slate-700 dark:text-slate-200", bg: "bg-white dark:bg-slate-800" },
+          { label: isViewingToday ? "本日合計" : `${format(targetDate, "M/d", { locale: ja })} の予約`, value: stats.total, color: "text-slate-700 dark:text-slate-200", bg: "bg-white dark:bg-slate-800" },
           { label: "待合中", value: stats.arrived, color: "text-blue-700 dark:text-blue-300", bg: "bg-blue-50 dark:bg-blue-900/30" },
           { label: "施術中", value: stats.inTreatment, color: "text-emerald-700 dark:text-emerald-300", bg: "bg-emerald-50 dark:bg-emerald-900/30" },
           { label: "完了", value: stats.done, color: "text-slate-500 dark:text-slate-400", bg: "bg-slate-50 dark:bg-slate-800/50" },
@@ -427,6 +592,30 @@ export default function CounterPage() {
         ))}
       </div>
 
+      {canSuggestClosing && (
+        <div className="rounded-2xl border border-indigo-200 bg-indigo-50/80 p-4 dark:border-indigo-900/60 dark:bg-indigo-950/30">
+          <div className="flex items-start justify-between gap-3 flex-wrap">
+            <div>
+              <p className="text-sm font-bold text-indigo-700 dark:text-indigo-300">
+                一日の終わりなら、残りの患者様をまとめて会計完了にできます
+              </p>
+              <p className="text-sm text-indigo-600/90 dark:text-indigo-200/80 mt-1">
+                残り{activeApts.length}名を会計完了にして、そのまま一括売上入力へ進めます。来院されなかった方は先に「来院なし」で外してください。
+              </p>
+            </div>
+            <Button
+              type="button"
+              onClick={handleCloseDay}
+              disabled={isClosingDay}
+              className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold"
+            >
+              {isClosingDay ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <CheckCircle2 className="w-4 h-4 mr-2" />}
+              全員を会計完了にして一括入力
+            </Button>
+          </div>
+        </div>
+      )}
+
       {/* 予約リスト */}
       {loading ? (
         <div className="flex items-center justify-center h-40 text-slate-400">
@@ -436,7 +625,7 @@ export default function CounterPage() {
       ) : appointments.length === 0 ? (
         <div className="text-center py-16 text-slate-400 bg-white dark:bg-slate-900/50 rounded-2xl border border-slate-200 dark:border-white/10">
           <Clock className="w-10 h-10 mx-auto mb-3 opacity-30" />
-          <p className="font-medium">本日の予約はありません</p>
+          <p className="font-medium">予約はありません</p>
           <Link href="/admin/appointments" className="mt-3 inline-flex items-center gap-1 text-sm text-blue-500 hover:text-blue-600">
             予約を追加する <ArrowRight className="w-3.5 h-3.5" />
           </Link>
@@ -451,6 +640,7 @@ export default function CounterPage() {
                   key={apt.id}
                   apt={apt}
                   onStatusChange={handleStatusChange}
+                  onRemove={handleRemoveAppointment}
                 />
               ))}
             </div>
@@ -471,6 +661,7 @@ export default function CounterPage() {
                     key={apt.id}
                     apt={apt}
                     onStatusChange={handleStatusChange}
+                    onRemove={handleRemoveAppointment}
                   />
                 ))}
               </div>

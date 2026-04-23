@@ -48,7 +48,7 @@ export default function TasksPage() {
     supabase.auth.getUser().then(async ({ data: { user } }) => {
       if (!user) return;
       const { data } = await supabase.from("clinic_users").select("clinic_id").eq("user_id", user.id).single();
-      setClinicId(data?.clinic_id ?? "00000000-0000-0000-0000-000000000001");
+      setClinicId(data?.clinic_id ?? (process.env.NEXT_PUBLIC_CLINIC_ID ?? "00000000-0000-0000-0000-000000000001"));
     });
   }, []);
 

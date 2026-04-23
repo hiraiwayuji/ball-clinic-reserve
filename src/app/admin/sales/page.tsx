@@ -1,6 +1,22 @@
 "use client";
 
-import { useState, useEffect, useTransition, useRef, useCallback, Suspense } from "react";
+import { useState, useEffect, useTransition, useRef, useCallback, Suspense, useMemo } from "react";
+
+type SalesLineItem = { name: string; amount: number };
+
+function parseMemo(memoStr: string | null) {
+  if (!memoStr) return "-";
+  try {
+    const data = JSON.parse(memoStr);
+    if (data.jippi || data.buhan) {
+      const items = [...(data.jippi || []), ...(data.buhan || [])];
+      return items.map((i: any) => i.name).join(", ");
+    }
+  } catch (e) {
+    // not json
+  }
+  return memoStr;
+}
 import { useSearchParams } from "next/navigation";
 import { format } from "date-fns";
 import { ja } from "date-fns/locale";
@@ -9,7 +25,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Calendar as CalendarIcon, Plus, Trash2, Loader2, Coins, User, UserPlus, Landmark, Receipt, Upload, Download, Clock } from "lucide-react";
+import { Calendar as CalendarIcon, Plus, Trash2, Loader2, Coins, User, UserPlus, Landmark, Receipt, Upload, Download, Clock, Bot, X, AlertTriangle, Zap } from "lucide-react";
 import { addCashSale, getCashSales, deleteCashSale, searchSalesPatients, SalesPatientSuggestion } from "@/app/actions/sales";
 import { toast } from "sonner";
 import Link from "next/link";
@@ -28,14 +44,34 @@ function SalesPageInner() {
 
   // 患者名サジェスト
   const [nameValue, setNameValue] = useState("");
-  const [amountValue, setAmountValue] = useState("");
+  const [jippiItems, setJippiItems] = useState<SalesLineItem[]>([{ name: "施術費", amount: 0 }]);
+  const [buhanItems, setBuhanItems] = useState<SalesLineItem[]>([]);
+  const [savedMenuItems, setSavedMenuItems] = useState<string[]>(() => {
+    if (typeof window === "undefined") return [];
+    return JSON.parse(localStorage.getItem("custom_sales_items") || "[]");
+  });
+
+  const totalAmount = useMemo(() => {
+    const sum = (items: SalesLineItem[]) => items.reduce((s, i) => s + (i.amount || 0), 0);
+    return sum(jippiItems) + sum(buhanItems);
+  }, [jippiItems, buhanItems]);
   const [suggestions, setSuggestions] = useState<SalesPatientSuggestion[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [isSearching, setIsSearching] = useState(false);
   const searchTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
   const suggestionsRef = useRef<HTMLDivElement>(null);
 
-  // 受付カウンターからの遷移: URLパラメータで名前・初診フラグを受け取り、金額を過去履歴から予測
+  // AI秘書バナー（受付カウンターから予測データを受け取ったとき）
+  const [aiDraft, setAiDraft] = useState<{
+    message: string;
+    amount: number;
+    memo: string;
+    confidence: number;
+    warning: string | null;
+  } | null>(null);
+  const [showAiBanner, setShowAiBanner] = useState(false);
+
+  // 受付カウンターからの遷移: URLパラメータで名前・初診フラグ・予測データを受け取る
   useEffect(() => {
     const presetName = searchParams.get("name");
     const presetFirstVisit = searchParams.get("first_visit") === "true";
@@ -44,16 +80,28 @@ function SalesPageInner() {
     setIsFirstVisit(presetFirstVisit);
     setNameValue(presetName);
 
-    // 過去履歴から金額を予測（初診は空欄のまま）
+    // 予測データがURLに含まれている場合（カウンターから遷移）
+    const predictedAmount = searchParams.get("predicted_amount");
+    const predictedMemo = searchParams.get("predicted_memo") ?? "";
+    const aiMessage = searchParams.get("ai_message");
+    const confidence = searchParams.get("confidence");
+
+    if (predictedAmount && aiMessage && !presetFirstVisit) {
+      const amount = parseInt(predictedAmount, 10);
+      const conf = parseInt(confidence ?? "0", 10);
+      setJippiItems(prev => [{ name: prev[0]?.name || "施術費", amount }, ...prev.slice(1)]);
+      setAiDraft({ message: aiMessage, amount, memo: predictedMemo, confidence: conf, warning: null });
+      setShowAiBanner(true);
+      return;
+    }
+
+    // 予測なし: 過去履歴から金額を取得（初診は空欄）
     if (!presetFirstVisit) {
       searchSalesPatients(presetName).then((results) => {
-        // 名前が完全一致するものを優先、なければ最初の候補
-        const exact = results.find(
-          (r) => r.customer_name === presetName
-        );
+        const exact = results.find((r) => r.customer_name === presetName);
         const best = exact ?? results[0];
         if (best) {
-          setAmountValue(String(best.lastAmount));
+          setJippiItems([{ name: "前回同様", amount: best.lastAmount }]);
           toast.info(`${presetName}様の前回金額（${best.lastAmount.toLocaleString()}円）を入力しました`);
         }
       });
@@ -84,9 +132,17 @@ function SalesPageInner() {
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!date) return;
+    const breakdown = {
+      jippi: jippiItems.filter(i => i.name || i.amount > 0),
+      buhan: buhanItems.filter(i => i.name || i.amount > 0),
+    };
+
     const formData = new FormData(e.currentTarget);
     formData.set("sale_date", format(date, "yyyy-MM-dd"));
     formData.set("is_first_visit", String(isFirstVisit));
+    formData.set("customer_name", nameValue);
+    formData.set("treatment_fee", String(totalAmount));
+    formData.set("memo", JSON.stringify(breakdown));
 
     startTransition(async () => {
       try {
@@ -96,8 +152,11 @@ function SalesPageInner() {
           formRef.current?.reset();
           setIsFirstVisit(false);
           setNameValue("");
-          setAmountValue("");
+          setJippiItems([{ name: "施術費", amount: 0 }]);
+          setBuhanItems([]);
           setSuggestions([]);
+          setShowAiBanner(false);
+          setAiDraft(null);
           fetchSales(date);
         } else {
           toast.error(res.error || "エラーが発生しました");
@@ -140,7 +199,7 @@ function SalesPageInner() {
   // 候補を選択したとき
   const handleSelectSuggestion = (p: SalesPatientSuggestion) => {
     setNameValue(p.customer_name);
-    setAmountValue(String(p.lastAmount));
+    setJippiItems([{ name: "前回同様", amount: p.lastAmount }]);
     setShowSuggestions(false);
   };
 
@@ -176,8 +235,9 @@ function SalesPageInner() {
     );
   };
 
-  const totalAmount = sales.reduce((sum, s) => sum + s.treatment_fee, 0);
+  const dailyTotalAmount = sales.reduce((sum, s) => sum + s.treatment_fee, 0);
   const newPatientCount = sales.filter(s => s.is_first_visit).length;
+  const bulkSalesHref = date ? `/admin/sales/bulk?date=${format(date, "yyyy-MM-dd")}` : "/admin/sales/bulk";
 
   if (!date) {
     return <div className="p-8 text-center text-slate-500">読み込み中...</div>;
@@ -191,6 +251,12 @@ function SalesPageInner() {
           <p className="text-slate-500 dark:text-slate-400">窓口での自費・物販等の売上を記録します</p>
         </div>
         <div className="flex items-center gap-3 flex-wrap justify-end">
+          <Link href={bulkSalesHref}>
+            <Button variant="outline" size="sm" className="border-amber-300 text-amber-600 hover:bg-amber-50 dark:border-amber-700 dark:text-amber-400 dark:hover:bg-amber-950/50 font-bold">
+              <Zap className="w-4 h-4 mr-1.5" />
+              一括入力
+            </Button>
+          </Link>
           <Button variant="outline" size="sm" onClick={() => setShowImport(true)} className="border-blue-200 text-blue-600 hover:bg-blue-50 dark:border-blue-800 dark:text-blue-400 dark:hover:bg-blue-950/50 font-bold">
             <Upload className="w-4 h-4 mr-1.5" />
             Excel/CSV取込
@@ -234,6 +300,34 @@ function SalesPageInner() {
             <CardDescription>{format(date, "M月d日 (E)", { locale: ja })} の売上</CardDescription>
           </CardHeader>
           <CardContent>
+            {/* AI秘書バナー（受付カウンターから予測データがある場合） */}
+            {showAiBanner && aiDraft && (
+              <div className="mb-4 rounded-xl border border-violet-300 dark:border-violet-700 bg-violet-50 dark:bg-violet-950/40 p-3">
+                <div className="flex items-start gap-2">
+                  <div className="w-7 h-7 bg-violet-500 rounded-full flex items-center justify-center shrink-0 mt-0.5">
+                    <Bot className="w-4 h-4 text-white" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-1.5 mb-1">
+                      <Zap className="w-3 h-3 text-violet-500" />
+                      <span className="text-[11px] font-black text-violet-600 dark:text-violet-400 uppercase tracking-wide">AI秘書の仮入力</span>
+                      <span className="text-[10px] text-violet-400 bg-violet-100 dark:bg-violet-900/50 px-1.5 rounded-full">確度 {aiDraft.confidence}%</span>
+                    </div>
+                    <p className="text-xs text-violet-800 dark:text-violet-200 leading-snug font-medium">{aiDraft.message}</p>
+                    {aiDraft.warning && (
+                      <div className="mt-1.5 flex items-center gap-1 text-amber-600 dark:text-amber-400">
+                        <AlertTriangle className="w-3 h-3 shrink-0" />
+                        <p className="text-[11px]">{aiDraft.warning}</p>
+                      </div>
+                    )}
+                  </div>
+                  <button type="button" onClick={() => setShowAiBanner(false)} className="text-violet-400 hover:text-violet-600 transition-colors shrink-0">
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            )}
+
             <form ref={formRef} onSubmit={handleSubmit} className="space-y-4">
               {/* お名前（サジェスト付き） */}
               <div className="space-y-2">
@@ -299,27 +393,51 @@ function SalesPageInner() {
                 </div>
               </div>
 
-              {/* 金額 */}
+              {/* 実費セクション */}
               <div className="space-y-2">
-                <Label htmlFor="treatment_fee">金額（税込）</Label>
-                <div className="relative">
-                  <Coins className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
-                  <Input
-                    id="treatment_fee"
-                    name="treatment_fee"
-                    type="number"
-                    placeholder="5000"
-                    className="pl-9"
-                    required
-                    value={amountValue}
-                    onChange={(e) => setAmountValue(e.target.value)}
-                  />
+                <div className="flex items-center justify-between">
+                  <Label className="text-sm font-semibold text-slate-700 dark:text-slate-300">実費</Label>
+                  <button type="button" onClick={() => setJippiItems(v => [...v, { name: "", amount: 0 }])}
+                    className="text-xs text-blue-600 hover:underline">＋項目を追加</button>
                 </div>
+                {jippiItems.map((item, i) => (
+                  <LineItemRow key={`jippi-${i}`} item={item} savedItems={savedMenuItems}
+                    onChange={updated => setJippiItems(v => v.map((x, j) => j === i ? updated : x))}
+                    onRemove={() => setJippiItems(v => v.filter((_, j) => j !== i))}
+                    onSaveToMaster={name => {
+                      const next = [...new Set([...savedMenuItems, name])];
+                      setSavedMenuItems(next);
+                      localStorage.setItem("custom_sales_items", JSON.stringify(next));
+                    }}
+                  />
+                ))}
               </div>
+
+              {/* 物販セクション */}
               <div className="space-y-2">
-                <Label htmlFor="memo">備考（オプション）</Label>
-                <Input id="memo" name="memo" placeholder="自費施術, 物販等" />
+                <div className="flex items-center justify-between">
+                  <Label className="text-sm font-semibold text-slate-700 dark:text-slate-300">物販</Label>
+                  <button type="button" onClick={() => setBuhanItems(v => [...v, { name: "", amount: 0 }])}
+                    className="text-xs text-blue-600 hover:underline">＋項目を追加</button>
+                </div>
+                {buhanItems.map((item, i) => (
+                  <LineItemRow key={`buhan-${i}`} item={item} savedItems={savedMenuItems}
+                    onChange={updated => setBuhanItems(v => v.map((x, j) => j === i ? updated : x))}
+                    onRemove={() => setBuhanItems(v => v.filter((_, j) => j !== i))}
+                    onSaveToMaster={name => {
+                      const next = [...new Set([...savedMenuItems, name])];
+                      setSavedMenuItems(next);
+                      localStorage.setItem("custom_sales_items", JSON.stringify(next));
+                    }}
+                  />
+                ))}
               </div>
+
+              {/* 合計表示 */}
+              <div className="text-right text-lg font-bold text-slate-900 dark:text-slate-100">
+                合計: ¥{totalAmount.toLocaleString()}
+              </div>
+
               {/* 新患トグル */}
               <button
                 type="button"
@@ -333,7 +451,7 @@ function SalesPageInner() {
                 <UserPlus className="w-4 h-4" />
                 {isFirstVisit ? "✓ 新患（タップで解除）" : "新患の場合はここをタップ"}
               </button>
-              <Button type="submit" className="w-full bg-blue-600 hover:bg-blue-700 h-10" disabled={isPending}>
+              <Button type="submit" className="w-full bg-blue-600 hover:bg-blue-700 h-10" disabled={isPending || totalAmount === 0}>
                 {isPending ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Plus className="w-4 h-4 mr-2" />}
                 登録する
               </Button>
@@ -357,7 +475,7 @@ function SalesPageInner() {
               )}
               <div className="text-right">
                 <p className="text-xs text-slate-500 dark:text-slate-400 font-medium">本日合計</p>
-                <p className="text-2xl font-bold text-blue-600 dark:text-blue-400">¥{totalAmount.toLocaleString()}</p>
+                <p className="text-2xl font-bold text-blue-600 dark:text-blue-400">¥{dailyTotalAmount.toLocaleString()}</p>
               </div>
             </div>
           </CardHeader>
@@ -400,7 +518,7 @@ function SalesPageInner() {
                             )}
                           </div>
                         </TableCell>
-                        <TableCell className="text-slate-500 dark:text-slate-400 text-sm">{sale.memo || "-"}</TableCell>
+                        <TableCell className="text-slate-500 dark:text-slate-400 text-sm">{parseMemo(sale.memo)}</TableCell>
                         <TableCell className="text-right font-bold text-slate-700 dark:text-slate-200">¥{sale.treatment_fee.toLocaleString()}</TableCell>
                         <TableCell className="text-right text-slate-100 group">
                           <Button 
@@ -431,6 +549,42 @@ function SalesPageInner() {
   );
 }
 
+function LineItemRow({
+  item, savedItems, onChange, onRemove, onSaveToMaster
+}: {
+  item: SalesLineItem;
+  savedItems: string[];
+  onChange: (item: SalesLineItem) => void;
+  onRemove: () => void;
+  onSaveToMaster: (name: string) => void;
+}) {
+  const [saveChecked, setSaveChecked] = useState(false);
+  return (
+    <div className="flex items-center gap-2">
+      <input list="saved-items-list" value={item.name}
+        onChange={e => onChange({ ...item, name: e.target.value })}
+        placeholder="項目名" className="flex-1 border border-slate-200 dark:border-slate-700 rounded px-2 py-1 text-sm bg-transparent dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+      <datalist id="saved-items-list">
+        {savedItems.map(s => <option key={s} value={s} />)}
+      </datalist>
+      <input type="number" value={item.amount || ""}
+        onChange={e => onChange({ ...item, amount: Number(e.target.value) })}
+        placeholder="金額" className="w-24 border border-slate-200 dark:border-slate-700 rounded px-2 py-1 text-sm text-right bg-transparent dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+      {item.name && !savedItems.includes(item.name) && (
+        <label className="flex items-center gap-1 text-xs text-slate-500 whitespace-nowrap cursor-pointer">
+          <input type="checkbox" checked={saveChecked}
+            onChange={e => {
+              setSaveChecked(e.target.checked);
+              if (e.target.checked) onSaveToMaster(item.name);
+            }} className="accent-blue-600" />
+          保存
+        </label>
+      )}
+      <button type="button" onClick={onRemove} className="text-slate-400 hover:text-red-500 text-lg leading-none shrink-0 w-6 h-6 flex items-center justify-center rounded hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">×</button>
+    </div>
+  );
+}
+
 export default function SalesPage() {
   return (
     <Suspense fallback={<div className="p-8 text-center text-slate-500">読み込み中...</div>}>
@@ -438,4 +592,3 @@ export default function SalesPage() {
     </Suspense>
   );
 }
-

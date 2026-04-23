@@ -265,6 +265,61 @@ export async function updateCheckinStatus(
   }
 }
 
+export async function markAppointmentNoShow(
+  appointmentId: string,
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const { clinicId } = await checkAdminAuth();
+    const supabase = getAdminSupabase();
+    if (!supabase) return { success: false, error: "サーバー設定エラー" };
+
+    const { error } = await supabase
+      .from("appointments")
+      .update({ status: "cancelled", checkin_status: null })
+      .eq("id", appointmentId)
+      .eq("clinic_id", clinicId);
+
+    if (error) return { success: false, error: error.message };
+    revalidatePath("/admin/counter");
+    revalidatePath("/admin/appointments");
+    revalidatePath("/admin/sales");
+    return { success: true };
+  } catch (err) {
+    console.error("markAppointmentNoShow error:", err);
+    return { success: false, error: "予期せぬエラーが発生しました" };
+  }
+}
+
+export async function completeAllActiveAppointments(
+  appointmentIds: string[],
+): Promise<{ success: boolean; updatedCount?: number; error?: string }> {
+  try {
+    const { clinicId } = await checkAdminAuth();
+    const supabase = getAdminSupabase();
+    if (!supabase) return { success: false, error: "サーバー設定エラー" };
+
+    const uniqueIds = Array.from(new Set(appointmentIds.filter(Boolean)));
+    if (uniqueIds.length === 0) {
+      return { success: false, error: "対象の予約がありません" };
+    }
+
+    const { error } = await supabase
+      .from("appointments")
+      .update({ checkin_status: "done" })
+      .eq("clinic_id", clinicId)
+      .neq("status", "cancelled")
+      .in("id", uniqueIds);
+
+    if (error) return { success: false, error: error.message };
+    revalidatePath("/admin/counter");
+    revalidatePath("/admin/sales");
+    return { success: true, updatedCount: uniqueIds.length };
+  } catch (err) {
+    console.error("completeAllActiveAppointments error:", err);
+    return { success: false, error: "予期せぬエラーが発生しました" };
+  }
+}
+
 // ===== 受付カウンター：今日の予約一覧取得 =====
 
 export async function getTodayAppointments() {
@@ -273,9 +328,9 @@ export async function getTodayAppointments() {
     const supabase = getAdminSupabase();
     if (!supabase) return { success: false, data: [] };
 
-    const now = new Date();
-    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0).toISOString();
-    const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59).toISOString();
+    const todayStr = new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" });
+    const todayStart = `${todayStr}T00:00:00+09:00`;
+    const todayEnd   = `${todayStr}T23:59:59+09:00`;
 
     const { data, error } = await supabase
       .from("appointments")
@@ -294,6 +349,36 @@ export async function getTodayAppointments() {
     return { success: true, data: data ?? [] };
   } catch (err) {
     console.error("getTodayAppointments error:", err);
+    return { success: false, data: [] };
+  }
+}
+
+export async function getAppointmentsByDate(dateStr: string) {
+  try {
+    const { clinicId } = await checkAdminAuth();
+    const supabase = getAdminSupabase();
+    if (!supabase) return { success: false, data: [] };
+
+    const dayStart = `${dateStr}T00:00:00+09:00`;
+    const dayEnd   = `${dateStr}T23:59:59+09:00`;
+
+    const { data, error } = await supabase
+      .from("appointments")
+      .select(`
+        id, start_time, end_time, status, checkin_status,
+        is_first_visit, memo, course_name, staff_name,
+        customers(id, name, phone, line_user_id)
+      `)
+      .eq("clinic_id", clinicId)
+      .neq("status", "cancelled")
+      .gte("start_time", dayStart)
+      .lte("start_time", dayEnd)
+      .order("start_time", { ascending: true });
+
+    if (error) return { success: false, data: [] };
+    return { success: true, data: data ?? [] };
+  } catch (err) {
+    console.error("getAppointmentsByDate error:", err);
     return { success: false, data: [] };
   }
 }

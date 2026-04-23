@@ -83,10 +83,10 @@ export default function RegisterPage() {
         {/* Header */}
         <div className="text-center mb-8">
           <div
-            className="inline-flex items-center justify-center w-20 h-20 rounded-2xl mb-6 shadow-2xl overflow-hidden bg-white/10 backdrop-blur-sm"
+            className={`inline-flex items-center justify-center rounded-2xl mb-6 shadow-2xl overflow-hidden bg-white/10 backdrop-blur-sm ${CLINIC_CONFIG.usesWordmarkLogo ? "px-4 py-3" : "w-20 h-20"}`}
             style={{ boxShadow: "0 0 40px rgba(16, 185, 129, 0.3)" }}
           >
-            <div className="relative w-14 h-14">
+            <div className={`relative ${CLINIC_CONFIG.usesWordmarkLogo ? "w-40 h-12 bg-white rounded-lg px-2 py-1" : "w-14 h-14"}`}>
               {_isExternalLogo ? (
                   <img src={CLINIC_CONFIG.logoSmallUrl} alt={CLINIC_CONFIG.nameShort} className="max-h-12 w-auto object-contain" />
                 ) : (
@@ -94,7 +94,7 @@ export default function RegisterPage() {
                 )}
             </div>
           </div>
-          <h1 className="text-3xl font-black text-white tracking-tight">接骨院管理システム</h1>
+          {!CLINIC_CONFIG.usesWordmarkLogo && <h1 className="text-3xl font-black text-white tracking-tight">接骨院管理システム</h1>}
           <p className="text-emerald-300/70 text-sm mt-2 font-medium tracking-wide">
             新規クリニック登録
           </p>
