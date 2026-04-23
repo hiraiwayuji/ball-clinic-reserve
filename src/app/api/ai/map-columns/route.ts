@@ -25,10 +25,9 @@ const SCHEMA_FIELDS: Record<TargetSchema, { field: string; description: string; 
     { field: "memo",         description: "備考・メモ（任意）", required: false },
   ],
   insurance: [
-    { field: "payment_month",  description: "対象月（請求月、診療月、YYYY/MM形式）", required: true },
+    { field: "payment_date",   description: "入金日・振込日（振込日、入金日、対象月、請求月、診療月など）", required: true },
     { field: "insurance_name", description: "保険組合名・機関名（支払元、保険者名など）", required: true },
     { field: "amount",         description: "金額（入金額、支払額、円）", required: true },
-    { field: "payment_date",   description: "入金日・振込日（任意）", required: false },
     { field: "notes",          description: "備考・メモ（任意）", required: false },
   ],
 };
