@@ -69,9 +69,7 @@ export default function QuestionnairePage() {
             {(CLINIC_CONFIG.hasCustomLogo || CLINIC_CONFIG.isDefaultClinic) && (
               <div className="relative w-40 h-14 mx-auto">
                 {CLINIC_CONFIG.hasCustomLogo ? (
-                  <div className="bg-white rounded-lg px-2 py-1 inline-flex items-center justify-center w-full h-full">
-                    <img src={CLINIC_CONFIG.logoSmallUrl} alt={CLINIC_CONFIG.nameShort} className="max-h-full w-auto object-contain" />
-                  </div>
+                  <img src={CLINIC_CONFIG.logoSmallUrl} alt={CLINIC_CONFIG.nameShort} className="max-h-full w-auto object-contain mx-auto" />
                 ) : (
                   <Image src={CLINIC_CONFIG.logoSmallUrl} alt={CLINIC_CONFIG.nameShort} fill className="object-contain" />
                 )}

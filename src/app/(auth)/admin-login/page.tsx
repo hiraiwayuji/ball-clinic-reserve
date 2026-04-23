@@ -109,9 +109,7 @@ export default function AdminLoginPage() {
           >
             <div className={`relative flex items-center justify-center ${CLINIC_CONFIG.hasCustomLogo && CLINIC_CONFIG.usesWordmarkLogo ? "w-40 h-12 bg-white rounded-lg px-2 py-1" : "w-14 h-14"}`}>
               {CLINIC_CONFIG.hasCustomLogo ? (
-                <div className="bg-white rounded-lg px-2 py-1 flex items-center justify-center">
-                  <img src={CLINIC_CONFIG.logoSmallUrl} alt={CLINIC_CONFIG.nameShort} className="max-h-12 w-auto object-contain" />
-                </div>
+                <img src={CLINIC_CONFIG.logoSmallUrl} alt={CLINIC_CONFIG.nameShort} className="max-h-12 w-auto object-contain" />
               ) : CLINIC_CONFIG.isDefaultClinic ? (
                 <Image src={CLINIC_CONFIG.logoSmallUrl} alt={CLINIC_CONFIG.nameShort} fill className="object-contain" />
               ) : (

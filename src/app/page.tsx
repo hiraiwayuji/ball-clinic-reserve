@@ -23,9 +23,7 @@ export default function Home() {
           <div className="flex items-center gap-3">
             <Link href="/">
               {CLINIC_CONFIG.hasCustomLogo ? (
-                <div className="bg-white rounded-lg px-2 py-1">
-                  <img src={CLINIC_CONFIG.logoUrl} alt={CLINIC_CONFIG.name} className="h-8 w-auto object-contain" />
-                </div>
+                <img src={CLINIC_CONFIG.logoUrl} alt={CLINIC_CONFIG.name} className="h-10 w-auto object-contain" />
               ) : CLINIC_CONFIG.isDefaultClinic ? (
                 <div className="relative w-40 h-12">
                   <Image src={CLINIC_CONFIG.logoUrl} alt={CLINIC_CONFIG.name} fill className="object-contain" />
@@ -138,13 +136,11 @@ export default function Home() {
         <div className="container mx-auto px-4 text-center">
           <div className="flex items-center justify-center gap-3 mb-6">
             {CLINIC_CONFIG.hasCustomLogo ? (
-              <div className="bg-white rounded-lg px-2 py-1 inline-flex items-center justify-center">
-                <img
-                  src={CLINIC_CONFIG.logoSmallUrl}
-                  alt={CLINIC_CONFIG.name}
-                  className="h-8 w-auto object-contain"
-                />
-              </div>
+              <img
+                src={CLINIC_CONFIG.logoSmallUrl}
+                alt={CLINIC_CONFIG.name}
+                className="h-10 w-auto object-contain"
+              />
             ) : CLINIC_CONFIG.isDefaultClinic ? (
               <div className="relative w-8 h-8">
                 <Image
