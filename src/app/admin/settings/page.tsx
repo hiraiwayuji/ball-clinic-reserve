@@ -5,6 +5,7 @@ import SettingsForm from "@/components/admin/SettingsForm";
 import CourseStaffSettings from "@/components/admin/CourseStaffSettings";
 import AccountSettingsForm from "@/components/admin/AccountSettingsForm";
 import TermsAndPolicySection from "@/components/admin/TermsAndPolicySection";
+import ManualSection from "@/components/admin/ManualSection";
 
 export default async function SettingsPage() {
   const [initialSettings, initialCourses, initialStaff, initialRooms, currentEmail] = await Promise.all([
@@ -17,6 +18,8 @@ export default async function SettingsPage() {
 
   return (
     <div className="container mx-auto space-y-10">
+      <ManualSection />
+
       <SettingsForm initialSettings={initialSettings} />
 
       <div className="bg-white dark:bg-slate-900 rounded-2xl border p-6 shadow-sm">
