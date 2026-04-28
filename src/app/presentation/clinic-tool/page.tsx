@@ -23,7 +23,9 @@ import {
   Home,
   DoorOpen,
   Stethoscope,
+  Hand,
 } from "lucide-react";
+import Link from "next/link";
 
 type Slide = {
   badge?: string;
@@ -526,6 +528,41 @@ const SLIDES: Slide[] = [
             <span className="px-2 py-1 rounded bg-pink-500/40">河原（受付）</span>
           </div>
         </div>
+      </div>
+    ),
+  },
+  {
+    badge: "Try It",
+    title: "実際に触ってみてください",
+    subtitle: "藤川先生の院でセットアップ済みの体験デモ",
+    bg: "from-blue-600 to-cyan-600",
+    body: (
+      <div className="space-y-4 text-sm">
+        <div className="bg-white/15 backdrop-blur rounded-xl p-4 border border-white/20 space-y-2">
+          <div className="font-bold text-xs flex items-center gap-2">
+            <Hand className="w-4 h-4" />
+            体験できること
+          </div>
+          <ul className="text-[11px] space-y-1 opacity-95">
+            <li>● スタッフ4名（藤川/島田/大橋/河原）の色分けカレンダー</li>
+            <li>● 島田先生の訪問治療レーン（10:00〜16:00）</li>
+            <li>● 個室・大部屋4ベッドの稼働状況</li>
+            <li>● 鍼灸 / 整体 / マッサージ等のメニュー予約</li>
+            <li>● アスリート患者のスポーツ情報表示</li>
+          </ul>
+        </div>
+
+        <Link
+          href="/presentation/karada-demo"
+          className="block w-full text-center bg-white text-blue-700 font-black px-5 py-4 rounded-2xl shadow-2xl active:scale-95 transition"
+        >
+          デモ画面を開く →
+        </Link>
+
+        <p className="text-[10px] opacity-70 text-center leading-relaxed">
+          画面上の「このまま本番スタート」ボタンから、<br />
+          このセットアップをそのまま運用に引き継げます。
+        </p>
       </div>
     ),
   },
