@@ -37,7 +37,7 @@ type Slide = {
 
 const SLIDES: Slide[] = [
   {
-    title: "karada鍼灸整骨院 藤川先生へ",
+    title: "からだ鍼灸整骨院 藤川先生へ",
     subtitle: "予約・LINE・売上・AIをひとつに",
     bg: "from-blue-600 via-indigo-700 to-purple-800",
     body: (
@@ -569,7 +569,7 @@ const SLIDES: Slide[] = [
   {
     badge: "Closing",
     title: "藤川先生と一緒に育てたい。",
-    subtitle: "karada鍼灸整骨院の毎日を、もっとシンプルに",
+    subtitle: "からだ鍼灸整骨院の毎日を、もっとシンプルに",
     bg: "from-blue-700 via-purple-700 to-pink-700",
     body: (
       <div className="space-y-5 text-center">

@@ -1,7 +1,7 @@
 import type { Metadata, Viewport } from "next";
 
 export const metadata: Metadata = {
-  title: "karada鍼灸整骨院 体験デモ｜接骨院DXツール",
+  title: "からだ鍼灸整骨院 体験デモ｜接骨院DXツール",
   description: "藤川先生の院に合わせたデモ環境です。スタッフ別色分けカレンダーと訪問治療スケジュールを体験できます。",
 };
 
