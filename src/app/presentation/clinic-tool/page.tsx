@@ -379,7 +379,7 @@ const SLIDES: Slide[] = [
     ),
   },
   {
-    badge: "For karada",
+    badge: "からだ鍼灸整骨院へ",
     title: "藤川先生の院ならこう活かせる",
     subtitle: "サイトを拝見して考えた7つのご提案",
     bg: "from-amber-600 to-orange-700",
