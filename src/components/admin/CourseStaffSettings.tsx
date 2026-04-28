@@ -11,7 +11,7 @@ import {
   saveRoom, deleteRoom,
   type ReservationCourse, type ReservationStaff, type ReservationRoom,
 } from "@/app/actions/courses";
-import { Plus, Trash2, GripVertical, Clock, Pencil, Check, X, User, DoorOpen } from "lucide-react";
+import { Plus, Trash2, GripVertical, Clock, Pencil, Check, X, User, DoorOpen, Sparkles, Tag, Star } from "lucide-react";
 
 interface Props {
   initialCourses: ReservationCourse[];
@@ -34,6 +34,12 @@ function CourseRow({
   const [duration, setDuration] = useState(course.duration_minutes.toString());
   const [price, setPrice] = useState(course.price?.toString() ?? "");
   const [description, setDescription] = useState(course.description ?? "");
+  const [imageUrl, setImageUrl] = useState(course.image_url ?? "");
+  const [isCoupon, setIsCoupon] = useState(course.is_coupon);
+  const [isFirstVisitOnly, setIsFirstVisitOnly] = useState(course.is_first_visit_only);
+  const [isRepeatOnly, setIsRepeatOnly] = useState(course.is_repeat_only);
+  const [regularPrice, setRegularPrice] = useState(course.regular_price?.toString() ?? "");
+  const [badgeLabel, setBadgeLabel] = useState(course.badge_label ?? "");
   const [saving, setSaving] = useState(false);
 
   const handleSave = async () => {
@@ -47,6 +53,12 @@ function CourseRow({
       description: description || null,
       is_active: course.is_active,
       sort_order: course.sort_order,
+      image_url: imageUrl.trim() || null,
+      is_coupon: isCoupon,
+      is_first_visit_only: isFirstVisitOnly,
+      is_repeat_only: isRepeatOnly,
+      regular_price: regularPrice ? Number(regularPrice) : null,
+      badge_label: badgeLabel.trim() || null,
     });
     setSaving(false);
     if (res.success) {
@@ -76,27 +88,111 @@ function CourseRow({
 
   if (editing) {
     return (
-      <div className="border rounded-xl p-3 bg-blue-50 border-blue-200 space-y-2">
+      <div className="border rounded-xl p-3 bg-blue-50 border-blue-200 dark:bg-slate-900 dark:border-slate-700 space-y-2">
         <div className="grid grid-cols-2 gap-2">
           <div>
-            <Label className="text-xs text-slate-600">コース名 *</Label>
+            <Label className="text-xs text-slate-600 dark:text-slate-300">コース名 *</Label>
             <Input value={name} onChange={e => setName(e.target.value)} className="h-9 mt-1" placeholder="例: 初診コース" />
           </div>
           <div>
-            <Label className="text-xs text-slate-600">所要時間（分） *</Label>
+            <Label className="text-xs text-slate-600 dark:text-slate-300">所要時間（分） *</Label>
             <Input type="number" value={duration} onChange={e => setDuration(e.target.value)} className="h-9 mt-1" min={10} step={5} />
           </div>
         </div>
         <div className="grid grid-cols-2 gap-2">
           <div>
-            <Label className="text-xs text-slate-600">料金（円）</Label>
+            <Label className="text-xs text-slate-600 dark:text-slate-300">料金（円）</Label>
             <Input type="number" value={price} onChange={e => setPrice(e.target.value)} className="h-9 mt-1" placeholder="未設定可" />
           </div>
           <div>
-            <Label className="text-xs text-slate-600">説明</Label>
-            <Input value={description} onChange={e => setDescription(e.target.value)} className="h-9 mt-1" placeholder="患者向け説明文" />
+            <Label className="text-xs text-slate-600 dark:text-slate-300">通常価格（円）</Label>
+            <Input
+              type="number"
+              value={regularPrice}
+              onChange={e => setRegularPrice(e.target.value)}
+              className="h-9 mt-1"
+              placeholder="例: 9000（割引前）"
+            />
           </div>
         </div>
+        <div>
+          <Label className="text-xs text-slate-600 dark:text-slate-300">説明</Label>
+          <Input value={description} onChange={e => setDescription(e.target.value)} className="h-9 mt-1" placeholder="患者向け説明文" />
+        </div>
+
+        {/* メニューLP用フィールド */}
+        <div className="border-t border-blue-200 dark:border-slate-700 pt-2 mt-2 space-y-2">
+          <p className="text-[11px] font-bold text-blue-700 dark:text-blue-300 flex items-center gap-1">
+            <Sparkles className="w-3 h-3" />
+            メニューLP表示設定（任意）
+          </p>
+          <div>
+            <Label className="text-xs text-slate-600 dark:text-slate-300">写真URL</Label>
+            <Input
+              value={imageUrl}
+              onChange={e => setImageUrl(e.target.value)}
+              className="h-9 mt-1"
+              placeholder="https://... （Supabase Storage または外部URL）"
+            />
+            {imageUrl && (
+              <div className="mt-2 w-20 h-20 rounded-lg overflow-hidden border bg-slate-100 dark:bg-slate-800">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={imageUrl} alt="プレビュー" className="w-full h-full object-cover" />
+              </div>
+            )}
+          </div>
+          <div>
+            <Label className="text-xs text-slate-600 dark:text-slate-300 flex items-center gap-1">
+              <Star className="w-3 h-3" />バッジラベル
+            </Label>
+            <Input
+              value={badgeLabel}
+              onChange={e => setBadgeLabel(e.target.value)}
+              className="h-9 mt-1"
+              placeholder="例: 人気No.1 / 期間限定"
+            />
+          </div>
+          <div className="flex flex-col gap-2 pt-1">
+            <label className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-200 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={isCoupon}
+                onChange={e => setIsCoupon(e.target.checked)}
+                className="w-4 h-4 accent-blue-600"
+              />
+              <Tag className="w-3.5 h-3.5 text-amber-500" />
+              クーポンとして公開する（メニューLPのクーポンタブに表示）
+            </label>
+            <div className="flex flex-col gap-1 pl-1">
+              <p className="text-[11px] text-slate-500 dark:text-slate-400">対象区分（どちらか一方のみ。両方OFFなら全員）</p>
+              <label className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-200 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={isFirstVisitOnly}
+                  onChange={e => {
+                    setIsFirstVisitOnly(e.target.checked);
+                    if (e.target.checked) setIsRepeatOnly(false);
+                  }}
+                  className="w-4 h-4 accent-rose-500"
+                />
+                新規患者限定
+              </label>
+              <label className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-200 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={isRepeatOnly}
+                  onChange={e => {
+                    setIsRepeatOnly(e.target.checked);
+                    if (e.target.checked) setIsFirstVisitOnly(false);
+                  }}
+                  className="w-4 h-4 accent-purple-500"
+                />
+                再来（2回目以降）限定
+              </label>
+            </div>
+          </div>
+        </div>
+
         <div className="flex gap-2 justify-end pt-1">
           <Button size="sm" variant="outline" onClick={() => setEditing(false)}>
             <X className="w-3.5 h-3.5 mr-1" /> キャンセル
@@ -112,6 +208,12 @@ function CourseRow({
   return (
     <div className={`flex items-center gap-3 border rounded-xl px-3 py-2.5 transition-colors ${course.is_active ? "bg-white dark:bg-slate-800" : "bg-slate-50 dark:bg-slate-800/50 opacity-60"}`}>
       <GripVertical className="w-4 h-4 text-slate-300 shrink-0" />
+      {course.image_url ? (
+        <div className="w-10 h-10 rounded-lg overflow-hidden bg-slate-100 dark:bg-slate-700 shrink-0">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={course.image_url} alt="" className="w-full h-full object-cover" />
+        </div>
+      ) : null}
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 flex-wrap">
           <span className="font-semibold text-slate-800 dark:text-slate-100">{course.name}</span>
@@ -120,7 +222,30 @@ function CourseRow({
           </span>
           {course.price != null && (
             <span className="text-xs text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-700 px-2 py-0.5 rounded-full">
+              {course.regular_price != null && course.regular_price > course.price && (
+                <span className="line-through text-slate-400 mr-1">¥{course.regular_price.toLocaleString()}</span>
+              )}
               ¥{course.price.toLocaleString()}
+            </span>
+          )}
+          {course.is_coupon && (
+            <span className="flex items-center gap-1 text-[10px] font-bold text-amber-700 dark:text-amber-300 bg-amber-100 dark:bg-amber-900/40 px-2 py-0.5 rounded-full">
+              <Tag className="w-2.5 h-2.5" />クーポン
+            </span>
+          )}
+          {course.is_first_visit_only && (
+            <span className="text-[10px] font-bold text-rose-700 dark:text-rose-300 bg-rose-100 dark:bg-rose-900/40 px-2 py-0.5 rounded-full">
+              新規限定
+            </span>
+          )}
+          {course.is_repeat_only && (
+            <span className="text-[10px] font-bold text-purple-700 dark:text-purple-300 bg-purple-100 dark:bg-purple-900/40 px-2 py-0.5 rounded-full">
+              再来限定
+            </span>
+          )}
+          {course.badge_label && (
+            <span className="text-[10px] font-bold text-blue-700 dark:text-blue-300 bg-blue-100 dark:bg-blue-900/40 px-2 py-0.5 rounded-full">
+              {course.badge_label}
             </span>
           )}
         </div>
@@ -360,6 +485,12 @@ export default function CourseStaffSettings({ initialCourses, initialStaff, init
   const [newCourseDuration, setNewCourseDuration] = useState("30");
   const [newCoursePrice, setNewCoursePrice] = useState("");
   const [newCourseDesc, setNewCourseDesc] = useState("");
+  const [newCourseImageUrl, setNewCourseImageUrl] = useState("");
+  const [newCourseIsCoupon, setNewCourseIsCoupon] = useState(false);
+  const [newCourseIsFirstVisitOnly, setNewCourseIsFirstVisitOnly] = useState(false);
+  const [newCourseIsRepeatOnly, setNewCourseIsRepeatOnly] = useState(false);
+  const [newCourseRegularPrice, setNewCourseRegularPrice] = useState("");
+  const [newCourseBadge, setNewCourseBadge] = useState("");
   const [savingCourse, setSavingCourse] = useState(false);
 
   const [addingStaff, setAddingStaff] = useState(false);
@@ -394,6 +525,12 @@ export default function CourseStaffSettings({ initialCourses, initialStaff, init
       price: newCoursePrice ? Number(newCoursePrice) : null,
       description: newCourseDesc || null,
       sort_order: courses.length,
+      image_url: newCourseImageUrl.trim() || null,
+      is_coupon: newCourseIsCoupon,
+      is_first_visit_only: newCourseIsFirstVisitOnly,
+      is_repeat_only: newCourseIsRepeatOnly,
+      regular_price: newCourseRegularPrice ? Number(newCourseRegularPrice) : null,
+      badge_label: newCourseBadge.trim() || null,
     });
     setSavingCourse(false);
     if (res.success) {
@@ -403,6 +540,12 @@ export default function CourseStaffSettings({ initialCourses, initialStaff, init
       setNewCourseDuration("30");
       setNewCoursePrice("");
       setNewCourseDesc("");
+      setNewCourseImageUrl("");
+      setNewCourseIsCoupon(false);
+      setNewCourseIsFirstVisitOnly(false);
+      setNewCourseIsRepeatOnly(false);
+      setNewCourseRegularPrice("");
+      setNewCourseBadge("");
       window.location.reload();
     } else {
       toast.error(res.error ?? "追加に失敗しました");
@@ -481,28 +624,112 @@ export default function CourseStaffSettings({ initialCourses, initialStaff, init
           ))}
 
           {addingCourse && (
-            <div className="border rounded-xl p-3 bg-blue-50 border-blue-200 space-y-2">
-              <p className="text-xs font-bold text-blue-700">新しいコースを追加</p>
+            <div className="border rounded-xl p-3 bg-blue-50 border-blue-200 dark:bg-slate-900 dark:border-slate-700 space-y-2">
+              <p className="text-xs font-bold text-blue-700 dark:text-blue-300">新しいコースを追加</p>
               <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <Label className="text-xs text-slate-600">コース名 *</Label>
+                  <Label className="text-xs text-slate-600 dark:text-slate-300">コース名 *</Label>
                   <Input value={newCourseName} onChange={e => setNewCourseName(e.target.value)} className="h-9 mt-1" placeholder="例: 初診コース" autoFocus />
                 </div>
                 <div>
-                  <Label className="text-xs text-slate-600">所要時間（分） *</Label>
+                  <Label className="text-xs text-slate-600 dark:text-slate-300">所要時間（分） *</Label>
                   <Input type="number" value={newCourseDuration} onChange={e => setNewCourseDuration(e.target.value)} className="h-9 mt-1" min={10} step={5} />
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <Label className="text-xs text-slate-600">料金（円）</Label>
+                  <Label className="text-xs text-slate-600 dark:text-slate-300">料金（円）</Label>
                   <Input type="number" value={newCoursePrice} onChange={e => setNewCoursePrice(e.target.value)} className="h-9 mt-1" placeholder="未設定可" />
                 </div>
                 <div>
-                  <Label className="text-xs text-slate-600">説明</Label>
-                  <Input value={newCourseDesc} onChange={e => setNewCourseDesc(e.target.value)} className="h-9 mt-1" placeholder="患者向け説明文" />
+                  <Label className="text-xs text-slate-600 dark:text-slate-300">通常価格（円）</Label>
+                  <Input
+                    type="number"
+                    value={newCourseRegularPrice}
+                    onChange={e => setNewCourseRegularPrice(e.target.value)}
+                    className="h-9 mt-1"
+                    placeholder="例: 9000（割引前）"
+                  />
                 </div>
               </div>
+              <div>
+                <Label className="text-xs text-slate-600 dark:text-slate-300">説明</Label>
+                <Input value={newCourseDesc} onChange={e => setNewCourseDesc(e.target.value)} className="h-9 mt-1" placeholder="患者向け説明文" />
+              </div>
+
+              {/* メニューLP用フィールド */}
+              <div className="border-t border-blue-200 dark:border-slate-700 pt-2 mt-2 space-y-2">
+                <p className="text-[11px] font-bold text-blue-700 dark:text-blue-300 flex items-center gap-1">
+                  <Sparkles className="w-3 h-3" />
+                  メニューLP表示設定（任意）
+                </p>
+                <div>
+                  <Label className="text-xs text-slate-600 dark:text-slate-300">写真URL</Label>
+                  <Input
+                    value={newCourseImageUrl}
+                    onChange={e => setNewCourseImageUrl(e.target.value)}
+                    className="h-9 mt-1"
+                    placeholder="https://... （Supabase Storage または外部URL）"
+                  />
+                  {newCourseImageUrl && (
+                    <div className="mt-2 w-20 h-20 rounded-lg overflow-hidden border bg-slate-100 dark:bg-slate-800">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={newCourseImageUrl} alt="プレビュー" className="w-full h-full object-cover" />
+                    </div>
+                  )}
+                </div>
+                <div>
+                  <Label className="text-xs text-slate-600 dark:text-slate-300 flex items-center gap-1">
+                    <Star className="w-3 h-3" />バッジラベル
+                  </Label>
+                  <Input
+                    value={newCourseBadge}
+                    onChange={e => setNewCourseBadge(e.target.value)}
+                    className="h-9 mt-1"
+                    placeholder="例: 人気No.1 / 期間限定"
+                  />
+                </div>
+                <div className="flex flex-col gap-2 pt-1">
+                  <label className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-200 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={newCourseIsCoupon}
+                      onChange={e => setNewCourseIsCoupon(e.target.checked)}
+                      className="w-4 h-4 accent-blue-600"
+                    />
+                    <Tag className="w-3.5 h-3.5 text-amber-500" />
+                    クーポンとして公開する（メニューLPのクーポンタブに表示）
+                  </label>
+                  <div className="flex flex-col gap-1 pl-1">
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400">対象区分（どちらか一方のみ。両方OFFなら全員）</p>
+                    <label className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-200 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={newCourseIsFirstVisitOnly}
+                        onChange={e => {
+                          setNewCourseIsFirstVisitOnly(e.target.checked);
+                          if (e.target.checked) setNewCourseIsRepeatOnly(false);
+                        }}
+                        className="w-4 h-4 accent-rose-500"
+                      />
+                      新規患者限定
+                    </label>
+                    <label className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-200 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={newCourseIsRepeatOnly}
+                        onChange={e => {
+                          setNewCourseIsRepeatOnly(e.target.checked);
+                          if (e.target.checked) setNewCourseIsFirstVisitOnly(false);
+                        }}
+                        className="w-4 h-4 accent-purple-500"
+                      />
+                      再来（2回目以降）限定
+                    </label>
+                  </div>
+                </div>
+              </div>
+
               <div className="flex gap-2 justify-end pt-1">
                 <Button size="sm" variant="outline" onClick={() => setAddingCourse(false)}>
                   <X className="w-3.5 h-3.5 mr-1" /> キャンセル

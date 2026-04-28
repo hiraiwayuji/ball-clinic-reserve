@@ -13,6 +13,12 @@ export type ReservationCourse = {
   description: string | null;
   is_active: boolean;
   sort_order: number;
+  image_url: string | null;
+  is_coupon: boolean;
+  is_first_visit_only: boolean;
+  is_repeat_only: boolean;
+  regular_price: number | null;
+  badge_label: string | null;
 };
 
 export type ReservationStaff = {
@@ -113,6 +119,12 @@ export async function saveCourse(course: Partial<ReservationCourse> & { name: st
     description: course.description ?? null,
     is_active: course.is_active ?? true,
     sort_order: course.sort_order ?? 0,
+    image_url: course.image_url ?? null,
+    is_coupon: course.is_coupon ?? false,
+    is_first_visit_only: course.is_first_visit_only ?? false,
+    is_repeat_only: course.is_repeat_only ?? false,
+    regular_price: course.regular_price ?? null,
+    badge_label: course.badge_label ?? null,
   };
 
   if (course.id) {

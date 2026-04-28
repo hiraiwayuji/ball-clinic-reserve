@@ -29,6 +29,7 @@ function ReserveContent() {
   const searchParams = useSearchParams();
   const initialDateStr = searchParams.get("date");
   const initialTime = searchParams.get("time");
+  const initialCourseId = searchParams.get("courseId");
 
   const initialDate = initialDateStr ? (() => {
     const parsed = parse(initialDateStr, "yyyy-MM-dd", new Date());
@@ -61,7 +62,13 @@ function ReserveContent() {
 
   useEffect(() => {
     getClinicHolidays().then(setClinicHolidays);
-    getActiveCourses().then(setCourses);
+    getActiveCourses().then(list => {
+      setCourses(list);
+      // ?courseId=xxx で来た場合、該当コースを初期選択
+      if (initialCourseId && list.some(c => c.id === initialCourseId)) {
+        setSelectedCourseId(initialCourseId);
+      }
+    });
     getActiveStaff().then(setStaffList);
     getActiveRooms().then(setRooms);
     const savedName = localStorage.getItem("ballClinic_savedName");
@@ -69,7 +76,7 @@ function ReserveContent() {
     if (savedName) setName(savedName);
     if (savedPhone) setPhone(savedPhone);
     if (savedName && savedPhone) setVisitType("return");
-  }, []);
+  }, [initialCourseId]);
 
   useEffect(() => {
     if (date) {
@@ -226,8 +233,11 @@ function ReserveContent() {
           </div>
           <h1 className="text-3xl font-extrabold text-white mb-2 tracking-tight">予約日時を選ぶ</h1>
           <p className="text-blue-200/60 text-sm mb-6">カレンダーから空きをご確認ください</p>
-          <Button className="w-full bg-blue-600 hover:bg-blue-500 h-16 text-lg font-bold rounded-2xl" asChild>
+          <Button className="w-full bg-blue-600 hover:bg-blue-500 h-16 text-lg font-bold rounded-2xl mb-3" asChild>
             <Link href="/reserve/calendar">カレンダーで空きを確認</Link>
+          </Button>
+          <Button variant="outline" className="w-full bg-amber-500/10 hover:bg-amber-500/20 border-amber-500/40 text-amber-200 h-14 text-sm font-bold rounded-2xl" asChild>
+            <Link href="/reserve/menu">✨ クーポン・メニューから選ぶ</Link>
           </Button>
         </div>
         {/* 初めての方向け */}

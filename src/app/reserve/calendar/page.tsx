@@ -1,12 +1,14 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, Suspense } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { format, isSameMonth, isSameDay, isToday, isPast, startOfDay, startOfMonth, endOfMonth, eachDayOfInterval, startOfWeek, endOfWeek } from "date-fns";
 import { ja } from "date-fns/locale";
-import { ChevronLeft, ChevronRight, ArrowLeft, Clock, CalendarDays, X, CheckCircle2, AlertCircle } from "lucide-react";
+import { ChevronLeft, ChevronRight, ArrowLeft, Clock, CalendarDays, X, CheckCircle2, AlertCircle, Sparkles } from "lucide-react";
 import { createWaitlistReservation } from "@/app/actions/reserve";
 import { getClinicHolidays, type ClinicHoliday } from "@/app/actions/holidays";
+import { getActiveCourses, type ReservationCourse } from "@/app/actions/courses";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -98,6 +100,29 @@ const levelConfig = {
 type WaitlistState = "idle" | "form" | "submitting" | "success";
 
 export default function ReserveCalendarPage() {
+  return (
+    <Suspense fallback={<CalendarLoading />}>
+      <ReserveCalendarContent />
+    </Suspense>
+  );
+}
+
+function CalendarLoading() {
+  return (
+    <div className="min-h-screen bg-slate-900 flex items-center justify-center" style={{ backgroundColor: '#0f172a' }}>
+      <div className="flex flex-col items-center gap-3">
+        <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+        <p className="text-zinc-500 text-sm font-bold">カレンダーを読み込み中...</p>
+      </div>
+    </div>
+  );
+}
+
+function ReserveCalendarContent() {
+  const searchParams = useSearchParams();
+  const courseIdParam = searchParams.get("courseId");
+
+  const [selectedCourse, setSelectedCourse] = useState<ReservationCourse | null>(null);
   const [currentMonth, setCurrentMonth] = useState<Date | null>(null);
   const [monthlyData, setMonthlyData] = useState<Record<string, number>>({});
   const [clinicHolidays, setClinicHolidays] = useState<ClinicHoliday[]>([]);
@@ -181,6 +206,21 @@ export default function ReserveCalendarPage() {
   useEffect(() => {
     setCurrentMonth(new Date(new Date().getFullYear(), new Date().getMonth(), 1));
   }, []);
+
+  // courseId から該当コースを取得
+  useEffect(() => {
+    if (!courseIdParam) {
+      setSelectedCourse(null);
+      return;
+    }
+    let mounted = true;
+    getActiveCourses().then(courses => {
+      if (!mounted) return;
+      const found = courses.find(c => c.id === courseIdParam) ?? null;
+      setSelectedCourse(found);
+    });
+    return () => { mounted = false; };
+  }, [courseIdParam]);
 
   useEffect(() => {
     if (currentMonth) {
@@ -387,6 +427,41 @@ export default function ReserveCalendarPage() {
 
       <div className="max-w-2xl mx-auto px-4 pb-12">
 
+        {/* ─── 選択中メニュー バナー ─── */}
+        {selectedCourse && (
+          <div className="mt-4 bg-gradient-to-r from-blue-600/20 to-blue-500/10 border border-blue-500/40 rounded-2xl p-4">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 bg-blue-500/30 rounded-xl flex items-center justify-center shrink-0">
+                <Sparkles className="w-5 h-5 text-blue-300" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-[10px] text-blue-300/70 font-bold uppercase tracking-widest">選択中のメニュー</p>
+                <h2 className="text-base font-black text-white leading-snug mt-0.5">{selectedCourse.name}</h2>
+                <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                  <span className="flex items-center gap-1 text-[11px] text-blue-200 bg-blue-500/20 px-2 py-0.5 rounded-md font-bold">
+                    <Clock className="w-3 h-3" />
+                    {selectedCourse.duration_minutes}分
+                  </span>
+                  {selectedCourse.price != null && (
+                    <span className="text-[11px] text-blue-200 bg-blue-500/20 px-2 py-0.5 rounded-md font-bold tabular-nums">
+                      ¥{selectedCourse.price.toLocaleString()}
+                    </span>
+                  )}
+                </div>
+              </div>
+              <Link
+                href="/reserve/menu"
+                className="shrink-0 text-[11px] font-bold text-blue-300 hover:text-white bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/30 rounded-lg px-2.5 py-1.5 transition"
+              >
+                変更
+              </Link>
+            </div>
+            <p className="text-[11px] text-blue-200/60 mt-2.5 ml-13">
+              ※ {selectedCourse.duration_minutes}分の連続枠が確保できる時間のみ「◯ 空き」表示しています
+            </p>
+          </div>
+        )}
+
         {/* ─── 月ナビゲーション ─── */}
         <div className="flex items-center justify-between py-5">
           <button
@@ -542,55 +617,88 @@ export default function ReserveCalendarPage() {
                   <div className="w-7 h-7 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
                   <p className="text-zinc-600 text-sm font-bold">時間を読み込み中...</p>
                 </div>
-              ) : (
-                <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 mb-4">
-                  {getTimeSlots(selectedDate).map((slot) => {
-                    const isBooked = dailySlots.includes(slot);
-                    const isTooClose = isTimeSlotWithinTwoHours(selectedDate, slot);
+              ) : (() => {
+                const allSlots = getTimeSlots(selectedDate);
+                const slotDuration = selectedCourse?.duration_minutes ?? 30;
+                const requiredSteps = Math.max(1, Math.ceil(slotDuration / 30));
 
-                    if (isBooked) {
+                // 連続枠が確保できるか判定
+                const canFitDuration = (slot: string): boolean => {
+                  const idx = allSlots.indexOf(slot);
+                  if (idx < 0) return false;
+                  for (let i = 0; i < requiredSteps; i++) {
+                    const next = allSlots[idx + i];
+                    if (!next) return false;
+                    if (dailySlots.includes(next)) return false;
+                  }
+                  return true;
+                };
+
+                return (
+                  <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 mb-4">
+                    {allSlots.map((slot) => {
+                      const isBooked = dailySlots.includes(slot);
+                      const isTooClose = isTimeSlotWithinTwoHours(selectedDate, slot);
+                      const fits = canFitDuration(slot);
+
+                      if (isBooked) {
+                        return (
+                          <div
+                            key={slot}
+                            className="flex flex-col items-center justify-center rounded-2xl border border-zinc-800 bg-slate-900 py-3.5 px-2 select-none opacity-50"
+                          >
+                            <span className="text-sm font-black text-zinc-500 tabular-nums">{slot}</span>
+                            <span className="text-[10px] font-bold text-rose-600 mt-0.5">予約済</span>
+                          </div>
+                        );
+                      }
+
+                      if (isTooClose) {
+                        return (
+                          <div
+                            key={slot}
+                            className="flex flex-col items-center justify-center rounded-2xl border border-zinc-800 bg-slate-900 py-3.5 px-2 select-none"
+                          >
+                            <span className="text-sm font-black text-zinc-500 tabular-nums">{slot}</span>
+                            <span className="text-[10px] font-bold text-zinc-600 mt-0.5">要電話</span>
+                          </div>
+                        );
+                      }
+
+                      // 連続枠が確保できない（後続が予約済または営業時間外）
+                      if (!fits) {
+                        return (
+                          <div
+                            key={slot}
+                            className="flex flex-col items-center justify-center rounded-2xl border border-zinc-800 bg-slate-900 py-3.5 px-2 select-none opacity-40"
+                          >
+                            <span className="text-sm font-black text-zinc-500 tabular-nums">{slot}</span>
+                            <span className="text-[10px] font-bold text-amber-700 mt-0.5">枠不足</span>
+                          </div>
+                        );
+                      }
+
+                      const courseQuery = selectedCourse ? `&courseId=${selectedCourse.id}` : "";
                       return (
-                        <div
+                        <Link
                           key={slot}
-                          className="flex flex-col items-center justify-center rounded-2xl border border-zinc-800 bg-slate-900 py-3.5 px-2 select-none opacity-50"
+                          href={`/reserve?date=${format(selectedDate, "yyyy-MM-dd")}&time=${slot}${courseQuery}`}
+                          className="flex flex-col items-center justify-center rounded-2xl border border-emerald-700 bg-emerald-950 py-3.5 px-2 hover:bg-emerald-900 active:scale-95 transition-all shadow-lg shadow-emerald-950/50 cursor-pointer"
                         >
-                          <span className="text-sm font-black text-zinc-500 tabular-nums">{slot}</span>
-                          <span className="text-[10px] font-bold text-rose-600 mt-0.5">予約済</span>
-                        </div>
+                          <span className="text-sm font-black text-white tabular-nums">{slot}</span>
+                          <span className="text-[10px] font-black text-emerald-400 mt-0.5">◯ 空き</span>
+                        </Link>
                       );
-                    }
-
-                    if (isTooClose) {
-                      return (
-                        <div
-                          key={slot}
-                          className="flex flex-col items-center justify-center rounded-2xl border border-zinc-800 bg-slate-900 py-3.5 px-2 select-none"
-                        >
-                          <span className="text-sm font-black text-zinc-500 tabular-nums">{slot}</span>
-                          <span className="text-[10px] font-bold text-zinc-600 mt-0.5">要電話</span>
-                        </div>
-                      );
-                    }
-
-                    return (
-                      <Link
-                        key={slot}
-                        href={`/reserve?date=${format(selectedDate, "yyyy-MM-dd")}&time=${slot}`}
-                        className="flex flex-col items-center justify-center rounded-2xl border border-emerald-700 bg-emerald-950 py-3.5 px-2 hover:bg-emerald-900 active:scale-95 transition-all shadow-lg shadow-emerald-950/50 cursor-pointer"
-                      >
-                        <span className="text-sm font-black text-white tabular-nums">{slot}</span>
-                        <span className="text-[10px] font-black text-emerald-400 mt-0.5">◯ 空き</span>
-                      </Link>
-                    );
-                  })}
-                </div>
-              )}
+                    })}
+                  </div>
+                );
+              })()}
 
               {/* CTA or 満員案内 */}
               {!loadingDay && (
                 dailySlots.length < getTimeSlots(selectedDate).length ? (
                   <Link
-                    href={`/reserve?date=${format(selectedDate, "yyyy-MM-dd")}`}
+                    href={`/reserve?date=${format(selectedDate, "yyyy-MM-dd")}${selectedCourse ? `&courseId=${selectedCourse.id}` : ""}`}
                     className="flex items-center justify-center gap-2 w-full h-14 rounded-2xl bg-blue-600 hover:bg-blue-500 active:scale-95 text-white text-base font-black shadow-xl shadow-blue-950 transition-all"
                   >
                     <CalendarDays className="w-5 h-5" />
