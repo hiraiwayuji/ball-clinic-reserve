@@ -10,7 +10,7 @@
 --           評価 4.92（52件）/ 国家資格者による施術
 --
 -- ⚠️ 重要：
---   このSQLを実行する前に、{{KARADA_CLINIC_ID}} を実運用の
+--   このSQLを実行する前に、d3b55abc-46a6-4cbe-8198-21c0392d9a2e を実運用の
 --   clinic_id（Vercel karada-clinic の NEXT_PUBLIC_CLINIC_ID）に
 --   置換してから Run してください。
 --
@@ -69,14 +69,14 @@ SET
   ]'::jsonb,
   lp_voice_quote      = 'マッサージや他の整骨院では届かなかった奥のコリに、トリガーポイント鍼で届いた感覚がありました。「そこだったのか！」と体で実感できる施術です。',
   lp_voice_author     = '40代女性 静岡市在住'
-WHERE id = '{{KARADA_CLINIC_ID}}';
+WHERE id = 'd3b55abc-46a6-4cbe-8198-21c0392d9a2e';
 
 -- ---------------------------------------------------------------
 -- STEP 2: 既存の汎用コースを非表示化
 -- ---------------------------------------------------------------
 UPDATE public.reservation_courses
 SET is_active = false
-WHERE clinic_id = '{{KARADA_CLINIC_ID}}';
+WHERE clinic_id = 'd3b55abc-46a6-4cbe-8198-21c0392d9a2e';
 
 -- ---------------------------------------------------------------
 -- STEP 3: ホットペッパー掲載の全15クーポンを reservation_courses に投入
@@ -84,25 +84,25 @@ WHERE clinic_id = '{{KARADA_CLINIC_ID}}';
 INSERT INTO public.reservation_courses
   (clinic_id, name, duration_minutes, price, regular_price, description, is_active, sort_order, image_url, is_coupon, is_first_visit_only, is_repeat_only, badge_label)
 VALUES
-('{{KARADA_CLINIC_ID}}', '《火曜日限定》【筋膜リリース】肩・腰のお悩みに 60分', 60, 6600, 8800, '平日の火曜日限定。カウンセリング+施術60分の特別価格。筋膜リリース・深層筋アプローチを組み合わせた集中施術でスッキリ解消。', true, 1, 'https://imgbp.hotp.jp/CSP/IMG_SRC_K/36/70/C055903670/C055903670.jpg', true, false, false, '火曜限定'),
-('{{KARADA_CLINIC_ID}}', '【人気No.1】筋膜リリース｜首肩・肩甲骨の動きをスムーズに 60分', 60, 7700, 8800, 'ガチガチに固まった首・肩・背中を、筋肉の専門家が徹底ケア。眼精疲労や頭痛の原因となる筋緊張をほぐし、スッキリ軽やかに。カウンセリング20分+マッサージ60分。', true, 2, 'https://imgbp.hotp.jp/CSP/IMG_SRC_K/35/76/C058423576/C058423576.jpg', true, true, false, '人気No.1'),
-('{{KARADA_CLINIC_ID}}', '【人気No.2】筋膜リリース｜「もう無理」腰痛の根本に届く 60分', 60, 7700, 8800, 'ガチガチな腰の疲れに。マッサージで届かない深層筋と筋膜の癒着が慢性痛の原因。国家資格者が筋膜の癒着とトリガーポイントを正確に評価・施術し、「そこだったのか」を体で実感。', true, 3, 'https://imgbp.hotp.jp/CSP/IMG_SRC_K/60/51/C058346051/C058346051.jpg', true, true, false, '人気No.2'),
-('{{KARADA_CLINIC_ID}}', '【人気No.3】鍼×筋膜リリース｜肩コリ・腰痛ケア 60分', 60, 7700, 8800, 'なかなか改善しない不調に。深層筋に潜むトリガーポイントへ、国家資格者が体のクセ・姿勢・筋肉の状態を評価し、コリにピンポイント鍼アプローチ。カウンセリング20分+鍼+マッサージ60分。', true, 4, 'https://imgbp.hotp.jp/CSP/IMG_SRC_K/36/11/C058423611/C058423611.jpg', true, true, false, '人気No.3'),
-('{{KARADA_CLINIC_ID}}', '【迷ったらコレ】症状に合わせて施術プランをご提案 60分', 60, 7700, 8800, 'どのクーポンを選べばいいか分からない方や、ご自身の症状が当てはまらない方、とりあえず予約だけ入れておきたい方、なんでもOK。ご希望を簡単にお伝えください。60分の施術。', true, 5, 'https://imgbp.hotp.jp/CSP/IMG_SRC_K/45/15/C058424515/C058424515.jpg', true, true, false, NULL),
-('{{KARADA_CLINIC_ID}}', '【迷ったらコレ】症状に合わせて施術プランをご提案 90分', 90, 12100, 13200, 'どのクーポンを選べばいいか分からない方や、ご自身の症状が当てはまらない方、とりあえず予約だけ入れておきたい方、なんでもOK。ご希望を簡単にお伝えください。90分のじっくり施術。', true, 6, 'https://imgbp.hotp.jp/CSP/IMG_SRC_K/44/75/C058424475/C058424475.jpg', true, true, false, NULL),
-('{{KARADA_CLINIC_ID}}', '【まずは原因を知りたい方】カウンセリング+動作・姿勢チェック 30分', 30, 0, NULL, '首肩こり・腰痛…その原因を可視化しませんか？国家資格者が姿勢・筋肉・動作のクセを丁寧に評価し、最適なプランをご提案。施術（60分7,700円）は別途ご案内。', true, 7, 'https://imgbp.hotp.jp/CSP/IMG_SRC_K/65/50/C049226550/C049226550.jpg', true, true, false, '無料相談'),
-('{{KARADA_CLINIC_ID}}', '【筋膜リリース】自律神経×疲労回復 深いリラックスへ 60分', 60, 7700, 8800, '疲れているのに眠れない・朝スッキリしない、そんな方に。深層筋までアプローチするマッサージで全身の緊張を解放。疲労回復＆質の高い睡眠へ。カウンセリング20分+マッサージ60分。', true, 8, 'https://imgbp.hotp.jp/CSP/IMG_SRC_K/36/50/C058423650/C058423650.jpg', true, true, false, NULL),
-('{{KARADA_CLINIC_ID}}', '【筋膜リリース】肩・腰・足…全身ガチガチな方へ 90分', 90, 12100, 13200, 'どこへ行っても改善しない方に。筋膜の癒着・深層筋の硬結・動作のクセまで徹底的に原因分析。国家資格者が筋膜リリース整体で体の奥深くにアプローチし効果実感。', true, 9, 'https://imgbp.hotp.jp/CSP/IMG_SRC_K/09/88/C049710988/C049710988.jpg', true, true, false, NULL),
-('{{KARADA_CLINIC_ID}}', '【筋膜リリース】全身疲労をリフレッシュ リカバリーケア 90分', 90, 12100, 13200, '蓄積した疲労・ストレスを徹底リセット。肩・首・腰・脚の血流＆代謝をUP。心身ともにスッキリ軽く、前向きな気持ちに。筋膜リリース＋深層筋アプローチ。カウンセリング20分+マッサージ90分。', true, 10, 'https://imgbp.hotp.jp/CSP/IMG_SRC_K/36/83/C058423683/C058423683.jpg', true, true, false, NULL),
-('{{KARADA_CLINIC_ID}}', '【鍼×筋膜リリース】根深いコリを全身解消 本格ケア 90分', 90, 12100, 13200, '忙しい日々で限界を感じる方に。全身の深層筋・姿勢・動きのクセを分析。トリガーポイント鍼×整体でガチガチの筋肉と動作エラーを根本ケア。', true, 11, 'https://imgbp.hotp.jp/CSP/IMG_SRC_K/85/14/C058518514/C058518514.jpg', true, true, false, NULL),
-('{{KARADA_CLINIC_ID}}', '【鍼×筋膜リリース】疲労回復・全身リフレッシュコース 90分', 90, 12100, 13200, '全身がだるい・疲れが取れない、そんなあなたに。疲れ・ストレス解消、肩・首・腰・足の重だるさをしっかりケア。自律神経を整える施術で心身ともにスッキリ。カウンセリング20分+施術90分。', true, 12, 'https://imgbp.hotp.jp/CSP/IMG_SRC_K/85/47/C058518547/C058518547.jpg', true, true, false, NULL),
-('{{KARADA_CLINIC_ID}}', 'ホットペッパービューティーの口コミ割引', 60, 1000, NULL, 'ホットペッパービューティーの口コミを入れていただきましたら、ご利用いただけるクーポンです。', true, 13, 'https://imgbp.hotp.jp/CSP/IMG_SRC_K/92/06/C050709206/C050709206.jpg', true, false, false, '口コミ割'),
-('{{KARADA_CLINIC_ID}}', '【2回目以降の方】60分 通常メニュー', 60, 8800, NULL, '2回目以降のご来院で、60分のご予約をお取りになる際にご利用ください。', true, 14, 'https://imgbp.hotp.jp/CSP/IMG_SRC_K/40/74/C058424074/C058424074.jpg', true, false, true, NULL),
-('{{KARADA_CLINIC_ID}}', '【2回目以降の方】90分 通常メニュー', 90, 13200, NULL, '2回目以降のご来院で、90分施術のご予約をお取りになる際にご利用ください。', true, 15, 'https://imgbp.hotp.jp/CSP/IMG_SRC_K/40/91/C058424091/C058424091.jpg', true, false, true, NULL);
+('d3b55abc-46a6-4cbe-8198-21c0392d9a2e', '《火曜日限定》【筋膜リリース】肩・腰のお悩みに 60分', 60, 6600, 8800, '平日の火曜日限定。カウンセリング+施術60分の特別価格。筋膜リリース・深層筋アプローチを組み合わせた集中施術でスッキリ解消。', true, 1, 'https://imgbp.hotp.jp/CSP/IMG_SRC_K/36/70/C055903670/C055903670.jpg', true, false, false, '火曜限定'),
+('d3b55abc-46a6-4cbe-8198-21c0392d9a2e', '【人気No.1】筋膜リリース｜首肩・肩甲骨の動きをスムーズに 60分', 60, 7700, 8800, 'ガチガチに固まった首・肩・背中を、筋肉の専門家が徹底ケア。眼精疲労や頭痛の原因となる筋緊張をほぐし、スッキリ軽やかに。カウンセリング20分+マッサージ60分。', true, 2, 'https://imgbp.hotp.jp/CSP/IMG_SRC_K/35/76/C058423576/C058423576.jpg', true, true, false, '人気No.1'),
+('d3b55abc-46a6-4cbe-8198-21c0392d9a2e', '【人気No.2】筋膜リリース｜「もう無理」腰痛の根本に届く 60分', 60, 7700, 8800, 'ガチガチな腰の疲れに。マッサージで届かない深層筋と筋膜の癒着が慢性痛の原因。国家資格者が筋膜の癒着とトリガーポイントを正確に評価・施術し、「そこだったのか」を体で実感。', true, 3, 'https://imgbp.hotp.jp/CSP/IMG_SRC_K/60/51/C058346051/C058346051.jpg', true, true, false, '人気No.2'),
+('d3b55abc-46a6-4cbe-8198-21c0392d9a2e', '【人気No.3】鍼×筋膜リリース｜肩コリ・腰痛ケア 60分', 60, 7700, 8800, 'なかなか改善しない不調に。深層筋に潜むトリガーポイントへ、国家資格者が体のクセ・姿勢・筋肉の状態を評価し、コリにピンポイント鍼アプローチ。カウンセリング20分+鍼+マッサージ60分。', true, 4, 'https://imgbp.hotp.jp/CSP/IMG_SRC_K/36/11/C058423611/C058423611.jpg', true, true, false, '人気No.3'),
+('d3b55abc-46a6-4cbe-8198-21c0392d9a2e', '【迷ったらコレ】症状に合わせて施術プランをご提案 60分', 60, 7700, 8800, 'どのクーポンを選べばいいか分からない方や、ご自身の症状が当てはまらない方、とりあえず予約だけ入れておきたい方、なんでもOK。ご希望を簡単にお伝えください。60分の施術。', true, 5, 'https://imgbp.hotp.jp/CSP/IMG_SRC_K/45/15/C058424515/C058424515.jpg', true, true, false, NULL),
+('d3b55abc-46a6-4cbe-8198-21c0392d9a2e', '【迷ったらコレ】症状に合わせて施術プランをご提案 90分', 90, 12100, 13200, 'どのクーポンを選べばいいか分からない方や、ご自身の症状が当てはまらない方、とりあえず予約だけ入れておきたい方、なんでもOK。ご希望を簡単にお伝えください。90分のじっくり施術。', true, 6, 'https://imgbp.hotp.jp/CSP/IMG_SRC_K/44/75/C058424475/C058424475.jpg', true, true, false, NULL),
+('d3b55abc-46a6-4cbe-8198-21c0392d9a2e', '【まずは原因を知りたい方】カウンセリング+動作・姿勢チェック 30分', 30, 0, NULL, '首肩こり・腰痛…その原因を可視化しませんか？国家資格者が姿勢・筋肉・動作のクセを丁寧に評価し、最適なプランをご提案。施術（60分7,700円）は別途ご案内。', true, 7, 'https://imgbp.hotp.jp/CSP/IMG_SRC_K/65/50/C049226550/C049226550.jpg', true, true, false, '無料相談'),
+('d3b55abc-46a6-4cbe-8198-21c0392d9a2e', '【筋膜リリース】自律神経×疲労回復 深いリラックスへ 60分', 60, 7700, 8800, '疲れているのに眠れない・朝スッキリしない、そんな方に。深層筋までアプローチするマッサージで全身の緊張を解放。疲労回復＆質の高い睡眠へ。カウンセリング20分+マッサージ60分。', true, 8, 'https://imgbp.hotp.jp/CSP/IMG_SRC_K/36/50/C058423650/C058423650.jpg', true, true, false, NULL),
+('d3b55abc-46a6-4cbe-8198-21c0392d9a2e', '【筋膜リリース】肩・腰・足…全身ガチガチな方へ 90分', 90, 12100, 13200, 'どこへ行っても改善しない方に。筋膜の癒着・深層筋の硬結・動作のクセまで徹底的に原因分析。国家資格者が筋膜リリース整体で体の奥深くにアプローチし効果実感。', true, 9, 'https://imgbp.hotp.jp/CSP/IMG_SRC_K/09/88/C049710988/C049710988.jpg', true, true, false, NULL),
+('d3b55abc-46a6-4cbe-8198-21c0392d9a2e', '【筋膜リリース】全身疲労をリフレッシュ リカバリーケア 90分', 90, 12100, 13200, '蓄積した疲労・ストレスを徹底リセット。肩・首・腰・脚の血流＆代謝をUP。心身ともにスッキリ軽く、前向きな気持ちに。筋膜リリース＋深層筋アプローチ。カウンセリング20分+マッサージ90分。', true, 10, 'https://imgbp.hotp.jp/CSP/IMG_SRC_K/36/83/C058423683/C058423683.jpg', true, true, false, NULL),
+('d3b55abc-46a6-4cbe-8198-21c0392d9a2e', '【鍼×筋膜リリース】根深いコリを全身解消 本格ケア 90分', 90, 12100, 13200, '忙しい日々で限界を感じる方に。全身の深層筋・姿勢・動きのクセを分析。トリガーポイント鍼×整体でガチガチの筋肉と動作エラーを根本ケア。', true, 11, 'https://imgbp.hotp.jp/CSP/IMG_SRC_K/85/14/C058518514/C058518514.jpg', true, true, false, NULL),
+('d3b55abc-46a6-4cbe-8198-21c0392d9a2e', '【鍼×筋膜リリース】疲労回復・全身リフレッシュコース 90分', 90, 12100, 13200, '全身がだるい・疲れが取れない、そんなあなたに。疲れ・ストレス解消、肩・首・腰・足の重だるさをしっかりケア。自律神経を整える施術で心身ともにスッキリ。カウンセリング20分+施術90分。', true, 12, 'https://imgbp.hotp.jp/CSP/IMG_SRC_K/85/47/C058518547/C058518547.jpg', true, true, false, NULL),
+('d3b55abc-46a6-4cbe-8198-21c0392d9a2e', 'ホットペッパービューティーの口コミ割引', 60, 1000, NULL, 'ホットペッパービューティーの口コミを入れていただきましたら、ご利用いただけるクーポンです。', true, 13, 'https://imgbp.hotp.jp/CSP/IMG_SRC_K/92/06/C050709206/C050709206.jpg', true, false, false, '口コミ割'),
+('d3b55abc-46a6-4cbe-8198-21c0392d9a2e', '【2回目以降の方】60分 通常メニュー', 60, 8800, NULL, '2回目以降のご来院で、60分のご予約をお取りになる際にご利用ください。', true, 14, 'https://imgbp.hotp.jp/CSP/IMG_SRC_K/40/74/C058424074/C058424074.jpg', true, false, true, NULL),
+('d3b55abc-46a6-4cbe-8198-21c0392d9a2e', '【2回目以降の方】90分 通常メニュー', 90, 13200, NULL, '2回目以降のご来院で、90分施術のご予約をお取りになる際にご利用ください。', true, 15, 'https://imgbp.hotp.jp/CSP/IMG_SRC_K/40/91/C058424091/C058424091.jpg', true, false, true, NULL);
 
 -- ---------------------------------------------------------------
 -- STEP 4: 確認クエリ（任意）
 -- ---------------------------------------------------------------
--- SELECT id, clinic_name, hero_subtitle, theme_color FROM clinic_settings WHERE id = '{{KARADA_CLINIC_ID}}';
+-- SELECT id, clinic_name, hero_subtitle, theme_color FROM clinic_settings WHERE id = 'd3b55abc-46a6-4cbe-8198-21c0392d9a2e';
 -- SELECT name, price, regular_price, duration_minutes, is_coupon, is_first_visit_only, is_repeat_only, badge_label
---   FROM reservation_courses WHERE clinic_id = '{{KARADA_CLINIC_ID}}' AND is_active = true ORDER BY sort_order;
+--   FROM reservation_courses WHERE clinic_id = 'd3b55abc-46a6-4cbe-8198-21c0392d9a2e' AND is_active = true ORDER BY sort_order;
