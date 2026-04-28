@@ -45,6 +45,7 @@ export type ThemeColor =
   | "violet"
   | "emerald"
   | "amber"
+  | "orange"
   | "rose"
   | "sky"
   | "teal"
@@ -55,6 +56,7 @@ const ALLOWED_COLORS: ThemeColor[] = [
   "violet",
   "emerald",
   "amber",
+  "orange",
   "rose",
   "sky",
   "teal",

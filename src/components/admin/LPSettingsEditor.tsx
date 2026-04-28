@@ -12,6 +12,7 @@ const THEME_COLORS: { key: string; label: string; classes: string }[] = [
   { key: "violet", label: "バイオレット", classes: "bg-violet-500" },
   { key: "emerald", label: "エメラルド", classes: "bg-emerald-500" },
   { key: "amber", label: "アンバー", classes: "bg-amber-500" },
+  { key: "orange", label: "オレンジ", classes: "bg-orange-500" },
   { key: "rose", label: "ローズ", classes: "bg-rose-500" },
   { key: "sky", label: "スカイ", classes: "bg-sky-500" },
   { key: "teal", label: "ティール", classes: "bg-teal-500" },

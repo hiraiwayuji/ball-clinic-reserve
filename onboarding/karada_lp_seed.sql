@@ -53,7 +53,7 @@ UPDATE public.clinic_settings
 SET
   hero_title          = 'からだ鍼灸整骨院',
   hero_subtitle       = 'ドイツ・ブンデスリーガ「ハノーファー96」にて鍼灸メディカルトレーナーを務めた院長が、日常の痛みからアスリートのパフォーマンス向上まで、一人ひとりに寄り添ってサポートします。',
-  theme_color         = 'emerald',
+  theme_color         = 'orange',
   lp_cta_text         = '施術メニューから予約する',
   phone_number        = '088-679-1239',
   address             = '〒771-0124 徳島市川内町鈴江南 43-1',

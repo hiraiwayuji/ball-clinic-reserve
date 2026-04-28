@@ -68,6 +68,17 @@ const THEMES: Record<ThemeColor, ThemeClasses> = {
     ringActive: "ring-amber-500",
     leadText: "text-amber-200",
   },
+  orange: {
+    heroGradient: "from-orange-700 via-orange-950 to-slate-950",
+    ctaBg: "bg-orange-500",
+    ctaHoverBg: "hover:bg-orange-400",
+    ctaShadow: "shadow-orange-950",
+    accentText: "text-orange-300",
+    accentBgSoft: "bg-orange-500/10",
+    accentBorderSoft: "border-orange-500/30",
+    ringActive: "ring-orange-500",
+    leadText: "text-orange-200",
+  },
   rose: {
     heroGradient: "from-rose-900 via-rose-950 to-slate-950",
     ctaBg: "bg-rose-600",
