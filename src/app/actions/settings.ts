@@ -42,6 +42,16 @@ export type ClinicSettings = {
   // 営業時間
   hours_lines?: string[];
   hours_closed?: string;
+  // 患者向けLP（/reserve, /reserve/menu）用
+  hero_subtitle?: string | null;
+  hero_image_url?: string | null;
+  hero_background_url?: string | null;
+  lp_features?: { icon?: string; title: string; description?: string }[] | null;
+  lp_target_problems?: string[] | null;
+  lp_voice_quote?: string | null;
+  lp_voice_author?: string | null;
+  lp_cta_text?: string | null;
+  theme_color?: string | null;
 };
 
 
@@ -120,6 +130,15 @@ export async function updateClinicSettings(settings: Partial<ClinicSettings>) {
     hp_url: settings.hp_url,
     hours_lines: settings.hours_lines,
     hours_closed: settings.hours_closed,
+    hero_subtitle: settings.hero_subtitle ?? null,
+    hero_image_url: settings.hero_image_url ?? null,
+    hero_background_url: settings.hero_background_url ?? null,
+    lp_features: settings.lp_features ?? null,
+    lp_target_problems: settings.lp_target_problems ?? null,
+    lp_voice_quote: settings.lp_voice_quote ?? null,
+    lp_voice_author: settings.lp_voice_author ?? null,
+    lp_cta_text: settings.lp_cta_text ?? null,
+    theme_color: settings.theme_color ?? null,
   };
 
   const targetData = {

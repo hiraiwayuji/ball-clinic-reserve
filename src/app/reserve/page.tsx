@@ -21,6 +21,7 @@ import { useSearchParams } from "next/navigation";
 import { getTimeSlots, isDateWithinAllowedRange } from "@/lib/time-slots";
 import { toast } from "sonner";
 import { CLINIC_CONFIG } from "@/lib/clinic-config";
+import ReserveLandingPage from "./ReserveLandingPage";
 
 const isExternalLogo = CLINIC_CONFIG.logoSmallUrl.startsWith("http");
 const LINE_URL = process.env.NEXT_PUBLIC_LINE_OFFICIAL_ACCOUNT_URL ?? "https://line.me/ti/p/%40shc8761q";
@@ -221,39 +222,7 @@ function ReserveContent() {
   }
 
   if (!date || !time) {
-    return (
-      <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center p-4 gap-4">
-        <div className="max-w-md w-full bg-white/5 backdrop-blur-2xl p-10 rounded-[3rem] shadow-2xl border border-white/10 text-center">
-          <div className="relative w-48 h-20 mx-auto mb-8 flex items-center justify-center">
-            {isExternalLogo ? (
-              <img src={CLINIC_CONFIG.logoSmallUrl} alt={CLINIC_CONFIG.name} className={`max-h-20 w-auto object-contain ${CLINIC_CONFIG.usesWordmarkLogo ? "bg-white rounded-lg px-3 py-2" : ""}`} />
-            ) : (
-              <Image src={CLINIC_CONFIG.logoSmallUrl} alt={CLINIC_CONFIG.name} fill className="object-contain" />
-            )}
-          </div>
-          <h1 className="text-3xl font-extrabold text-white mb-2 tracking-tight">予約日時を選ぶ</h1>
-          <p className="text-blue-200/60 text-sm mb-6">カレンダーから空きをご確認ください</p>
-          <Button className="w-full bg-blue-600 hover:bg-blue-500 h-16 text-lg font-bold rounded-2xl mb-3" asChild>
-            <Link href="/reserve/calendar">カレンダーで空きを確認</Link>
-          </Button>
-          <Button variant="outline" className="w-full bg-amber-500/10 hover:bg-amber-500/20 border-amber-500/40 text-amber-200 h-14 text-sm font-bold rounded-2xl" asChild>
-            <Link href="/reserve/menu">✨ クーポン・メニューから選ぶ</Link>
-          </Button>
-        </div>
-        {/* 初めての方向け */}
-        <div className="max-w-md w-full bg-white/5 border border-white/10 rounded-[2rem] p-6 text-center space-y-3">
-          <p className="text-blue-100/50 text-xs font-bold uppercase tracking-widest">初めてオンライン予約をご希望の方</p>
-          <p className="text-white font-bold text-sm">アンケートにご協力ください</p>
-          <p className="text-blue-100/40 text-xs">お名前・電話番号・誕生月などをご登録いただくと、LINE登録後にオンライン予約が可能になります。誕生月クーポンなどの特典もご利用いただけます。</p>
-          <Link
-            href="/questionnaire"
-            className="inline-flex w-full items-center justify-center bg-white/10 hover:bg-white/20 border border-white/20 text-white font-bold py-3 px-4 rounded-2xl transition-all gap-2 text-sm"
-          >
-            📋 アンケートに回答して登録する
-          </Link>
-        </div>
-      </div>
-    );
+    return <ReserveLandingPage />;
   }
 
   return (

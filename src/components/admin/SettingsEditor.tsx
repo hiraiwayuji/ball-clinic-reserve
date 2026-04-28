@@ -10,6 +10,7 @@ import { ClinicSettings, updateClinicSettings } from "@/app/actions/settings";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
+import LPSettingsEditor from "./LPSettingsEditor";
 
 export default function SettingsEditor({ initialSettings }: { initialSettings: ClinicSettings | null }) {
   const router = useRouter();
@@ -90,6 +91,9 @@ export default function SettingsEditor({ initialSettings }: { initialSettings: C
               <div className="space-y-2"><Label className="font-bold">目標来院数 (人)</Label><Input type="number" value={settings?.target_patients ?? 0} onChange={(e) => updateField("target_patients", parseInt(e.target.value) || 0)} /></div>
             </CardContent>
           </Card>
+
+          {/* 患者向けLP設定 */}
+          <LPSettingsEditor settings={settings} updateField={updateField} />
 
           {/* LINE連携設定（ここを一番目立つようにしました！） */}
           <Card className="border-green-400 shadow-md ring-2 ring-green-100">

@@ -5,15 +5,18 @@ import Link from "next/link";
 import Image from "next/image";
 import { ArrowLeft, Sparkles, Clock, Tag, Star, Users, UserPlus, RefreshCw } from "lucide-react";
 import type { ReservationCourse } from "@/app/actions/courses";
+import type { PublicClinicSettings } from "@/app/actions/publicSettings";
 import { CLINIC_CONFIG } from "@/lib/clinic-config";
-
-const isExternalLogo = CLINIC_CONFIG.logoSmallUrl.startsWith("http");
+import { getThemeClasses } from "@/lib/lp-theme";
+import LPHero from "@/components/reserve/LPHero";
+import LPFeatures from "@/components/reserve/LPFeatures";
 
 type Tab = "coupon" | "menu" | "all";
 type AudienceFilter = "all" | "first" | "repeat";
 
 interface Props {
   initialCourses: ReservationCourse[];
+  settings: PublicClinicSettings | null;
 }
 
 function audienceOf(course: ReservationCourse): "first" | "repeat" | "all" {
@@ -28,9 +31,12 @@ function formatPercent(price: number, regular: number): string {
   return `${off}%OFF`;
 }
 
-export default function MenuLPClient({ initialCourses }: Props) {
+export default function MenuLPClient({ initialCourses, settings }: Props) {
   const [tab, setTab] = useState<Tab>("coupon");
   const [audience, setAudience] = useState<AudienceFilter>("all");
+
+  const themeColor = settings?.theme_color ?? "blue";
+  const theme = getThemeClasses(themeColor);
 
   const filteredCourses = useMemo(() => {
     return initialCourses.filter(c => {
@@ -52,29 +58,36 @@ export default function MenuLPClient({ initialCourses }: Props) {
 
   return (
     <div className="min-h-screen bg-slate-900 text-white" data-dark-page>
-      {/* ─── ヘッダー ─── */}
-      <div className="sticky top-0 z-20 bg-slate-900/95 backdrop-blur border-b border-zinc-800">
-        <div className="max-w-2xl mx-auto px-4 py-3 flex items-center gap-3">
-          <Link
-            href="/reserve"
-            className="w-9 h-9 flex items-center justify-center rounded-xl bg-zinc-800 hover:bg-zinc-700 transition shrink-0"
-          >
-            <ArrowLeft className="w-4 h-4 text-zinc-300" />
-          </Link>
-          <div className="flex-1 min-w-0">
-            <p className="text-xs text-zinc-500 font-bold">{CLINIC_CONFIG.nameShort}</p>
-            <h1 className="text-sm font-black text-white truncate flex items-center gap-1.5">
-              <Sparkles className="w-4 h-4 text-amber-400" />
-              メニュー・クーポン
-            </h1>
-          </div>
-          <div className="shrink-0 text-right">
-            <p className="text-[10px] text-zinc-600 font-bold">全{counts.all}件</p>
-          </div>
-        </div>
+      {/* ─── ヒーロー（院ごとカスタム） ─── */}
+      <LPHero settings={settings} fallbackName={CLINIC_CONFIG.name} />
 
-        {/* タブ切替（クーポン / メニュー / すべて） */}
-        <div className="max-w-2xl mx-auto px-4 pb-3">
+      {/* ─── お悩み・強み（院ごとカスタム） ─── */}
+      <LPFeatures
+        features={settings?.lp_features ?? null}
+        problems={settings?.lp_target_problems ?? null}
+        themeColor={themeColor}
+      />
+
+      {/* ─── メニュー・クーポン セクション見出し ─── */}
+      <div className="max-w-2xl mx-auto px-4 pt-6 pb-2 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Sparkles className={`w-4 h-4 ${theme.accentText}`} />
+          <h2 className="text-sm font-black text-white tracking-tight">
+            メニュー・クーポン
+          </h2>
+        </div>
+        <Link
+          href="/reserve"
+          className="flex items-center gap-1 text-[11px] text-zinc-500 hover:text-white transition"
+        >
+          <ArrowLeft className="w-3 h-3" />
+          戻る
+        </Link>
+      </div>
+
+      {/* ─── タブ切替＋対象区分フィルタ ─── */}
+      <div className="sticky top-0 z-20 bg-slate-900/95 backdrop-blur border-b border-zinc-800">
+        <div className="max-w-2xl mx-auto px-4 py-3">
           <div className="grid grid-cols-3 gap-1.5 bg-zinc-900 rounded-xl p-1 border border-zinc-800">
             {([
               { key: "coupon" as const, label: "クーポン", count: counts.coupon },
@@ -86,19 +99,18 @@ export default function MenuLPClient({ initialCourses }: Props) {
                 onClick={() => setTab(t.key)}
                 className={`relative h-9 rounded-lg text-xs font-black transition ${
                   tab === t.key
-                    ? "bg-blue-600 text-white shadow"
+                    ? `${theme.ctaBg} text-white shadow`
                     : "text-zinc-400 hover:text-white"
                 }`}
               >
                 {t.label}
-                <span className={`ml-1 text-[10px] tabular-nums ${tab === t.key ? "text-blue-100" : "text-zinc-600"}`}>
+                <span className={`ml-1 text-[10px] tabular-nums ${tab === t.key ? "text-white/80" : "text-zinc-600"}`}>
                   {t.count}
                 </span>
               </button>
             ))}
           </div>
 
-          {/* 対象区分フィルタ */}
           <div className="flex gap-1.5 mt-2">
             {([
               { key: "all" as const, label: "全員", icon: Users },
@@ -132,7 +144,7 @@ export default function MenuLPClient({ initialCourses }: Props) {
           <EmptyState tab={tab} />
         ) : (
           filteredCourses.map(course => (
-            <CouponCard key={course.id} course={course} />
+            <CouponCard key={course.id} course={course} themeColor={themeColor} />
           ))
         )}
       </div>
@@ -147,8 +159,9 @@ export default function MenuLPClient({ initialCourses }: Props) {
 }
 
 // ─── カードコンポーネント ─────────────────────────────
-function CouponCard({ course }: { course: ReservationCourse }) {
+function CouponCard({ course, themeColor }: { course: ReservationCourse; themeColor: import("@/app/actions/publicSettings").ThemeColor }) {
   const aud = audienceOf(course);
+  const theme = getThemeClasses(themeColor);
   const hasDiscount =
     course.regular_price != null &&
     course.price != null &&
@@ -157,7 +170,7 @@ function CouponCard({ course }: { course: ReservationCourse }) {
   return (
     <Link
       href={`/reserve/calendar?courseId=${course.id}`}
-      className="block bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden hover:border-blue-700 active:scale-[0.99] transition-all shadow-lg shadow-black/20"
+      className={`block bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden hover:${theme.accentBorderSoft} active:scale-[0.99] transition-all shadow-lg shadow-black/20`}
     >
       <div className="flex gap-3 p-3">
         {/* サムネイル（ホットペッパーは縦長 73x97px。ここでは 96x120 程度） */}
@@ -214,7 +227,7 @@ function CouponCard({ course }: { course: ReservationCourse }) {
               {course.name}
             </h3>
             {course.badge_label && (
-              <span className="shrink-0 flex items-center gap-0.5 bg-blue-500/20 text-blue-300 text-[9px] font-bold px-1.5 py-0.5 rounded border border-blue-500/30">
+              <span className={`shrink-0 flex items-center gap-0.5 ${theme.accentBgSoft} ${theme.accentText} text-[9px] font-bold px-1.5 py-0.5 rounded border ${theme.accentBorderSoft}`}>
                 <Star className="w-2.5 h-2.5" />
                 {course.badge_label}
               </span>
@@ -256,12 +269,12 @@ function CouponCard({ course }: { course: ReservationCourse }) {
       </div>
 
       {/* CTA帯 */}
-      <div className="border-t border-zinc-800 bg-blue-600/10 hover:bg-blue-600/20 px-4 py-2.5 flex items-center justify-between">
-        <span className="text-xs font-black text-blue-300 flex items-center gap-1">
+      <div className={`border-t border-zinc-800 ${theme.accentBgSoft} hover:bg-white/10 px-4 py-2.5 flex items-center justify-between`}>
+        <span className={`text-xs font-black ${theme.accentText} flex items-center gap-1`}>
           <Tag className="w-3.5 h-3.5" />
           このメニューで予約する
         </span>
-        <span className="text-blue-400 font-black text-sm">→</span>
+        <span className={`${theme.accentText} font-black text-sm`}>→</span>
       </div>
     </Link>
   );

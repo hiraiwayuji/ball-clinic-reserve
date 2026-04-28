@@ -1,0 +1,134 @@
+"use server";
+
+import { PUBLIC_CLINIC_ID } from "@/lib/default-clinic-id";
+
+/**
+ * 患者向けLP（/reserve, /reserve/menu）で使う公開クリニック設定。
+ * 認証不要で読める安全なフィールドだけを返す。
+ *
+ * primary_color とは別に theme_color を持つ：
+ *   - primary_color : 管理画面・ブランディング全般
+ *   - theme_color   : LP 専用（CV 最適化のため変えたい場合がある）
+ */
+export type PublicClinicSettings = {
+  id: string;
+  clinic_name: string;
+  hero_title: string | null;
+  hero_subtitle: string | null;
+  hero_image_url: string | null;
+  hero_background_url: string | null;
+  lp_features: LPFeature[] | null;
+  lp_target_problems: string[] | null;
+  lp_voice_quote: string | null;
+  lp_voice_author: string | null;
+  lp_cta_text: string | null;
+  theme_color: ThemeColor;
+  primary_color: string | null;
+
+  phone_number: string | null;
+  address: string | null;
+  area_name: string | null;
+  hp_url: string | null;
+  instagram_url: string | null;
+  line_official_account_url: string | null;
+};
+
+export type LPFeature = {
+  icon?: string;
+  title: string;
+  description?: string;
+};
+
+/** Tailwind v4 でも static に検出できるよう、許可色を限定する。 */
+export type ThemeColor =
+  | "blue"
+  | "violet"
+  | "emerald"
+  | "amber"
+  | "rose"
+  | "sky"
+  | "teal"
+  | "indigo";
+
+const ALLOWED_COLORS: ThemeColor[] = [
+  "blue",
+  "violet",
+  "emerald",
+  "amber",
+  "rose",
+  "sky",
+  "teal",
+  "indigo",
+];
+
+function normalizeColor(raw: unknown): ThemeColor {
+  if (typeof raw === "string" && ALLOWED_COLORS.includes(raw as ThemeColor)) {
+    return raw as ThemeColor;
+  }
+  return "blue";
+}
+
+export async function getPublicClinicSettings(): Promise<PublicClinicSettings | null> {
+  const { createClient: createAdminClient } = await import("@supabase/supabase-js");
+
+  if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    return null;
+  }
+
+  const adminClient = createAdminClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL,
+    process.env.SUPABASE_SERVICE_ROLE_KEY
+  );
+
+  const { data, error } = await adminClient
+    .from("clinic_settings")
+    .select(`
+      id, clinic_name, hero_title, hero_subtitle, hero_image_url, hero_background_url,
+      lp_features, lp_target_problems, lp_voice_quote, lp_voice_author, lp_cta_text,
+      theme_color, primary_color,
+      phone_number, address, area_name, hp_url, instagram_url, line_official_account_url
+    `)
+    .eq("id", PUBLIC_CLINIC_ID)
+    .maybeSingle();
+
+  if (error || !data) return null;
+
+  return {
+    id: data.id,
+    clinic_name: data.clinic_name,
+    hero_title: data.hero_title ?? null,
+    hero_subtitle: data.hero_subtitle ?? null,
+    hero_image_url: data.hero_image_url ?? null,
+    hero_background_url: data.hero_background_url ?? null,
+    lp_features: parseLPFeatures(data.lp_features),
+    lp_target_problems: parseStringArray(data.lp_target_problems),
+    lp_voice_quote: data.lp_voice_quote ?? null,
+    lp_voice_author: data.lp_voice_author ?? null,
+    lp_cta_text: data.lp_cta_text ?? null,
+    theme_color: normalizeColor(data.theme_color),
+    primary_color: data.primary_color ?? null,
+    phone_number: data.phone_number ?? null,
+    address: data.address ?? null,
+    area_name: data.area_name ?? null,
+    hp_url: data.hp_url ?? null,
+    instagram_url: data.instagram_url ?? null,
+    line_official_account_url: data.line_official_account_url ?? null,
+  };
+}
+
+function parseLPFeatures(raw: unknown): LPFeature[] | null {
+  if (!Array.isArray(raw)) return null;
+  return raw
+    .filter((f): f is Record<string, unknown> => typeof f === "object" && f !== null)
+    .map((f) => ({
+      icon: typeof f.icon === "string" ? f.icon : undefined,
+      title: typeof f.title === "string" ? f.title : "",
+      description: typeof f.description === "string" ? f.description : undefined,
+    }))
+    .filter((f) => f.title.length > 0);
+}
+
+function parseStringArray(raw: unknown): string[] | null {
+  if (!Array.isArray(raw)) return null;
+  return raw.filter((s): s is string => typeof s === "string" && s.length > 0);
+}

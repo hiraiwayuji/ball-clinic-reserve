@@ -1,4 +1,5 @@
 import { getActiveCourses } from "@/app/actions/courses";
+import { getPublicClinicSettings } from "@/app/actions/publicSettings";
 import { CLINIC_CONFIG } from "@/lib/clinic-config";
 import MenuLPClient from "./MenuLPClient";
 
@@ -10,6 +11,9 @@ export const metadata = {
 export const dynamic = "force-dynamic";
 
 export default async function ReserveMenuPage() {
-  const courses = await getActiveCourses();
-  return <MenuLPClient initialCourses={courses} />;
+  const [courses, settings] = await Promise.all([
+    getActiveCourses(),
+    getPublicClinicSettings(),
+  ]);
+  return <MenuLPClient initialCourses={courses} settings={settings} />;
 }
