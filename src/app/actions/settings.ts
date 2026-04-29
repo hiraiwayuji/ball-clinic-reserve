@@ -2,6 +2,8 @@
 
 import { unstable_noStore as noStore, revalidatePath } from "next/cache";
 import { checkAdminAuth } from "./auth";
+import { writeAudit, notifyOwnerOfStaffAction } from "@/lib/audit";
+import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 
 export type ClinicSettings = {
   id: string;
@@ -98,12 +100,55 @@ export async function getClinicSettings(): Promise<ClinicSettings | null> {
   };
 }
 
-export async function updateClinicSettings(settings: Partial<ClinicSettings>) {
-  const { clinicId } = await checkAdminAuth();
+export async function updateClinicSettings(
+  settings: Partial<ClinicSettings>,
+): Promise<{ success: boolean; error?: string; pendingApproval?: boolean }> {
+  const auth = await checkAdminAuth();
+  const { clinicId } = auth;
   const { createClient } = await import("@/lib/supabase/server");
   const supabase = await createClient();
-  
+
   console.log("Saving settings for clinic:", clinicId, settings);
+
+  // ── owner 以外は承認待ちキューに登録（即時反映しない） ──
+  if (auth.role !== "owner") {
+    const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const srk = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    if (!url || !srk) return { success: false, error: "サーバー設定エラー（service role 未設定）" };
+    const sb = createSupabaseClient(url, srk);
+
+    const { error: pendingErr } = await sb.from("pending_settings_changes").insert({
+      clinic_id: clinicId,
+      requested_by: auth.userId,
+      requested_email: auth.email,
+      requested_role: auth.role,
+      target_table: "clinic_settings",
+      payload: settings,
+      reason: "管理画面からの設定変更",
+      status: "pending",
+    });
+    if (pendingErr) return { success: false, error: "承認申請の登録に失敗: " + pendingErr.message };
+
+    await writeAudit({
+      clinicId,
+      actorUserId: auth.userId,
+      actorEmail: auth.email,
+      actorRole: auth.role,
+      actionType: "settings.request",
+      targetTable: "clinic_settings",
+      targetId: clinicId,
+      after: settings,
+    });
+    await notifyOwnerOfStaffAction({
+      clinicId,
+      actorRole: auth.role,
+      actorEmail: auth.email,
+      actionType: "⚠️ 設定変更の申請（要承認）",
+      summary: `スタッフが clinic_settings の変更を申請しました。\n/admin/approvals で内容を確認してください。`,
+    });
+
+    return { success: true, pendingApproval: true };
+  }
 
   // 1. Separate settings for clinic_settings and clinic_targets
   const settingsData = {
@@ -184,6 +229,18 @@ export async function updateClinicSettings(settings: Partial<ClinicSettings>) {
   const { data: reflectTargets } = await supabase.from("clinic_targets").select("*").eq("clinic_id", clinicId).eq("month", monthStr).single();
   console.log("DB Reflect - Settings:", reflectSettings);
   console.log("DB Reflect - Targets:", reflectTargets);
+
+  // ── 監査ログ（owner 自身の操作も記録） ──
+  await writeAudit({
+    clinicId,
+    actorUserId: auth.userId,
+    actorEmail: auth.email,
+    actorRole: auth.role,
+    actionType: "settings.update",
+    targetTable: "clinic_settings",
+    targetId: clinicId,
+    after: settings,
+  });
 
   revalidatePath("/admin/settings");
   revalidatePath("/admin/dashboard");

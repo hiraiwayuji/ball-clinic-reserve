@@ -2,8 +2,18 @@
 
 import { redirect } from "next/navigation";
 
-// Supabaseセッションを確認し、テナントのclinic_idを返す関数
-export async function checkAdminAuth(): Promise<{ clinicId: string }> {
+export type ClinicRole = "owner" | "admin" | "staff";
+
+export type AdminAuthInfo = {
+  clinicId: string;
+  userId: string;
+  email: string | null;
+  role: ClinicRole;
+};
+
+// Supabaseセッションを確認し、テナントのclinic_idと role を返す関数
+// 戻り値の clinicId は既存呼び出しと互換、role/userId/email は Phase 1 で追加。
+export async function checkAdminAuth(): Promise<AdminAuthInfo> {
   const { createClient } = await import("@/lib/supabase/server");
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -14,13 +24,47 @@ export async function checkAdminAuth(): Promise<{ clinicId: string }> {
 
   const { data } = await supabase
     .from("clinic_users")
-    .select("clinic_id")
+    .select("clinic_id, role")
     .eq("user_id", user.id)
     .limit(1)
     .single();
 
   const clinicId = data?.clinic_id ?? "00000000-0000-0000-0000-000000000001";
-  return { clinicId };
+  const role = (data?.role as ClinicRole | undefined) ?? "owner";
+  return { clinicId, userId: user.id, email: user.email ?? null, role };
+}
+
+/**
+ * 指定 role のいずれかでなければリダイレクト。
+ * - 例: requireRole(['owner'])  → owner 以外は /admin/dashboard?denied=1 へ
+ * - 例: requireRole(['owner','admin'])
+ */
+export async function requireRole(
+  allowed: ClinicRole[],
+  redirectTo: string = "/admin/dashboard?denied=1",
+): Promise<AdminAuthInfo> {
+  const info = await checkAdminAuth();
+  if (!allowed.includes(info.role)) {
+    redirect(redirectTo);
+  }
+  return info;
+}
+
+/** リダイレクトせずに role のみ返す（クライアント表示制御用） */
+export async function getMyRole(): Promise<ClinicRole | null> {
+  const { createClient } = await import("@/lib/supabase/server");
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return null;
+
+  const { data } = await supabase
+    .from("clinic_users")
+    .select("role")
+    .eq("user_id", user.id)
+    .limit(1)
+    .single();
+
+  return (data?.role as ClinicRole | undefined) ?? "owner";
 }
 
 /** クライアントコンポーネントからログイン中ユーザーの clinic_id を取得する（リダイレクトなし） */

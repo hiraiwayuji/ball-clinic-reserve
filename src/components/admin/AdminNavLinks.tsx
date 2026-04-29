@@ -6,27 +6,35 @@ import { useState, useEffect, useRef } from "react";
 import { Menu, X } from "lucide-react";
 import { isFamilyGift } from "@/lib/app-mode";
 
-const CLINIC_NAV_ITEMS = [
-  { href: "/admin/dashboard", label: "ダッシュボード" },
-  { href: "/admin/counter", label: "受付" },
-  { href: "/admin/appointments", label: "予約一覧" },
-  { href: "/admin/customers", label: "顧客管理" },
-  { href: "/admin/sales", label: "売上記帳" },
-  { href: "/admin/evaluation", label: "経営評価" },
-  { href: "/admin/marketing", label: "LINE・販促" },
-  { href: "/admin/settings", label: "設定" },
+type Role = "owner" | "admin" | "staff";
+
+type NavItem = { href: string; label: string; allow: Role[] };
+
+// role ごとに表示する項目を制御
+const CLINIC_NAV_ITEMS: NavItem[] = [
+  { href: "/admin/dashboard", label: "ダッシュボード", allow: ["owner", "admin", "staff"] },
+  { href: "/admin/counter", label: "受付", allow: ["owner", "admin", "staff"] },
+  { href: "/admin/appointments", label: "予約一覧", allow: ["owner", "admin", "staff"] },
+  { href: "/admin/customers", label: "顧客管理", allow: ["owner", "admin", "staff"] },
+  { href: "/admin/sales", label: "売上記帳", allow: ["owner", "admin"] },
+  { href: "/admin/evaluation", label: "経営評価", allow: ["owner", "admin"] },
+  { href: "/admin/marketing", label: "LINE・販促", allow: ["owner", "admin"] },
+  { href: "/admin/leaderboard", label: "🏆 ランキング", allow: ["owner", "admin", "staff"] },
+  { href: "/admin/approvals", label: "承認", allow: ["owner"] },
+  { href: "/admin/settings", label: "設定", allow: ["owner"] },
 ];
 
-const FAMILY_GIFT_NAV_ITEMS = [
-  { href: "/calendar", label: "カレンダーへ" },
-  { href: "/admin/settings", label: "設定" },
+const FAMILY_GIFT_NAV_ITEMS: NavItem[] = [
+  { href: "/calendar", label: "カレンダーへ", allow: ["owner", "admin", "staff"] },
+  { href: "/admin/settings", label: "設定", allow: ["owner"] },
 ];
 
-export default function AdminNavLinks() {
+export default function AdminNavLinks({ role = "owner" }: { role?: Role }) {
   const pathname = usePathname();
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
-  const NAV_ITEMS = isFamilyGift ? FAMILY_GIFT_NAV_ITEMS : CLINIC_NAV_ITEMS;
+  const SOURCE = isFamilyGift ? FAMILY_GIFT_NAV_ITEMS : CLINIC_NAV_ITEMS;
+  const NAV_ITEMS = SOURCE.filter((item) => item.allow.includes(role));
 
   // パス変更時にメニューを閉じる
   useEffect(() => {

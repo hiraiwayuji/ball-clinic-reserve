@@ -20,7 +20,7 @@ export default async function AdminLayout({
   children: React.ReactNode;
 }) {
   // admin配下のページはすべてここで認証チェックを行う（/admin/login は除くためlayoutの配置に注意）
-  await checkAdminAuth();
+  const auth = await checkAdminAuth();
 
   return (
     <div className="min-h-screen bg-background dark:bg-slate-950 flex flex-col transition-colors duration-500">
@@ -48,7 +48,7 @@ export default async function AdminLayout({
             </Link>
             <div className="h-6 w-px bg-slate-200 dark:bg-slate-800 mx-2 hidden md:block" />
             <span className="text-sm font-medium text-slate-500 hidden md:block uppercase tracking-widest">{APP_SUBTITLE}</span>
-            <AdminNavLinks />
+            <AdminNavLinks role={auth.role} />
           </div>
           <div className="flex items-center gap-2">
             <ThemeToggle />

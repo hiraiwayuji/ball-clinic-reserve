@@ -1,7 +1,7 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
-import { checkAdminAuth } from "@/app/actions/auth";
+import { checkAdminAuth, requireRole } from "@/app/actions/auth";
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { revalidatePath } from "next/cache";
 
@@ -292,7 +292,8 @@ export async function searchSalesPatients(name: string): Promise<SalesPatientSug
 }
 
 export async function addCashSale(formData: FormData) {
-  const { clinicId } = await checkAdminAuth();
+  const auth = await checkAdminAuth();
+  const { clinicId } = auth;
   try {
     const saleDate = formData.get("sale_date") as string;
     const customerName = formData.get("customer_name") as string;
@@ -319,6 +320,16 @@ export async function addCashSale(formData: FormData) {
       .insert([saleData]);
 
     if (error) throw error;
+
+    // ポイント加算（売上記帳 1 件 = 8pt）
+    const { awardPoints } = await import("@/lib/gamification");
+    await awardPoints({
+      clinicId,
+      userId: auth.userId,
+      userEmail: auth.email,
+      reason: "sales.record",
+      sourceTable: "cash_sales",
+    });
 
     revalidatePath("/admin/sales");
     revalidatePath("/admin/dashboard");
@@ -351,7 +362,55 @@ export async function getCashSales(dateStr: string) {
   }
 }
 
+export async function updateCashSale(formData: FormData) {
+  await requireRole(["owner", "admin"]);
+  const { clinicId } = await checkAdminAuth();
+  try {
+    const id = formData.get("id") as string;
+    const saleDate = formData.get("sale_date") as string;
+    const customerName = ((formData.get("customer_name") as string) ?? "").trim();
+    // 金額は整数のみ許可。"5000abc" や 小数を弾く（parseInt は前者を通すため Number+isInteger）
+    const feeRaw = (formData.get("treatment_fee") as string) ?? "";
+    const treatmentFee = Number(feeRaw);
+    const memo = (formData.get("memo") as string) ?? "";
+    const isFirstVisit = formData.get("is_first_visit") === "true";
+
+    if (!id) {
+      return { success: false, error: "ID が指定されていません" };
+    }
+    if (!saleDate || !customerName) {
+      return { success: false, error: "日付とお名前を入力してください" };
+    }
+    if (!Number.isInteger(treatmentFee) || treatmentFee < 0) {
+      return { success: false, error: "金額は0以上の整数で入力してください" };
+    }
+
+    const supabase = await getSupabase();
+    const { error } = await supabase
+      .from("cash_sales")
+      .update({
+        sale_date: saleDate,
+        customer_name: customerName,
+        treatment_fee: treatmentFee,
+        memo,
+        is_first_visit: isFirstVisit,
+      })
+      .eq("id", id)
+      .eq("clinic_id", clinicId); // 他院のレコードを誤って書き換えない安全策
+
+    if (error) throw error;
+
+    revalidatePath("/admin/sales");
+    revalidatePath("/admin/dashboard");
+    return { success: true };
+  } catch (error) {
+    console.error("Error updating cash sale:", error);
+    return { success: false, error: "更新に失敗しました" };
+  }
+}
+
 export async function deleteCashSale(id: string) {
+  await requireRole(["owner", "admin"]);
   const { clinicId } = await checkAdminAuth();
   try {
     const supabase = await getSupabase();
@@ -436,7 +495,7 @@ export async function updateInsurancePayment(id: string, data: {
   payment_date: string | null;
   notes: string | null;
 }) {
-  await checkAdminAuth();
+  await requireRole(["owner", "admin"]);
   try {
     const supabase = await getSupabase();
     const { error } = await supabase
@@ -477,6 +536,7 @@ export async function updateInsurancePassbookCheck(id: string, checked: boolean)
 }
 
 export async function deleteInsurancePayment(id: string) {
+  await requireRole(["owner", "admin"]);
   const { clinicId } = await checkAdminAuth();
   try {
     const supabase = await getSupabase();
@@ -651,6 +711,7 @@ export async function updateExpense(id: string, data: {
   amount?: number;
   memo?: string;
 }) {
+  await requireRole(["owner", "admin"]);
   const { clinicId } = await checkAdminAuth();
   try {
     const supabase = await getSupabase();
@@ -672,6 +733,7 @@ export async function updateExpense(id: string, data: {
 }
 
 export async function deleteExpense(id: string) {
+  await requireRole(["owner", "admin"]);
   const { clinicId } = await checkAdminAuth();
   try {
     const supabase = await getSupabase();

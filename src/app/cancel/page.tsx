@@ -9,10 +9,9 @@ import Link from "next/link";
 import { CLINIC_CONFIG } from "@/lib/clinic-config";
 
 export default function CancelPage() {
-  const [searchType, setSearchType] = useState<"number" | "phone" | "name">("phone");
+  const [searchType, setSearchType] = useState<"number" | "phone">("phone");
   const [reservationNumber, setReservationNumber] = useState("");
   const [phone, setPhone] = useState("");
-  const [name, setName] = useState("");
   const [step, setStep] = useState<"input" | "list" | "done">("input");
   const [appointments, setAppointments] = useState<any[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -25,9 +24,9 @@ export default function CancelPage() {
     setSelectedIds(new Set());
     try {
       const params =
-        searchType === "number" ? `id=${reservationNumber.trim().toUpperCase()}` :
-        searchType === "phone" ? `phone=${phone.trim()}` :
-        `name=${encodeURIComponent(name.trim())}`;
+        searchType === "number"
+          ? `id=${reservationNumber.trim().toUpperCase()}`
+          : `phone=${phone.trim()}`;
       const res = await fetch(`/api/cancel?${params}`);
       const data = await res.json();
       if (data.success) {
@@ -60,7 +59,8 @@ export default function CancelPage() {
       const res = await fetch("/api/cancel", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ids: Array.from(selectedIds) }),
+        // 検索時に入力された電話番号で本人確認（API 側で必須）
+        body: JSON.stringify({ ids: Array.from(selectedIds), phone: phone.trim() || undefined }),
       });
       const data = await res.json();
       if (data.success) {
@@ -98,13 +98,13 @@ export default function CancelPage() {
                 予約を検索
               </CardTitle>
               <div className="flex gap-2 mt-2">
-                {(["phone", "name", "number"] as const).map((type) => (
+                {(["phone", "number"] as const).map((type) => (
                   <button
                     key={type}
                     onClick={() => { setSearchType(type); setError(""); }}
                     className={`flex-1 py-2 rounded-md text-sm font-medium transition-colors ${searchType === type ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-600"}`}
                   >
-                    {type === "phone" ? "電話番号" : type === "name" ? "お名前" : "予約番号"}
+                    {type === "phone" ? "電話番号" : "予約番号"}
                   </button>
                 ))}
               </div>
@@ -114,20 +114,15 @@ export default function CancelPage() {
                 <Input placeholder="例: ABC12345（英数字8文字）" value={reservationNumber}
                   onChange={(e) => setReservationNumber(e.target.value.toUpperCase())}
                   className="text-center text-lg tracking-widest font-mono" maxLength={8} />
-              ) : searchType === "phone" ? (
+              ) : (
                 <Input placeholder="例: 090-0000-0000" value={phone}
                   onChange={(e) => setPhone(e.target.value)} type="tel" />
-              ) : (
-                <Input placeholder="例: 山田 太郎" value={name}
-                  onChange={(e) => setName(e.target.value)} />
               )}
               {error && <p className="text-red-500 text-sm text-center">{error}</p>}
               <Button
                 onClick={handleSearch}
                 disabled={loading || (
-                  searchType === "number" ? reservationNumber.length < 8 :
-                  searchType === "phone" ? phone.length < 5 :
-                  name.trim().length < 1
+                  searchType === "number" ? reservationNumber.length < 8 : phone.length < 5
                 )}
                 className="w-full bg-blue-600 hover:bg-blue-700"
               >

@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { PUBLIC_CLINIC_ID } from "@/lib/default-clinic-id";
+import { writeAudit } from "@/lib/audit";
 
 const DEFAULT_CLINIC_ID = PUBLIC_CLINIC_ID;
+const TWO_HOURS_MS = 2 * 60 * 60 * 1000;
 
 function getSupabase() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
@@ -37,6 +39,23 @@ async function notifyOwnerCancelled(name: string, date: string, time: string, vi
     });
   } catch (err) {
     console.error("[LINE通知] キャンセル通知エラー:", err);
+  }
+}
+
+/** 患者本人の LINE にキャンセル完了の確認を送信（line_user_id が登録されている場合のみ） */
+async function notifyPatientCancelled(lineUserId: string | null | undefined, name: string, date: string, time: string) {
+  if (!lineUserId) return;
+  const token = process.env.LINE_CHANNEL_ACCESS_TOKEN;
+  if (!token) return;
+  const text = `✅ 予約キャンセル完了\n\n${name}様の以下の予約をキャンセルしました。\n\n📅 日時: ${date} ${time}\n\nまたのご予約をお待ちしております。`;
+  try {
+    await fetch("https://api.line.me/v2/bot/message/push", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ to: lineUserId, messages: [{ type: "text", text }] }),
+    });
+  } catch (err) {
+    console.error("[LINE通知] 患者キャンセル確認エラー:", err);
   }
 }
 
@@ -135,7 +154,37 @@ export async function POST(req: NextRequest) {
   if (unauthorized.length > 0)
     return NextResponse.json({ error: "キャンセル権限がありません。ご自身の予約のみキャンセルできます。" }, { status: 403 });
 
-  // キャンセル前に予約情報を取得済み（LINE通知用）
+  // ── 2 時間前制限のチェック ──
+  // 1 件でも 2 時間以内の予約が含まれていたら、すべて拒否（部分成功にはしない）
+  const now = Date.now();
+  const tooClose = targetApts.find((a: any) => {
+    const startMs = new Date(a.start_time).getTime();
+    return startMs - now < TWO_HOURS_MS;
+  });
+  if (tooClose) {
+    return NextResponse.json(
+      {
+        error:
+          "予約開始 2 時間前を切っているため Web からはキャンセルできません。お電話（088-635-5344）または LINE にてご連絡ください。",
+      },
+      { status: 400 },
+    );
+  }
+
+  // キャンセル前に line_user_id を取得（患者本人通知用）
+  const customerIdsForLine = Array.from(new Set(targetApts.map((a: any) => a.customer_id))).filter(Boolean);
+  const { data: customersWithLine } = customerIdsForLine.length
+    ? await supabase
+        .from("customers")
+        .select("id, name, line_user_id")
+        .in("id", customerIdsForLine)
+        .eq("clinic_id", DEFAULT_CLINIC_ID)
+    : { data: [] as { id: string; name: string; line_user_id: string | null }[] };
+  const lineMap = new Map<string, { name: string; line_user_id: string | null }>();
+  (customersWithLine ?? []).forEach((c: any) =>
+    lineMap.set(c.id, { name: c.name, line_user_id: c.line_user_id }),
+  );
+
   const apts = targetApts;
 
   const { error } = await supabase
@@ -146,7 +195,7 @@ export async function POST(req: NextRequest) {
 
   if (error) return NextResponse.json({ error: "キャンセルに失敗しました" }, { status: 500 });
 
-  // 院長LINEへ通知（非同期、失敗してもキャンセル自体は成功扱い）
+  // 院長 + 患者本人 LINE へ通知 + 監査ログ（非同期、失敗しても成功扱い）
   if (apts) {
     for (const apt of apts) {
       const customer = Array.isArray(apt.customers) ? apt.customers[0] : apt.customers;
@@ -154,7 +203,21 @@ export async function POST(req: NextRequest) {
       const date = startTime.toLocaleDateString("ja-JP", { year: "numeric", month: "long", day: "numeric", weekday: "short", timeZone: "Asia/Tokyo" });
       const time = startTime.toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Tokyo" });
       const visitType = apt.is_first_visit ? "初診" : "再診";
-      await notifyOwnerCancelled(customer?.name || "不明", date, time, visitType);
+      const lineInfo = lineMap.get(apt.customer_id);
+
+      await Promise.all([
+        notifyOwnerCancelled(customer?.name || "不明", date, time, visitType),
+        notifyPatientCancelled(lineInfo?.line_user_id ?? null, customer?.name || "お客様", date, time),
+        writeAudit({
+          clinicId: DEFAULT_CLINIC_ID,
+          actorRole: "system",
+          actionType: "appointment.cancel_by_patient",
+          targetTable: "appointments",
+          targetId: apt.id,
+          before: { status: "active", start_time: apt.start_time, customer_name: customer?.name },
+          after: { status: "cancelled" },
+        }),
+      ]);
     }
   }
 
