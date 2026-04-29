@@ -78,7 +78,7 @@ export async function generateOwnerBriefing(): Promise<{ success: boolean; brief
       .gte("created_at", since),
     sb
       .from("cash_sales")
-      .select("amount, sale_date")
+      .select("treatment_fee, sale_date")
       .eq("clinic_id", auth.clinicId)
       .gte("sale_date", since.split("T")[0]),
   ]);
@@ -92,7 +92,7 @@ export async function generateOwnerBriefing(): Promise<{ success: boolean; brief
   const last7DaysDeletedByStaff = audits.filter(
     (a: any) => a.action_type === "appointment.delete" && (a.actor_role === "staff" || a.actor_role === "admin"),
   ).length;
-  const last7DaysRevenue = (salesRes.data ?? []).reduce((sum: number, r: any) => sum + (r.amount ?? 0), 0);
+  const last7DaysRevenue = (salesRes.data ?? []).reduce((sum: number, r: any) => sum + (r.treatment_fee ?? 0), 0);
   const cancelRate = last7DaysAppointments > 0 ? Math.round((last7DaysCancellations / last7DaysAppointments) * 100) : 0;
 
   // ── ローカル異常検知（Gemini が動かなくてもアラートは出る） ──
