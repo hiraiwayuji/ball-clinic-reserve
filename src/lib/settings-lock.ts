@@ -1,12 +1,14 @@
 // Phase 1: 設定画面ロックの「解錠状態」を Cookie で管理する
 // - Cookie 値は HMAC 署名付きで改ざん検知
 // - 既定 30 分で失効
+// - 「自動再ロック無効モード」が選ばれているクリニックでは 1 年に延長
 // - Server Action / Server Component で `isSettingsUnlocked()` をチェックする
 
 import { cookies } from "next/headers";
 
 const COOKIE_NAME = "ball_settings_unlock";
-const TTL_MS = 30 * 60 * 1000; // 30 分
+const TTL_MS = 30 * 60 * 1000; // 30 分（通常）
+const TTL_MS_LONG = 365 * 24 * 60 * 60 * 1000; // 1 年（自動再ロック無効モード）
 
 function getSecret(): string {
   return (
@@ -32,8 +34,12 @@ async function hmacHex(payload: string): Promise<string> {
     .join("");
 }
 
-export async function setSettingsUnlocked(clinicId: string): Promise<void> {
-  const expiry = Date.now() + TTL_MS;
+export async function setSettingsUnlocked(
+  clinicId: string,
+  opts?: { autoLockDisabled?: boolean },
+): Promise<void> {
+  const ttl = opts?.autoLockDisabled ? TTL_MS_LONG : TTL_MS;
+  const expiry = Date.now() + ttl;
   const payload = `${clinicId}:${expiry}`;
   const sig = await hmacHex(payload);
   const value = `${expiry}.${sig}`;
@@ -46,7 +52,7 @@ export async function setSettingsUnlocked(clinicId: string): Promise<void> {
     sameSite: "lax",
     secure: process.env.NODE_ENV === "production",
     path: "/",
-    maxAge: Math.floor(TTL_MS / 1000),
+    maxAge: Math.floor(ttl / 1000),
   });
 }
 

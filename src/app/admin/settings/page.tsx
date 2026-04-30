@@ -9,10 +9,11 @@ import ManualSection from "@/components/admin/ManualSection";
 import SettingsPasscodeGate from "@/components/admin/SettingsPasscodeGate";
 import SettingsLockBar from "@/components/admin/SettingsLockBar";
 import SettingsPasscodeChangeForm from "@/components/admin/SettingsPasscodeChangeForm";
+import SettingsAutoLockToggle from "@/components/admin/SettingsAutoLockToggle";
 import NotificationTargetsManager from "@/components/admin/NotificationTargetsManager";
 import { isSettingsUnlocked } from "@/lib/settings-lock";
 import { PASSCODE_DEFAULT_HINT } from "@/lib/passcode";
-import { listNotificationTargets } from "@/app/actions/security";
+import { listNotificationTargets, getAutoLockDisabled } from "@/app/actions/security";
 
 export default async function SettingsPage() {
   // owner のみ設定画面アクセス可
@@ -24,18 +25,19 @@ export default async function SettingsPage() {
     return <SettingsPasscodeGate defaultHint={PASSCODE_DEFAULT_HINT} />;
   }
 
-  const [initialSettings, initialCourses, initialStaff, initialRooms, currentEmail, notifTargets] = await Promise.all([
+  const [initialSettings, initialCourses, initialStaff, initialRooms, currentEmail, notifTargets, autoLockDisabled] = await Promise.all([
     getClinicSettings(),
     getCourses(),
     getStaffList(),
     getRooms(),
     getMyEmail(),
     listNotificationTargets(),
+    getAutoLockDisabled(),
   ]);
 
   return (
     <div className="container mx-auto space-y-10">
-      <SettingsLockBar />
+      <SettingsLockBar autoLockDisabled={autoLockDisabled} />
 
       <ManualSection />
 
@@ -55,10 +57,15 @@ export default async function SettingsPage() {
       </div>
 
       {/* 設定画面パスコード変更 */}
-      <div className="bg-white dark:bg-slate-900 rounded-2xl border p-6 shadow-sm">
-        <h2 className="text-lg font-bold text-slate-900 dark:text-slate-100 mb-1">セキュリティ・パスコード</h2>
-        <p className="text-sm text-slate-500 mb-6">設定画面ロックの解錠用パスコード（数字 4〜6 桁）を変更します。</p>
-        <SettingsPasscodeChangeForm />
+      <div className="bg-white dark:bg-slate-900 rounded-2xl border p-6 shadow-sm space-y-8">
+        <div>
+          <h2 className="text-lg font-bold text-slate-900 dark:text-slate-100 mb-1">セキュリティ・パスコード</h2>
+          <p className="text-sm text-slate-500 mb-6">設定画面ロックの解錠用パスコード（数字 4〜6 桁）を変更します。</p>
+          <SettingsPasscodeChangeForm />
+        </div>
+        <div className="border-t pt-6">
+          <SettingsAutoLockToggle initialDisabled={autoLockDisabled} />
+        </div>
       </div>
 
       {/* 通知先（複数オーナー対応） */}

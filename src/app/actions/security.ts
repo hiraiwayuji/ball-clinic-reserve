@@ -30,7 +30,7 @@ export async function unlockSettingsAction(formData: FormData): Promise<{ succes
 
   const { data } = await sb
     .from("clinic_settings")
-    .select("settings_passcode_hash")
+    .select("settings_passcode_hash, settings_auto_lock_disabled")
     .eq("id", auth.clinicId)
     .maybeSingle();
 
@@ -48,7 +48,9 @@ export async function unlockSettingsAction(formData: FormData): Promise<{ succes
     return { success: false, error: "パスコードが違います" };
   }
 
-  await setSettingsUnlocked(auth.clinicId);
+  await setSettingsUnlocked(auth.clinicId, {
+    autoLockDisabled: !!data?.settings_auto_lock_disabled,
+  });
   await writeAudit({
     clinicId: auth.clinicId,
     actorUserId: auth.userId,
@@ -262,6 +264,55 @@ export async function rejectPendingChange(id: string, note?: string): Promise<{ 
 export async function getSettingsLockStatus(): Promise<{ unlocked: boolean }> {
   const auth = await checkAdminAuth();
   return { unlocked: await isSettingsUnlocked(auth.clinicId) };
+}
+
+// ───────── 自動再ロック無効モード（スタッフ不在院向け） ─────────
+
+/** 現在の自動再ロック無効フラグを取得（owner のみ） */
+export async function getAutoLockDisabled(): Promise<boolean> {
+  const auth = await requireRole(["owner"]);
+  const sb = getServiceClient();
+  if (!sb) return false;
+  const { data } = await sb
+    .from("clinic_settings")
+    .select("settings_auto_lock_disabled")
+    .eq("id", auth.clinicId)
+    .maybeSingle();
+  return !!data?.settings_auto_lock_disabled;
+}
+
+/**
+ * 自動再ロック無効フラグを切り替える（owner のみ）。
+ * - true にすると、次回パスコード解錠時の cookie TTL が 1 年に延長される。
+ * - false に戻すと、次回解錠から従来通り 30 分で自動再ロック。
+ * - 既存の解錠 cookie には影響しない（クリアしないので、効力は次回解錠から）。
+ */
+export async function setAutoLockDisabledAction(
+  enabled: boolean,
+): Promise<{ success: boolean; error?: string }> {
+  const auth = await requireRole(["owner"]);
+  const sb = getServiceClient();
+  if (!sb) return { success: false, error: "サーバー設定エラー" };
+
+  const { error } = await sb
+    .from("clinic_settings")
+    .update({ settings_auto_lock_disabled: enabled })
+    .eq("id", auth.clinicId);
+  if (error) return { success: false, error: "保存に失敗しました: " + error.message };
+
+  await writeAudit({
+    clinicId: auth.clinicId,
+    actorUserId: auth.userId,
+    actorEmail: auth.email,
+    actorRole: auth.role,
+    actionType: enabled ? "settings.auto_lock_disable" : "settings.auto_lock_enable",
+    targetTable: "clinic_settings",
+    targetId: auth.clinicId,
+    after: { settings_auto_lock_disabled: enabled },
+  });
+
+  revalidatePath("/admin/settings");
+  return { success: true };
 }
 
 // ───────── 通知先管理（admin_notification_targets） ─────────
