@@ -417,8 +417,9 @@ function DraftRowItem({
           <span className="text-[11px] font-bold text-emerald-600 dark:text-emerald-400">0円の支払区分:</span>
           {([
             { value: "jibaiseki", label: "自賠責" },
-            { value: "hagukumi", label: "はぐくみ医療" },
-            { value: "other", label: "その他公費" },
+            { value: "rosai", label: "労災" },
+            { value: "subsidy", label: "公費・助成" },
+            { value: "other", label: "その他" },
           ] as { value: CashSalePaymentType; label: string }[]).map(opt => (
             <button
               key={opt.value}
