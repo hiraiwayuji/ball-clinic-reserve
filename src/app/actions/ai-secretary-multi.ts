@@ -58,8 +58,12 @@ export async function generateOwnerBriefing(): Promise<{ success: boolean; brief
   const now = new Date();
   const since = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();
 
+  // 違和感検知用の参照範囲（今日〜2週間先の予約・全顧客の電話/名前）
+  const todayStr = new Date().toISOString().split("T")[0];
+  const twoWeeksLater = new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000).toISOString();
+
   // ── 並列で集計 ──
-  const [auditRes, apptRes, cancelRes, salesRes] = await Promise.all([
+  const [auditRes, apptRes, cancelRes, salesRes, upcomingRes, customersRes] = await Promise.all([
     sb
       .from("audit_log")
       .select("action_type, actor_role, actor_email, created_at")
@@ -81,6 +85,21 @@ export async function generateOwnerBriefing(): Promise<{ success: boolean; brief
       .select("treatment_fee, sale_date")
       .eq("clinic_id", auth.clinicId)
       .gte("sale_date", since.split("T")[0]),
+    // 違和感検知: 今日〜2週間先の予約（顧客名・電話を結合）
+    sb
+      .from("appointments")
+      .select("id, start_time, customer_id, customers(id, name, phone)")
+      .eq("clinic_id", auth.clinicId)
+      .neq("status", "cancelled")
+      .gte("start_time", `${todayStr}T00:00:00+09:00`)
+      .lte("start_time", twoWeeksLater),
+    // 同一電話で別名義の登録チェック用（軽いので最大 500 件）
+    sb
+      .from("customers")
+      .select("id, name, phone")
+      .eq("clinic_id", auth.clinicId)
+      .not("phone", "is", null)
+      .limit(500),
   ]);
 
   const audits = auditRes.data ?? [];
@@ -111,6 +130,77 @@ export async function generateOwnerBriefing(): Promise<{ success: boolean; brief
   if (settingsRequests > 0) {
     alerts.push(`スタッフからの設定変更申請が ${settingsRequests} 件、承認待ちです。`);
   }
+
+  // ── 違和感検知（予約・顧客の整合性チェック） ──
+  // 1) 同じ日に同じ顧客の予約が複数（重複疑い）
+  type ApptRow = { id: string; start_time: string; customer_id: string | null; customers: { id: string; name: string; phone: string | null } | { id: string; name: string; phone: string | null }[] | null };
+  const upcoming: ApptRow[] = (upcomingRes.data ?? []) as any[];
+  const pickCustomer = (c: ApptRow["customers"]) => Array.isArray(c) ? c[0] : c;
+  const sameDayMap = new Map<string, { name: string; date: string; ids: string[] }>();
+  for (const a of upcoming) {
+    const cust = pickCustomer(a.customers);
+    if (!cust?.name) continue;
+    const dateKey = a.start_time.slice(0, 10); // YYYY-MM-DD（JST 想定で UTC 寄りでもザックリ把握）
+    const key = `${dateKey}|${cust.id ?? cust.name}`;
+    const cur = sameDayMap.get(key) ?? { name: cust.name, date: dateKey, ids: [] };
+    cur.ids.push(a.id);
+    sameDayMap.set(key, cur);
+  }
+  const duplicates = [...sameDayMap.values()].filter((v) => v.ids.length >= 2);
+  if (duplicates.length > 0) {
+    const head = duplicates.slice(0, 3);
+    const tail = duplicates.length > 3 ? `（他 ${duplicates.length - 3} 件）` : "";
+    alerts.push(
+      `同じ日に同名の予約が重複しています。確認してください: ${head
+        .map((d) => `${d.date} ${d.name}様（${d.ids.length}件）`)
+        .join(" / ")}${tail}`
+    );
+  }
+
+  // 2) 同一電話番号で別名義の顧客（家族予約 or 入力ミスの疑い）
+  const customers = (customersRes.data ?? []) as { id: string; name: string; phone: string | null }[];
+  const phoneToNames = new Map<string, Set<string>>();
+  for (const c of customers) {
+    if (!c.phone) continue;
+    const normalized = c.phone.replace(/[^\d]/g, "");
+    if (normalized.length < 6) continue;
+    const set = phoneToNames.get(normalized) ?? new Set<string>();
+    set.add(c.name);
+    phoneToNames.set(normalized, set);
+  }
+  const phoneConflicts = [...phoneToNames.entries()].filter(([, names]) => names.size >= 2);
+  if (phoneConflicts.length > 0) {
+    const head = phoneConflicts.slice(0, 3).map(([phone, names]) => {
+      const masked = phone.length >= 4 ? `${phone.slice(0, 3)}***${phone.slice(-2)}` : "***";
+      return `${masked}（${[...names].slice(0, 3).join("・")}）`;
+    });
+    const tail = phoneConflicts.length > 3 ? `（他 ${phoneConflicts.length - 3} 件）` : "";
+    alerts.push(`同じ電話番号で別名義の登録が ${phoneConflicts.length} 組あります: ${head.join(" / ")}${tail}（家族予約か入力ミスを確認）`);
+  }
+
+  // 3) 直近 14 日に同じ顧客の連続キャンセルが 3 回以上（離脱兆候）
+  const cancelByCustomerSince = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000).toISOString();
+  try {
+    const { data: cancels14d } = await sb
+      .from("appointments")
+      .select("customer_id, customers(name)")
+      .eq("clinic_id", auth.clinicId)
+      .eq("status", "cancelled")
+      .gte("created_at", cancelByCustomerSince);
+    const byCustomer = new Map<string, { name: string; n: number }>();
+    for (const r of (cancels14d ?? []) as any[]) {
+      if (!r.customer_id) continue;
+      const cust = Array.isArray(r.customers) ? r.customers[0] : r.customers;
+      const cur = byCustomer.get(r.customer_id) ?? { name: cust?.name ?? "(顧客名不明)", n: 0 };
+      cur.n++;
+      byCustomer.set(r.customer_id, cur);
+    }
+    const heavyCancellers = [...byCustomer.values()].filter((v) => v.n >= 3);
+    if (heavyCancellers.length > 0) {
+      const head = heavyCancellers.slice(0, 3).map((v) => `${v.name}様（${v.n}回）`);
+      alerts.push(`直近2週間でキャンセルが続いている方がいます: ${head.join(" / ")}（連絡確認を）`);
+    }
+  } catch {}
 
   // ── Gemini で経営アドバイスを 1 文生成 ──
   const prompt = `あなたはぼーるくん（接骨院オーナー）専属の経営秘書 AI です。

@@ -25,8 +25,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Calendar as CalendarIcon, Plus, Trash2, Loader2, Coins, User, UserPlus, Landmark, Receipt, Upload, Download, Clock, Bot, X, AlertTriangle, Zap } from "lucide-react";
-import { addCashSale, getCashSales, deleteCashSale, searchSalesPatients, SalesPatientSuggestion } from "@/app/actions/sales";
+import { Calendar as CalendarIcon, Plus, Trash2, Loader2, Coins, User, UserPlus, Landmark, Receipt, Upload, Download, Clock, Bot, X, AlertTriangle, Zap, Pencil, ShieldCheck } from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
+import { addCashSale, getCashSales, deleteCashSale, updateCashSale, searchSalesPatients, SalesPatientSuggestion, type CashSalePaymentType } from "@/app/actions/sales";
 import { toast } from "sonner";
 import Link from "next/link";
 import CashSalesImportDialog from "@/components/admin/CashSalesImportDialog";
@@ -70,6 +71,32 @@ function SalesPageInner() {
     warning: string | null;
   } | null>(null);
   const [showAiBanner, setShowAiBanner] = useState(false);
+
+  // 支払区分（0円計上時に自賠責・はぐくみ医療等を選ぶ）
+  const [paymentType, setPaymentType] = useState<CashSalePaymentType | "">("");
+
+  // 編集ダイアログ。memo に明細 JSON が入っている場合は明細を温存して名前/金額/支払区分のみ編集可能。
+  const [editTarget, setEditTarget] = useState<any | null>(null);
+  const [editForm, setEditForm] = useState<{
+    customer_name: string;
+    treatment_fee: string;
+    memo: string;
+    originalMemo: string;
+    hasJsonMemo: boolean;
+    is_first_visit: boolean;
+    payment_type: CashSalePaymentType | "";
+    sale_date: string;
+  }>({
+    customer_name: "",
+    treatment_fee: "",
+    memo: "",
+    originalMemo: "",
+    hasJsonMemo: false,
+    is_first_visit: false,
+    payment_type: "",
+    sale_date: "",
+  });
+  const [isUpdating, setIsUpdating] = useState(false);
 
   // 受付カウンターからの遷移: URLパラメータで名前・初診フラグ・予測データを受け取る
   useEffect(() => {
@@ -137,12 +164,19 @@ function SalesPageInner() {
       buhan: buhanItems.filter(i => i.name || i.amount > 0),
     };
 
+    // 0 円計上時は支払区分必須
+    if (totalAmount === 0 && !paymentType) {
+      toast.error("0円で登録する場合は支払区分（自賠責・はぐくみ医療など）を選択してください");
+      return;
+    }
+
     const formData = new FormData(e.currentTarget);
     formData.set("sale_date", format(date, "yyyy-MM-dd"));
     formData.set("is_first_visit", String(isFirstVisit));
     formData.set("customer_name", nameValue);
     formData.set("treatment_fee", String(totalAmount));
     formData.set("memo", JSON.stringify(breakdown));
+    if (paymentType) formData.set("payment_type", paymentType);
 
     startTransition(async () => {
       try {
@@ -157,6 +191,7 @@ function SalesPageInner() {
           setSuggestions([]);
           setShowAiBanner(false);
           setAiDraft(null);
+          setPaymentType("");
           fetchSales(date);
         } else {
           toast.error(res.error || "エラーが発生しました");
@@ -175,6 +210,58 @@ function SalesPageInner() {
       fetchSales(date);
     } else {
       toast.error(res.error || "削除に失敗しました");
+    }
+  };
+
+  const openEdit = (sale: any) => {
+    const rawMemo = typeof sale.memo === "string" ? sale.memo : "";
+    const hasJsonMemo = rawMemo.trim().startsWith("{");
+    setEditTarget(sale);
+    setEditForm({
+      customer_name: sale.customer_name ?? "",
+      treatment_fee: String(sale.treatment_fee ?? 0),
+      memo: hasJsonMemo ? "" : rawMemo,
+      originalMemo: rawMemo,
+      hasJsonMemo,
+      is_first_visit: !!sale.is_first_visit,
+      payment_type: (sale.payment_type as CashSalePaymentType) ?? "",
+      sale_date: sale.sale_date ?? "",
+    });
+  };
+
+  const handleUpdate = async () => {
+    if (!editTarget || !date) return;
+    const trimmedName = editForm.customer_name.trim();
+    const fee = Number(editForm.treatment_fee);
+    if (!trimmedName || !Number.isInteger(fee) || fee < 0) {
+      toast.error("お名前と金額（0以上の整数）を正しく入力してください");
+      return;
+    }
+    if (fee === 0 && !editForm.payment_type) {
+      toast.error("0円に修正する場合は支払区分（自賠責・はぐくみ医療など）を選択してください");
+      return;
+    }
+    const memoToSave = editForm.hasJsonMemo ? editForm.originalMemo : editForm.memo;
+    setIsUpdating(true);
+    try {
+      const fd = new FormData();
+      fd.set("id", editTarget.id);
+      fd.set("sale_date", editForm.sale_date || format(date, "yyyy-MM-dd"));
+      fd.set("customer_name", trimmedName);
+      fd.set("treatment_fee", String(fee));
+      fd.set("memo", memoToSave);
+      fd.set("is_first_visit", editForm.is_first_visit ? "true" : "false");
+      if (editForm.payment_type) fd.set("payment_type", editForm.payment_type);
+      const res = await updateCashSale(fd);
+      if (res.success) {
+        toast.success("更新しました");
+        setEditTarget(null);
+        fetchSales(date);
+      } else {
+        toast.error(res.error || "更新に失敗しました");
+      }
+    } finally {
+      setIsUpdating(false);
     }
   };
 
@@ -451,9 +538,43 @@ function SalesPageInner() {
                 <UserPlus className="w-4 h-4" />
                 {isFirstVisit ? "✓ 新患（タップで解除）" : "新患の場合はここをタップ"}
               </button>
-              <Button type="submit" className="w-full bg-blue-600 hover:bg-blue-700 h-10" disabled={isPending || totalAmount === 0}>
+
+              {/* 支払区分（自賠責・はぐくみ医療等の 0 円計上用） */}
+              <div className="space-y-1.5">
+                <Label className="text-xs font-semibold text-slate-600 dark:text-slate-300 flex items-center gap-1">
+                  <ShieldCheck className="w-3.5 h-3.5" />
+                  支払区分（0円計上の場合は必須）
+                </Label>
+                <div className="grid grid-cols-2 gap-2">
+                  {([
+                    { value: "", label: "通常（自費）" },
+                    { value: "jibaiseki", label: "自賠責" },
+                    { value: "hagukumi", label: "はぐくみ医療" },
+                    { value: "other", label: "その他公費" },
+                  ] as { value: CashSalePaymentType | ""; label: string }[]).map(opt => (
+                    <button
+                      key={opt.value || "self_pay"}
+                      type="button"
+                      onClick={() => setPaymentType(opt.value)}
+                      className={`px-2 py-2 rounded-md text-xs font-bold border transition-all ${
+                        paymentType === opt.value
+                          ? "bg-emerald-500 border-emerald-600 text-white shadow-sm"
+                          : "bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100"
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <Button
+                type="submit"
+                className="w-full bg-blue-600 hover:bg-blue-700 h-10"
+                disabled={isPending || (totalAmount === 0 && !paymentType)}
+              >
                 {isPending ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Plus className="w-4 h-4 mr-2" />}
-                登録する
+                {totalAmount === 0 && paymentType ? "0円で登録（公費・自賠責）" : "登録する"}
               </Button>
             </form>
           </CardContent>
@@ -518,17 +639,44 @@ function SalesPageInner() {
                             )}
                           </div>
                         </TableCell>
-                        <TableCell className="text-slate-500 dark:text-slate-400 text-sm">{parseMemo(sale.memo)}</TableCell>
+                        <TableCell className="text-slate-500 dark:text-slate-400 text-sm">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            {sale.payment_type === "jibaiseki" && (
+                              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400">自賠責</span>
+                            )}
+                            {sale.payment_type === "hagukumi" && (
+                              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400">はぐくみ</span>
+                            )}
+                            {sale.payment_type === "other" && (
+                              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400">公費</span>
+                            )}
+                            <span className="truncate">{parseMemo(sale.memo)}</span>
+                          </div>
+                        </TableCell>
                         <TableCell className="text-right font-bold text-slate-700 dark:text-slate-200">¥{sale.treatment_fee.toLocaleString()}</TableCell>
                         <TableCell className="text-right text-slate-100 group">
-                          <Button 
-                            variant="ghost" 
-                            size="icon" 
-                            className="text-slate-300 hover:text-rose-500 hover:bg-rose-50 transition-all rounded-full"
-                            onClick={() => handleDelete(sale.id)}
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </Button>
+                          <div className="flex items-center justify-end gap-1">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="text-slate-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/30 transition-all rounded-full"
+                              onClick={() => openEdit(sale)}
+                              aria-label="修正"
+                              title="修正"
+                            >
+                              <Pencil className="w-4 h-4" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="text-slate-300 hover:text-rose-500 hover:bg-rose-50 transition-all rounded-full"
+                              onClick={() => handleDelete(sale.id)}
+                              aria-label="削除"
+                              title="削除"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </Button>
+                          </div>
                         </TableCell>
                       </TableRow>
                     ))
@@ -545,6 +693,109 @@ function SalesPageInner() {
         onClose={() => setShowImport(false)}
         onImported={() => date && fetchSales(date)}
       />
+
+      {/* 売上修正ダイアログ */}
+      <Dialog open={!!editTarget} onOpenChange={(o) => !o && setEditTarget(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>売上を修正</DialogTitle>
+            <DialogDescription>
+              受付からの一括入力後でも、ここで金額・お名前・支払区分を修正できます。
+            </DialogDescription>
+          </DialogHeader>
+          {editTarget && (
+            <div className="space-y-3 py-2">
+              <div className="space-y-1.5">
+                <Label className="text-xs font-semibold text-slate-600">日付</Label>
+                <Input
+                  type="date"
+                  value={editForm.sale_date}
+                  onChange={(e) => setEditForm(f => ({ ...f, sale_date: e.target.value }))}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs font-semibold text-slate-600">お名前</Label>
+                <Input
+                  value={editForm.customer_name}
+                  onChange={(e) => setEditForm(f => ({ ...f, customer_name: e.target.value }))}
+                  placeholder="やまだ たろう"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs font-semibold text-slate-600">金額（円）</Label>
+                <Input
+                  type="number"
+                  inputMode="numeric"
+                  min={0}
+                  value={editForm.treatment_fee}
+                  onChange={(e) => setEditForm(f => ({ ...f, treatment_fee: e.target.value }))}
+                />
+                {editForm.hasJsonMemo && (
+                  <p className="text-[10px] text-slate-400">
+                    ※ 受付入力の明細データは保持されます（金額のみ上書き）
+                  </p>
+                )}
+              </div>
+              {!editForm.hasJsonMemo && (
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-semibold text-slate-600">備考</Label>
+                  <Input
+                    value={editForm.memo}
+                    onChange={(e) => setEditForm(f => ({ ...f, memo: e.target.value }))}
+                    placeholder="備考"
+                  />
+                </div>
+              )}
+              <div className="space-y-1.5">
+                <Label className="text-xs font-semibold text-slate-600 flex items-center gap-1">
+                  <ShieldCheck className="w-3.5 h-3.5" />
+                  支払区分
+                </Label>
+                <div className="grid grid-cols-2 gap-2">
+                  {([
+                    { value: "", label: "通常（自費）" },
+                    { value: "jibaiseki", label: "自賠責" },
+                    { value: "hagukumi", label: "はぐくみ医療" },
+                    { value: "other", label: "その他公費" },
+                  ] as { value: CashSalePaymentType | ""; label: string }[]).map(opt => (
+                    <button
+                      key={opt.value || "self_pay"}
+                      type="button"
+                      onClick={() => setEditForm(f => ({ ...f, payment_type: opt.value }))}
+                      className={`px-2 py-2 rounded-md text-xs font-bold border transition-all ${
+                        editForm.payment_type === opt.value
+                          ? "bg-emerald-500 border-emerald-600 text-white shadow-sm"
+                          : "bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100"
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="flex items-center gap-2 pt-1">
+                <input
+                  type="checkbox"
+                  id="edit-first-visit"
+                  checked={editForm.is_first_visit}
+                  onChange={(e) => setEditForm(f => ({ ...f, is_first_visit: e.target.checked }))}
+                  className="accent-amber-500"
+                />
+                <Label htmlFor="edit-first-visit" className="text-xs cursor-pointer">新患</Label>
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditTarget(null)} disabled={isUpdating}>
+              キャンセル
+            </Button>
+            <Button onClick={handleUpdate} disabled={isUpdating} className="bg-blue-600 hover:bg-blue-700">
+              {isUpdating ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
+              保存する
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

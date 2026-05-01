@@ -69,7 +69,7 @@ export default function AdminWeeklyGridPage() {
         const supabase = createClient();
         const { data: aptData } = await supabase
           .from("appointments")
-          .select(`id, start_time, end_time, memo, is_first_visit, status, customer_id, customers(name, phone)`)
+          .select(`id, start_time, end_time, memo, is_first_visit, status, customer_id, series_id, customers(name, phone)`)
           .eq("clinic_id", clinicId)
           .gte("start_time", weekStart.toISOString())
           .lt("start_time", weekEnd.toISOString())
