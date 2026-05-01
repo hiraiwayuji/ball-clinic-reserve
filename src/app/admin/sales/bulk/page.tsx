@@ -418,7 +418,7 @@ function DraftRowItem({
           {([
             { value: "jibaiseki", label: "自賠責" },
             { value: "rosai", label: "労災" },
-            { value: "subsidy", label: "公費・助成" },
+            { value: "hagukumi", label: "はぐくみ医療" },
             { value: "other", label: "その他" },
           ] as { value: CashSalePaymentType; label: string }[]).map(opt => (
             <button

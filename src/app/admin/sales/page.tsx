@@ -550,7 +550,7 @@ function SalesPageInner() {
                     { value: "", label: "通常（自費）" },
                     { value: "jibaiseki", label: "自賠責" },
                     { value: "rosai", label: "労災" },
-                    { value: "subsidy", label: "公費・助成" },
+                    { value: "hagukumi", label: "はぐくみ医療" },
                     { value: "other", label: "その他" },
                   ] as { value: CashSalePaymentType | ""; label: string }[]).map(opt => (
                     <button
@@ -568,7 +568,7 @@ function SalesPageInner() {
                   ))}
                 </div>
                 <p className="text-[10px] text-slate-400">
-                  ※ 0 円計上時は必須。例: 自治体の子ども医療助成・自賠責・労災など
+                  ※ 0 円計上時は必須。自賠責・労災・はぐくみ医療等
                 </p>
               </div>
 
@@ -651,15 +651,11 @@ function SalesPageInner() {
                             {sale.payment_type === "rosai" && (
                               <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400">労災</span>
                             )}
-                            {sale.payment_type === "subsidy" && (
-                              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400">公費</span>
+                            {sale.payment_type === "hagukumi" && (
+                              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400">はぐくみ</span>
                             )}
                             {sale.payment_type === "other" && (
                               <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400">その他</span>
-                            )}
-                            {/* 旧データ（hagukumi）が残っている場合の互換表示 */}
-                            {sale.payment_type === "hagukumi" && (
-                              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400">公費</span>
                             )}
                             <span className="truncate">{parseMemo(sale.memo)}</span>
                           </div>
@@ -767,7 +763,7 @@ function SalesPageInner() {
                     { value: "", label: "通常（自費）" },
                     { value: "jibaiseki", label: "自賠責" },
                     { value: "rosai", label: "労災" },
-                    { value: "subsidy", label: "公費・助成" },
+                    { value: "hagukumi", label: "はぐくみ医療" },
                     { value: "other", label: "その他" },
                   ] as { value: CashSalePaymentType | ""; label: string }[]).map(opt => (
                     <button

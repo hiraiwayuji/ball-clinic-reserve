@@ -215,8 +215,8 @@ export async function getTodayPendingSales(dateStr?: string): Promise<{ success:
 }
 
 // 一括売上登録
-export type CashSalePaymentType = "self_pay" | "jibaiseki" | "rosai" | "subsidy" | "other";
-const ALLOWED_PAYMENT_TYPES: CashSalePaymentType[] = ["self_pay", "jibaiseki", "rosai", "subsidy", "other"];
+export type CashSalePaymentType = "self_pay" | "jibaiseki" | "rosai" | "hagukumi" | "other";
+const ALLOWED_PAYMENT_TYPES: CashSalePaymentType[] = ["self_pay", "jibaiseki", "rosai", "hagukumi", "other"];
 
 function normalizePaymentType(value: unknown): CashSalePaymentType | null {
   if (typeof value !== "string") return null;
