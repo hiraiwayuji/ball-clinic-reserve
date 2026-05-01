@@ -91,6 +91,11 @@ export async function createManualReservation(formData: FormData) {
     const baseDate = new Date(`${rawDate}T${time}:00+09:00`);
     const isFirstVisit = visitType === "new";
 
+    // 連続予約は同一 series_id で束ねる（後で「この日以降を全削除」できるように）
+    const seriesId = recurringWeeks > 1
+      ? (typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : null)
+      : null;
+
     const appointmentsToInsert = [];
     for (let i = 0; i < recurringWeeks; i++) {
       const targetDate = new Date(baseDate.getTime());
@@ -109,6 +114,7 @@ export async function createManualReservation(formData: FormData) {
         is_first_visit: i === 0 ? isFirstVisit : false,
         status: "confirmed",
         clinic_id: clinicId,
+        series_id: seriesId,
       });
     }
 
@@ -520,26 +526,56 @@ export async function getAppointmentsByDate(dateStr: string) {
 }
 
 // 予約の削除アクション
-export async function deleteAppointment(appointmentId: string) {
+// scope:
+//   "one"    - この予約 1 件のみ削除（既定）
+//   "future" - この予約と、同じ series_id を持つこの日以降の連続予約を全削除
+export type DeleteAppointmentScope = "one" | "future";
+
+export async function deleteAppointment(
+  appointmentId: string,
+  scope: DeleteAppointmentScope = "one",
+) {
   const auth = await checkAdminAuth();
   try {
     const supabase = getAdminSupabase() || await getSupabase();
 
-    // 削除前に内容を保存（監査・通知用）
+    // 削除前に内容を保存（監査・通知用）。series_id と start_time も取得して連続削除に使う。
     const { data: before } = await supabase
       .from("appointments")
-      .select("id, start_time, end_time, status, memo, customers(name, phone)")
+      .select("id, start_time, end_time, status, memo, series_id, customers(name, phone)")
       .eq("id", appointmentId)
       .maybeSingle();
 
-    const { error } = await supabase
-      .from("appointments")
-      .delete()
-      .eq("id", appointmentId);
+    if (!before) {
+      return { success: false, error: "対象の予約が見つかりませんでした" };
+    }
 
-    if (error) {
-      console.error("Failed to delete appointment:", error);
-      return { success: false, error: "予約の削除に失敗しました" };
+    let deletedCount = 1;
+
+    if (scope === "future" && before.series_id) {
+      // 同一シリーズかつこの日時以降を全削除（自分自身も含む）
+      const { error, count } = await supabase
+        .from("appointments")
+        .delete({ count: "exact" })
+        .eq("clinic_id", auth.clinicId)
+        .eq("series_id", before.series_id)
+        .gte("start_time", before.start_time);
+      if (error) {
+        console.error("Failed to delete appointment series:", error);
+        return { success: false, error: "連続予約の削除に失敗しました" };
+      }
+      deletedCount = count ?? 1;
+    } else {
+      // 単発削除（series_id が無い、または scope が "one"）
+      const { error } = await supabase
+        .from("appointments")
+        .delete()
+        .eq("id", appointmentId)
+        .eq("clinic_id", auth.clinicId);
+      if (error) {
+        console.error("Failed to delete appointment:", error);
+        return { success: false, error: "予約の削除に失敗しました" };
+      }
     }
 
     const customerName = Array.isArray(before?.customers) ? before?.customers[0]?.name : (before?.customers as any)?.name;
@@ -548,22 +584,24 @@ export async function deleteAppointment(appointmentId: string) {
       actorUserId: auth.userId,
       actorEmail: auth.email,
       actorRole: auth.role,
-      actionType: "appointment.delete",
+      actionType: scope === "future" ? "appointment.delete_series" : "appointment.delete",
       targetTable: "appointments",
       targetId: appointmentId,
-      before,
+      before: { ...before, deletedCount, scope },
     });
     await notifyOwnerOfStaffAction({
       clinicId: auth.clinicId,
       actorRole: auth.role,
       actorEmail: auth.email,
-      actionType: "⚠️ 予約の削除",
-      summary: `${customerName ?? "(顧客名不明)"}様\n日時: ${before?.start_time ?? ""}\nメモ: ${before?.memo ?? ""}\nID: ${appointmentId}`,
+      actionType: scope === "future" ? "⚠️ 連続予約の一括削除" : "⚠️ 予約の削除",
+      summary: scope === "future"
+        ? `${customerName ?? "(顧客名不明)"}様\n${before?.start_time ?? ""} 以降の連続予約 ${deletedCount} 件を削除\nメモ: ${before?.memo ?? ""}`
+        : `${customerName ?? "(顧客名不明)"}様\n日時: ${before?.start_time ?? ""}\nメモ: ${before?.memo ?? ""}\nID: ${appointmentId}`,
     });
 
     revalidatePath("/admin/appointments");
     revalidatePath("/admin");
-    return { success: true };
+    return { success: true, deletedCount };
   } catch (err) {
     console.error(err);
     return { success: false, error: "予期せぬエラーが発生しました" };

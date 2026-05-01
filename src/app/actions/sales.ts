@@ -215,18 +215,37 @@ export async function getTodayPendingSales(dateStr?: string): Promise<{ success:
 }
 
 // 一括売上登録
+export type CashSalePaymentType = "self_pay" | "jibaiseki" | "hagukumi" | "other";
+const ALLOWED_PAYMENT_TYPES: CashSalePaymentType[] = ["self_pay", "jibaiseki", "hagukumi", "other"];
+
+function normalizePaymentType(value: unknown): CashSalePaymentType | null {
+  if (typeof value !== "string") return null;
+  const v = value.trim();
+  if (!v) return null;
+  return (ALLOWED_PAYMENT_TYPES as string[]).includes(v) ? (v as CashSalePaymentType) : null;
+}
+
 export async function bulkAddCashSales(rows: Array<{
   customer_name: string;
   treatment_fee: number;
   memo: string;
   is_first_visit: boolean;
   sale_date: string;
+  payment_type?: CashSalePaymentType | null;
 }>) {
   const { clinicId } = await checkAdminAuth();
   try {
     const supabase = await getSupabase();
     const { error } = await supabase.from("cash_sales").insert(
-      rows.map(r => ({ ...r, clinic_id: clinicId }))
+      rows.map(r => ({
+        customer_name: r.customer_name,
+        treatment_fee: r.treatment_fee,
+        memo: r.memo,
+        is_first_visit: r.is_first_visit,
+        sale_date: r.sale_date,
+        payment_type: normalizePaymentType(r.payment_type),
+        clinic_id: clinicId,
+      }))
     );
     if (error) throw error;
     revalidatePath("/admin/sales");
@@ -300,9 +319,15 @@ export async function addCashSale(formData: FormData) {
     const treatmentFee = parseInt(formData.get("treatment_fee") as string, 10);
     const memo = formData.get("memo") as string || "";
     const isFirstVisit = formData.get("is_first_visit") === "true";
+    const paymentType = normalizePaymentType(formData.get("payment_type"));
 
-    if (!saleDate || !customerName || isNaN(treatmentFee)) {
+    if (!saleDate || !customerName || isNaN(treatmentFee) || treatmentFee < 0) {
       return { success: false, error: "必須項目を入力してください" };
+    }
+    // 0 円計上時は支払区分（自賠責/はぐくみ/その他）を必須にする。
+    // 通常の自費で 0 円は誤入力の可能性が高いため。
+    if (treatmentFee === 0 && (!paymentType || paymentType === "self_pay")) {
+      return { success: false, error: "0円で登録する場合は支払区分（自賠責・はぐくみ医療など）を選択してください" };
     }
 
     const supabase = await getSupabase();
@@ -312,6 +337,7 @@ export async function addCashSale(formData: FormData) {
       treatment_fee: treatmentFee,
       memo,
       is_first_visit: isFirstVisit,
+      payment_type: paymentType,
       clinic_id: clinicId
     };
 
@@ -374,6 +400,7 @@ export async function updateCashSale(formData: FormData) {
     const treatmentFee = Number(feeRaw);
     const memo = (formData.get("memo") as string) ?? "";
     const isFirstVisit = formData.get("is_first_visit") === "true";
+    const paymentType = normalizePaymentType(formData.get("payment_type"));
 
     if (!id) {
       return { success: false, error: "ID が指定されていません" };
@@ -383,6 +410,9 @@ export async function updateCashSale(formData: FormData) {
     }
     if (!Number.isInteger(treatmentFee) || treatmentFee < 0) {
       return { success: false, error: "金額は0以上の整数で入力してください" };
+    }
+    if (treatmentFee === 0 && (!paymentType || paymentType === "self_pay")) {
+      return { success: false, error: "0円に修正する場合は支払区分（自賠責・はぐくみ医療など）を選択してください" };
     }
 
     const supabase = await getSupabase();
@@ -394,6 +424,7 @@ export async function updateCashSale(formData: FormData) {
         treatment_fee: treatmentFee,
         memo,
         is_first_visit: isFirstVisit,
+        payment_type: paymentType,
       })
       .eq("id", id)
       .eq("clinic_id", clinicId); // 他院のレコードを誤って書き換えない安全策

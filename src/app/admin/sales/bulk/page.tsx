@@ -8,6 +8,7 @@ import {
   getTodayPendingSales,
   bulkAddCashSales,
   type PendingSalePatient,
+  type CashSalePaymentType,
 } from "@/app/actions/sales";
 import { toast } from "sonner";
 import Link from "next/link";
@@ -22,6 +23,7 @@ type DraftRow = PendingSalePatient & {
   checked: boolean;
   editAmount: string;
   editMemo: string;
+  paymentType: CashSalePaymentType | "";
 };
 
 const CONFIDENCE_ORDER = { certain: 0, likely: 1, unknown: 2 } as const;
@@ -48,6 +50,7 @@ function BulkSalesPageInner() {
             checked: p.confidence === "certain" || p.confidence === "likely",
             editAmount: p.prediction ? String(p.prediction.predictedAmount) : "",
             editMemo: p.prediction?.predictedMemo ?? "",
+            paymentType: "" as CashSalePaymentType | "",
           }))
       );
     } else {
@@ -59,12 +62,12 @@ function BulkSalesPageInner() {
   useEffect(() => { fetchPending(); }, [targetDateStr]);
 
   const toggleAll = () => {
-    const allChecked = rows.filter(r => r.editAmount).every(r => r.checked);
-    setRows(prev => prev.map(r => r.editAmount ? { ...r, checked: !allChecked } : r));
+    const allChecked = rows.filter(r => r.editAmount !== "").every(r => r.checked);
+    setRows(prev => prev.map(r => r.editAmount !== "" ? { ...r, checked: !allChecked } : r));
   };
 
   const markAllAsChecked = () => {
-    setRows(prev => prev.map(r => r.editAmount ? { ...r, checked: true } : r));
+    setRows(prev => prev.map(r => r.editAmount !== "" ? { ...r, checked: true } : r));
   };
 
   const clearAllChecks = () => {
@@ -78,9 +81,15 @@ function BulkSalesPageInner() {
   };
 
   const handleSave = () => {
-    const targets = rows.filter(r => r.checked && r.editAmount);
+    const targets = rows.filter(r => r.checked && r.editAmount !== "");
     if (targets.length === 0) {
       toast.error("保存する項目がありません");
+      return;
+    }
+    // 0 円計上の行は支払区分を必須にする（自賠責・はぐくみ医療等）
+    const zeroWithoutPaymentType = targets.filter(r => parseInt(r.editAmount, 10) === 0 && !r.paymentType);
+    if (zeroWithoutPaymentType.length > 0) {
+      toast.error(`${zeroWithoutPaymentType.map(r => r.customerName).join("・")}様：0円の場合は支払区分を選択してください`);
       return;
     }
     startTransition(async () => {
@@ -91,6 +100,7 @@ function BulkSalesPageInner() {
           memo: r.editMemo,
           is_first_visit: r.isFirstVisit,
           sale_date: targetDateStr,
+          payment_type: r.paymentType || null,
         }))
       );
       if (res.success) {
@@ -102,9 +112,9 @@ function BulkSalesPageInner() {
     });
   };
 
-  const checkedCount = rows.filter(r => r.checked && r.editAmount).length;
+  const checkedCount = rows.filter(r => r.checked && r.editAmount !== "").length;
   const totalAmount = rows
-    .filter(r => r.checked && r.editAmount)
+    .filter(r => r.checked && r.editAmount !== "")
     .reduce((sum, r) => sum + parseInt(r.editAmount || "0", 10), 0);
 
   const warningRows = rows.filter(r => r.prediction?.warning);
@@ -239,7 +249,7 @@ function BulkSalesPageInner() {
           {/* テーブルヘッダー */}
           <div className="flex items-center gap-3 px-4 py-3 bg-slate-50 dark:bg-slate-800/50 border-b border-slate-200 dark:border-white/10">
             <button type="button" onClick={toggleAll} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors">
-              {rows.filter(r => r.editAmount).every(r => r.checked)
+              {rows.filter(r => r.editAmount !== "").every(r => r.checked)
                 ? <CheckSquare className="w-5 h-5 text-indigo-600" />
                 : <Square className="w-5 h-5" />}
             </button>
@@ -307,7 +317,8 @@ function DraftRowItem({
   row: DraftRow;
   onChange: (updated: DraftRow) => void;
 }) {
-  const hasAmount = !!row.editAmount;
+  const hasAmount = row.editAmount !== "";
+  const isZero = hasAmount && parseInt(row.editAmount, 10) === 0;
   const time = format(parseISO(row.checkinTime), "HH:mm");
 
   return (
@@ -380,9 +391,10 @@ function DraftRowItem({
         <div className="w-28 shrink-0">
           <Input
             type="number"
+            min={0}
             placeholder="金額"
             value={row.editAmount}
-            onChange={(e) => onChange({ ...row, editAmount: e.target.value, checked: !!e.target.value })}
+            onChange={(e) => onChange({ ...row, editAmount: e.target.value, checked: e.target.value !== "" })}
             className="text-right font-bold h-9 text-sm"
           />
         </div>
@@ -398,6 +410,34 @@ function DraftRowItem({
           />
         </div>
       </div>
+
+      {/* 0円のときだけ支払区分選択を表示（自賠責・はぐくみ医療等） */}
+      {isZero && (
+        <div className="mt-2 ml-8 flex items-center gap-2 flex-wrap">
+          <span className="text-[11px] font-bold text-emerald-600 dark:text-emerald-400">0円の支払区分:</span>
+          {([
+            { value: "jibaiseki", label: "自賠責" },
+            { value: "hagukumi", label: "はぐくみ医療" },
+            { value: "other", label: "その他公費" },
+          ] as { value: CashSalePaymentType; label: string }[]).map(opt => (
+            <button
+              key={opt.value}
+              type="button"
+              onClick={() => onChange({ ...row, paymentType: opt.value })}
+              className={`px-2 py-0.5 rounded-md text-[11px] font-bold border transition-all ${
+                row.paymentType === opt.value
+                  ? "bg-emerald-500 border-emerald-600 text-white"
+                  : "bg-white border-slate-200 text-slate-500 hover:bg-slate-50"
+              }`}
+            >
+              {opt.label}
+            </button>
+          ))}
+          {!row.paymentType && (
+            <span className="text-[10px] text-rose-500 font-medium">※ 必須</span>
+          )}
+        </div>
+      )}
     </div>
   );
 }

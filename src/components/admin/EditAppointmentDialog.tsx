@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { format, parseISO } from "date-fns";
 import { ja } from "date-fns/locale";
-import { CalendarIcon, Trash2, MessageCircle, CheckCircle, X, Clock } from "lucide-react";
+import { CalendarIcon, Trash2, MessageCircle, CheckCircle, X, Clock, CalendarRange } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
@@ -14,6 +14,8 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogDescription,
+  DialogFooter,
 } from "@/components/ui/dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
@@ -46,6 +48,8 @@ export function EditAppointmentDialog({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [lastVisitDate, setLastVisitDate] = useState<Date | null>(null);
   const [visitCount, setVisitCount] = useState<number | null>(null);
+  const [deleteChoiceOpen, setDeleteChoiceOpen] = useState(false);
+  const [seriesFutureCount, setSeriesFutureCount] = useState<number>(0);
 
   useEffect(() => {
     if (open && appointment) {
@@ -126,14 +130,42 @@ export function EditAppointmentDialog({
     }
   };
 
-  const handleDelete = async () => {
+  // 削除ボタン押下: 連続予約（series_id あり）なら選択ダイアログを開く。
+  // 単発予約は従来通り confirm のみ。
+  const handleDeleteClick = async () => {
     if (!appointment) return;
+    if (appointment.series_id) {
+      // 同一シリーズ内のこの予約を含む将来の件数を数える（モーダルに件数表示）
+      try {
+        const supabase = createClient();
+        const { count } = await supabase
+          .from("appointments")
+          .select("id", { count: "exact", head: true })
+          .eq("series_id", appointment.series_id)
+          .neq("status", "cancelled")
+          .gte("start_time", appointment.start_time);
+        setSeriesFutureCount(count ?? 1);
+      } catch {
+        setSeriesFutureCount(1);
+      }
+      setDeleteChoiceOpen(true);
+      return;
+    }
     if (!confirm("本当にこの予約を削除しますか？")) return;
+    await runDelete("one");
+  };
+
+  const runDelete = async (scope: "one" | "future") => {
+    if (!appointment) return;
     setIsSubmitting(true);
+    setDeleteChoiceOpen(false);
     try {
-      const result = await deleteAppointment(appointment.id);
+      const result = await deleteAppointment(appointment.id, scope);
       if (result.success) {
-        toast.success("予約を削除しました");
+        const n = (result as any).deletedCount ?? 1;
+        toast.success(scope === "future" && n > 1
+          ? `連続予約 ${n} 件を削除しました`
+          : "予約を削除しました");
         onOpenChange(false);
         onSuccess?.();
       } else {
@@ -385,7 +417,7 @@ export function EditAppointmentDialog({
               <Button
                 type="button"
                 variant="destructive"
-                onClick={handleDelete}
+                onClick={handleDeleteClick}
                 disabled={isSubmitting}
                 className="flex-1 h-10 rounded-xl text-sm"
               >
@@ -396,6 +428,58 @@ export function EditAppointmentDialog({
           </div>
         </form>
       </DialogContent>
+
+      {/* 連続予約の削除選択ダイアログ */}
+      <Dialog open={deleteChoiceOpen} onOpenChange={setDeleteChoiceOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <CalendarRange className="w-5 h-5 text-amber-500" />
+              連続予約の削除
+            </DialogTitle>
+            <DialogDescription>
+              この予約は連続予約（毎週繰り返し）として登録されています。
+              削除する範囲を選んでください。
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2 py-2">
+            <button
+              type="button"
+              onClick={() => runDelete("one")}
+              disabled={isSubmitting}
+              className="w-full text-left rounded-xl border-2 border-slate-200 hover:border-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/30 px-4 py-3 transition-all disabled:opacity-50"
+            >
+              <p className="font-bold text-sm text-slate-800 dark:text-slate-100">この予約だけ削除</p>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                {date ? format(date, "M月d日（E）", { locale: ja }) : ""} {time} の 1 件のみを削除します。
+              </p>
+            </button>
+            <button
+              type="button"
+              onClick={() => runDelete("future")}
+              disabled={isSubmitting}
+              className="w-full text-left rounded-xl border-2 border-rose-200 hover:border-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/30 px-4 py-3 transition-all disabled:opacity-50"
+            >
+              <p className="font-bold text-sm text-rose-700 dark:text-rose-300">
+                この日以降の連続予約をすべて削除（{seriesFutureCount}件）
+              </p>
+              <p className="text-xs text-rose-500 dark:text-rose-400 mt-0.5">
+                同じシリーズの「この日およびそれ以降」の予約をまとめて削除します。元に戻せません。
+              </p>
+            </button>
+          </div>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setDeleteChoiceOpen(false)}
+              disabled={isSubmitting}
+            >
+              キャンセル
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Dialog>
   );
 }
