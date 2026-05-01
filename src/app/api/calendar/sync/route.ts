@@ -2,10 +2,13 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { format, addHours } from "date-fns";
 
-// Supabase初期化
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
-const supabase = createClient(supabaseUrl, supabaseAnonKey);
+// Supabase クライアントは GET 内で遅延初期化する（ビルド時に env var が
+// 未定義でも 'supabaseUrl is required' でビルドが落ちないようにするため）
+function getSupabase() {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
+  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
+  return createClient(supabaseUrl, supabaseAnonKey);
+}
 
 export const revalidate = 0; // 常に最新を返す
 
@@ -68,6 +71,7 @@ function generateICalendar(events: any[]): string {
 
 export async function GET(request: Request) {
   try {
+    const supabase = getSupabase();
     const eventsToSync: any[] = [];
 
     // 1. 接骨院の予約データを取得 (appointments)
