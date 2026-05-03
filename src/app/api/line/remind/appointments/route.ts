@@ -63,7 +63,7 @@ export async function POST(req: NextRequest) {
 
   const { data: appointments } = await supabase
     .from("appointments")
-    .select("*, customers(name, line_user_id)")
+    .select("*, customers(id, name, display_name, line_user_id)")
     .eq("clinic_id", DEFAULT_CLINIC_ID)
     .gte("start_time", dayStart)
     .lte("start_time", dayEnd)
@@ -72,15 +72,33 @@ export async function POST(req: NextRequest) {
   const results = [];
   for (const apt of appointments || []) {
     const customer = Array.isArray(apt.customers) ? apt.customers[0] : apt.customers;
-    if (!customer?.line_user_id) continue;
+    if (!customer?.id) continue;
+
+    // この customer に紐付く全 LINE userId を取得（家族紐付け対応）
+    const { data: links } = await supabase
+      .from("customer_line_links")
+      .select("line_user_id")
+      .eq("customer_id", customer.id);
+    const lineIds = Array.from(
+      new Set(
+        [
+          ...(links ?? []).map((r: { line_user_id: string }) => r.line_user_id),
+          customer.line_user_id,
+        ].filter((v): v is string => Boolean(v)),
+      ),
+    );
+    if (lineIds.length === 0) continue;
 
     const timeStr = new Date(apt.start_time).toLocaleTimeString("ja-JP", {
       timeZone: "Asia/Tokyo", hour: "2-digit", minute: "2-digit",
     });
-    const msg = `${customer.name}様\n\nこんにちは！ボール接骨院です。\n本日 ${timeStr} からご予約を頂いております。\nお気を付けてお越しください！`;
+    const displayName = customer.display_name ?? customer.name;
+    const msg = `${displayName}様\n\nこんにちは！ボール接骨院です。\n本日 ${timeStr} からご予約を頂いております。\nお気を付けてお越しください！`;
 
-    const ok = await pushLine(customer.line_user_id, msg, channelToken);
-    results.push({ name: customer.name, time: timeStr, sent: ok });
+    for (const lineId of lineIds) {
+      const ok = await pushLine(lineId, msg, channelToken);
+      results.push({ name: displayName, lineId, time: timeStr, sent: ok });
+    }
   }
 
   return NextResponse.json({ status: "ok", count: results.length, results });

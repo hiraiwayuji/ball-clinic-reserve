@@ -1,29 +1,8 @@
 "use server";
 
 import { PUBLIC_CLINIC_ID } from "@/lib/default-clinic-id";
-
-async function getLineToken(): Promise<string | null> {
-  const channelId = process.env.LINE_CHANNEL_ID;
-  const channelSecret = process.env.LINE_CHANNEL_SECRET;
-  // チャンネルID/Secretが揃っていれば動的トークンを取得、なければ静的トークンにフォールバック
-  if (!channelId || !channelSecret) {
-    const staticToken = process.env.LINE_CHANNEL_ACCESS_TOKEN ?? null;
-    console.log("[LINE-DEBUG] getLineToken: LINE_CHANNEL_ID未設定、静的トークンにフォールバック=", staticToken ? "OK" : "NULL");
-    return staticToken;
-  }
-  try {
-    const res = await fetch("https://api.line.me/v2/oauth/accessToken", {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: `grant_type=client_credentials&client_id=${channelId}&client_secret=${channelSecret}`,
-    });
-    const data = await res.json();
-    console.log("[LINE-DEBUG] getLineToken: status=", res.status, "access_token=", data.access_token ? "OK" : "NULL/MISSING");
-    return data.access_token ?? process.env.LINE_CHANNEL_ACCESS_TOKEN ?? null;
-  } catch {
-    return process.env.LINE_CHANNEL_ACCESS_TOKEN ?? null;
-  }
-}
+import { pushLineToOwners, sendEmailToOwners } from "@/lib/admin-notify";
+import { getLineUidFromCookie } from "@/app/actions/family-line";
 
 async function notifyOwner(
   name: string,
@@ -37,46 +16,20 @@ async function notifyOwner(
   courseName?: string | null,
   staffName?: string | null,
 ) {
-  const ownerLineId = process.env.OWNER_LINE_USER_ID;
-  console.log("[LINE-DEBUG] notifyOwner called, ownerLineId=", ownerLineId ? "SET" : "NOT SET");
   const visitLabel = visitType === "new" ? "初診" : "再診";
   const statusLabel = isWaiting ? "⏳【キャンセル待ち登録】" : "🔔【新規予約】";
   const courseLine = courseName ? `\nコース: ${courseName}` : "";
   const staffLine = staffName ? `\n指名: ${staffName}` : "";
   const messageText = `${statusLabel}\n\n患者名: ${name}\n日時: ${rawDate} ${time}\n電話: ${phone || "未入力"}\n種別: ${visitLabel}${courseLine}${staffLine}\n症状: ${symptoms || "なし"}\n予約番号: ${reservationNumber}`;
 
-  if (ownerLineId) {
-    try {
-      const token = await getLineToken();
-      console.log("[LINE-DEBUG] notifyOwner: token=", token ? "RECEIVED" : "NULL - LINE API failed");
-      if (token) {
-        const res = await fetch("https://api.line.me/v2/bot/message/push", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-          body: JSON.stringify({ to: ownerLineId, messages: [{ type: "text", text: messageText }] }),
-        });
-        if (!res.ok) console.error("[LINE通知] 送信失敗:", await res.json());
-        else console.log("[LINE通知] 送信成功");
-      }
-    } catch (err) { console.error("[LINE通知] エラー:", err); }
-  }
-
-  const resendKey = process.env.RESEND_API_KEY;
-  if (resendKey) {
-    try {
-      await fetch("https://api.resend.com/emails", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${resendKey}` },
-        body: JSON.stringify({
-          from: "ボール接骨院予約 <onboarding@resend.dev>",
-          to: ["hiraiwayuji@gmail.com"],
-          subject: `${statusLabel} ${name}様 ${rawDate} ${time}`,
-          text: messageText,
-        }),
-      });
-      console.log("[メール通知] 送信成功");
-    } catch (err) { console.error("[メール通知] エラー:", err); }
-  }
+  await Promise.all([
+    pushLineToOwners(PUBLIC_CLINIC_ID, messageText),
+    sendEmailToOwners(
+      PUBLIC_CLINIC_ID,
+      `${statusLabel} ${name}様 ${rawDate} ${time}`,
+      messageText,
+    ),
+  ]);
 }
 
 
@@ -323,6 +276,7 @@ export async function createReservation(formData: FormData) {
     const staffName = (formData.get("staffName") as string) || null;
     const roomId = (formData.get("roomId") as string) || null;
     const roomName = (formData.get("roomName") as string) || null;
+    const requestedCustomerId = (formData.get("customerId") as string) || null;
 
     const isFirstVisit = visitType === "new";
 
@@ -347,14 +301,43 @@ export async function createReservation(formData: FormData) {
 
     const supabase = await getSupabase();
     if (supabase) {
-      let customerId = null;
+      let customerId: string | null = null;
 
       const adminDb = getAdminSupabase() || supabase;
 
-      // ── 顧客照合 ──
+      // ── LINE 経由の家族選択 ──
+      // /reserve に lt トークン経由で来たユーザーは ball_line_uid cookie を持つ。
+      // フォームから customerId が来たら、その customer が cookie の line_user_id に紐付いているかを検証。
+      if (requestedCustomerId) {
+        const lineUid = await getLineUidFromCookie();
+        if (lineUid) {
+          const { data: link } = await adminDb
+            .from("customer_line_links")
+            .select("customer_id")
+            .eq("line_user_id", lineUid)
+            .eq("customer_id", requestedCustomerId)
+            .eq("clinic_id", PUBLIC_CLINIC_ID)
+            .maybeSingle();
+          if (link) {
+            const { data: cust } = await adminDb
+              .from("customers")
+              .select("id, name, booking_suspended")
+              .eq("id", requestedCustomerId)
+              .maybeSingle();
+            if (cust) {
+              if (cust.booking_suspended) {
+                return { success: false, error: "現在、オンライン予約のご利用が停止されています。お電話またはLINEにてお問い合わせください。" };
+              }
+              customerId = cust.id;
+            }
+          }
+        }
+      }
+
+      // ── 通常の顧客照合（customerId 未指定 or 検証失敗時） ──
       // LINE紐づけ済み or 顧客DB登録済みなら予約可能。
       // 電話番号で照合 → 名前で照合 → 未登録ならアンケートへ誘導。
-      if (phone) {
+      if (!customerId && phone) {
         const { data: existing } = await adminDb
           .from("customers")
           .select("id, name, booking_suspended, line_user_id")
@@ -377,7 +360,7 @@ export async function createReservation(formData: FormData) {
             requiresQuestionnaire: true,
           };
         }
-      } else {
+      } else if (!customerId) {
         // 電話番号なし（再診・名前のみ）→ 名前 + clinic_id で照合
         const { data: existingList } = await adminDb
           .from("customers")
@@ -409,6 +392,11 @@ export async function createReservation(formData: FormData) {
         }
         // LINE未紐づけ かつ 顧客DB登録済み → 予約は通す（スタッフが手動管理）
         customerId = existing.id;
+      }
+
+      if (!customerId) {
+        // どのフローでも customer が確定しなかった（家族選択トークン期限切れ等の保険）
+        return { success: false, error: "ご予約者の情報が確認できませんでした。お手数ですがお名前と電話番号を再度ご入力ください。" };
       }
 
       const startDateTimeStr = `${rawDate}T${time}:00+09:00`;
