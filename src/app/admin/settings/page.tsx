@@ -10,6 +10,7 @@ import SettingsPasscodeGate from "@/components/admin/SettingsPasscodeGate";
 import SettingsLockBar from "@/components/admin/SettingsLockBar";
 import SettingsPasscodeChangeForm from "@/components/admin/SettingsPasscodeChangeForm";
 import NotificationTargetsManager from "@/components/admin/NotificationTargetsManager";
+import LineHealthChecker from "@/components/admin/LineHealthChecker";
 import { isSettingsUnlocked } from "@/lib/settings-lock";
 import { PASSCODE_DEFAULT_HINT } from "@/lib/passcode";
 import { listNotificationTargets } from "@/app/actions/security";
@@ -69,6 +70,16 @@ export default async function SettingsPage() {
           複数登録すると全員に送られます。
         </p>
         <NotificationTargetsManager initial={notifTargets} />
+      </div>
+
+      {/* LINE 連携診断 */}
+      <div className="bg-white dark:bg-slate-900 rounded-2xl border p-6 shadow-sm">
+        <h2 className="text-lg font-bold text-slate-900 dark:text-slate-100 mb-1">LINE 連携診断</h2>
+        <p className="text-sm text-slate-500 mb-6">
+          予約通知が届かない／LINE ボタンが効かないときに、設定の状態と LINE API 接続を確認します。
+          新しい院をセットアップした直後にも実行してください。
+        </p>
+        <LineHealthChecker />
       </div>
 
       {/* 個人情報・利用規約 */}
