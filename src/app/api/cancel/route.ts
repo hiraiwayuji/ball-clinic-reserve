@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { PUBLIC_CLINIC_ID } from "@/lib/default-clinic-id";
 import { writeAudit } from "@/lib/audit";
+import { pushLineToOwners, pushLineToCustomer } from "@/lib/admin-notify";
 
 const DEFAULT_CLINIC_ID = PUBLIC_CLINIC_ID;
 const TWO_HOURS_MS = 2 * 60 * 60 * 1000;
@@ -27,36 +28,15 @@ function formatApt(apt: any) {
 }
 
 async function notifyOwnerCancelled(name: string, date: string, time: string, visitType: string) {
-  const ownerLineId = process.env.OWNER_LINE_USER_ID;
-  const token = process.env.LINE_CHANNEL_ACCESS_TOKEN;
-  if (!ownerLineId || !token) return;
   const text = `❌【予約キャンセル】\n\n患者名: ${name}\n日時: ${date} ${time}\n種別: ${visitType}\n\nWeb からキャンセルされました。`;
-  try {
-    await fetch("https://api.line.me/v2/bot/message/push", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ to: ownerLineId, messages: [{ type: "text", text }] }),
-    });
-  } catch (err) {
-    console.error("[LINE通知] キャンセル通知エラー:", err);
-  }
+  await pushLineToOwners(DEFAULT_CLINIC_ID, text);
 }
 
 /** 患者本人の LINE にキャンセル完了の確認を送信（line_user_id が登録されている場合のみ） */
 async function notifyPatientCancelled(lineUserId: string | null | undefined, name: string, date: string, time: string) {
   if (!lineUserId) return;
-  const token = process.env.LINE_CHANNEL_ACCESS_TOKEN;
-  if (!token) return;
   const text = `✅ 予約キャンセル完了\n\n${name}様の以下の予約をキャンセルしました。\n\n📅 日時: ${date} ${time}\n\nまたのご予約をお待ちしております。`;
-  try {
-    await fetch("https://api.line.me/v2/bot/message/push", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ to: lineUserId, messages: [{ type: "text", text }] }),
-    });
-  } catch (err) {
-    console.error("[LINE通知] 患者キャンセル確認エラー:", err);
-  }
+  await pushLineToCustomer(lineUserId, text);
 }
 
 export async function GET(req: NextRequest) {

@@ -22,9 +22,15 @@ import { getTimeSlots, isDateWithinAllowedRange } from "@/lib/time-slots";
 import { toast } from "sonner";
 import { CLINIC_CONFIG } from "@/lib/clinic-config";
 import ReserveLandingPage from "./ReserveLandingPage";
+import type { LinkedCustomer } from "@/lib/line-links";
+
+const SELECTED_CUSTOMER_KEY = "ballClinic_selectedCustomerId";
+const FAMILY_LIST_KEY = "ballClinic_familyList";
 
 const isExternalLogo = CLINIC_CONFIG.logoSmallUrl.startsWith("http");
-const LINE_URL = process.env.NEXT_PUBLIC_LINE_OFFICIAL_ACCOUNT_URL ?? "https://line.me/ti/p/%40shc8761q";
+// 「友だち追加」用 URL は /R/ti/p/ 形式。/ti/p/ だけだと既に友だちでないと開けず
+// 「LINEの友だちではないユーザー」エラーになる
+const LINE_URL = process.env.NEXT_PUBLIC_LINE_OFFICIAL_ACCOUNT_URL ?? "https://line.me/R/ti/p/%40shc8761q";
 
 function ReserveContent() {
   const searchParams = useSearchParams();
@@ -60,6 +66,8 @@ function ReserveContent() {
   const [isWaitingResult, setIsWaitingResult] = useState(false);
   const [requiresQuestionnaire, setRequiresQuestionnaire] = useState(false);
   const [clinicHolidays, setClinicHolidays] = useState<ClinicHoliday[]>([]);
+  // LINE 経由で選択された家族 customer（あれば name/phone をプリフィル + customerId を送信）
+  const [selectedFamilyMember, setSelectedFamilyMember] = useState<LinkedCustomer | null>(null);
 
   useEffect(() => {
     getClinicHolidays().then(setClinicHolidays);
@@ -72,11 +80,32 @@ function ReserveContent() {
     });
     getActiveStaff().then(setStaffList);
     getActiveRooms().then(setRooms);
-    const savedName = localStorage.getItem("ballClinic_savedName");
-    const savedPhone = localStorage.getItem("ballClinic_savedPhone");
-    if (savedName) setName(savedName);
-    if (savedPhone) setPhone(savedPhone);
-    if (savedName && savedPhone) setVisitType("return");
+
+    // 家族選択がある場合は customer 情報を優先プリフィル
+    let appliedFamily = false;
+    try {
+      const familyJson = localStorage.getItem(FAMILY_LIST_KEY);
+      const selectedId = localStorage.getItem(SELECTED_CUSTOMER_KEY);
+      if (familyJson && selectedId) {
+        const list: LinkedCustomer[] = JSON.parse(familyJson);
+        const member = list.find((c) => c.customer_id === selectedId);
+        if (member) {
+          setSelectedFamilyMember(member);
+          setName(member.display_name ?? member.name);
+          if (member.phone) setPhone(member.phone);
+          setVisitType("return");
+          appliedFamily = true;
+        }
+      }
+    } catch {}
+
+    if (!appliedFamily) {
+      const savedName = localStorage.getItem("ballClinic_savedName");
+      const savedPhone = localStorage.getItem("ballClinic_savedPhone");
+      if (savedName) setName(savedName);
+      if (savedPhone) setPhone(savedPhone);
+      if (savedName && savedPhone) setVisitType("return");
+    }
   }, [initialCourseId]);
 
   useEffect(() => {
@@ -155,6 +184,9 @@ function ReserveContent() {
           formData.append("roomId", room.id);
           formData.append("roomName", room.name);
         }
+      }
+      if (selectedFamilyMember) {
+        formData.append("customerId", selectedFamilyMember.customer_id);
       }
 
       const result = await createReservation(formData);
@@ -406,6 +438,15 @@ function ReserveContent() {
                 {/* お客様情報 */}
                 <section className="space-y-6">
                   <h2 className="text-xl font-bold text-white tracking-tight">お客様情報</h2>
+
+                  {selectedFamilyMember && (
+                    <div className="p-4 bg-emerald-500/10 border border-emerald-500/30 rounded-2xl text-sm text-emerald-200">
+                      🏥 <span className="font-bold">{selectedFamilyMember.display_name ?? selectedFamilyMember.name}</span> さんでご予約します
+                      <Link href="/reserve" className="ml-2 text-emerald-300 underline text-xs">
+                        切替え
+                      </Link>
+                    </div>
+                  )}
 
                   {/* 初診・再診 */}
                   <div className="space-y-2">

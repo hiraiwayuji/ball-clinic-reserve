@@ -1,7 +1,14 @@
 "use client";
 
-import { useState, useTransition } from "react";
-import { linkLineUser, unlinkLineUser, getRecentUnlinkedLineLogs } from "@/app/actions/adminCustomers";
+import { useState, useTransition, useEffect } from "react";
+import {
+  linkLineUser,
+  unlinkLineUser,
+  getRecentUnlinkedLineLogs,
+  getLineLinksForCustomer,
+  unlinkSpecificLineLink,
+  setPrimaryLinkForCustomer,
+} from "@/app/actions/adminCustomers";
 import { toast } from "sonner";
 import {
   Dialog,
@@ -10,7 +17,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { MessageCircle, Link2, Unlink, Search, Loader2, CheckCircle2 } from "lucide-react";
+import { MessageCircle, Link2, Unlink, Search, Loader2, CheckCircle2, Star } from "lucide-react";
 
 interface Props {
   customerId: string;
@@ -18,12 +25,30 @@ interface Props {
   lineUserId: string | null;
 }
 
+type LinkRow = { line_user_id: string; is_primary: boolean; display_label: string | null; linked_via: string | null; linked_at: string };
+
 export function LinkLineDialog({ customerId, customerName, lineUserId }: Props) {
   const [open, setOpen] = useState(false);
   const [manualId, setManualId] = useState("");
   const [logs, setLogs] = useState<{ user_id: string; message: string | null; created_at: string }[]>([]);
   const [logsLoaded, setLogsLoaded] = useState(false);
+  const [links, setLinks] = useState<LinkRow[]>([]);
   const [isPending, startTransition] = useTransition();
+
+  const reloadLinks = async () => {
+    try {
+      const data = await getLineLinksForCustomer(customerId);
+      setLinks(data);
+    } catch (e) {
+      console.error("LINE links load error:", e);
+    }
+  };
+
+  useEffect(() => {
+    if (open) {
+      reloadLinks();
+    }
+  }, [open, customerId]);
 
   const handleOpen = () => {
     setOpen(true);
@@ -48,7 +73,7 @@ export function LinkLineDialog({ customerId, customerName, lineUserId }: Props) 
       try {
         await linkLineUser(customerId, uid.trim());
         toast.success(`${customerName}さんのLINEを紐づけました`);
-        setOpen(false);
+        await reloadLinks();
         setManualId("");
       } catch {
         toast.error("紐づけに失敗しました");
@@ -64,6 +89,30 @@ export function LinkLineDialog({ customerId, customerName, lineUserId }: Props) 
         setOpen(false);
       } catch {
         toast.error("解除に失敗しました");
+      }
+    });
+  };
+
+  const handleUnlinkOne = (uid: string) => {
+    startTransition(async () => {
+      try {
+        await unlinkSpecificLineLink(customerId, uid);
+        toast.success("この LINE 紐付けを解除しました");
+        await reloadLinks();
+      } catch {
+        toast.error("解除に失敗しました");
+      }
+    });
+  };
+
+  const handleSetPrimary = (uid: string) => {
+    startTransition(async () => {
+      try {
+        await setPrimaryLinkForCustomer(customerId, uid);
+        toast.success("主紐付けを切替えました");
+        await reloadLinks();
+      } catch {
+        toast.error("切替えに失敗しました");
       }
     });
   };
@@ -100,22 +149,56 @@ export function LinkLineDialog({ customerId, customerName, lineUserId }: Props) 
           </DialogHeader>
 
           <div className="space-y-4">
-            {/* 現在の状態 */}
-            {lineUserId && (
-              <div className="bg-emerald-50 rounded-lg p-3 space-y-2">
-                <p className="text-xs font-bold text-emerald-700 flex items-center gap-1">
-                  <CheckCircle2 className="w-3 h-3" /> 紐づけ済み
+            {/* 現在の紐付け一覧（複数対応） */}
+            {links.length > 0 && (
+              <div className="space-y-2">
+                <p className="text-xs font-bold text-slate-600 flex items-center gap-1">
+                  <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                  紐付け済みの LINE ({links.length}件)
                 </p>
-                <p className="text-[10px] text-slate-400 font-mono break-all">{lineUserId}</p>
+                {links.map((l) => (
+                  <div key={l.line_user_id} className="bg-emerald-50 rounded-lg p-3 space-y-2">
+                    <div className="flex items-center gap-2 text-xs font-bold text-emerald-700">
+                      {l.is_primary && <Star className="w-3 h-3 fill-yellow-400 text-yellow-500" />}
+                      {l.is_primary ? "主紐付け" : "サブ紐付け"}
+                      {l.linked_via && <span className="text-[10px] text-slate-400 font-normal">({l.linked_via})</span>}
+                    </div>
+                    <p className="text-[10px] text-slate-400 font-mono break-all">{l.line_user_id}</p>
+                    <div className="flex gap-2">
+                      {!l.is_primary && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-7 text-[11px] text-amber-700 border-amber-200 hover:bg-amber-50"
+                          onClick={() => handleSetPrimary(l.line_user_id)}
+                          disabled={isPending}
+                        >
+                          <Star className="w-3 h-3 mr-1" />
+                          主にする
+                        </Button>
+                      )}
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-7 text-[11px] text-red-600 border-red-200 hover:bg-red-50"
+                        onClick={() => handleUnlinkOne(l.line_user_id)}
+                        disabled={isPending}
+                      >
+                        <Unlink className="w-3 h-3 mr-1" />
+                        この LINE を解除
+                      </Button>
+                    </div>
+                  </div>
+                ))}
                 <Button
                   variant="outline"
                   size="sm"
-                  className="h-7 text-[11px] text-red-600 border-red-200 hover:bg-red-50"
+                  className="h-7 text-[11px] text-red-600 border-red-200 hover:bg-red-50 w-full"
                   onClick={handleUnlink}
                   disabled={isPending}
                 >
                   {isPending ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <Unlink className="w-3 h-3 mr-1" />}
-                  紐づけを解除する
+                  すべての紐付けを解除する
                 </Button>
               </div>
             )}

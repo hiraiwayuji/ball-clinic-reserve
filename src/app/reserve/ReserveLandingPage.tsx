@@ -2,16 +2,26 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Sparkles, CalendarDays, ClipboardList } from "lucide-react";
+import { useSearchParams, useRouter } from "next/navigation";
+import { Sparkles, CalendarDays, ClipboardList, Users } from "lucide-react";
 import LPHero from "@/components/reserve/LPHero";
 import LPFeatures from "@/components/reserve/LPFeatures";
 import { getPublicClinicSettings, type PublicClinicSettings } from "@/app/actions/publicSettings";
 import { CLINIC_CONFIG } from "@/lib/clinic-config";
 import { getThemeClasses } from "@/lib/lp-theme";
+import { consumeLineReserveToken, getFamilyForLineSession } from "@/app/actions/family-line";
+import type { LinkedCustomer } from "@/lib/line-links";
+
+const SELECTED_CUSTOMER_KEY = "ballClinic_selectedCustomerId";
+const FAMILY_LIST_KEY = "ballClinic_familyList";
 
 export default function ReserveLandingPage() {
   const [settings, setSettings] = useState<PublicClinicSettings | null>(null);
   const [loaded, setLoaded] = useState(false);
+  const [family, setFamily] = useState<LinkedCustomer[]>([]);
+  const [selectedCustomerId, setSelectedCustomerId] = useState<string>("");
+  const searchParams = useSearchParams();
+  const router = useRouter();
 
   useEffect(() => {
     let mounted = true;
@@ -25,6 +35,45 @@ export default function ReserveLandingPage() {
     };
   }, []);
 
+  // LINE 経由 (?lt=...) または既存セッションから家族リストを取得
+  useEffect(() => {
+    const lt = searchParams.get("lt");
+    let cancelled = false;
+    (async () => {
+      let list: LinkedCustomer[] = [];
+      if (lt) {
+        const result = await consumeLineReserveToken(lt);
+        if (result.ok) list = result.family;
+        // URL から ?lt を消す（ブラウザバックや共有時の安全対策）
+        router.replace("/reserve");
+      } else {
+        list = await getFamilyForLineSession();
+      }
+      if (cancelled) return;
+      setFamily(list);
+      if (list.length > 0) {
+        try {
+          localStorage.setItem(FAMILY_LIST_KEY, JSON.stringify(list));
+        } catch {}
+      }
+      const stored = (() => {
+        try { return localStorage.getItem(SELECTED_CUSTOMER_KEY) ?? ""; } catch { return ""; }
+      })();
+      if (list.length === 1) {
+        setSelectedCustomerId(list[0].customer_id);
+        try { localStorage.setItem(SELECTED_CUSTOMER_KEY, list[0].customer_id); } catch {}
+      } else if (stored && list.some((c) => c.customer_id === stored)) {
+        setSelectedCustomerId(stored);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [searchParams, router]);
+
+  function selectFamilyMember(customerId: string) {
+    setSelectedCustomerId(customerId);
+    try { localStorage.setItem(SELECTED_CUSTOMER_KEY, customerId); } catch {}
+  }
+
   const themeColor = settings?.theme_color ?? "blue";
   const theme = getThemeClasses(themeColor);
 
@@ -36,6 +85,8 @@ export default function ReserveLandingPage() {
     );
   }
 
+  const selectedMember = family.find((c) => c.customer_id === selectedCustomerId) ?? null;
+
   return (
     <div className="min-h-screen bg-slate-900 text-white" data-dark-page>
       <LPHero settings={settings} fallbackName={CLINIC_CONFIG.name} />
@@ -45,6 +96,58 @@ export default function ReserveLandingPage() {
         problems={settings?.lp_target_problems ?? null}
         themeColor={themeColor}
       />
+
+      {/* LINE 経由：家族選択（複数患者紐付き時のみ） */}
+      {family.length > 1 && (
+        <div className="max-w-3xl mx-auto px-5 pt-8">
+          <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-2xl p-5 space-y-3">
+            <div className="flex items-center gap-2 text-emerald-300">
+              <Users className="w-4 h-4" />
+              <p className="text-xs font-bold uppercase tracking-widest">予約する患者さんを選んでください</p>
+            </div>
+            <div className="grid gap-2">
+              {family.map((c) => {
+                const isSelected = c.customer_id === selectedCustomerId;
+                const label = c.display_label ?? c.display_name ?? c.name;
+                return (
+                  <button
+                    key={c.customer_id}
+                    type="button"
+                    onClick={() => selectFamilyMember(c.customer_id)}
+                    className={`w-full text-left p-4 rounded-xl border transition ${
+                      isSelected
+                        ? "bg-emerald-500 border-emerald-400 text-white"
+                        : "bg-white/5 border-white/10 text-white/80 hover:bg-white/10"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-sm">
+                        {label}
+                        {c.is_primary && <span className="ml-2 text-[10px] opacity-70">主</span>}
+                      </span>
+                      {isSelected && <span className="text-xs">選択中</span>}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+            <p className="text-emerald-200/70 text-xs">
+              ※ 切替えると以降の予約はこの患者さんでお取りします。
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* LINE 経由：1人だけ紐付き時のウェルカム表示 */}
+      {family.length === 1 && selectedMember && (
+        <div className="max-w-3xl mx-auto px-5 pt-8">
+          <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-2xl p-4 text-center">
+            <p className="text-emerald-200 text-sm">
+              <span className="font-bold">{selectedMember.display_name ?? selectedMember.name}</span> さんでご予約に進みます
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* メイン導線セクション */}
       <div className="max-w-3xl mx-auto px-5 py-8 space-y-3">
