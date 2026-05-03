@@ -83,7 +83,7 @@ export default function ReminderQuickAdd() {
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="fixed bottom-6 right-6 z-40 w-14 h-14 rounded-full bg-amber-500 hover:bg-amber-600 text-white shadow-2xl shadow-amber-500/40 flex items-center justify-center transition-all hover:scale-110 active:scale-95"
+        className="fixed bottom-24 right-6 z-40 w-14 h-14 rounded-full bg-amber-500 hover:bg-amber-600 text-white shadow-2xl shadow-amber-500/40 flex items-center justify-center transition-all hover:scale-110 active:scale-95"
         aria-label="リマインダーを追加"
         title="リマインダーを追加"
       >
