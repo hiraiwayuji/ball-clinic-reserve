@@ -28,7 +28,9 @@ const SELECTED_CUSTOMER_KEY = "ballClinic_selectedCustomerId";
 const FAMILY_LIST_KEY = "ballClinic_familyList";
 
 const isExternalLogo = CLINIC_CONFIG.logoSmallUrl.startsWith("http");
-const LINE_URL = process.env.NEXT_PUBLIC_LINE_OFFICIAL_ACCOUNT_URL ?? "https://line.me/ti/p/%40shc8761q";
+// 「友だち追加」用 URL は /R/ti/p/ 形式。/ti/p/ だけだと既に友だちでないと開けず
+// 「LINEの友だちではないユーザー」エラーになる
+const LINE_URL = process.env.NEXT_PUBLIC_LINE_OFFICIAL_ACCOUNT_URL ?? "https://line.me/R/ti/p/%40shc8761q";
 
 function ReserveContent() {
   const searchParams = useSearchParams();
