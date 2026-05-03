@@ -6,6 +6,8 @@ import { Button } from "@/components/ui/button";
 import { LogOut } from "lucide-react";
 import AiChatPanel from "@/components/AiChatPanel";
 import AdminNavLinks from "@/components/admin/AdminNavLinks";
+import RemindersWatcher from "@/components/admin/RemindersWatcher";
+import ReminderQuickAdd from "@/components/admin/ReminderQuickAdd";
 import { isFamilyGift, isDemo, APP_TITLE, APP_SUBTITLE } from "@/lib/app-mode";
 import { CLINIC_CONFIG } from "@/lib/clinic-config";
 const hasCustomLogo = CLINIC_CONFIG.logoSmallUrl !== "/images/logo-white.png";
@@ -75,6 +77,14 @@ export default async function AdminLayout({
       
       {/* 全管理画面にAIチャットを配置（CLINICモードのみ） */}
       {!isFamilyGift && <AiChatPanel />}
+
+      {/* アドホック・リマインダー（緊急クエスト）— ポップアップ + 音 + クイック追加ボタン */}
+      {!isFamilyGift && (
+        <>
+          <RemindersWatcher />
+          <ReminderQuickAdd />
+        </>
+      )}
     </div>
   );
 }
