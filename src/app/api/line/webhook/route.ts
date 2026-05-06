@@ -4,6 +4,7 @@ import * as line from "@line/bot-sdk";
 import { randomBytes } from "crypto";
 import { PUBLIC_CLINIC_ID } from "@/lib/default-clinic-id";
 import { linkLineToCustomer } from "@/lib/line-links";
+import { getLineAccessToken } from "@/lib/admin-notify";
 
 function generateReserveToken(): string {
   return randomBytes(16).toString("hex");
@@ -15,9 +16,8 @@ function getReserveBaseUrl(): string {
   return "http://localhost:3000";
 }
 
+// 署名検証は LINE_CHANNEL_SECRET 必須（webhook 受信側）
 const channelSecret = process.env.LINE_CHANNEL_SECRET || "";
-const channelAccessToken = process.env.LINE_CHANNEL_ACCESS_TOKEN || "";
-const client = new line.messagingApi.MessagingApiClient({ channelAccessToken });
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
 // webhookはサーバーサイドのみで動くため、必ずservice_roleキーを使用してRLSをバイパス
@@ -63,17 +63,21 @@ async function replyMessage(replyToken: string, messages: any[], lineUserId: str
   // PII を残さないため、raw_body には返信本文ではなく診断情報のみを保存する
   const messageTypes = messages.map((m) => m?.type ?? "unknown").join(",");
 
-  if (!channelAccessToken) {
-    console.warn("Missing LINE_CHANNEL_ACCESS_TOKEN for reply");
+  // 動的トークン取得（LINE_CHANNEL_ID/SECRET から client credentials grant）。
+  // 古い静的 LINE_CHANNEL_ACCESS_TOKEN が失効しても動的取得で復旧できるように。
+  const token = await getLineAccessToken();
+  if (!token) {
+    console.warn("Failed to obtain LINE access token for reply");
     await saveDebugLog(
       lineUserId,
       "reply_error",
-      "LINE_CHANNEL_ACCESS_TOKEN が未設定です",
+      "LINE access token を取得できませんでした (env LINE_CHANNEL_ID/SECRET または LINE_CHANNEL_ACCESS_TOKEN を確認)",
       JSON.stringify({ status: "no_token", lineUserId, messageTypes })
     );
     return;
   }
   try {
+    const client = new line.messagingApi.MessagingApiClient({ channelAccessToken: token });
     await client.replyMessage({ replyToken, messages });
   } catch (error: any) {
     // @line/bot-sdk v10 の HTTPFetchError: status / statusText / headers / body
