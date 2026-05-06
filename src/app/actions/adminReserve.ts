@@ -6,6 +6,7 @@ import { revalidatePath } from "next/cache";
 import { checkAdminAuth } from "./auth";
 import { writeAudit, notifyOwnerOfStaffAction } from "@/lib/audit";
 import { awardPoints } from "@/lib/gamification";
+import { getLineAccessToken } from "@/lib/admin-notify";
 
 async function getSupabase() {
   return await createClient();
@@ -308,8 +309,11 @@ export async function sendLineConfirmation(appointmentId: string) {
       return { success: false, error: "この患者のLINE IDが未登録です。患者がLINE公式アカウントにメッセージを送ると登録されます。" };
     }
 
-    const token = process.env.LINE_CHANNEL_ACCESS_TOKEN;
-    if (!token) return { success: false, error: "LINE_CHANNEL_ACCESS_TOKEN が未設定です" };
+    // 動的トークン取得（LINE_CHANNEL_ID/SECRET 経由が優先、static token はフォールバック）
+    const token = await getLineAccessToken();
+    if (!token) {
+      return { success: false, error: "LINE トークンが取得できません。env LINE_CHANNEL_ID/SECRET または LINE_CHANNEL_ACCESS_TOKEN を確認してください。" };
+    }
 
     const startTime = new Date(apt.start_time);
     const dateStr = startTime.toLocaleDateString("ja-JP", {
@@ -331,9 +335,17 @@ export async function sendLineConfirmation(appointmentId: string) {
     });
 
     if (!res.ok) {
-      const errBody = await res.json();
-      console.error("[LINE送信失敗]", errBody);
-      return { success: false, error: "LINE送信に失敗しました。患者が友だち追加しているか確認してください。" };
+      const errBody = await res.json().catch(() => ({}));
+      console.error(`[LINE送信失敗] status=${res.status}`, errBody);
+      // status code に応じた具体的なエラー（友だち追加してないと一律で返さない）
+      if (res.status === 401) {
+        return { success: false, error: "LINE 認証エラー。設定の LINE_CHANNEL_ID/SECRET が正しいか確認してください。" };
+      }
+      if (res.status === 403) {
+        return { success: false, error: "この患者は LINE 公式アカウントの友だち登録が解除されているか、まだ追加していません。患者に友だち追加を案内してください。" };
+      }
+      const detail = errBody?.message ? `（${errBody.message}）` : "";
+      return { success: false, error: `LINE 送信失敗 (HTTP ${res.status})${detail}` };
     }
 
     return { success: true };
