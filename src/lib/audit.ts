@@ -5,6 +5,7 @@
 // 失敗してもアプリ本処理は止めないこと（ベストエフォート）。
 
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
+import { getLineAccessToken } from "@/lib/admin-notify";
 
 export type AuditActorRole = "owner" | "admin" | "staff" | "unknown" | "system";
 
@@ -112,8 +113,9 @@ export async function notifyOwnerOfStaffAction(opts: {
   if (opts.actorRole === "owner") return;
 
   const targets = await listLineTargets(opts.clinicId);
-  const token = process.env.LINE_CHANNEL_ACCESS_TOKEN;
-  if (targets.length === 0 || !token) return;
+  if (targets.length === 0) return;
+  const token = await getLineAccessToken();
+  if (!token) return;
 
   const actorLabel = `${opts.actorRole.toUpperCase()}${opts.actorEmail ? ` (${opts.actorEmail})` : ""}`;
   const text = `🛡️【スタッフ操作通知】\n操作者: ${actorLabel}\n種別: ${opts.actionType}\n\n${opts.summary}`;

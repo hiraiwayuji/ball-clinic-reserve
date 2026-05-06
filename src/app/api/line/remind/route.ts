@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { getLineAccessToken } from "@/lib/admin-notify";
 
 const REMIND_SECRET = process.env.REMIND_SECRET || "";
-const channelAccessToken = process.env.LINE_CHANNEL_ACCESS_TOKEN || "";
 
 function getAdminSupabase() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
@@ -10,12 +10,12 @@ function getAdminSupabase() {
   return createClient(url, key);
 }
 
-async function pushLine(userId: string, text: string) {
+async function pushLine(userId: string, text: string, token: string) {
   await fetch("https://api.line.me/v2/bot/message/push", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${channelAccessToken}`,
+      Authorization: `Bearer ${token}`,
     },
     body: JSON.stringify({ to: userId, messages: [{ type: "text", text }] }),
   });
@@ -92,9 +92,15 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "No LINE user IDs configured" }, { status: 500 });
   }
 
+  // 動的トークン取得（旧静的 token に依存しない）
+  const token = await getLineAccessToken();
+  if (!token) {
+    return NextResponse.json({ error: "LINE トークンが取得できません" }, { status: 500 });
+  }
+
   if (!events || events.length === 0) {
     const text = `📅 ${label}（${dateStr.slice(5).replace("-","/")}）の予定はありません。`;
-    await Promise.all(targetIds.map(id => pushLine(id, text)));
+    await Promise.all(targetIds.map(id => pushLine(id, text, token)));
     return NextResponse.json({ status: "ok", events: 0 });
   }
 
@@ -105,7 +111,7 @@ export async function POST(req: NextRequest) {
   });
 
   const text = `📅 ${label}（${dateStr.slice(5).replace("-","/")}）の予定\n\n${lines.join("\n")}`;
-  await Promise.all(targetIds.map(id => pushLine(id, text)));
+  await Promise.all(targetIds.map(id => pushLine(id, text, token)));
 
   return NextResponse.json({ status: "ok", events: events.length, date: dateStr });
 }

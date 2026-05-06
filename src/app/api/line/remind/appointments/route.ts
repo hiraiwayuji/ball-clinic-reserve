@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { getLineAccessToken } from "@/lib/admin-notify";
 
 const REMIND_SECRET = process.env.REMIND_SECRET || "";
 
@@ -51,7 +52,11 @@ export async function POST(req: NextRequest) {
   const now = new Date();
   const jstNow = new Date(now.toLocaleString("en-US", { timeZone: "Asia/Tokyo" }));
 
-  const channelToken = settings.line_channel_access_token || process.env.LINE_CHANNEL_ACCESS_TOKEN;
+  // 優先順: clinic_settings.line_channel_access_token → 動的取得 (LINE_CHANNEL_ID/SECRET) → 静的 env
+  const channelToken =
+    settings.line_channel_access_token ||
+    (await getLineAccessToken()) ||
+    process.env.LINE_CHANNEL_ACCESS_TOKEN;
   if (!channelToken) {
     return NextResponse.json({ error: "LINE token not configured" }, { status: 500 });
   }

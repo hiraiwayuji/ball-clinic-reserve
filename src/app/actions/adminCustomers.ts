@@ -594,12 +594,14 @@ export async function sendDormantLinePush(
     await checkAdminAuth();
 
     const settings = await getClinicSettings();
+    const { getLineAccessToken } = await import("@/lib/admin-notify");
     const token =
       settings?.line_channel_access_token ||
+      (await getLineAccessToken()) ||
       process.env.LINE_CHANNEL_ACCESS_TOKEN;
 
     if (!token) {
-      return { success: false, error: "LINE_CHANNEL_ACCESS_TOKEN が未設定です" };
+      return { success: false, error: "LINE トークンが取得できません。env LINE_CHANNEL_ID/SECRET を確認してください。" };
     }
 
     const res = await fetch("https://api.line.me/v2/bot/message/push", {
