@@ -537,6 +537,134 @@ export async function getAppointmentsByDate(dateStr: string) {
   }
 }
 
+// 重複予約候補を検出するアクション
+// 今日以降（JST 00:00〜）の予約から、以下 2 種類の重複グループを返す。
+//   idDuplicates   : 同じ start_time + 同じ customer_id（確実な二重登録）
+//   nameDuplicates : 同じ start_time + 同じ customers.name で customer_id は異なる（手動登録由来の可能性）
+export type DuplicateAppointmentItem = {
+  id: string;
+  start_time: string;
+  status: string | null;
+  memo: string | null;
+  customer_id: string | null;
+  created_at: string | null;
+  customer: { id: string | null; name: string | null; phone: string | null } | null;
+};
+
+export type DuplicateAppointmentGroup = {
+  key: string;
+  startTime: string;
+  customerName: string | null;
+  items: DuplicateAppointmentItem[];
+};
+
+export async function findDuplicateAppointments(): Promise<{
+  success: boolean;
+  idDuplicates: DuplicateAppointmentGroup[];
+  nameDuplicates: DuplicateAppointmentGroup[];
+  error?: string;
+}> {
+  try {
+    const { clinicId } = await checkAdminAuth();
+    const supabase = getAdminSupabase();
+    if (!supabase) {
+      return { success: false, idDuplicates: [], nameDuplicates: [], error: "サーバー設定エラー" };
+    }
+
+    // JST 今日の 00:00 を ISO で算出
+    const now = new Date();
+    const jstNow = new Date(now.getTime() + 9 * 60 * 60 * 1000);
+    const yyyy = jstNow.getUTCFullYear();
+    const mm = String(jstNow.getUTCMonth() + 1).padStart(2, "0");
+    const dd = String(jstNow.getUTCDate()).padStart(2, "0");
+    const todayStartJst = `${yyyy}-${mm}-${dd}T00:00:00+09:00`;
+
+    const { data, error } = await supabase
+      .from("appointments")
+      .select(`
+        id, start_time, status, memo, customer_id, created_at,
+        customers(id, name, phone)
+      `)
+      .eq("clinic_id", clinicId)
+      .neq("status", "cancelled")
+      .gte("start_time", todayStartJst)
+      .order("start_time", { ascending: true });
+
+    if (error) {
+      console.error("findDuplicateAppointments select error:", error);
+      return { success: false, idDuplicates: [], nameDuplicates: [], error: "予約取得に失敗しました" };
+    }
+
+    const rows: DuplicateAppointmentItem[] = (data ?? []).map((r: any) => {
+      const c = Array.isArray(r.customers) ? r.customers[0] : r.customers;
+      return {
+        id: r.id,
+        start_time: r.start_time,
+        status: r.status ?? null,
+        memo: r.memo ?? null,
+        customer_id: r.customer_id ?? null,
+        created_at: r.created_at ?? null,
+        customer: c ? { id: c.id ?? null, name: c.name ?? null, phone: c.phone ?? null } : null,
+      };
+    });
+
+    // 1) customer_id + start_time でグループ化（確実な重複）
+    const idMap = new Map<string, DuplicateAppointmentItem[]>();
+    for (const row of rows) {
+      if (!row.customer_id) continue;
+      const k = `${row.start_time}|${row.customer_id}`;
+      const arr = idMap.get(k) ?? [];
+      arr.push(row);
+      idMap.set(k, arr);
+    }
+    const idDuplicates: DuplicateAppointmentGroup[] = [];
+    const idDupRowIds = new Set<string>();
+    for (const [key, items] of idMap) {
+      if (items.length >= 2) {
+        idDuplicates.push({
+          key,
+          startTime: items[0].start_time,
+          customerName: items[0].customer?.name ?? null,
+          items,
+        });
+        for (const it of items) idDupRowIds.add(it.id);
+      }
+    }
+    idDuplicates.sort((a, b) => a.startTime.localeCompare(b.startTime));
+
+    // 2) name + start_time でグループ化（customer_id 一致グループに含まれた行は除外）
+    const nameMap = new Map<string, DuplicateAppointmentItem[]>();
+    for (const row of rows) {
+      if (idDupRowIds.has(row.id)) continue;
+      const name = row.customer?.name?.trim();
+      if (!name) continue;
+      const k = `${row.start_time}|${name}`;
+      const arr = nameMap.get(k) ?? [];
+      arr.push(row);
+      nameMap.set(k, arr);
+    }
+    const nameDuplicates: DuplicateAppointmentGroup[] = [];
+    for (const [key, items] of nameMap) {
+      // 名前が同じでも customer_id が全て同一なら 1 系列なのでスキップ（既に id 側で拾われていない＝customer_id null の同名ケースのみ残る想定）
+      const distinctCustomerIds = new Set(items.map((i) => i.customer_id));
+      if (items.length >= 2 && distinctCustomerIds.size >= 2) {
+        nameDuplicates.push({
+          key,
+          startTime: items[0].start_time,
+          customerName: items[0].customer?.name ?? null,
+          items,
+        });
+      }
+    }
+    nameDuplicates.sort((a, b) => a.startTime.localeCompare(b.startTime));
+
+    return { success: true, idDuplicates, nameDuplicates };
+  } catch (err) {
+    console.error("findDuplicateAppointments error:", err);
+    return { success: false, idDuplicates: [], nameDuplicates: [], error: "予期せぬエラーが発生しました" };
+  }
+}
+
 // 予約の削除アクション
 // scope:
 //   "one"    - この予約 1 件のみ削除（既定）

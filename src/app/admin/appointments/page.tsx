@@ -10,14 +10,19 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
-  ChevronLeft, ChevronRight, Calendar, Settings, Loader2, Plus, User, CalendarDays, Search, LayoutList,
+  ChevronLeft, ChevronRight, Calendar, Settings, Loader2, Plus, User, CalendarDays, Search, LayoutList, AlertTriangle,
 } from "lucide-react";
 import Link from "next/link";
 import { EditAppointmentDialog } from "@/components/admin/EditAppointmentDialog";
 import { AddAppointmentDialog } from "@/components/admin/AddAppointmentDialog";
 import { PatientSearchPanel } from "@/components/admin/PatientSearchPanel";
+import { DuplicateAppointmentsDialog } from "@/components/admin/DuplicateAppointmentsDialog";
 import { ADMIN_TIME_SLOTS as TIME_SLOTS } from "@/lib/time-slots";
 import { getMyClinicId } from "@/app/actions/auth";
+import {
+  findDuplicateAppointments,
+  type DuplicateAppointmentGroup,
+} from "@/app/actions/adminReserve";
 
 export default function AdminWeeklyGridPage() {
   const [currentDate, setCurrentDate] = useState<Date | null>(null);
@@ -34,6 +39,9 @@ export default function AdminWeeklyGridPage() {
   const [isSearchPanelOpen, setIsSearchPanelOpen] = useState(false);
   const [clinicId, setClinicId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<"week" | "day">("week"); // PC表示モード
+  const [duplicateIdGroups, setDuplicateIdGroups] = useState<DuplicateAppointmentGroup[]>([]);
+  const [duplicateNameGroups, setDuplicateNameGroups] = useState<DuplicateAppointmentGroup[]>([]);
+  const [isDuplicateDialogOpen, setIsDuplicateDialogOpen] = useState(false);
 
   const weekStart = useMemo(() => {
     if (!currentDate) return startOfWeek(new Date(), { weekStartsOn: 1 });
@@ -88,6 +96,20 @@ export default function AdminWeeklyGridPage() {
     }
     fetchData();
   }, [weekStart, refreshKey, clinicId]);
+
+  // 重複候補のスキャン（今日以降の全予約）
+  useEffect(() => {
+    if (clinicId === null) return;
+    let cancelled = false;
+    findDuplicateAppointments().then((res) => {
+      if (cancelled) return;
+      if (res.success) {
+        setDuplicateIdGroups(res.idDuplicates);
+        setDuplicateNameGroups(res.nameDuplicates);
+      }
+    });
+    return () => { cancelled = true; };
+  }, [clinicId, refreshKey]);
 
   useEffect(() => {
     const supabase = createClient();
@@ -202,6 +224,33 @@ export default function AdminWeeklyGridPage() {
           </div>
         </div>
       </div>
+
+      {/* ====================================================
+          DUPLICATE WARNING BANNER
+      ==================================================== */}
+      {(duplicateIdGroups.length > 0 || duplicateNameGroups.length > 0) && (
+        <button
+          type="button"
+          onClick={() => setIsDuplicateDialogOpen(true)}
+          className="mb-3 flex w-full items-center gap-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2.5 text-left text-sm shadow-sm transition hover:bg-amber-100"
+        >
+          <AlertTriangle className="h-5 w-5 shrink-0 text-amber-600" />
+          <span className="flex-1">
+            <span className="font-semibold text-amber-900">
+              重複候補が {duplicateIdGroups.length + duplicateNameGroups.length} 件あります
+            </span>
+            <span className="ml-2 text-xs text-amber-800">
+              （確実 {duplicateIdGroups.length} ／ 要確認 {duplicateNameGroups.length}）
+            </span>
+            <span className="ml-2 text-xs text-amber-700">
+              同じ日時に同じ患者の予約が二重に入っています。整理しましょうか？
+            </span>
+          </span>
+          <span className="rounded-md bg-amber-600 px-2.5 py-1 text-xs font-semibold text-white">
+            確認する
+          </span>
+        </button>
+      )}
 
       {/* ====================================================
           MOBILE VIEW (< md)
@@ -838,6 +887,15 @@ export default function AdminWeeklyGridPage() {
         open={isSearchPanelOpen}
         onOpenChange={setIsSearchPanelOpen}
         onRefresh={() => setRefreshKey(k => k + 1)}
+      />
+
+      {/* Duplicate appointments dialog */}
+      <DuplicateAppointmentsDialog
+        open={isDuplicateDialogOpen}
+        onOpenChange={setIsDuplicateDialogOpen}
+        idDuplicates={duplicateIdGroups}
+        nameDuplicates={duplicateNameGroups}
+        onDeleted={() => setRefreshKey(k => k + 1)}
       />
     </div>
   );
