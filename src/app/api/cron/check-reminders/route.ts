@@ -17,7 +17,7 @@ type CalendarEventRow = {
   member_name: string | null;
   is_recurring: boolean | null;
   recurrence_rule: string | null;
-  reminder_minutes_before: number | null;
+  reminder_minutes_before: number[] | null;
 };
 
 function toJSTDateStr(date: Date): string {
@@ -40,23 +40,20 @@ function formatTimeJST(iso: string): string {
   return fmt.format(new Date(iso));
 }
 
-const REMINDER_LABEL: Record<number, string> = {
-  5: "5分後",
-  10: "10分後",
-  30: "30分後",
-  60: "1時間後",
-  1440: "明日",
-};
+function reminderLabel(minutes: number): string {
+  if (minutes >= 1440 && minutes % 1440 === 0) return `${minutes / 1440}日後`;
+  if (minutes >= 60 && minutes % 60 === 0) return `${minutes / 60}時間後`;
+  return `${minutes}分後`;
+}
 
 function buildPayload(event: CalendarEventRow, minutesBefore: number) {
   const time = event.is_all_day ? "終日" : `${formatTimeJST(event.start_time)}〜`;
   const owner = event.member_name || "家族";
-  const label = REMINDER_LABEL[minutesBefore] || `${minutesBefore}分後`;
   return {
-    title: `⏰ ${label} - ${event.title}`,
+    title: `⏰ ${reminderLabel(minutesBefore)} - ${event.title}`,
     body: `${owner} / ${time}`,
     url: `/calendar/${event.calendar_id}`,
-    tag: `reminder-${event.id}`,
+    tag: `reminder-${event.id}-${minutesBefore}`,
   };
 }
 
@@ -78,7 +75,6 @@ function* expandOccurrences(event: CalendarEventRow, from: Date, to: Date): Gene
     ? base.replace("WEEKLY:", "").split(",").map(Number).filter((n) => !isNaN(n))
     : [];
 
-  // cursor を from から to まで日次で走査
   const cursor = new Date(from.getFullYear(), from.getMonth(), from.getDate());
   const limit = new Date(to.getFullYear(), to.getMonth(), to.getDate() + 1);
   while (cursor < limit) {
@@ -91,7 +87,11 @@ function* expandOccurrences(event: CalendarEventRow, from: Date, to: Date): Gene
       matches = cursor.getDate() === start.getDate();
     }
     const dateKey = `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, "0")}-${String(cursor.getDate()).padStart(2, "0")}`;
-    if (matches && !exdates.includes(dateKey) && cursor >= new Date(start.getFullYear(), start.getMonth(), start.getDate())) {
+    if (
+      matches &&
+      !exdates.includes(dateKey) &&
+      cursor >= new Date(start.getFullYear(), start.getMonth(), start.getDate())
+    ) {
       const occ = new Date(cursor.getFullYear(), cursor.getMonth(), cursor.getDate(), start.getHours(), start.getMinutes());
       yield occ;
     }
@@ -130,12 +130,14 @@ export async function GET(req: NextRequest) {
   const due: Due[] = [];
 
   for (const ev of events) {
-    const minutes = ev.reminder_minutes_before;
-    if (minutes === null || minutes === undefined) continue;
+    const minutesList = ev.reminder_minutes_before;
+    if (!minutesList || minutesList.length === 0) continue;
     for (const occ of expandOccurrences(ev, expandFrom, expandTo)) {
-      const fireAt = new Date(occ.getTime() - minutes * 60 * 1000);
-      if (fireAt < windowStart || fireAt > windowEnd) continue;
-      due.push({ event: ev, occurrenceDate: toJSTDateStr(occ), minutes });
+      for (const minutes of minutesList) {
+        const fireAt = new Date(occ.getTime() - minutes * 60 * 1000);
+        if (fireAt < windowStart || fireAt > windowEnd) continue;
+        due.push({ event: ev, occurrenceDate: toJSTDateStr(occ), minutes });
+      }
     }
   }
 
@@ -145,13 +147,15 @@ export async function GET(req: NextRequest) {
 
   const { data: alreadySent } = await supabase
     .from("event_reminder_sent")
-    .select("event_id, occurrence_date")
+    .select("event_id, occurrence_date, minutes_before")
     .in("event_id", due.map((d) => d.event.id));
-  const sentSet = new Set((alreadySent || []).map((r) => `${r.event_id}|${r.occurrence_date}`));
+  const sentSet = new Set(
+    (alreadySent || []).map((r) => `${r.event_id}|${r.occurrence_date}|${r.minutes_before}`),
+  );
 
   let sent = 0;
   for (const item of due) {
-    const k = `${item.event.id}|${item.occurrenceDate}`;
+    const k = `${item.event.id}|${item.occurrenceDate}|${item.minutes}`;
     if (sentSet.has(k)) continue;
     const result = await sendPushToCalendar(
       item.event.calendar_id,
@@ -160,7 +164,11 @@ export async function GET(req: NextRequest) {
     );
     const { error: insErr } = await supabase
       .from("event_reminder_sent")
-      .insert({ event_id: item.event.id, occurrence_date: item.occurrenceDate });
+      .insert({
+        event_id: item.event.id,
+        occurrence_date: item.occurrenceDate,
+        minutes_before: item.minutes,
+      });
     if (insErr && !insErr.message.includes("duplicate")) {
       console.error("[cron] event_reminder_sent insert error:", insErr.message);
     }
