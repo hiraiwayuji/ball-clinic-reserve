@@ -65,17 +65,26 @@ interface Form {
   isRecurring: boolean;
   recurrenceFreq: "daily" | "weekly" | "monthly";
   recurrenceDays: number[];
-  reminderMinutesBefore: number | null;
+  reminderMinutesList: number[];
 }
 
-const REMINDER_OPTIONS: { value: number | null; label: string }[] = [
-  { value: null, label: "なし" },
+const REMINDER_OPTIONS: { value: number; label: string }[] = [
   { value: 5,    label: "5分前" },
   { value: 10,   label: "10分前" },
+  { value: 15,   label: "15分前" },
   { value: 30,   label: "30分前" },
   { value: 60,   label: "1時間前" },
+  { value: 120,  label: "2時間前" },
   { value: 1440, label: "1日前" },
 ];
+
+function reminderLabel(minutes: number): string {
+  const found = REMINDER_OPTIONS.find((o) => o.value === minutes);
+  if (found) return found.label;
+  if (minutes >= 1440) return `${Math.round(minutes / 1440)}日前`;
+  if (minutes >= 60) return `${Math.round(minutes / 60)}時間前`;
+  return `${minutes}分前`;
+}
 
 function getWeekDays(dateStr: string): string[] {
   const [sy, sm, sd] = dateStr.split("-").map(Number);
@@ -179,7 +188,7 @@ const blankForm = (date = toLocalDateStr(new Date()), defaultMember = "家族"):
   startTime: "09:00", endTime: "10:00", endDate: date, isAllDay: false, isMultiDay: false, memberName: defaultMember,
   location: "", isShared: true, items: [],
   isRecurring: false, recurrenceFreq: "weekly", recurrenceDays: [],
-  reminderMinutesBefore: 10,
+  reminderMinutesList: [10],
 });
 
 export default function FamilyCalendarPage() {
@@ -392,7 +401,7 @@ export default function FamilyCalendarPage() {
       isRecurring: false,
       recurrenceFreq: "weekly",
       recurrenceDays: [],
-      reminderMinutesBefore: ev.reminder_minutes_before ?? null,
+      reminderMinutesList: ev.reminder_minutes_before ?? [],
     });
     setModal({ mode: "create" });
   }
@@ -463,7 +472,7 @@ export default function FamilyCalendarPage() {
       isRecurring: false,
       recurrenceFreq: "weekly",
       recurrenceDays: [],
-      reminderMinutesBefore: baseEvent.reminder_minutes_before ?? null,
+      reminderMinutesList: baseEvent.reminder_minutes_before ?? [],
     });
     setRecurringDayEdit({ baseEvent, dateStr });
     setRecurringPicker(null);
@@ -486,7 +495,7 @@ export default function FamilyCalendarPage() {
       isRecurring: e.is_recurring ?? false,
       recurrenceFreq: parseRecurrenceFreq(e.recurrence_rule),
       recurrenceDays: parseRecurrenceDays(e.recurrence_rule),
-      reminderMinutesBefore: e.reminder_minutes_before ?? null,
+      reminderMinutesList: e.reminder_minutes_before ?? [],
     });
     setSingleDayEdit(null);
     setModal({ mode: "edit", event: e });
@@ -502,7 +511,7 @@ export default function FamilyCalendarPage() {
       isAllDay: e.is_all_day, isMultiDay: false, memberName: e.member_name ?? "家族",
       location: e.location ?? "", isShared: e.is_shared ?? true, items: e.items ? [...e.items] : [],
       isRecurring: false, recurrenceFreq: "weekly", recurrenceDays: [],
-      reminderMinutesBefore: e.reminder_minutes_before ?? null,
+      reminderMinutesList: e.reminder_minutes_before ?? [],
     });
     setSingleDayEdit({ originalEvent: e, fromDate });
     setModal({ mode: "edit", event: e });
@@ -530,7 +539,7 @@ export default function FamilyCalendarPage() {
       is_recurring: form.isRecurring,
       recurrence_rule: form.isRecurring ? buildRecurrenceRule(form.recurrenceFreq, form.recurrenceDays) : null,
       is_shared: form.isShared,
-      reminder_minutes_before: form.reminderMinutesBefore,
+      reminder_minutes_before: form.reminderMinutesList.length > 0 ? form.reminderMinutesList : null,
     };
 
     let res: { success: boolean; error?: string };
@@ -1868,25 +1877,63 @@ export default function FamilyCalendarPage() {
                     <div className="flex items-center gap-2 mb-2">
                       <Bell className="w-4 h-4 text-amber-400" />
                       <span className="text-sm font-bold text-slate-200">リマインド</span>
+                      <span className="text-[10px] text-slate-500">複数指定OK</span>
                     </div>
-                    <div className="flex flex-wrap gap-1.5">
-                      {REMINDER_OPTIONS.map((opt) => {
-                        const sel = form.reminderMinutesBefore === opt.value;
-                        return (
-                          <button
-                            key={String(opt.value)}
-                            type="button"
-                            onClick={() => setForm({ ...form, reminderMinutesBefore: opt.value })}
-                            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${
-                              sel ? "bg-amber-500 text-white" : "bg-slate-700 text-slate-300 hover:bg-slate-600"
-                            }`}
-                          >
-                            {opt.label}
-                          </button>
-                        );
-                      })}
-                    </div>
-                    {form.isAllDay && form.reminderMinutesBefore !== null && (
+
+                    {form.reminderMinutesList.length === 0 ? (
+                      <p className="text-xs text-slate-500 mb-2">通知なし</p>
+                    ) : (
+                      <div className="space-y-1.5 mb-2">
+                        {form.reminderMinutesList.map((minutes, idx) => (
+                          <div key={idx} className="flex items-center gap-2">
+                            <select
+                              value={String(minutes)}
+                              onChange={(e) => {
+                                const next = [...form.reminderMinutesList];
+                                next[idx] = Number(e.target.value);
+                                setForm({ ...form, reminderMinutesList: next });
+                              }}
+                              className="flex-1 bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-amber-500"
+                            >
+                              {REMINDER_OPTIONS.map((opt) => (
+                                <option key={opt.value} value={opt.value}>{opt.label}</option>
+                              ))}
+                            </select>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setForm({
+                                  ...form,
+                                  reminderMinutesList: form.reminderMinutesList.filter((_, i) => i !== idx),
+                                });
+                              }}
+                              className="w-8 h-8 rounded-lg bg-red-900/30 hover:bg-red-900/50 flex items-center justify-center text-red-400 transition shrink-0"
+                              aria-label="このリマインドを削除"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {form.reminderMinutesList.length < 5 && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          // 既存と被らないデフォルト値を選ぶ (なければ 10)
+                          const used = new Set(form.reminderMinutesList);
+                          const next = REMINDER_OPTIONS.find((o) => !used.has(o.value))?.value ?? 10;
+                          setForm({ ...form, reminderMinutesList: [...form.reminderMinutesList, next] });
+                        }}
+                        className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-dashed border-amber-700/50 text-amber-300 hover:bg-amber-900/20 hover:border-amber-500 transition text-xs font-bold"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        リマインドを追加
+                      </button>
+                    )}
+
+                    {form.isAllDay && form.reminderMinutesList.length > 0 && (
                       <p className="text-[10px] text-slate-500 mt-2">※ 終日予定は当日 0:00 を基準に通知します</p>
                     )}
                   </div>

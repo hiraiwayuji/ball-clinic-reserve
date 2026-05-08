@@ -46,7 +46,7 @@ export type CalendarEvent = {
   is_recurring: boolean;
   recurrence_rule?: string | null;
   is_shared: boolean;
-  reminder_minutes_before?: number | null;
+  reminder_minutes_before?: number[] | null;
   created_at: string;
 };
 
