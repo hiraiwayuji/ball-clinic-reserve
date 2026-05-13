@@ -24,8 +24,8 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { useConfirm } from "@/components/ui/confirm-dialog";
 import { toast } from "sonner";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -118,7 +118,6 @@ function AppointmentCard({
   const [justDone, setJustDone] = useState(false);
   const [showSecretaryTip, setShowSecretaryTip] = useState(false);
   const [prediction, setPrediction] = useState<SalesPrediction | null>(null);
-  const confirm = useConfirm();
   const step = getStep(apt.checkin_status);
   const next = nextStatus(apt.checkin_status);
   const nextStep = next !== null ? getStep(next) : null;
@@ -176,16 +175,9 @@ function AppointmentCard({
     });
   };
 
-  const handleNoShow = async () => {
+  const handleNoShow = () => {
     const patientName = apt.customers?.name ?? "この患者";
-    const ok = await confirm({
-      title: "来院なしにしますか？",
-      description: `${patientName}様を「来院なし」として受付一覧から外します。`,
-      confirmLabel: "外す",
-      cancelLabel: "キャンセル",
-      tone: "destructive",
-    });
-    if (!ok) return;
+    if (!confirm(`${patientName}様を「来院なし」として受付一覧から外しますか？`)) return;
 
     startTransition(async () => {
       const res = await markAppointmentNoShow(apt.id);
@@ -408,7 +400,6 @@ export default function CounterPage() {
   const [targetDate, setTargetDate] = useState<Date>(new Date());
   const [clinicId, setClinicId] = useState<string | null>(null);
   const [isClosingDay, startClosingDayTransition] = useTransition();
-  const confirm = useConfirm();
 
   const isViewingToday = isToday(targetDate);
 
@@ -485,16 +476,10 @@ export default function CounterPage() {
   const hasActiveAppointments = activeApts.length > 0;
   const canSuggestClosing = hasActiveAppointments && doneApts.length > 0;
 
-  const handleCloseDay = async () => {
-    if (!hasActiveAppointments) return;
+  const handleCloseDay = () => {
+    if (!canSuggestClosing) return;
     const targetIds = activeApts.map(a => a.id);
-    const ok = await confirm({
-      title: "本日の施術はすべて終了",
-      description: `残り${targetIds.length}名を会計完了にして、一括入力へ進みますか？`,
-      confirmLabel: "進む",
-      cancelLabel: "キャンセル",
-    });
-    if (!ok) return;
+    if (!confirm(`残り${targetIds.length}名を会計完了にして、一括入力へ進みますか？`)) return;
 
     startClosingDayTransition(async () => {
       const res = await completeAllActiveAppointments(targetIds);
