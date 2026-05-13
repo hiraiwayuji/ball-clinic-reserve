@@ -24,8 +24,8 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import { toast } from "sonner";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -118,6 +118,7 @@ function AppointmentCard({
   const [justDone, setJustDone] = useState(false);
   const [showSecretaryTip, setShowSecretaryTip] = useState(false);
   const [prediction, setPrediction] = useState<SalesPrediction | null>(null);
+  const confirm = useConfirm();
   const step = getStep(apt.checkin_status);
   const next = nextStatus(apt.checkin_status);
   const nextStep = next !== null ? getStep(next) : null;
@@ -175,9 +176,16 @@ function AppointmentCard({
     });
   };
 
-  const handleNoShow = () => {
+  const handleNoShow = async () => {
     const patientName = apt.customers?.name ?? "この患者";
-    if (!confirm(`${patientName}様を「来院なし」として受付一覧から外しますか？`)) return;
+    const ok = await confirm({
+      title: "来院なしにしますか？",
+      description: `${patientName}様を「来院なし」として受付一覧から外します。`,
+      confirmLabel: "外す",
+      cancelLabel: "キャンセル",
+      tone: "destructive",
+    });
+    if (!ok) return;
 
     startTransition(async () => {
       const res = await markAppointmentNoShow(apt.id);
@@ -280,7 +288,7 @@ function AppointmentCard({
               "flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-bold transition-all shadow-sm active:scale-95",
               nextStep.value === "arrived" ? "bg-blue-600 hover:bg-blue-700 text-white" :
               nextStep.value === "in_treatment" ? "bg-emerald-600 hover:bg-emerald-700 text-white" :
-              "bg-slate-700 hover:bg-slate-800 text-white",
+              "bg-slate-200 hover:bg-slate-300 text-slate-700",
               isPending ? "opacity-60 cursor-not-allowed" : "",
             ].join(" ")}
           >
@@ -400,6 +408,7 @@ export default function CounterPage() {
   const [targetDate, setTargetDate] = useState<Date>(new Date());
   const [clinicId, setClinicId] = useState<string | null>(null);
   const [isClosingDay, startClosingDayTransition] = useTransition();
+  const confirm = useConfirm();
 
   const isViewingToday = isToday(targetDate);
 
@@ -476,10 +485,16 @@ export default function CounterPage() {
   const hasActiveAppointments = activeApts.length > 0;
   const canSuggestClosing = hasActiveAppointments && doneApts.length > 0;
 
-  const handleCloseDay = () => {
-    if (!canSuggestClosing) return;
+  const handleCloseDay = async () => {
+    if (!hasActiveAppointments) return;
     const targetIds = activeApts.map(a => a.id);
-    if (!confirm(`残り${targetIds.length}名を会計完了にして、一括入力へ進みますか？`)) return;
+    const ok = await confirm({
+      title: "本日の施術はすべて終了",
+      description: `残り${targetIds.length}名を会計完了にして、一括入力へ進みますか？`,
+      confirmLabel: "進む",
+      cancelLabel: "キャンセル",
+    });
+    if (!ok) return;
 
     startClosingDayTransition(async () => {
       const res = await completeAllActiveAppointments(targetIds);

@@ -42,9 +42,9 @@ export default function TemplateDownloadButtons() {
         onClick={() =>
           downloadExcelTemplate(EXPENSE_COLS, EXPENSE_SAMPLE, "経費入力テンプレート.xlsx")
         }
-        className="border-slate-600 text-slate-300 hover:bg-slate-800 hover:text-white"
+        className="border-slate-300 text-slate-700 hover:bg-slate-50 hover:text-slate-900 bg-white"
       >
-        <Download className="w-4 h-4 mr-2 text-emerald-400" />
+        <Download className="w-4 h-4 mr-2 text-emerald-600" />
         経費テンプレート（推奨形式）
       </Button>
       <Button
@@ -52,9 +52,9 @@ export default function TemplateDownloadButtons() {
         onClick={() =>
           downloadExcelTemplate(INSURANCE_COLS, INSURANCE_SAMPLE, "保険入金テンプレート.xlsx")
         }
-        className="border-slate-600 text-slate-300 hover:bg-slate-800 hover:text-white"
+        className="border-slate-300 text-slate-700 hover:bg-slate-50 hover:text-slate-900 bg-white"
       >
-        <Download className="w-4 h-4 mr-2 text-blue-400" />
+        <Download className="w-4 h-4 mr-2 text-[#2563EB]" />
         保険入金テンプレート（推奨形式）
       </Button>
     </div>

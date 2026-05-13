@@ -287,7 +287,7 @@ export default function TasksPage() {
             </div>
           )}
           <div className="mt-4 flex justify-end">
-            <Button onClick={() => setSelectedReference(null)} className="bg-slate-900">
+            <Button onClick={() => setSelectedReference(null)} className="bg-[#2563EB] hover:bg-[#1d4ed8] text-white">
               閉じる
             </Button>
           </div>

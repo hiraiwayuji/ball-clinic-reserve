@@ -181,13 +181,13 @@ export default function CustomExportDialog({
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
-      <DialogContent className="max-w-md bg-slate-900 border-slate-700 text-white">
+      <DialogContent className="max-w-md bg-white border-slate-200">
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2 text-white">
-            <FileSpreadsheet className="w-5 h-5 text-emerald-400" />
+          <DialogTitle className="flex items-center gap-2 text-slate-900">
+            <FileSpreadsheet className="w-5 h-5 text-emerald-600" />
             エクスポート設定
           </DialogTitle>
-          <DialogDescription className="text-slate-400">
+          <DialogDescription className="text-slate-500">
             出力する列と形式を選択してください
           </DialogDescription>
         </DialogHeader>
@@ -195,7 +195,7 @@ export default function CustomExportDialog({
         <div className="space-y-5">
           {/* Preset buttons */}
           <div className="space-y-2">
-            <p className="text-xs text-slate-400 font-medium">プリセット</p>
+            <p className="text-xs text-slate-500 font-medium">プリセット</p>
             <div className="flex flex-wrap gap-2">
               {PRESETS.map((p) => (
                 <button
@@ -204,8 +204,8 @@ export default function CustomExportDialog({
                   className={cn(
                     "px-3 py-1.5 rounded-md text-xs font-medium border transition",
                     preset === p.id
-                      ? "bg-emerald-600 border-emerald-500 text-white"
-                      : "bg-slate-800 border-slate-600 text-slate-300 hover:bg-slate-700"
+                      ? "bg-emerald-600 border-emerald-600 text-white"
+                      : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"
                   )}
                 >
                   {p.label}
@@ -216,8 +216,8 @@ export default function CustomExportDialog({
 
           {/* Column checklist */}
           <div className="space-y-2">
-            <p className="text-xs text-slate-400 font-medium">出力列</p>
-            <div className="bg-slate-800 rounded-lg p-3 space-y-2">
+            <p className="text-xs text-slate-500 font-medium">出力列</p>
+            <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-2">
               {cols.map((col) => (
                 <label
                   key={col.key}
@@ -227,11 +227,11 @@ export default function CustomExportDialog({
                     type="checkbox"
                     checked={selectedKeys.has(col.key)}
                     onChange={() => toggleKey(col.key)}
-                    className="w-4 h-4 accent-emerald-500"
+                    className="w-4 h-4 accent-emerald-600"
                   />
                   <span className={cn(
                     "text-sm transition",
-                    selectedKeys.has(col.key) ? "text-slate-200" : "text-slate-500"
+                    selectedKeys.has(col.key) ? "text-slate-800" : "text-slate-400"
                   )}>
                     {col.label}
                   </span>
@@ -244,7 +244,7 @@ export default function CustomExportDialog({
           <Button
             onClick={handleExport}
             disabled={selectedKeys.size === 0}
-            className="w-full bg-emerald-600 hover:bg-emerald-500 text-white disabled:opacity-50"
+            className="w-full bg-emerald-600 hover:bg-emerald-700 text-white disabled:opacity-50"
           >
             <Download className="w-4 h-4 mr-2" />
             エクスポート（{selectedKeys.size}列）

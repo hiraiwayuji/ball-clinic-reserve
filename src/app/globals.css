@@ -87,38 +87,39 @@
 }
 
 :root {
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
+  /* 白基調・青アクセントの管理画面トークン（B-SCORE 風） */
+  --background: oklch(0.984 0.005 240);          /* #F7FAFC */
+  --foreground: oklch(0.27 0.03 257);            /* #1F2937 */
+  --card: oklch(1 0 0);                          /* #FFFFFF */
+  --card-foreground: oklch(0.27 0.03 257);
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
+  --popover-foreground: oklch(0.27 0.03 257);
+  --primary: oklch(0.55 0.21 257);               /* #2563EB */
+  --primary-foreground: oklch(1 0 0);
+  --secondary: oklch(0.97 0.01 247);             /* 薄いグレー */
+  --secondary-foreground: oklch(0.27 0.03 257);
+  --muted: oklch(0.97 0.01 247);
+  --muted-foreground: oklch(0.50 0.02 257);      /* #6B7280 */
+  --accent: oklch(0.96 0.04 235);                /* #E0F2FE */
+  --accent-foreground: oklch(0.45 0.20 257);     /* 濃い青 */
   --destructive: oklch(0.58 0.22 27);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
+  --border: oklch(0.92 0.01 257);                /* #E5E7EB */
+  --input: oklch(0.92 0.01 257);
+  --ring: oklch(0.65 0.15 235);                  /* #0EA5E9 */
   --chart-1: oklch(0.809 0.105 251.813);
   --chart-2: oklch(0.623 0.214 259.815);
   --chart-3: oklch(0.546 0.245 262.881);
   --chart-4: oklch(0.488 0.243 264.376);
   --chart-5: oklch(0.424 0.199 265.638);
   --radius: 0.625rem;
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+  --sidebar: oklch(1 0 0);                       /* #FFFFFF */
+  --sidebar-foreground: oklch(0.27 0.03 257);
+  --sidebar-primary: oklch(0.55 0.21 257);       /* #2563EB */
+  --sidebar-primary-foreground: oklch(1 0 0);
+  --sidebar-accent: oklch(0.96 0.04 235);        /* #E0F2FE */
+  --sidebar-accent-foreground: oklch(0.45 0.20 257);
+  --sidebar-border: oklch(0.92 0.01 257);
+  --sidebar-ring: oklch(0.65 0.15 235);
 }
 
 .dark {
@@ -165,7 +166,11 @@
   html {
     @apply font-sans;
   }
-  input, select, option {
+  /* 患者向け黒基調ページ（[data-dark-page] 配下）でのみ入力欄を黒スタイルに。
+     管理画面は白基調のままにする（白入力欄 + 黒文字）。 */
+  [data-dark-page] input,
+  [data-dark-page] select,
+  [data-dark-page] option {
     @apply bg-slate-900 text-white border-white/20;
   }
 }
