@@ -280,7 +280,7 @@ function AppointmentCard({
               "flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-bold transition-all shadow-sm active:scale-95",
               nextStep.value === "arrived" ? "bg-blue-600 hover:bg-blue-700 text-white" :
               nextStep.value === "in_treatment" ? "bg-emerald-600 hover:bg-emerald-700 text-white" :
-              "bg-slate-700 hover:bg-slate-800 text-white",
+              "bg-slate-200 hover:bg-slate-300 text-slate-700",
               isPending ? "opacity-60 cursor-not-allowed" : "",
             ].join(" ")}
           >

@@ -656,7 +656,7 @@ export default function MarketingDashboardPage() {
               <p className="text-xs text-slate-500 font-medium">
                 相手の先生にスマホで読み取ってもらうと、<br />即座にプレゼン資料が表示されます。
               </p>
-              <Button onClick={() => setShowQr(false)} className="w-full rounded-xl bg-slate-900">閉じる</Button>
+              <Button onClick={() => setShowQr(false)} className="w-full rounded-xl bg-[#2563EB] hover:bg-[#1d4ed8] text-white">閉じる</Button>
            </div>
         </div>
       )}

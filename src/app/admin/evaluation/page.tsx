@@ -148,12 +148,12 @@ function DetailPanel({ year, month, onClose }: { year: number; month: number; on
       <div className="fixed inset-0 bg-black/40" onClick={onClose} />
       <div className="relative ml-auto w-full max-w-2xl h-full bg-white shadow-2xl flex flex-col overflow-hidden">
         {/* Header */}
-        <div className="px-6 py-4 border-b flex items-center justify-between bg-slate-900 text-white shrink-0">
+        <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between bg-white shrink-0">
           <div>
-            <h2 className="font-bold text-lg">{year}年{month}月 数字の根拠・明細</h2>
-            <p className="text-slate-400 text-xs mt-0.5">確認・編集できます</p>
+            <h2 className="font-bold text-lg text-slate-900">{year}年{month}月 数字の根拠・明細</h2>
+            <p className="text-slate-500 text-xs mt-0.5">確認・編集できます</p>
           </div>
-          <button onClick={onClose} className="text-slate-400 hover:text-white transition-colors">
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-700 transition-colors">
             <X className="w-5 h-5" />
           </button>
         </div>
@@ -794,13 +794,13 @@ export default function EvaluationPage() {
         {/* --- Right --- */}
         <div className="space-y-6">
           <Card className="shadow-md border-slate-200 overflow-hidden">
-            <CardHeader className="bg-slate-900 text-white pb-6">
+            <CardHeader className="bg-sky-50 border-b border-sky-100 pb-6">
               <div className="flex justify-between items-center">
-                <CardTitle className="text-lg flex items-center gap-2">
-                  <Star className="w-5 h-5 text-amber-400 fill-amber-400" />
+                <CardTitle className="text-lg flex items-center gap-2 text-slate-900">
+                  <Star className="w-5 h-5 text-amber-500 fill-amber-400" />
                   Google 口コミ評価
                 </CardTitle>
-                <ArrowUpRight className="w-5 h-5 text-emerald-400" />
+                <ArrowUpRight className="w-5 h-5 text-emerald-600" />
               </div>
             </CardHeader>
             <CardContent className="pt-6">

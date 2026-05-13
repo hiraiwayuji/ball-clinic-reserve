@@ -9,7 +9,6 @@ import { Lock, Mail, Eye, EyeOff, Shield, ArrowRight, FlaskConical } from "lucid
 import Image from "next/image";
 import { isDemo, isFamilyGift, APP_TITLE } from "@/lib/app-mode";
 import { CLINIC_CONFIG } from "@/lib/clinic-config";
-const isExternalLogo = CLINIC_CONFIG.logoSmallUrl.startsWith("http");
 
 export default function AdminLoginPage() {
   const [error, setError] = useState<string | null>(null);
@@ -48,7 +47,6 @@ export default function AdminLoginPage() {
       return;
     }
 
-    // クッキーが確定してからナビゲート（スマホブラウザ対応）
     router.push("/admin");
     router.refresh();
   };
@@ -67,93 +65,70 @@ export default function AdminLoginPage() {
   };
 
   return (
-    <div className="min-h-screen relative flex items-center justify-center p-4 overflow-hidden">
-      {/* Animated gradient background */}
-      <div 
-        className="absolute inset-0 z-0"
-        style={{
-          background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 25%, #0f4c81 50%, #1e3a5f 75%, #0f172a 100%)',
-          backgroundSize: '400% 400%',
-          animation: 'gradientShift 15s ease infinite',
-        }}
-      />
-      
-      {/* Floating decorative orbs */}
-      <div className="absolute top-1/4 left-1/4 w-72 h-72 rounded-full opacity-10 blur-3xl z-0"
-        style={{ background: 'radial-gradient(circle, #3b82f6, transparent)', animation: 'float 8s ease-in-out infinite' }}
-      />
-      <div className="absolute bottom-1/4 right-1/4 w-96 h-96 rounded-full opacity-10 blur-3xl z-0"
-        style={{ background: 'radial-gradient(circle, #06b6d4, transparent)', animation: 'float 12s ease-in-out infinite reverse' }}
-      />
-      <div className="absolute top-1/2 right-1/3 w-48 h-48 rounded-full opacity-5 blur-2xl z-0"
-        style={{ background: 'radial-gradient(circle, #8b5cf6, transparent)', animation: 'float 10s ease-in-out infinite 2s' }}
-      />
-
-      {/* Grid pattern overlay */}
-      <div 
-        className="absolute inset-0 z-0 opacity-[0.03]"
-        style={{
-          backgroundImage: `linear-gradient(rgba(255,255,255,.1) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.1) 1px, transparent 1px)`,
-          backgroundSize: '60px 60px',
-        }}
-      />
-
-      {/* Login card */}
-      <div className="relative z-10 w-full max-w-md">
+    <div className="min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-[#F7FAFC] via-white to-[#E0F2FE]/40">
+      <div className="w-full max-w-md">
+        {/* ヘッダー: ロゴ + 院名 */}
         <div className="text-center mb-8">
           <div
-            className={`inline-flex items-center justify-center rounded-2xl mb-6 shadow-2xl overflow-hidden bg-white/10 backdrop-blur-sm ${CLINIC_CONFIG.hasCustomLogo && CLINIC_CONFIG.usesWordmarkLogo ? "px-4 py-3" : "w-20 h-20"}`}
-            style={{
-              boxShadow: '0 0 40px rgba(59, 130, 246, 0.3)',
-            }}
+            className={`inline-flex items-center justify-center rounded-2xl mb-6 bg-white border border-slate-200 shadow-sm overflow-hidden ${
+              CLINIC_CONFIG.hasCustomLogo && CLINIC_CONFIG.usesWordmarkLogo ? "px-4 py-3" : "w-20 h-20"
+            }`}
           >
-            <div className={`relative flex items-center justify-center ${CLINIC_CONFIG.hasCustomLogo && CLINIC_CONFIG.usesWordmarkLogo ? "w-40 h-12 bg-white rounded-lg px-2 py-1" : "w-14 h-14"}`}>
+            <div
+              className={`relative flex items-center justify-center ${
+                CLINIC_CONFIG.hasCustomLogo && CLINIC_CONFIG.usesWordmarkLogo ? "w-40 h-12" : "w-14 h-14"
+              }`}
+            >
               {CLINIC_CONFIG.hasCustomLogo ? (
-                <img src={CLINIC_CONFIG.logoSmallUrl} alt={CLINIC_CONFIG.nameShort} className="max-h-12 w-auto object-contain" />
+                <img
+                  src={CLINIC_CONFIG.logoSmallUrl}
+                  alt={CLINIC_CONFIG.nameShort}
+                  className="max-h-12 w-auto object-contain"
+                />
               ) : CLINIC_CONFIG.isDefaultClinic ? (
-                <Image src={CLINIC_CONFIG.logoSmallUrl} alt={CLINIC_CONFIG.nameShort} fill className="object-contain" />
+                <Image
+                  src={CLINIC_CONFIG.logoSmallUrl}
+                  alt={CLINIC_CONFIG.nameShort}
+                  fill
+                  className="object-contain"
+                />
               ) : (
-                <Shield className="w-10 h-10 text-blue-400" />
+                <Shield className="w-10 h-10 text-[#2563EB]" />
               )}
             </div>
           </div>
           {!CLINIC_CONFIG.usesWordmarkLogo && (
-            <h1 className="text-3xl font-black text-white tracking-tight">
+            <h1 className="text-2xl font-bold text-slate-900 tracking-tight">
               {isFamilyGift ? APP_TITLE : CLINIC_CONFIG.nameShort}
             </h1>
           )}
-          <p className="text-blue-300/70 text-sm mt-2 font-medium tracking-wide">
+          <p className="text-slate-500 text-sm mt-2">
             {isDemo ? "デモ環境 - 自由にお試しいただけます" : "予約管理システム"}
           </p>
           {isDemo && (
-            <span className="mt-2 inline-block text-xs font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 px-3 py-1 rounded-full">
+            <span className="mt-3 inline-block text-xs font-bold bg-amber-50 text-amber-700 border border-amber-200 px-3 py-1 rounded-full">
               DEMO MODE
             </span>
           )}
         </div>
 
-        {/* Glass card */}
-        <div 
-          className="rounded-2xl p-8 shadow-2xl border border-white/10"
-          style={{
-            background: 'rgba(255, 255, 255, 0.05)',
-            backdropFilter: 'blur(20px)',
-            WebkitBackdropFilter: 'blur(20px)',
-          }}
-        >
-          <div className="text-center mb-8">
-            <h2 className="text-xl font-bold text-white">管理者ログイン</h2>
-            <p className="text-slate-400 text-sm mt-1">アカウント情報を入力してください</p>
+        {/* ログインカード */}
+        <div className="rounded-2xl bg-white border border-slate-200 shadow-sm p-8">
+          <div className="text-center mb-6">
+            <h2 className="text-lg font-bold text-slate-900">管理者ログイン</h2>
+            <p className="text-slate-500 text-sm mt-1">アカウント情報を入力してください</p>
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-5">
-            {/* Email field */}
             <div className="space-y-2">
-              <label htmlFor="email" className="text-xs font-semibold text-slate-300 uppercase tracking-wider">
+              <label
+                htmlFor="email"
+                className="text-xs font-semibold text-slate-600 uppercase tracking-wider"
+              >
                 メールアドレス
               </label>
               <div className="relative group">
-                <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500 group-focus-within:text-blue-400 transition-colors" />
+                <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 group-focus-within:text-[#2563EB] transition-colors" />
                 <Input
                   id="email"
                   name="email"
@@ -164,18 +139,20 @@ export default function AdminLoginPage() {
                   autoCorrect="off"
                   autoComplete="email"
                   spellCheck={false}
-                  className="pl-10 h-12 bg-white/5 border-white/10 text-white placeholder:text-slate-500 focus:border-blue-500/50 focus:ring-blue-500/20 rounded-xl transition-all"
+                  className="pl-10 h-11 bg-white border-slate-200 text-slate-900 placeholder:text-slate-400 focus-visible:border-[#2563EB] focus-visible:ring-[#2563EB]/20 rounded-lg"
                 />
               </div>
             </div>
 
-            {/* Password field */}
             <div className="space-y-2">
-              <label htmlFor="password" className="text-xs font-semibold text-slate-300 uppercase tracking-wider">
+              <label
+                htmlFor="password"
+                className="text-xs font-semibold text-slate-600 uppercase tracking-wider"
+              >
                 パスワード
               </label>
               <div className="relative group">
-                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500 group-focus-within:text-blue-400 transition-colors" />
+                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 group-focus-within:text-[#2563EB] transition-colors" />
                 <Input
                   id="password"
                   name="password"
@@ -186,40 +163,34 @@ export default function AdminLoginPage() {
                   autoCorrect="off"
                   autoComplete="current-password"
                   spellCheck={false}
-                  className="pl-10 pr-10 h-12 bg-white/5 border-white/10 text-white placeholder:text-slate-500 focus:border-blue-500/50 focus:ring-blue-500/20 rounded-xl transition-all"
+                  className="pl-10 pr-10 h-11 bg-white border-slate-200 text-slate-900 placeholder:text-slate-400 focus-visible:border-[#2563EB] focus-visible:ring-[#2563EB]/20 rounded-lg"
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 transition-colors"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors"
+                  aria-label={showPassword ? "パスワードを隠す" : "パスワードを表示"}
                 >
                   {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                 </button>
               </div>
             </div>
-            
-            {/* Error message */}
+
             {error && (
-              <div className="flex items-center gap-2 bg-red-500/10 text-red-400 text-sm p-3 rounded-xl border border-red-500/20">
-                <div className="w-2 h-2 rounded-full bg-red-400 shrink-0 animate-pulse" />
+              <div className="flex items-center gap-2 bg-rose-50 text-rose-700 text-sm p-3 rounded-lg border border-rose-200">
+                <div className="w-2 h-2 rounded-full bg-rose-500 shrink-0" />
                 {error}
               </div>
             )}
 
-            {/* Submit button */}
-            <Button 
-              type="submit" 
-              className="w-full h-12 rounded-xl text-base font-bold shadow-lg transition-all duration-300 hover:shadow-blue-500/25 hover:scale-[1.02] active:scale-[0.98]"
-              style={{
-                background: isLoading 
-                  ? 'rgba(59, 130, 246, 0.5)' 
-                  : 'linear-gradient(135deg, #3b82f6 0%, #06b6d4 100%)',
-              }}
+            <Button
+              type="submit"
+              className="w-full h-11 rounded-lg text-base font-semibold bg-[#2563EB] hover:bg-[#1d4ed8] text-white transition-colors"
               disabled={isLoading}
             >
               {isLoading ? (
                 <span className="flex items-center gap-2">
-                  <span className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  <span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />
                   認証中...
                 </span>
               ) : (
@@ -231,57 +202,58 @@ export default function AdminLoginPage() {
             </Button>
           </form>
 
-          {/* デモログインボタン（DEMO モードのみ表示） */}
           {isDemo && (
-            <div className="mt-4 pt-4 border-t border-white/10">
+            <div className="mt-4 pt-4 border-t border-slate-200">
               <button
                 type="button"
                 onClick={handleDemoLogin}
                 disabled={isDemoLoading || isLoading}
-                className="w-full h-12 rounded-xl text-base font-bold transition-all duration-300 flex items-center justify-center gap-2 border-2 border-amber-400/40 text-amber-300 hover:bg-amber-400/10 disabled:opacity-50"
+                className="w-full h-11 rounded-lg text-base font-semibold transition-colors flex items-center justify-center gap-2 border border-amber-300 text-amber-700 hover:bg-amber-50 disabled:opacity-50"
               >
                 {isDemoLoading ? (
-                  <span className="w-5 h-5 border-2 border-amber-300/30 border-t-amber-300 rounded-full animate-spin" />
+                  <span className="w-4 h-4 border-2 border-amber-300/40 border-t-amber-600 rounded-full animate-spin" />
                 ) : (
-                  <FlaskConical className="w-5 h-5" />
+                  <FlaskConical className="w-4 h-4" />
                 )}
                 {isDemoLoading ? "ログイン中..." : "デモサイトを体験する"}
               </button>
-              <p className="text-center text-amber-400/50 text-xs mt-2">
+              <p className="text-center text-amber-600/70 text-xs mt-2">
                 テスト用アカウントで自動ログインします
               </p>
             </div>
           )}
 
-          {/* Footer hint */}
-          <div className="mt-8 pt-6 border-t border-white/5 text-center space-y-3">
+          <div className="mt-6 pt-5 border-t border-slate-200 text-center space-y-3">
             <p className="text-slate-500 text-xs">
               セッションはブラウザを閉じても保持されます
             </p>
             <button
               type="button"
-              onClick={() => { setShowReset(!showReset); setError(null); setResetSent(false); }}
-              className="text-blue-400/70 hover:text-blue-300 text-xs underline underline-offset-2 transition-colors"
+              onClick={() => {
+                setShowReset(!showReset);
+                setError(null);
+                setResetSent(false);
+              }}
+              className="text-[#2563EB] hover:text-[#1d4ed8] text-xs underline underline-offset-2 transition-colors"
             >
               パスワードをお忘れの方はこちら
             </button>
           </div>
 
-          {/* パスワードリセットフォーム */}
           {showReset && (
-            <div className="mt-6 pt-6 border-t border-white/10">
+            <div className="mt-5 pt-5 border-t border-slate-200">
               {resetSent ? (
-                <div className="text-center text-sm text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 rounded-xl p-4">
+                <div className="text-center text-sm text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg p-4">
                   ✅ リセット用メールを送信しました。<br />
                   メールのリンクをクリックして新しいパスワードを設定してください。
                 </div>
               ) : (
                 <form onSubmit={handlePasswordReset} className="space-y-3">
-                  <p className="text-slate-400 text-xs text-center">
+                  <p className="text-slate-500 text-xs text-center">
                     登録済みのメールアドレスを入力してください
                   </p>
                   <div className="relative">
-                    <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
+                    <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                     <Input
                       type="email"
                       value={resetEmail}
@@ -292,14 +264,13 @@ export default function AdminLoginPage() {
                       autoCorrect="off"
                       autoComplete="email"
                       spellCheck={false}
-                      className="pl-10 h-11 bg-white/5 border-white/10 text-white placeholder:text-slate-500 rounded-xl"
+                      className="pl-10 h-10 bg-white border-slate-200 text-slate-900 placeholder:text-slate-400 rounded-lg"
                     />
                   </div>
                   <button
                     type="submit"
                     disabled={isLoading}
-                    className="w-full h-11 rounded-xl text-sm font-semibold text-white transition-all"
-                    style={{ background: "linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)" }}
+                    className="w-full h-10 rounded-lg text-sm font-semibold text-white bg-[#0EA5E9] hover:bg-[#0284C7] transition-colors disabled:opacity-50"
                   >
                     {isLoading ? "送信中..." : "リセットメールを送信"}
                   </button>
@@ -309,24 +280,10 @@ export default function AdminLoginPage() {
           )}
         </div>
 
-        {/* Copyright */}
-        <p className="text-center text-slate-600 text-xs mt-8">
+        <p className="text-center text-slate-400 text-xs mt-6">
           © {new Date().getFullYear()} {CLINIC_CONFIG.nameShort} All rights reserved.
         </p>
       </div>
-
-      {/* CSS animations */}
-      <style jsx>{`
-        @keyframes gradientShift {
-          0% { background-position: 0% 50%; }
-          50% { background-position: 100% 50%; }
-          100% { background-position: 0% 50%; }
-        }
-        @keyframes float {
-          0%, 100% { transform: translate(0, 0); }
-          50% { transform: translate(30px, -30px); }
-        }
-      `}</style>
     </div>
   );
 }
