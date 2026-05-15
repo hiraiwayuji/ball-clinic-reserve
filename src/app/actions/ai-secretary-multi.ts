@@ -6,6 +6,7 @@
 // - Gemini API を共通基盤として使用
 
 import { checkAdminAuth, requireRole } from "@/app/actions/auth";
+import { getLatestSignalsForClinic } from "@/app/actions/external-signals";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 
@@ -36,6 +37,13 @@ async function callGemini(prompt: string, opts: GeminiOptions = {}): Promise<{ o
 
 // ───────── オーナー秘書: 経営異常検知 ─────────
 
+export type AlertCategory = "urgent" | "thisWeek" | "thisMonth" | "longTerm";
+
+export type OwnerAlert = {
+  category: AlertCategory;
+  message: string;
+};
+
 export type OwnerBriefing = {
   generatedAt: string;
   metrics: {
@@ -47,7 +55,8 @@ export type OwnerBriefing = {
     cancelRate: number;
   };
   message: string;
-  alerts: string[];
+  alerts: string[]; // 後方互換のため残す（全カテゴリのメッセージをフラットに収納）
+  alertsV2?: OwnerAlert[];
 };
 
 export async function generateOwnerBriefing(): Promise<{ success: boolean; briefing?: OwnerBriefing; error?: string }> {
@@ -115,20 +124,24 @@ export async function generateOwnerBriefing(): Promise<{ success: boolean; brief
   const cancelRate = last7DaysAppointments > 0 ? Math.round((last7DaysCancellations / last7DaysAppointments) * 100) : 0;
 
   // ── ローカル異常検知（Gemini が動かなくてもアラートは出る） ──
-  const alerts: string[] = [];
+  const alertsV2: OwnerAlert[] = [];
+  const pushAlert = (category: AlertCategory, message: string) => {
+    alertsV2.push({ category, message });
+  };
+
   if (last7DaysDeletedByStaff >= 3) {
-    alerts.push(`スタッフによる予約削除が ${last7DaysDeletedByStaff} 件あります。理由を確認してください。`);
+    pushAlert("urgent", `スタッフによる予約削除が ${last7DaysDeletedByStaff} 件あります。理由を確認してください。`);
   }
   if (cancelRate >= 30) {
-    alerts.push(`キャンセル率が ${cancelRate}% と高めです。リマインド運用を見直しましょう。`);
+    pushAlert("urgent", `キャンセル率が ${cancelRate}% と高めです。リマインド運用を見直しましょう。`);
   }
   const failedUnlocks = audits.filter((a: any) => a.action_type === "passcode.unlock_failed").length;
   if (failedUnlocks >= 3) {
-    alerts.push(`設定画面の解錠失敗が ${failedUnlocks} 回。第三者操作の可能性。`);
+    pushAlert("urgent", `設定画面の解錠失敗が ${failedUnlocks} 回。第三者操作の可能性。`);
   }
   const settingsRequests = audits.filter((a: any) => a.action_type === "settings.request").length;
   if (settingsRequests > 0) {
-    alerts.push(`スタッフからの設定変更申請が ${settingsRequests} 件、承認待ちです。`);
+    pushAlert("urgent", `スタッフからの設定変更申請が ${settingsRequests} 件、承認待ちです。`);
   }
 
   // ── 違和感検知（予約・顧客の整合性チェック） ──
@@ -150,7 +163,8 @@ export async function generateOwnerBriefing(): Promise<{ success: boolean; brief
   if (duplicates.length > 0) {
     const head = duplicates.slice(0, 3);
     const tail = duplicates.length > 3 ? `（他 ${duplicates.length - 3} 件）` : "";
-    alerts.push(
+    pushAlert(
+      "urgent",
       `同じ日に同名の予約が重複しています。確認してください: ${head
         .map((d) => `${d.date} ${d.name}様（${d.ids.length}件）`)
         .join(" / ")}${tail}`
@@ -175,7 +189,7 @@ export async function generateOwnerBriefing(): Promise<{ success: boolean; brief
       return `${masked}（${[...names].slice(0, 3).join("・")}）`;
     });
     const tail = phoneConflicts.length > 3 ? `（他 ${phoneConflicts.length - 3} 件）` : "";
-    alerts.push(`同じ電話番号で別名義の登録が ${phoneConflicts.length} 組あります: ${head.join(" / ")}${tail}（家族予約か入力ミスを確認）`);
+    pushAlert("urgent", `同じ電話番号で別名義の登録が ${phoneConflicts.length} 組あります: ${head.join(" / ")}${tail}（家族予約か入力ミスを確認）`);
   }
 
   // 3) 直近 14 日に同じ顧客の連続キャンセルが 3 回以上（離脱兆候）
@@ -198,14 +212,219 @@ export async function generateOwnerBriefing(): Promise<{ success: boolean; brief
     const heavyCancellers = [...byCustomer.values()].filter((v) => v.n >= 3);
     if (heavyCancellers.length > 0) {
       const head = heavyCancellers.slice(0, 3).map((v) => `${v.name}様（${v.n}回）`);
-      alerts.push(`直近2週間でキャンセルが続いている方がいます: ${head.join(" / ")}（連絡確認を）`);
+      pushAlert("urgent", `直近2週間でキャンセルが続いている方がいます: ${head.join(" / ")}（連絡確認を）`);
     }
   } catch {}
 
+  // ─────────────────────────────────────────
+  // 追加ルール（既存テーブル + Phase 2 スキーマで実装可能なもの）
+  // 失敗しても降格動作するよう個別に try-catch
+  // ─────────────────────────────────────────
+
+  // 4) 今週誕生日の患者
+  try {
+    const { data: birthCustomers } = await sb
+      .from("customers")
+      .select("id, name, birth_date, birth_month, line_user_id")
+      .eq("clinic_id", auth.clinicId);
+    const today = new Date();
+    const currentMonth = today.getMonth() + 1;
+    const currentDay = today.getDate();
+    const sevenDaysLater = new Date(today.getTime() + 7 * 24 * 60 * 60 * 1000);
+    const within7 = (m: number, d: number) => {
+      // 月跨ぎ対応：今日〜7日後の月日範囲に該当するか
+      for (let i = 0; i <= 7; i++) {
+        const t = new Date(today.getTime() + i * 24 * 60 * 60 * 1000);
+        if (t.getMonth() + 1 === m && t.getDate() === d) return true;
+      }
+      return false;
+    };
+    const upcoming: { name: string; mmdd: string; hasLine: boolean }[] = [];
+    for (const c of (birthCustomers ?? []) as any[]) {
+      let m: number | null = c.birth_month ?? null;
+      let d: number | null = null;
+      if (c.birth_date) {
+        const dt = new Date(c.birth_date);
+        m = dt.getMonth() + 1;
+        d = dt.getDate();
+      }
+      if (m == null || d == null) continue;
+      if (within7(m, d)) {
+        upcoming.push({
+          name: c.name,
+          mmdd: `${m}/${d}`,
+          hasLine: !!c.line_user_id,
+        });
+      }
+    }
+    if (upcoming.length > 0) {
+      const head = upcoming.slice(0, 4).map((u) => `${u.name}様(${u.mmdd}${u.hasLine ? "・LINE◯" : ""})`);
+      const tail = upcoming.length > 4 ? `（他 ${upcoming.length - 4} 名）` : "";
+      pushAlert("thisWeek", `今週お誕生日: ${head.join(" / ")}${tail}。LINE のお祝い・割引クーポン送付を検討`);
+    }
+    // 月内誕生日合計（今月のキャンペーン提案用）
+    const thisMonthTotal = (birthCustomers ?? []).filter((c: any) => {
+      if (c.birth_date) return new Date(c.birth_date).getMonth() + 1 === currentMonth;
+      return c.birth_month === currentMonth;
+    }).length;
+    if (thisMonthTotal >= 5 && upcoming.length === 0) {
+      pushAlert("thisMonth", `今月の誕生日患者は合計 ${thisMonthTotal} 名。誕生月キャンペーンの一斉配信を準備しましょう。`);
+    }
+    // sevenDaysLater は将来の判定で使う可能性あるが今は未使用
+    void sevenDaysLater;
+    void currentDay;
+  } catch {}
+
+  // 5) スタッフ誕生日（今週）
+  try {
+    const { data: staffList } = await sb
+      .from("reservation_staff")
+      .select("id, name, birth_date")
+      .eq("clinic_id", auth.clinicId)
+      .eq("is_active", true);
+    const upcoming: string[] = [];
+    for (const s of (staffList ?? []) as any[]) {
+      if (!s.birth_date) continue;
+      const dt = new Date(s.birth_date);
+      const m = dt.getMonth() + 1;
+      const d = dt.getDate();
+      for (let i = 0; i <= 7; i++) {
+        const t = new Date(Date.now() + i * 24 * 60 * 60 * 1000);
+        if (t.getMonth() + 1 === m && t.getDate() === d) {
+          upcoming.push(`${s.name}先生(${m}/${d})`);
+          break;
+        }
+      }
+    }
+    if (upcoming.length > 0) {
+      pushAlert("thisWeek", `スタッフの誕生日が近いです: ${upcoming.join(" / ")}。お祝いの準備を`);
+    }
+  } catch {}
+
+  // 6) 新患フォローアップ（来院 7-14 日経過 × 再来予約なし）
+  try {
+    const since14 = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000).toISOString();
+    const since7 = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();
+    const { data: firstVisits } = await sb
+      .from("appointments")
+      .select("id, customer_id, start_time, customers(name, line_user_id)")
+      .eq("clinic_id", auth.clinicId)
+      .eq("is_first_visit", true)
+      .neq("status", "cancelled")
+      .gte("start_time", since14)
+      .lt("start_time", since7);
+
+    const candidates: { id: string; name: string; date: string; hasLine: boolean }[] = [];
+    for (const r of (firstVisits ?? []) as any[]) {
+      if (!r.customer_id) continue;
+      // この顧客の未来予約があるか
+      const { data: future } = await sb
+        .from("appointments")
+        .select("id")
+        .eq("clinic_id", auth.clinicId)
+        .eq("customer_id", r.customer_id)
+        .neq("status", "cancelled")
+        .gt("start_time", now.toISOString())
+        .limit(1);
+      if ((future ?? []).length === 0) {
+        const cust = Array.isArray(r.customers) ? r.customers[0] : r.customers;
+        candidates.push({
+          id: r.id,
+          name: cust?.name ?? "(顧客名不明)",
+          date: r.start_time.slice(0, 10),
+          hasLine: !!cust?.line_user_id,
+        });
+      }
+    }
+    if (candidates.length > 0) {
+      const head = candidates.slice(0, 4).map((c) => `${c.name}様(${c.date}初診${c.hasLine ? "・LINE◯" : ""})`);
+      const tail = candidates.length > 4 ? `（他 ${candidates.length - 4} 名）` : "";
+      pushAlert("thisMonth", `初診後フォロー候補: ${head.join(" / ")}${tail}。LINE で「その後いかがですか？」声かけを`);
+    }
+  } catch {}
+
+  // 7) 長期未来院（60日以上、累計5回以上の優良顧客）
+  try {
+    const since60 = new Date(now.getTime() - 60 * 24 * 60 * 60 * 1000).toISOString();
+    const { data: longAppts } = await sb
+      .from("appointments")
+      .select("customer_id, start_time, customers(name, line_user_id)")
+      .eq("clinic_id", auth.clinicId)
+      .neq("status", "cancelled")
+      .order("start_time", { ascending: false })
+      .limit(2000);
+    const lastByCustomer = new Map<string, { name: string; last: string; count: number; hasLine: boolean }>();
+    for (const r of (longAppts ?? []) as any[]) {
+      if (!r.customer_id) continue;
+      const cust = Array.isArray(r.customers) ? r.customers[0] : r.customers;
+      const cur = lastByCustomer.get(r.customer_id) ?? {
+        name: cust?.name ?? "(顧客名不明)",
+        last: r.start_time,
+        count: 0,
+        hasLine: !!cust?.line_user_id,
+      };
+      cur.count++;
+      if (r.start_time > cur.last) cur.last = r.start_time;
+      lastByCustomer.set(r.customer_id, cur);
+    }
+    const lapsed = [...lastByCustomer.values()].filter((v) => v.count >= 5 && v.last < since60);
+    if (lapsed.length > 0) {
+      const head = lapsed.slice(0, 4).map((v) => `${v.name}様(${v.count}回・最終${v.last.slice(0, 10)}${v.hasLine ? "・LINE◯" : ""})`);
+      const tail = lapsed.length > 4 ? `（他 ${lapsed.length - 4} 名）` : "";
+      pushAlert("longTerm", `60日以上ご来院のない優良患者: ${head.join(" / ")}${tail}。リテンション施策を`);
+    }
+  } catch {}
+
+  // 8) スタッフ別予約偏り（過去 7 日）
+  try {
+    const { data: byStaff } = await sb
+      .from("appointments")
+      .select("staff_id, staff_name")
+      .eq("clinic_id", auth.clinicId)
+      .neq("status", "cancelled")
+      .gte("created_at", since)
+      .not("staff_id", "is", null);
+    const counts = new Map<string, { name: string; n: number }>();
+    for (const r of (byStaff ?? []) as any[]) {
+      if (!r.staff_id) continue;
+      const cur = counts.get(r.staff_id) ?? { name: r.staff_name ?? "(担当不明)", n: 0 };
+      cur.n++;
+      counts.set(r.staff_id, cur);
+    }
+    const vals = [...counts.values()];
+    if (vals.length >= 2) {
+      const avg = vals.reduce((s, v) => s + v.n, 0) / vals.length;
+      const max = vals.reduce((a, b) => (a.n > b.n ? a : b));
+      const min = vals.reduce((a, b) => (a.n < b.n ? a : b));
+      if (avg > 0 && max.n - min.n >= Math.max(3, avg * 0.6)) {
+        pushAlert(
+          "thisWeek",
+          `担当配分の偏り: ${max.name} ${max.n}件 ／ ${min.name} ${min.n}件（過去7日）。配分の見直しを`
+        );
+      }
+    }
+  } catch {}
+
+  // 9) 地域情報・時事ネタ（天気・インフル・花粉 など）
+  let externalSignalsText = "";
+  try {
+    const signals = await getLatestSignalsForClinic();
+    if (signals.length > 0) {
+      externalSignalsText = signals
+        .filter((s) => s.summary)
+        .map((s) => `- ${labelForSignalType(s.signal_type)}: ${s.summary}`)
+        .join("\n");
+    }
+  } catch {}
+
+  // ── 後方互換: フラット alerts を生成 ──
+  const alerts: string[] = alertsV2.map((a) => a.message);
+
   // ── Gemini で経営アドバイスを 1 文生成 ──
   const prompt = `あなたはぼーるくん（接骨院オーナー）専属の経営秘書 AI です。
-直近 7 日のデータを見て、150 字以内で「今週のひと言」を生成してください。
+直近 7 日のデータを見て、200 字以内で「今週のひと言」を生成してください。
 無駄な前置き禁止、語尾は「〜です」体、絵文字 1 つだけ使用可。
+${externalSignalsText ? "\n地域情報があれば、最後に1文「今日のひと言」として患者さんへの声かけ素材を添えること。" : ""}
 
 【データ】
 - 予約作成数: ${last7DaysAppointments}
@@ -214,6 +433,7 @@ export async function generateOwnerBriefing(): Promise<{ success: boolean; brief
 - スタッフによる予約削除: ${last7DaysDeletedByStaff}
 - 現金売上合計: ¥${last7DaysRevenue.toLocaleString()}
 - 検出されたアラート: ${alerts.length === 0 ? "なし" : alerts.join(" / ")}
+${externalSignalsText ? `\n【地域情報・時事ネタ】\n${externalSignalsText}` : ""}
 `;
 
   const ai = await callGemini(prompt, { temperature: 0.6, maxTokens: 200 });
@@ -233,8 +453,20 @@ export async function generateOwnerBriefing(): Promise<{ success: boolean; brief
       },
       message,
       alerts,
+      alertsV2,
     },
   };
+}
+
+function labelForSignalType(t: string): string {
+  switch (t) {
+    case "weather_today": return "今日の天気";
+    case "weather_forecast": return "天気予報";
+    case "influenza_weekly": return "インフル流行";
+    case "pollen": return "花粉";
+    case "heatstroke_alert": return "熱中症警戒";
+    default: return "メモ";
+  }
 }
 
 // ───────── スタッフ秘書: 個別モチベメッセージ ─────────
