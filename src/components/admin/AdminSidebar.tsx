@@ -30,7 +30,7 @@ export default function AdminSidebar({ role = "owner", variant = "desktop", onNa
       className={
         variant === "desktop"
           ? "hidden md:flex md:flex-col w-60 shrink-0 bg-[var(--sidebar)] border-r border-[var(--sidebar-border)] min-h-screen sticky top-0"
-          : "flex flex-col w-72 max-w-[85vw] bg-[var(--sidebar)] h-full pb-[env(safe-area-inset-bottom)]"
+          : "flex flex-col w-72 max-w-[85vw] bg-white dark:bg-slate-900 h-full pb-[env(safe-area-inset-bottom)]"
       }
     >
       {/* ロゴ・院名 */}
