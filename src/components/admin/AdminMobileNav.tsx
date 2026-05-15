@@ -57,7 +57,7 @@ export default function AdminMobileNav({ role = "owner" }: { role?: Role }) {
             aria-label="メニューを閉じる"
           />
           {/* Drawer 本体 */}
-          <div className="relative z-10 h-full shadow-xl animate-in slide-in-from-left duration-200">
+          <div className="relative z-10 h-full bg-white dark:bg-slate-900 shadow-xl animate-in slide-in-from-left duration-200">
             <button
               type="button"
               onClick={() => setOpen(false)}
