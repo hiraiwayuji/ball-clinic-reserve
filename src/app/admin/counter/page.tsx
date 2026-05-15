@@ -86,7 +86,7 @@ const CHECKIN_STEPS: {
     value: "done",
     label: "会計完了",
     shortLabel: "完了",
-    color: "text-slate-400",
+    color: "text-slate-500",
     bg: "bg-slate-50/50 dark:bg-slate-800/20",
     border: "border-slate-200 dark:border-slate-800",
     icon: <CheckCircle2 className="w-4 h-4" />,
@@ -204,7 +204,7 @@ function AppointmentCard({
         {/* 時間 */}
         <div className="shrink-0 text-center min-w-[52px]">
           <div className="text-xl font-black text-slate-900 dark:text-slate-100 leading-none">{time}</div>
-          <div className="text-xs text-slate-400 mt-0.5">〜{endTime}</div>
+          <div className="text-xs text-slate-500 mt-0.5">〜{endTime}</div>
         </div>
 
         {/* 患者情報 */}
@@ -477,7 +477,7 @@ export default function CounterPage() {
   const canSuggestClosing = hasActiveAppointments && doneApts.length > 0;
 
   const handleCloseDay = () => {
-    if (!canSuggestClosing) return;
+    if (!hasActiveAppointments) return;
     const targetIds = activeApts.map(a => a.id);
     if (!confirm(`残り${targetIds.length}名を会計完了にして、一括入力へ進みますか？`)) return;
 
@@ -618,12 +618,12 @@ export default function CounterPage() {
 
       {/* 予約リスト */}
       {loading ? (
-        <div className="flex items-center justify-center h-40 text-slate-400">
+        <div className="flex items-center justify-center h-40 text-slate-500">
           <Loader2 className="w-6 h-6 animate-spin mr-2" />
           読み込み中...
         </div>
       ) : appointments.length === 0 ? (
-        <div className="text-center py-16 text-slate-400 bg-white dark:bg-slate-900/50 rounded-2xl border border-slate-200 dark:border-white/10">
+        <div className="text-center py-16 text-slate-500 bg-white dark:bg-slate-900/50 rounded-2xl border border-slate-200 dark:border-white/10">
           <Clock className="w-10 h-10 mx-auto mb-3 opacity-30" />
           <p className="font-medium">予約はありません</p>
           <Link href="/admin/appointments" className="mt-3 inline-flex items-center gap-1 text-sm text-blue-500 hover:text-blue-600">
@@ -649,11 +649,11 @@ export default function CounterPage() {
           {/* 完了済み */}
           {doneApts.length > 0 && (
             <details className="group" open={doneApts.length > 0 && activeApts.length === 0}>
-              <summary className="cursor-pointer flex items-center gap-2 text-sm font-bold text-slate-400 select-none list-none py-2">
-                <CheckCircle2 className="w-4 h-4 text-slate-300" />
+              <summary className="cursor-pointer flex items-center gap-2 text-sm font-bold text-slate-500 select-none list-none py-2">
+                <CheckCircle2 className="w-4 h-4 text-slate-500" />
                 会計完了（{doneApts.length}名）
-                <span className="text-xs font-normal text-slate-300 ml-1 group-open:hidden">▶ 展開</span>
-                <span className="text-xs font-normal text-slate-300 ml-1 hidden group-open:inline">▼ 折りたたむ</span>
+                <span className="text-xs font-normal text-slate-500 ml-1 group-open:hidden">▶ 展開</span>
+                <span className="text-xs font-normal text-slate-500 ml-1 hidden group-open:inline">▼ 折りたたむ</span>
               </summary>
               <div className="mt-2 space-y-2">
                 {doneApts.map(apt => (
@@ -672,11 +672,11 @@ export default function CounterPage() {
 
       {/* ステータスフロー説明 */}
       <div className="bg-white/50 dark:bg-slate-900/30 rounded-xl border border-slate-100 dark:border-white/5 p-4">
-        <p className="text-xs font-bold text-slate-400 uppercase tracking-wide mb-3">ステータスフロー</p>
+        <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-3">ステータスフロー</p>
         <div className="flex items-center gap-2 flex-wrap text-xs text-slate-500 dark:text-slate-400">
           {CHECKIN_STEPS.map((s, i) => (
             <span key={i} className="flex items-center gap-1.5">
-              {i > 0 && <ArrowRight className="w-3 h-3 text-slate-300 shrink-0" />}
+              {i > 0 && <ArrowRight className="w-3 h-3 text-slate-500 shrink-0" />}
               <span className={`flex items-center gap-1 px-2 py-0.5 rounded-full ${s.bg} ${s.color} border ${s.border}`}>
                 {s.icon}{s.label}
               </span>

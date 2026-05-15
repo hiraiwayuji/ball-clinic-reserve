@@ -281,7 +281,7 @@ function ReserveContent() {
                   <h2 className="text-xl font-bold text-white tracking-tight">ご希望の日時</h2>
                   <div className="grid md:grid-cols-2 gap-6">
                     <div className="space-y-2">
-                      <Label className="text-blue-100/60 font-bold text-xs uppercase">予約日</Label>
+                      <Label className="text-blue-100/85 font-bold text-xs uppercase">予約日</Label>
                       <Popover>
                         <PopoverTrigger className="w-full h-14 bg-white/5 border border-white/10 rounded-2xl px-4 text-left text-white flex items-center gap-3">
                           <CalendarIcon className="w-5 h-5 text-blue-400" />
@@ -307,7 +307,7 @@ function ReserveContent() {
                       </Popover>
                     </div>
                     <div className="space-y-2">
-                      <Label className="text-blue-100/60 font-bold text-xs uppercase">来院時間</Label>
+                      <Label className="text-blue-100/85 font-bold text-xs uppercase">来院時間</Label>
                       <Select value={time} onValueChange={(val) => setTime(val || "")}>
                         <SelectTrigger className="w-full h-14 bg-slate-900 border-white/10 rounded-2xl px-4 text-white">
                           <SelectValue placeholder="時間を選択" />
@@ -344,7 +344,7 @@ function ReserveContent() {
                               <div>
                                 <p className="font-bold text-sm">{course.name}</p>
                                 {course.description && (
-                                  <p className={`text-xs mt-0.5 ${isSelected ? "text-blue-100" : "text-blue-100/50"}`}>
+                                  <p className={`text-xs mt-0.5 ${isSelected ? "text-blue-100" : "text-blue-100/80"}`}>
                                     {course.description}
                                   </p>
                                 )}
@@ -354,7 +354,7 @@ function ReserveContent() {
                                   {course.duration_minutes}分
                                 </span>
                                 {course.price != null && (
-                                  <p className={`text-xs ${isSelected ? "text-blue-100" : "text-blue-100/50"}`}>
+                                  <p className={`text-xs ${isSelected ? "text-blue-100" : "text-blue-100/80"}`}>
                                     ¥{course.price.toLocaleString()}
                                   </p>
                                 )}
@@ -370,7 +370,7 @@ function ReserveContent() {
                 {/* 指名選択 */}
                 {staffList.length > 0 && (
                   <section className="space-y-4">
-                    <h2 className="text-xl font-bold text-white tracking-tight">スタッフ指名 <span className="text-sm font-normal text-blue-100/50">（任意）</span></h2>
+                    <h2 className="text-xl font-bold text-white tracking-tight">スタッフ指名 <span className="text-sm font-normal text-blue-100/80">（任意）</span></h2>
                     <div className="flex flex-wrap gap-2">
                       <button
                         type="button"
@@ -378,7 +378,7 @@ function ReserveContent() {
                         className={`px-4 py-2.5 rounded-xl font-semibold text-sm border transition-all ${
                           selectedStaffId === ""
                             ? "bg-blue-600 border-blue-500 text-white"
-                            : "bg-white/5 border-white/10 text-blue-100/60 hover:bg-white/10"
+                            : "bg-white/5 border-white/10 text-blue-100/85 hover:bg-white/10"
                         }`}
                       >
                         指名なし
@@ -391,7 +391,7 @@ function ReserveContent() {
                           className={`px-4 py-2.5 rounded-xl font-semibold text-sm border transition-all ${
                             selectedStaffId === staff.id
                               ? "bg-blue-600 border-blue-500 text-white"
-                              : "bg-white/5 border-white/10 text-blue-100/60 hover:bg-white/10"
+                              : "bg-white/5 border-white/10 text-blue-100/85 hover:bg-white/10"
                           }`}
                         >
                           {staff.name}
@@ -404,7 +404,7 @@ function ReserveContent() {
                 {/* 個室選択 */}
                 {rooms.length > 0 && (
                   <section className="space-y-4">
-                    <h2 className="text-xl font-bold text-white tracking-tight">ご希望のお部屋 <span className="text-sm font-normal text-blue-100/50">（任意）</span></h2>
+                    <h2 className="text-xl font-bold text-white tracking-tight">ご希望のお部屋 <span className="text-sm font-normal text-blue-100/80">（任意）</span></h2>
                     <div className="flex flex-wrap gap-2">
                       <button
                         type="button"
@@ -412,7 +412,7 @@ function ReserveContent() {
                         className={`px-4 py-2.5 rounded-xl font-semibold text-sm border transition-all ${
                           selectedRoomId === ""
                             ? "bg-blue-600 border-blue-500 text-white"
-                            : "bg-white/5 border-white/10 text-blue-100/60 hover:bg-white/10"
+                            : "bg-white/5 border-white/10 text-blue-100/85 hover:bg-white/10"
                         }`}
                       >
                         希望なし
@@ -425,7 +425,7 @@ function ReserveContent() {
                           className={`px-4 py-2.5 rounded-xl font-semibold text-sm border transition-all ${
                             selectedRoomId === room.id
                               ? "bg-blue-600 border-blue-500 text-white"
-                              : "bg-white/5 border-white/10 text-blue-100/60 hover:bg-white/10"
+                              : "bg-white/5 border-white/10 text-blue-100/85 hover:bg-white/10"
                           }`}
                         >
                           {room.name}
@@ -450,19 +450,19 @@ function ReserveContent() {
 
                   {/* 初診・再診 */}
                   <div className="space-y-2">
-                    <Label className="text-blue-100/60 font-bold text-xs uppercase">来院区分</Label>
+                    <Label className="text-blue-100/85 font-bold text-xs uppercase">来院区分</Label>
                     <div className="grid grid-cols-2 gap-3">
                       <button
                         type="button"
                         onClick={() => setVisitType("new")}
-                        className={`h-14 rounded-2xl font-bold text-sm transition-all border ${visitType === "new" ? "bg-blue-600 border-blue-500 text-white" : "bg-white/5 border-white/10 text-blue-100/60 hover:bg-white/10"}`}
+                        className={`h-14 rounded-2xl font-bold text-sm transition-all border ${visitType === "new" ? "bg-blue-600 border-blue-500 text-white" : "bg-white/5 border-white/10 text-blue-100/85 hover:bg-white/10"}`}
                       >
                         🆕 初診（初めて）
                       </button>
                       <button
                         type="button"
                         onClick={() => setVisitType("return")}
-                        className={`h-14 rounded-2xl font-bold text-sm transition-all border ${visitType === "return" ? "bg-blue-600 border-blue-500 text-white" : "bg-white/5 border-white/10 text-blue-100/60 hover:bg-white/10"}`}
+                        className={`h-14 rounded-2xl font-bold text-sm transition-all border ${visitType === "return" ? "bg-blue-600 border-blue-500 text-white" : "bg-white/5 border-white/10 text-blue-100/85 hover:bg-white/10"}`}
                       >
                         🔄 再診（2回目以降）
                       </button>
@@ -470,8 +470,8 @@ function ReserveContent() {
                   </div>
 
                     <div className="space-y-2">
-                      <Label className="text-blue-100/60 font-bold text-xs uppercase" htmlFor="name">お名前</Label>
-                      <Input id="name" name="name" value={name} onChange={(e) => setName(e.target.value)} required placeholder="山田 太郎" className="h-14 bg-slate-900 border-white/10 rounded-2xl text-white placeholder:text-white/20" />
+                      <Label className="text-blue-100/85 font-bold text-xs uppercase" htmlFor="name">お名前</Label>
+                      <Input id="name" name="name" value={name} onChange={(e) => setName(e.target.value)} required placeholder="山田 太郎" className="h-14 bg-slate-900 border-white/10 rounded-2xl text-white placeholder:text-white/50" />
                     </div>
 
                     {/* 初診のみ：電話番号・LINE */}
@@ -479,7 +479,7 @@ function ReserveContent() {
                       <div className="space-y-4 p-6 bg-blue-500/10 border border-blue-500/20 rounded-2xl">
                         <p className="text-blue-300 text-sm font-bold">📋 初診の方は以下もご入力ください</p>
                         <div className="space-y-2">
-                          <Label className="text-blue-100/60 font-bold text-xs uppercase" htmlFor="phone">電話番号</Label>
+                          <Label className="text-blue-100/85 font-bold text-xs uppercase" htmlFor="phone">電話番号</Label>
                           <Input
                             id="phone"
                             name="phone"
@@ -488,7 +488,7 @@ function ReserveContent() {
                             onChange={(e) => setPhone(e.target.value)}
                             required
                             placeholder="090-0000-0000"
-                            className="h-14 bg-slate-900 border-white/10 rounded-2xl text-white placeholder:text-white/20"
+                            className="h-14 bg-slate-900 border-white/10 rounded-2xl text-white placeholder:text-white/50"
                           />
                         </div>
                       <div className="flex items-center gap-3 p-4 bg-green-500/10 border border-green-500/20 rounded-xl">
@@ -518,7 +518,7 @@ function ReserveContent() {
                   )}
                 </section>
 
-                <div className="bg-white/5 border border-white/10 p-5 rounded-2xl text-sm text-blue-100/60 space-y-1">
+                <div className="bg-white/5 border border-white/10 p-5 rounded-2xl text-sm text-blue-100/85 space-y-1">
                   <p className="font-bold text-white text-sm">⚠️ 仮予約について</p>
                   <p>こちらは仮予約です。院長がLINEにて確認後、予約確定のご連絡をいたします。</p>
                 </div>
@@ -532,7 +532,7 @@ function ReserveContent() {
                     <p className="text-blue-200 font-bold text-sm">
                       初めてオンライン予約をご希望の方は、先にアンケートへのご回答をお願いします
                     </p>
-                    <p className="text-blue-100/60 text-xs leading-relaxed">
+                    <p className="text-blue-100/85 text-xs leading-relaxed">
                       アンケートにご回答いただくとすぐにオンライン予約が可能になります。1分程度で完了します。
                     </p>
                     <Link
@@ -562,7 +562,7 @@ function ReserveContent() {
                   <MapPin className="w-4 h-4 text-emerald-400" />
                   アクセス / 営業日
                 </h3>
-                <div className="space-y-3 text-sm text-blue-100/60">
+                <div className="space-y-3 text-sm text-blue-100/85">
                   <p className="flex justify-between border-b border-white/5 pb-2"><span>日曜日 / 水曜日</span><span className="text-rose-400 font-bold">休診</span></p>
                   <p className="flex justify-between border-b border-white/5 pb-2"><span>祝日</span><span className="text-rose-400 font-bold">休診</span></p>
                   <p className="flex justify-between"><span>{CLINIC_CONFIG.nameShort}</span><span className="text-white">{CLINIC_CONFIG.address}</span></p>
@@ -574,7 +574,7 @@ function ReserveContent() {
                   お電話でのご予約
                 </h3>
                 <p className="text-2xl font-black text-white tracking-widest mb-1">{CLINIC_CONFIG.phone}</p>
-                <p className="text-[10px] text-blue-100/40 uppercase tracking-widest">お気軽にお電話ください</p>
+                <p className="text-[10px] text-blue-100/75 uppercase tracking-widest">お気軽にお電話ください</p>
               </div>
             </div>
           </div>

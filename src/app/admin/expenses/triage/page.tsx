@@ -11,7 +11,7 @@ import { Label } from "@/components/ui/label";
 import { Loader2, Receipt, Image as ImageIcon, Check, Ban, AlertCircle, Save, ExternalLink } from "lucide-react";
 import { getPendingExpenses, finalizePendingExpense, updatePendingExpense } from "@/app/actions/sales";
 import { getCustomExpenseCategories } from "@/app/actions/settings";
-import { BASE_EXPENSE_CATEGORIES } from "@/lib/expense-categories";
+import { CategorySelect } from "@/components/admin/CategorySelect";
 import Image from "next/image";
 import { toast } from "sonner";
 import Link from "next/link";
@@ -29,8 +29,6 @@ export default function ExpenseTriagePage() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<any>({});
   const [customCategories, setCustomCategories] = useState<string[]>([]);
-
-  const allCategories = [...BASE_EXPENSE_CATEGORIES, ...customCategories];
 
   const fetchItems = async () => {
     setLoading(true);
@@ -203,14 +201,14 @@ export default function ExpenseTriagePage() {
                                 value={editForm.amount}
                                 onChange={(e) => setEditForm({ ...editForm, amount: parseInt(e.target.value) || 0 })}
                               />
-                              <select
-                                className="w-full text-sm border rounded p-1"
+                              <CategorySelect
                                 value={editForm.category}
-                                onChange={(e) => setEditForm({ ...editForm, category: e.target.value })}
-                              >
-                                <option value="">カテゴリ選択</option>
-                                {allCategories.map(c => <option key={c} value={c}>{c}</option>)}
-                              </select>
+                                onChange={(v) => setEditForm({ ...editForm, category: v })}
+                                customCategories={customCategories}
+                                onCustomCategoriesChange={setCustomCategories}
+                                placeholder="カテゴリ選択"
+                                size="compact"
+                              />
                             </div>
                           ) : (
                             <div className="space-y-1">

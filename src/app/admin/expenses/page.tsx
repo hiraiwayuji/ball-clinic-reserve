@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Calendar as CalendarIcon, Plus, Trash2, Loader2, Receipt, Tag, AlertCircle, Save, Camera, Sparkles, Pencil, Check, X, Banknote, Download, FileSpreadsheet, Settings2 } from "lucide-react";
+import { Calendar as CalendarIcon, Plus, Trash2, Loader2, Receipt, AlertCircle, Save, Camera, Sparkles, Pencil, Check, X, Banknote, Download, FileSpreadsheet, Settings2 } from "lucide-react";
 import { addExpense, getExpenses, deleteExpense, addPendingExpense, updateExpense, getMonthDetailedExpenses } from "@/app/actions/sales";
 import { getCustomExpenseCategories, addCustomExpenseCategory, deleteCustomExpenseCategory } from "@/app/actions/settings";
 import { BASE_EXPENSE_CATEGORIES } from "@/lib/expense-categories";
@@ -18,6 +18,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { exportToExcel } from "@/lib/excel";
 import ExpensesImportDialog from "@/components/admin/ExpensesImportDialog";
+import { CategorySelect } from "@/components/admin/CategorySelect";
 
 type EditingState = {
   id: string;
@@ -52,6 +53,8 @@ export default function ExpensesPage() {
   const [categoryPanelOpen, setCategoryPanelOpen] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState("");
   const [isSavingCategory, setIsSavingCategory] = useState(false);
+  // 新規入力フォームのカテゴリ（controlled）
+  const [formCategory, setFormCategory] = useState<string>("");
 
   const allCategories = [...BASE_EXPENSE_CATEGORIES, ...customCategories];
 
@@ -111,6 +114,7 @@ export default function ExpensesPage() {
     if (!date) return;
     const formData = new FormData(e.currentTarget);
     formData.set("expense_date", formExpenseDate || format(date, "yyyy-MM-dd"));
+    formData.set("category", formCategory);
 
     startTransition(async () => {
       const res = await addExpense(formData);
@@ -118,6 +122,7 @@ export default function ExpensesPage() {
         toast.success("経費を登録しました");
         (e.target as HTMLFormElement).reset();
         setFormExpenseDate(format(date, "yyyy-MM-dd"));
+        setFormCategory("");
         setCurrentImageUrl(null);
         setPreviewUrl(null);
         fetchExpenses(date);
@@ -134,7 +139,7 @@ export default function ExpensesPage() {
     const formData = new FormData(form);
     const triageData = {
       expense_date: formExpenseDate || format(date, "yyyy-MM-dd"),
-      category: formData.get("category"),
+      category: formCategory,
       description: formData.get("description"),
       amount: parseInt(formData.get("amount") as string) || 0,
       memo: formData.get("memo")
@@ -147,6 +152,7 @@ export default function ExpensesPage() {
     if (res.success) {
       toast.success("保留経費として保存しました");
       form.reset();
+      setFormCategory("");
     } else {
       toast.error(res.error);
     }
@@ -215,10 +221,8 @@ export default function ExpensesPage() {
         if (json.description) (form.elements.namedItem("description") as HTMLInputElement).value = json.description;
         if (json.memo) (form.elements.namedItem("memo") as HTMLInputElement).value = json.memo;
         if (json.expense_date) setFormExpenseDate(json.expense_date);
-        if (json.category) {
-          const sel = form.elements.namedItem("category") as HTMLSelectElement;
-          const opt = Array.from(sel.options).find(o => o.value === json.category);
-          if (opt) sel.value = json.category;
+        if (json.category && allCategories.includes(json.category)) {
+          setFormCategory(json.category);
         }
       }
       toast.success("レシートを読み取りました。内容を確認してください。");
@@ -566,19 +570,15 @@ export default function ExpensesPage() {
               </div>
               <div className="space-y-2">
                 <Label htmlFor="category">カテゴリ</Label>
-                <div className="relative">
-                  <Tag className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
-                  <select
-                    id="category"
-                    name="category"
-                    className="w-full border border-slate-200 dark:border-slate-800 rounded-md pl-9 pr-3 py-2 text-sm bg-white dark:bg-slate-950 text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-emerald-500 outline-none"
-                  >
-                    <option value="">（後で決める）</option>
-                    {allCategories.map((cat) => (
-                      <option key={cat} value={cat}>{cat}</option>
-                    ))}
-                  </select>
-                </div>
+                <CategorySelect
+                  selectId="category"
+                  value={formCategory}
+                  onChange={setFormCategory}
+                  customCategories={customCategories}
+                  onCustomCategoriesChange={setCustomCategories}
+                  placeholder="（後で決める）"
+                  withIcon
+                />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="description">内容</Label>
@@ -677,16 +677,14 @@ export default function ExpensesPage() {
                                 />
                               </TableCell>
                               <TableCell>
-                                <select
+                                <CategorySelect
                                   value={editingRow!.category}
-                                  onChange={(e) => setEditingRow(r => r ? { ...r, category: e.target.value } : r)}
-                                  className="w-full border border-emerald-300 rounded px-1.5 py-1 text-xs bg-white text-slate-800 focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                                >
-                                  <option value="">未分類</option>
-                                  {allCategories.map(cat => (
-                                    <option key={cat} value={cat}>{cat}</option>
-                                  ))}
-                                </select>
+                                  onChange={(v) => setEditingRow(r => r ? { ...r, category: v } : r)}
+                                  customCategories={customCategories}
+                                  onCustomCategoriesChange={setCustomCategories}
+                                  placeholder="未分類"
+                                  size="compact"
+                                />
                               </TableCell>
                               <TableCell>
                                 <div className="space-y-1">

@@ -165,7 +165,7 @@ export default function QuestionnairePage() {
               初めてオンライン予約をご希望の方
             </div>
             <h1 className="text-2xl font-extrabold text-white">アンケートにご協力ください</h1>
-            <p className="text-blue-100/50 text-sm">
+            <p className="text-blue-100/80 text-sm">
               いただいた情報は、誕生月クーポンや特別なご案内にのみ使用します。
             </p>
           </div>
@@ -173,7 +173,7 @@ export default function QuestionnairePage() {
           <form onSubmit={handleSubmit} className="space-y-6">
             {/* お名前 */}
             <div className="space-y-2">
-              <label className="text-blue-100/60 font-bold text-xs uppercase tracking-wide">
+              <label className="text-blue-100/85 font-bold text-xs uppercase tracking-wide">
                 治療を受けられる患者様のお名前 <span className="text-red-400">*</span>
               </label>
               <input
@@ -182,13 +182,13 @@ export default function QuestionnairePage() {
                 onChange={(e) => setName(e.target.value)}
                 required
                 placeholder="山田 太郎"
-                className="w-full h-14 bg-white/5 border border-white/10 rounded-2xl px-4 text-white placeholder:text-white/20 focus:outline-none focus:border-blue-500/50 focus:bg-white/10 transition-all"
+                className="w-full h-14 bg-white/5 border border-white/10 rounded-2xl px-4 text-white placeholder:text-white/50 focus:outline-none focus:border-blue-500/50 focus:bg-white/10 transition-all"
               />
             </div>
 
             {/* 保護者名 */}
             <div className="space-y-2">
-              <label className="text-blue-100/60 font-bold text-xs uppercase tracking-wide">
+              <label className="text-blue-100/85 font-bold text-xs uppercase tracking-wide">
                 保護者のお名前 <span className="text-blue-400/50 font-normal normal-case text-[11px]">（任意・未成年の方のみ）</span>
               </label>
               <input
@@ -196,13 +196,13 @@ export default function QuestionnairePage() {
                 value={guardianName}
                 onChange={(e) => setGuardianName(e.target.value)}
                 placeholder="山田 花子"
-                className="w-full h-14 bg-white/5 border border-white/10 rounded-2xl px-4 text-white placeholder:text-white/20 focus:outline-none focus:border-blue-500/50 focus:bg-white/10 transition-all"
+                className="w-full h-14 bg-white/5 border border-white/10 rounded-2xl px-4 text-white placeholder:text-white/50 focus:outline-none focus:border-blue-500/50 focus:bg-white/10 transition-all"
               />
             </div>
 
             {/* 電話番号 */}
             <div className="space-y-2">
-              <label className="text-blue-100/60 font-bold text-xs uppercase tracking-wide">
+              <label className="text-blue-100/85 font-bold text-xs uppercase tracking-wide">
                 電話番号 <span className="text-red-400">*</span>
               </label>
               <input
@@ -212,13 +212,13 @@ export default function QuestionnairePage() {
                 required
                 placeholder="09012345678"
                 inputMode="numeric"
-                className="w-full h-14 bg-white/5 border border-white/10 rounded-2xl px-4 text-white placeholder:text-white/20 focus:outline-none focus:border-blue-500/50 focus:bg-white/10 transition-all"
+                className="w-full h-14 bg-white/5 border border-white/10 rounded-2xl px-4 text-white placeholder:text-white/50 focus:outline-none focus:border-blue-500/50 focus:bg-white/10 transition-all"
               />
             </div>
 
             {/* 誕生月 */}
             <div className="space-y-2">
-              <label className="text-blue-100/60 font-bold text-xs uppercase tracking-wide">
+              <label className="text-blue-100/85 font-bold text-xs uppercase tracking-wide">
                 誕生月 <span className="text-blue-400/50 font-normal text-[10px]">（誕生月クーポンに使用します）</span>
               </label>
               <div className="grid grid-cols-6 gap-2">
@@ -230,7 +230,7 @@ export default function QuestionnairePage() {
                     className={`h-10 rounded-xl font-bold text-sm transition-all ${
                       birthMonth === m
                         ? "bg-blue-600 text-white border border-blue-500"
-                        : "bg-white/5 border border-white/10 text-blue-100/60 hover:bg-white/10"
+                        : "bg-white/5 border border-white/10 text-blue-100/85 hover:bg-white/10"
                     }`}
                   >
                     {m}月
@@ -241,7 +241,7 @@ export default function QuestionnairePage() {
 
             {/* 性別 */}
             <div className="space-y-2">
-              <label className="text-blue-100/60 font-bold text-xs uppercase tracking-wide">性別</label>
+              <label className="text-blue-100/85 font-bold text-xs uppercase tracking-wide">性別</label>
               <div className="grid grid-cols-3 gap-3">
                 {[
                   { key: "male", label: "男性" },
@@ -255,7 +255,7 @@ export default function QuestionnairePage() {
                     className={`h-12 rounded-2xl font-bold text-sm transition-all border ${
                       gender === g.key
                         ? "bg-blue-600 border-blue-500 text-white"
-                        : "bg-white/5 border-white/10 text-blue-100/60 hover:bg-white/10"
+                        : "bg-white/5 border-white/10 text-blue-100/85 hover:bg-white/10"
                     }`}
                   >
                     {g.label}
@@ -266,7 +266,7 @@ export default function QuestionnairePage() {
 
             {/* 年代 */}
             <div className="space-y-2">
-              <label className="text-blue-100/60 font-bold text-xs uppercase tracking-wide">年代</label>
+              <label className="text-blue-100/85 font-bold text-xs uppercase tracking-wide">年代</label>
               <div className="grid grid-cols-3 gap-2">
                 {AGE_GROUPS.map((a) => (
                   <button
@@ -276,7 +276,7 @@ export default function QuestionnairePage() {
                     className={`h-12 rounded-2xl font-bold text-sm transition-all border ${
                       ageGroup === a
                         ? "bg-blue-600 border-blue-500 text-white"
-                        : "bg-white/5 border-white/10 text-blue-100/60 hover:bg-white/10"
+                        : "bg-white/5 border-white/10 text-blue-100/85 hover:bg-white/10"
                     }`}
                   >
                     {a}
