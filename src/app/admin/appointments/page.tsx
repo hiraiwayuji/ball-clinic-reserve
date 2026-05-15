@@ -222,7 +222,7 @@ export default function AdminWeeklyGridPage() {
             className="text-sm font-semibold text-slate-700 dark:text-slate-200 px-2 py-1 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 active:bg-slate-200 transition-colors"
           >
             {format(weekDays[0], "M月d日", { locale: ja })}
-            <span className="text-slate-400 dark:text-slate-500 mx-1.5">—</span>
+            <span className="text-slate-500 dark:text-slate-500 mx-1.5">—</span>
             {format(weekDays[6], "M月d日", { locale: ja })}
           </button>
           <Button
@@ -316,7 +316,7 @@ export default function AdminWeeklyGridPage() {
             <Loader2 className="h-8 w-8 animate-spin text-blue-500" />
           </div>
         ) : selectedDayAppointments.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-16 text-slate-400">
+          <div className="flex flex-col items-center justify-center py-16 text-slate-500">
             <CalendarDays className="w-14 h-14 mb-3 opacity-30" />
             <p className="text-sm font-semibold text-slate-500">予約はありません</p>
             {!isDayOff(selectedDay) && (
@@ -371,7 +371,7 @@ export default function AdminWeeklyGridPage() {
                         {/* Time */}
                         <div className="flex flex-col items-center min-w-[52px] pt-0.5">
                           <span className="text-base font-black text-slate-800 tabular-nums">{timeStr}</span>
-                          <span className="text-[10px] text-slate-400 tabular-nums">〜{endTimeStr}</span>
+                          <span className="text-[10px] text-slate-500 tabular-nums">〜{endTimeStr}</span>
                         </div>
                         {/* Info */}
                         <div className="flex-1 min-w-0">
@@ -391,7 +391,7 @@ export default function AdminWeeklyGridPage() {
                               {getStatusText(apt.status)}
                             </Badge>
                             {phone && (
-                              <span className="text-[11px] text-slate-400 flex items-center gap-0.5">
+                              <span className="text-[11px] text-slate-500 flex items-center gap-0.5">
                                 <User className="w-2.5 h-2.5" />
                                 {phone}
                               </span>
@@ -401,7 +401,7 @@ export default function AdminWeeklyGridPage() {
                             <p className="text-[11px] text-slate-500 mt-1 truncate">{apt.memo}</p>
                           )}
                         </div>
-                        <ChevronRight className="w-4 h-4 text-slate-300 shrink-0 mt-1" />
+                        <ChevronRight className="w-4 h-4 text-slate-500 shrink-0 mt-1" />
                       </div>
                     </div>
                   </Card>
@@ -472,11 +472,11 @@ export default function AdminWeeklyGridPage() {
             </div>
 
             <div className="text-lg font-bold text-slate-800 dark:text-slate-100 flex items-center">
-              <Calendar className="w-5 h-5 mr-2 text-slate-400 dark:text-slate-500 shrink-0" />
+              <Calendar className="w-5 h-5 mr-2 text-slate-500 dark:text-slate-500 shrink-0" />
               {viewMode === "week" ? (
                 <>
                   <span>{format(weekDays[0], "yyyy年 M月 d日", { locale: ja })}</span>
-                  <span className="text-slate-400 dark:text-slate-500 mx-2">〜</span>
+                  <span className="text-slate-500 dark:text-slate-500 mx-2">〜</span>
                   <span>{format(weekDays[6], "M月 d日", { locale: ja })}</span>
                 </>
               ) : (
@@ -725,9 +725,9 @@ export default function AdminWeeklyGridPage() {
                 </div>
 
                 {selectedDayAppointments.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center py-20 text-slate-400">
+                  <div className="flex flex-col items-center justify-center py-20 text-slate-500">
                     <CalendarDays className="w-16 h-16 mb-3 opacity-20" />
-                    <p className="text-base font-semibold text-slate-400">この日の予約はありません</p>
+                    <p className="text-base font-semibold text-slate-500">この日の予約はありません</p>
                     {!isDayOff(selectedDay) && (
                       <button
                         onClick={() => { setSelectedAddDate(selectedDay); setSelectedAddTime("12:00"); setIsAddDialogOpen(true); }}
@@ -763,7 +763,7 @@ export default function AdminWeeklyGridPage() {
                               <div className="flex items-center gap-4 px-4 py-3 flex-1">
                                 <div className="text-center min-w-[64px]">
                                   <p className="text-xl font-black text-slate-800 tabular-nums">{format(startTime, "HH:mm")}</p>
-                                  <p className="text-xs text-slate-400 tabular-nums">〜{format(endTime, "HH:mm")}</p>
+                                  <p className="text-xs text-slate-500 tabular-nums">〜{format(endTime, "HH:mm")}</p>
                                 </div>
                                 <div className="flex-1 min-w-0">
                                   <div className="flex items-center gap-2 flex-wrap">
@@ -780,7 +780,7 @@ export default function AdminWeeklyGridPage() {
                                     {apt.memo && <span className="truncate">{apt.memo}</span>}
                                   </div>
                                 </div>
-                                <ChevronRight className="w-4 h-4 text-slate-300 shrink-0" />
+                                <ChevronRight className="w-4 h-4 text-slate-500 shrink-0" />
                               </div>
                             </div>
                           </Card>
@@ -839,6 +839,9 @@ export default function AdminWeeklyGridPage() {
         onOpenChange={setIsSearchPanelOpen}
         onRefresh={() => setRefreshKey(k => k + 1)}
       />
+
+      {/* モバイルで FAB（AI秘書ボタン・リマインダー）に最終行が隠れないよう保険のスペーサー */}
+      <div className="h-24 md:hidden" aria-hidden />
     </div>
   );
 }

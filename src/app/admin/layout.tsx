@@ -31,7 +31,7 @@ export default async function AdminLayout({
             </div>
           )}
 
-          <main className="flex-1 px-4 md:px-8 py-6 md:py-8">{children}</main>
+          <main className="flex-1 px-4 md:px-8 py-6 md:py-8 pb-32 md:pb-8">{children}</main>
 
           {/* 全管理画面にAIチャットを配置（CLINICモードのみ） */}
           {!isFamilyGift && <AiChatPanel />}

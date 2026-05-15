@@ -11,6 +11,8 @@ import {
   ShieldCheck,
   Settings,
   CalendarRange,
+  CalendarClock,
+  Newspaper,
 } from "lucide-react";
 import { isFamilyGift } from "@/lib/app-mode";
 
@@ -33,6 +35,8 @@ const CLINIC_NAV_ITEMS: NavItem[] = [
   { href: "/admin/marketing", label: "LINE・販促", icon: MessageSquare, allow: ["owner", "admin"] },
   { href: "/admin/leaderboard", label: "ランキング", icon: Trophy, allow: ["owner", "admin", "staff"] },
   { href: "/admin/approvals", label: "承認", icon: ShieldCheck, allow: ["owner"] },
+  { href: "/admin/settings/staff-schedule", label: "スタッフ予定", icon: CalendarClock, allow: ["owner", "admin"] },
+  { href: "/admin/settings/external-signals", label: "時事ネタ", icon: Newspaper, allow: ["owner", "admin"] },
   { href: "/admin/settings", label: "設定", icon: Settings, allow: ["owner"] },
 ];
 

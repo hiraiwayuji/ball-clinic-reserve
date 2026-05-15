@@ -9,6 +9,7 @@ import { ChevronLeft, ChevronRight, ArrowLeft, Clock, CalendarDays, X, CheckCirc
 import { createWaitlistReservation } from "@/app/actions/reserve";
 import { getClinicHolidays, type ClinicHoliday } from "@/app/actions/holidays";
 import { getActiveCourses, type ReservationCourse } from "@/app/actions/courses";
+import { getBlockedTimesForCurrentClinic } from "@/app/actions/staff-schedule";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -76,7 +77,7 @@ const levelConfig = {
     dot: "bg-rose-400",
     label: "× 予約済",
     symbol: "×",
-    labelClass: "text-rose-400",
+    labelClass: "text-rose-300",
     text: "text-white",
   },
   closed: {
@@ -112,7 +113,7 @@ function CalendarLoading() {
     <div className="min-h-screen bg-slate-900 flex items-center justify-center" style={{ backgroundColor: '#0f172a' }}>
       <div className="flex flex-col items-center gap-3">
         <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
-        <p className="text-zinc-500 text-sm font-bold">カレンダーを読み込み中...</p>
+        <p className="text-zinc-300 text-sm font-bold">カレンダーを読み込み中...</p>
       </div>
     </div>
   );
@@ -129,6 +130,7 @@ function ReserveCalendarContent() {
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
   const [selectedLevel, setSelectedLevel] = useState<AvailabilityLevel | null>(null);
   const [dailySlots, setDailySlots] = useState<string[]>([]);
+  const [blockedSlots, setBlockedSlots] = useState<string[]>([]);
   const [loadingMonth, setLoadingMonth] = useState(false);
   const [loadingDay, setLoadingDay] = useState(false);
 
@@ -314,6 +316,11 @@ function ReserveCalendarContent() {
 
     if (aptError) console.error("データ取得エラー:", aptError);
 
+    // 並行してスタッフ予定（全スタッフ不在の時間帯）を取得
+    getBlockedTimesForCurrentClinic(dateStr)
+      .then((blocked) => setBlockedSlots(blocked))
+      .catch(() => setBlockedSlots([]));
+
     const slotCounts: Record<string, number> = {};
     if (aptData) {
       aptData.forEach((app: any) => {
@@ -382,7 +389,7 @@ function ReserveCalendarContent() {
       <div className="min-h-screen bg-slate-900 flex items-center justify-center" style={{ backgroundColor: '#0f172a' }}>
         <div className="flex flex-col items-center gap-3">
           <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
-          <p className="text-zinc-500 text-sm font-bold">カレンダーを読み込み中...</p>
+          <p className="text-zinc-300 text-sm font-bold">カレンダーを読み込み中...</p>
         </div>
       </div>
     );
@@ -416,11 +423,11 @@ function ReserveCalendarContent() {
             <ArrowLeft className="w-4 h-4 text-zinc-300" />
           </Link>
           <div className="flex-1 min-w-0">
-            <p className="text-xs text-zinc-500 font-bold">{CLINIC_CONFIG.nameShort}</p>
+            <p className="text-xs text-zinc-300 font-bold">{CLINIC_CONFIG.nameShort}</p>
             <h1 className="text-sm font-black text-white truncate">予約空き状況カレンダー</h1>
           </div>
           <div className="shrink-0 text-right">
-            <p className="text-[10px] text-zinc-600 font-bold">1ヶ月先まで予約可</p>
+            <p className="text-[10px] text-zinc-300 font-bold">1ヶ月先まで予約可</p>
           </div>
         </div>
       </div>
@@ -475,7 +482,7 @@ function ReserveCalendarContent() {
             <h2 className="text-3xl font-black tabular-nums tracking-tight">
               {format(currentMonth, "M月", { locale: ja })}
             </h2>
-            <p className="text-xs text-zinc-500 font-bold mt-0.5">{format(currentMonth, "yyyy年", { locale: ja })}</p>
+            <p className="text-xs text-zinc-300 font-bold mt-0.5">{format(currentMonth, "yyyy年", { locale: ja })}</p>
           </div>
           <button
             onClick={nextMonth}
@@ -501,7 +508,7 @@ function ReserveCalendarContent() {
           {/* 曜日ヘッダー */}
           <div className="grid grid-cols-7 border-b border-zinc-800">
             {WEEKDAYS.map((d, i) => (
-              <div key={d} className={`text-center text-xs font-black py-3 ${i === 0 ? "text-rose-400" : i === 6 ? "text-blue-400" : "text-zinc-500"}`}>
+              <div key={d} className={`text-center text-xs font-black py-3 ${i === 0 ? "text-rose-400" : i === 6 ? "text-blue-400" : "text-zinc-300"}`}>
                 {d}
               </div>
             ))}
@@ -511,7 +518,7 @@ function ReserveCalendarContent() {
             <div className="flex items-center justify-center h-56">
               <div className="flex flex-col items-center gap-3">
                 <div className="w-7 h-7 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
-                <p className="text-zinc-600 text-xs font-bold">読み込み中...</p>
+                <p className="text-zinc-300 text-xs font-bold">読み込み中...</p>
               </div>
             </div>
           ) : (
@@ -543,7 +550,7 @@ function ReserveCalendarContent() {
                   : level === "few"
                   ? "text-amber-400"
                   : level === "full"
-                  ? "text-rose-500"
+                  ? "text-rose-300"
                   : "";
 
                 return (
@@ -561,7 +568,7 @@ function ReserveCalendarContent() {
                   >
                     {/* 日付数字 */}
                     <div className={`text-xs font-black mb-1 ${
-                      !isCurrentMonth ? "text-zinc-700" :
+                      !isCurrentMonth ? "text-zinc-500" :
                       dow === 0 ? "text-rose-400" :
                       dow === 6 ? "text-blue-400" :
                       "text-zinc-300"
@@ -576,7 +583,7 @@ function ReserveCalendarContent() {
                       </span>
                     )}
                     {isCurrentMonth && level === "closed" && (
-                      <span className="text-[9px] font-bold text-zinc-700">休</span>
+                      <span className="text-[10px] font-bold text-zinc-300">休</span>
                     )}
                   </div>
                 );
@@ -596,7 +603,7 @@ function ReserveCalendarContent() {
                   <Clock className="w-4 h-4 text-white" />
                 </div>
                 <div>
-                  <p className="text-[11px] text-zinc-500 font-bold">選択中の日付</p>
+                  <p className="text-[11px] text-zinc-300 font-bold">選択中の日付</p>
                   <h3 className="text-base font-black text-white">
                     {format(selectedDate, "M月d日（E）", { locale: ja })}
                   </h3>
@@ -615,7 +622,7 @@ function ReserveCalendarContent() {
               {loadingDay ? (
                 <div className="flex flex-col items-center justify-center py-10 gap-3">
                   <div className="w-7 h-7 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
-                  <p className="text-zinc-600 text-sm font-bold">時間を読み込み中...</p>
+                  <p className="text-zinc-300 text-sm font-bold">時間を読み込み中...</p>
                 </div>
               ) : (() => {
                 const allSlots = getTimeSlots(selectedDate);
@@ -638,17 +645,30 @@ function ReserveCalendarContent() {
                   <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 mb-4">
                     {allSlots.map((slot) => {
                       const isBooked = dailySlots.includes(slot);
+                      const isBlocked = blockedSlots.includes(slot);
                       const isTooClose = isTimeSlotWithinTwoHours(selectedDate, slot);
                       const fits = canFitDuration(slot);
+
+                      if (isBlocked) {
+                        return (
+                          <div
+                            key={slot}
+                            className="flex flex-col items-center justify-center rounded-2xl border border-zinc-700 bg-zinc-800/60 py-3.5 px-2 select-none"
+                          >
+                            <span className="text-sm font-black text-zinc-300 tabular-nums">{slot}</span>
+                            <span className="text-[10px] font-bold text-zinc-400 mt-0.5">× 不可</span>
+                          </div>
+                        );
+                      }
 
                       if (isBooked) {
                         return (
                           <div
                             key={slot}
-                            className="flex flex-col items-center justify-center rounded-2xl border border-zinc-800 bg-slate-900 py-3.5 px-2 select-none opacity-50"
+                            className="flex flex-col items-center justify-center rounded-2xl border border-rose-900/40 bg-rose-950/40 py-3.5 px-2 select-none"
                           >
-                            <span className="text-sm font-black text-zinc-500 tabular-nums">{slot}</span>
-                            <span className="text-[10px] font-bold text-rose-600 mt-0.5">予約済</span>
+                            <span className="text-sm font-black text-rose-100/80 tabular-nums line-through">{slot}</span>
+                            <span className="text-[10px] font-bold text-rose-300 mt-0.5">予約済</span>
                           </div>
                         );
                       }
@@ -657,10 +677,10 @@ function ReserveCalendarContent() {
                         return (
                           <div
                             key={slot}
-                            className="flex flex-col items-center justify-center rounded-2xl border border-zinc-800 bg-slate-900 py-3.5 px-2 select-none"
+                            className="flex flex-col items-center justify-center rounded-2xl border border-zinc-700 bg-zinc-800/60 py-3.5 px-2 select-none"
                           >
-                            <span className="text-sm font-black text-zinc-500 tabular-nums">{slot}</span>
-                            <span className="text-[10px] font-bold text-zinc-600 mt-0.5">要電話</span>
+                            <span className="text-sm font-black text-zinc-200 tabular-nums">{slot}</span>
+                            <span className="text-[10px] font-bold text-amber-300 mt-0.5">要電話</span>
                           </div>
                         );
                       }
@@ -670,10 +690,10 @@ function ReserveCalendarContent() {
                         return (
                           <div
                             key={slot}
-                            className="flex flex-col items-center justify-center rounded-2xl border border-zinc-800 bg-slate-900 py-3.5 px-2 select-none opacity-40"
+                            className="flex flex-col items-center justify-center rounded-2xl border border-zinc-700 bg-zinc-800/40 py-3.5 px-2 select-none"
                           >
-                            <span className="text-sm font-black text-zinc-500 tabular-nums">{slot}</span>
-                            <span className="text-[10px] font-bold text-amber-700 mt-0.5">枠不足</span>
+                            <span className="text-sm font-black text-zinc-300 tabular-nums">{slot}</span>
+                            <span className="text-[10px] font-bold text-amber-300 mt-0.5">枠不足</span>
                           </div>
                         );
                       }
@@ -734,7 +754,7 @@ function ReserveCalendarContent() {
                 <form onSubmit={handleWaitlistSubmit} className="space-y-4">
                   {/* 希望時間帯 */}
                   <div className="bg-zinc-900 rounded-2xl border border-zinc-800 p-4">
-                    <Label className="text-[11px] font-bold text-zinc-500 uppercase tracking-widest mb-3 block">
+                    <Label className="text-[11px] font-bold text-zinc-300 uppercase tracking-widest mb-3 block">
                       ご希望の時間帯 <span className="text-rose-400">*</span>
                     </Label>
                     <div className="flex items-center gap-2">
@@ -748,7 +768,7 @@ function ReserveCalendarContent() {
                           return <option key={t} value={t} disabled={isTooClose}>{t}{isTooClose ? " (電話のみ)" : ""}</option>;
                         })}
                       </select>
-                      <span className="text-zinc-500 font-bold shrink-0">〜</span>
+                      <span className="text-zinc-300 font-bold shrink-0">〜</span>
                       <select
                         value={waitlistEnd}
                         onChange={e => setWaitlistEnd(e.target.value)}
@@ -759,25 +779,25 @@ function ReserveCalendarContent() {
                         ))}
                       </select>
                     </div>
-                    <p className="text-[11px] text-amber-600 mt-2 font-bold">※ 範囲内で空きが出た際にご連絡いたします</p>
+                    <p className="text-[11px] text-amber-300 mt-2 font-bold">※ 範囲内で空きが出た際にご連絡いたします</p>
                   </div>
 
                   {/* お名前 */}
                   <div>
-                    <Label className="text-[11px] font-bold text-zinc-500 uppercase tracking-widest mb-2 block">
+                    <Label className="text-[11px] font-bold text-zinc-300 uppercase tracking-widest mb-2 block">
                       お名前 <span className="text-rose-400">*</span>
                     </Label>
                     <input
                       value={waitlistName}
                       onChange={e => setWaitlistName(e.target.value)}
                       placeholder="例: 山田 太郎"
-                      className="w-full h-12 bg-zinc-800 border border-zinc-700 rounded-xl px-4 text-white text-sm font-bold placeholder:text-zinc-600 focus:outline-none focus:border-amber-500"
+                      className="w-full h-12 bg-zinc-800 border border-zinc-700 rounded-xl px-4 text-white text-sm font-bold placeholder:text-zinc-400 focus:outline-none focus:border-amber-500"
                     />
                   </div>
 
                   {/* 電話番号 */}
                   <div>
-                    <Label className="text-[11px] font-bold text-zinc-500 uppercase tracking-widest mb-2 block">
+                    <Label className="text-[11px] font-bold text-zinc-300 uppercase tracking-widest mb-2 block">
                       お電話番号 <span className="text-rose-400">*</span>
                     </Label>
                     <input
@@ -785,13 +805,13 @@ function ReserveCalendarContent() {
                       value={waitlistPhone}
                       onChange={e => setWaitlistPhone(e.target.value)}
                       placeholder="例: 090-1234-5678"
-                      className="w-full h-12 bg-zinc-800 border border-zinc-700 rounded-xl px-4 text-white text-sm font-bold placeholder:text-zinc-600 focus:outline-none focus:border-amber-500"
+                      className="w-full h-12 bg-zinc-800 border border-zinc-700 rounded-xl px-4 text-white text-sm font-bold placeholder:text-zinc-400 focus:outline-none focus:border-amber-500"
                     />
                   </div>
 
                   {/* 症状（任意） */}
                   <div>
-                    <Label className="text-[11px] font-bold text-zinc-500 uppercase tracking-widest mb-2 block">
+                    <Label className="text-[11px] font-bold text-zinc-300 uppercase tracking-widest mb-2 block">
                       お悩みの症状（任意）
                     </Label>
                     <textarea
@@ -799,7 +819,7 @@ function ReserveCalendarContent() {
                       onChange={e => setWaitlistSymptoms(e.target.value)}
                       placeholder="例: 腰痛、肩こりなど"
                       rows={2}
-                      className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 text-white text-sm font-bold placeholder:text-zinc-600 focus:outline-none focus:border-amber-500 resize-none"
+                      className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 text-white text-sm font-bold placeholder:text-zinc-400 focus:outline-none focus:border-amber-500 resize-none"
                     />
                   </div>
 
@@ -844,10 +864,10 @@ function ReserveCalendarContent() {
                   でキャンセルが出た際にご連絡します。
                 </p>
                 <div className="inline-block bg-zinc-900 border border-zinc-800 rounded-2xl px-8 py-4 mb-5">
-                  <p className="text-[10px] text-zinc-600 font-bold uppercase tracking-widest mb-1">受付番号</p>
+                  <p className="text-[10px] text-zinc-300 font-bold uppercase tracking-widest mb-1">受付番号</p>
                   <p className="text-4xl font-mono font-black text-amber-400 tracking-widest">{waitlistNumber}</p>
                 </div>
-                <p className="text-xs text-zinc-600 font-bold">
+                <p className="text-xs text-zinc-300 font-bold">
                   LINEでの連絡をご希望の方は{" "}
                   <a href="/reserve" className="text-blue-400 underline underline-offset-2">予約フォーム</a>{" "}
                   よりご連絡ください。
@@ -859,8 +879,8 @@ function ReserveCalendarContent() {
 
         {/* フッター注記 */}
         <div className="mt-6 space-y-1 text-center">
-          <p className="text-[11px] text-zinc-700 font-bold">※ 水曜・日曜は休診日です</p>
-          <p className="text-[11px] text-zinc-700 font-bold">※ 空き状況はリアルタイムで変わります</p>
+          <p className="text-[11px] text-zinc-300 font-bold">※ 水曜・日曜は休診日です</p>
+          <p className="text-[11px] text-zinc-300 font-bold">※ 空き状況はリアルタイムで変わります</p>
         </div>
       </div>
     </div>
