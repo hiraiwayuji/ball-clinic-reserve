@@ -138,7 +138,7 @@ export default function MenuLPClient({ initialCourses, settings }: Props) {
                 }`}
               >
                 {t.label}
-                <span className={`ml-1 text-[10px] tabular-nums ${tab === t.key ? "text-white/80" : "text-zinc-600"}`}>
+                <span className={`ml-1 text-[10px] tabular-nums ${tab === t.key ? "text-white/80" : "text-zinc-300"}`}>
                   {t.count}
                 </span>
               </button>
@@ -190,8 +190,8 @@ export default function MenuLPClient({ initialCourses, settings }: Props) {
 
       {/* ─── フッター注記 ─── */}
       <div className="max-w-2xl mx-auto px-4 pb-12 pt-4 border-t border-zinc-800 text-center space-y-1">
-        <p className="text-[11px] text-zinc-600 font-bold">※ 料金は税込表示です</p>
-        <p className="text-[11px] text-zinc-600 font-bold">※ 新規限定クーポンは初めてご来院の方が対象です</p>
+        <p className="text-[11px] text-zinc-300 font-bold">※ 料金は税込表示です</p>
+        <p className="text-[11px] text-zinc-300 font-bold">※ 新規限定クーポンは初めてご来院の方が対象です</p>
       </div>
 
       {/* ─── 詳細モーダル ─── */}
@@ -547,7 +547,7 @@ function EmptyState({ tab }: { tab: Tab }) {
         <Sparkles className="w-7 h-7 text-zinc-600" />
       </div>
       <p className="text-zinc-400 font-bold text-sm mb-1">{message}</p>
-      <p className="text-zinc-600 text-xs">条件を変えてもう一度お探しください</p>
+      <p className="text-zinc-300 text-xs">条件を変えてもう一度お探しください</p>
     </div>
   );
 }

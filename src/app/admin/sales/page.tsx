@@ -421,7 +421,7 @@ function SalesPageInner() {
                 <Label htmlFor="customer_name">お名前</Label>
                 <div className="relative" ref={suggestionsRef}>
                   <div className="relative">
-                    <User className="absolute left-3 top-2.5 h-4 w-4 text-slate-400 z-10" />
+                    <User className="absolute left-3 top-2.5 h-4 w-4 text-slate-500 z-10" />
                     <Input
                       id="customer_name"
                       name="customer_name"
@@ -455,13 +455,13 @@ function SalesPageInner() {
                         >
                           <div className="flex items-center justify-between gap-2">
                             <div className="flex items-center gap-2 min-w-0">
-                              <User className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                              <User className="w-3.5 h-3.5 text-slate-500 shrink-0" />
                               <span className="font-bold text-slate-800 text-sm truncate">{p.customer_name}</span>
                             </div>
                             <div className="text-right shrink-0 space-y-0.5">
                               <p className="text-sm font-bold text-blue-600">¥{p.lastAmount.toLocaleString()}</p>
                               <div className="flex items-center gap-1 justify-end">
-                                <Clock className="w-3 h-3 text-slate-400" />
+                                <Clock className="w-3 h-3 text-slate-500" />
                                 <span className={`text-xs font-semibold ${
                                   p.daysSinceLastVisit <= 7 ? "text-green-600" :
                                   p.daysSinceLastVisit <= 30 ? "text-blue-600" :
@@ -469,7 +469,7 @@ function SalesPageInner() {
                                 }`}>
                                   {p.daysSinceLastVisit}日前
                                 </span>
-                                <span className="text-xs text-slate-400">計{p.visitCount}回</span>
+                                <span className="text-xs text-slate-500">計{p.visitCount}回</span>
                               </div>
                             </div>
                           </div>
@@ -567,7 +567,7 @@ function SalesPageInner() {
                     </button>
                   ))}
                 </div>
-                <p className="text-[10px] text-slate-400">
+                <p className="text-[10px] text-slate-500">
                   ※ 0 円計上時は必須。自賠責・労災・はぐくみ医療等
                 </p>
               </div>
@@ -619,14 +619,14 @@ function SalesPageInner() {
                   {loading ? (
                     <TableRow>
                       <TableCell colSpan={4} className="h-48 text-center">
-                        <Loader2 className="w-8 h-8 animate-spin mx-auto text-slate-300" />
-                        <p className="text-sm text-slate-400 mt-2">読み込み中...</p>
+                        <Loader2 className="w-8 h-8 animate-spin mx-auto text-slate-500" />
+                        <p className="text-sm text-slate-500 mt-2">読み込み中...</p>
                       </TableCell>
                     </TableRow>
                   ) : sales.length === 0 ? (
                     <TableRow>
                       <TableCell colSpan={4} className="h-48 text-center">
-                        <div className="flex flex-col items-center justify-center text-slate-400">
+                        <div className="flex flex-col items-center justify-center text-slate-500">
                           <Coins className="w-12 h-12 mb-2 opacity-20" />
                           <p>売上データがありません</p>
                         </div>
@@ -666,7 +666,7 @@ function SalesPageInner() {
                             <Button
                               variant="ghost"
                               size="icon"
-                              className="text-slate-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/30 transition-all rounded-full"
+                              className="text-slate-500 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/30 transition-all rounded-full"
                               onClick={() => openEdit(sale)}
                               aria-label="修正"
                               title="修正"
@@ -676,7 +676,7 @@ function SalesPageInner() {
                             <Button
                               variant="ghost"
                               size="icon"
-                              className="text-slate-300 hover:text-rose-500 hover:bg-rose-50 transition-all rounded-full"
+                              className="text-slate-500 hover:text-rose-500 hover:bg-rose-50 transition-all rounded-full"
                               onClick={() => handleDelete(sale.id)}
                               aria-label="削除"
                               title="削除"
@@ -738,7 +738,7 @@ function SalesPageInner() {
                   onChange={(e) => setEditForm(f => ({ ...f, treatment_fee: e.target.value }))}
                 />
                 {editForm.hasJsonMemo && (
-                  <p className="text-[10px] text-slate-400">
+                  <p className="text-[10px] text-slate-500">
                     ※ 受付入力の明細データは保持されます（金額のみ上書き）
                   </p>
                 )}
@@ -839,7 +839,7 @@ function LineItemRow({
           保存
         </label>
       )}
-      <button type="button" onClick={onRemove} className="text-slate-400 hover:text-red-500 text-lg leading-none shrink-0 w-6 h-6 flex items-center justify-center rounded hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">×</button>
+      <button type="button" onClick={onRemove} className="text-slate-500 hover:text-red-500 text-lg leading-none shrink-0 w-6 h-6 flex items-center justify-center rounded hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">×</button>
     </div>
   );
 }
