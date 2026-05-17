@@ -5,6 +5,7 @@ import { checkAdminAuth } from "@/app/actions/auth";
 import { revalidatePath } from "next/cache";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { getClinicSettings } from "./settings";
+import { CLINIC_CONFIG } from "@/lib/clinic-config";
 
 async function getSupabase() { return await createClient(); }
 
@@ -83,7 +84,7 @@ export async function generateAnalyticsComment(comparisonJson: string, customerD
     const genAI = new GoogleGenerativeAI(apiKey);
     const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
     const noData = "なし";
-    const prompt = `あなたは接骨院の経営戦略AIです。比較データと顧客属性データを見て、院長への経営コメントを日本語で生成してください。比較(JSON): ${comparisonJson}. 顧客属性(JSON): ${customerDataJson || noData}. 出力: 200文字以内、院長を「ぼーるくん」と呼び、無駄な前置き文なしで書く。`;
+    const prompt = `あなたは接骨院の経営戦略AIです。比較データと顧客属性データを見て、院長への経営コメントを日本語で生成してください。比較(JSON): ${comparisonJson}. 顧客属性(JSON): ${customerDataJson || noData}. 出力: 200文字以内、院長を「${CLINIC_CONFIG.ownerNickname}」と呼び、無駄な前置き文なしで書く。`;
     const result = await model.generateContent(prompt);
     return { success: true, comment: result.response.text() };
   } catch (error) {
