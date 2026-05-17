@@ -1,5 +1,5 @@
 import { requireRole } from "@/app/actions/auth";
-import { listActiveStaff, listOverrides, listWorkingHours } from "@/app/actions/staff-schedule";
+import { listActiveStaff, listOverrides, listWorkingHours, listTasks } from "@/app/actions/staff-schedule";
 import StaffScheduleClient from "./StaffScheduleClient";
 
 export const dynamic = "force-dynamic";
@@ -15,10 +15,11 @@ export default async function StaffSchedulePage() {
   const startDate = ymd(today);
   const endDate = ymd(new Date(today.getTime() + 28 * 24 * 60 * 60 * 1000));
 
-  const [staffRes, overridesRes, workingHoursRes] = await Promise.all([
+  const [staffRes, overridesRes, workingHoursRes, tasksRes] = await Promise.all([
     listActiveStaff(),
     listOverrides({ startDate, endDate }),
     listWorkingHours(),
+    listTasks({ status: "all" }),
   ]);
 
   return (
@@ -35,6 +36,7 @@ export default async function StaffSchedulePage() {
         initialStaff={staffRes.staff ?? []}
         initialOverrides={overridesRes.rows ?? []}
         initialWorkingHours={workingHoursRes.rows ?? []}
+        initialTasks={tasksRes.rows ?? []}
         initialStartDate={startDate}
         initialEndDate={endDate}
       />

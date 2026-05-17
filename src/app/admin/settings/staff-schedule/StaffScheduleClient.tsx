@@ -5,6 +5,7 @@ import {
   type StaffOption,
   type StaffOverrideRow,
   type WorkingHourRow,
+  type StaffTaskRow,
 } from "@/app/actions/staff-schedule";
 import SpotScheduleTab from "./tabs/SpotScheduleTab";
 import WorkingHoursTab from "./tabs/WorkingHoursTab";
@@ -25,6 +26,7 @@ type Props = {
   initialStaff: StaffOption[];
   initialOverrides: StaffOverrideRow[];
   initialWorkingHours: WorkingHourRow[];
+  initialTasks: StaffTaskRow[];
   initialStartDate: string;
   initialEndDate: string;
 };
@@ -33,6 +35,7 @@ export default function StaffScheduleClient({
   initialStaff,
   initialOverrides,
   initialWorkingHours,
+  initialTasks,
   initialStartDate,
   initialEndDate,
 }: Props) {
@@ -76,7 +79,7 @@ export default function StaffScheduleClient({
       {tab === "working-hours" && (
         <WorkingHoursTab staff={initialStaff} initialRows={initialWorkingHours} />
       )}
-      {tab === "tasks" && <TasksTab />}
+      {tab === "tasks" && <TasksTab staff={initialStaff} initialRows={initialTasks} />}
       {tab === "import" && <ImportTab />}
     </div>
   );
