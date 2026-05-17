@@ -2,7 +2,7 @@
   "crons": [
     {
       "path": "/api/cron/keepalive",
-      "schedule": "0 22 * * *"
+      "schedule": "30 21 * * *"
     },
     {
       "path": "/api/line/remind/appointments?secret=REMIND_SECRET_PLACEHOLDER",
