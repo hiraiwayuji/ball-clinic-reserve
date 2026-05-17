@@ -6,14 +6,9 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: [
-    /*
-     * Match all request paths except for the ones starting with:
-     * - _next/static (static files)
-     * - _next/image (image optimization files)
-     * - favicon.ico (favicon file)
-     * Feel free to modify this pattern to include more paths.
-     */
-    '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
-  ],
+  // 認証チェックが必要なルートだけに限定。
+  // 全パスに広げると middleware 内の Supabase Auth API 呼び出しが朝一の
+  // cold start で詰まり MIDDLEWARE_INVOCATION_TIMEOUT(504) を起こす。
+  // 将来 /staff/* など別の認証要ルートを追加する場合はここに追記する。
+  matcher: ['/admin/:path*'],
 }

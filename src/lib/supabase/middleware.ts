@@ -27,16 +27,16 @@ export async function updateSession(request: NextRequest) {
     }
   )
 
-  // IMPORTANT: Avoid writing any logic between createServerClient and
-  // getUser(). A simple mistake could make it very hard to debug
-  // issues with users being logged out unnecessarily.
-
+  // getSession は cookie 内の JWT をローカルで読むだけで Supabase Auth API を
+  // 叩かない。getUser だと毎リクエストで外部 HTTP が発生し、朝一の cold start
+  // で middleware が timeout する原因になる。厳密な検証が必要な箇所
+  // (Server Action / Route Handler) では従来通り getUser を使う。
   const {
-    data: { user },
-  } = await supabase.auth.getUser()
+    data: { session },
+  } = await supabase.auth.getSession()
 
   if (
-    !user &&
+    !session &&
     !request.nextUrl.pathname.startsWith('/admin-login') &&
     !request.nextUrl.pathname.startsWith('/admin-setup') &&
     request.nextUrl.pathname.startsWith('/admin')
