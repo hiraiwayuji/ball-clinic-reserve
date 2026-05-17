@@ -1,5 +1,5 @@
 import { requireRole } from "@/app/actions/auth";
-import { listActiveStaff, listOverrides } from "@/app/actions/staff-schedule";
+import { listActiveStaff, listOverrides, listWorkingHours } from "@/app/actions/staff-schedule";
 import StaffScheduleClient from "./StaffScheduleClient";
 
 export const dynamic = "force-dynamic";
@@ -15,17 +15,18 @@ export default async function StaffSchedulePage() {
   const startDate = ymd(today);
   const endDate = ymd(new Date(today.getTime() + 28 * 24 * 60 * 60 * 1000));
 
-  const [staffRes, overridesRes] = await Promise.all([
+  const [staffRes, overridesRes, workingHoursRes] = await Promise.all([
     listActiveStaff(),
     listOverrides({ startDate, endDate }),
+    listWorkingHours(),
   ]);
 
   return (
-    <div className="container mx-auto py-6 max-w-4xl">
+    <div className="container mx-auto py-6 max-w-5xl">
       <header className="mb-6">
-        <h1 className="text-xl md:text-2xl font-bold text-slate-900">スタッフ予定・予約ブロック</h1>
+        <h1 className="text-xl md:text-2xl font-bold text-slate-900">スタッフ予定・勤怠・タスク</h1>
         <p className="text-sm text-slate-600 mt-1">
-          ミーティング・研修・私用などで予約を取れないようにしたい時間帯を登録します。
+          基本勤務時間・ミーティング等の単発予定・タスク管理を一画面でまとめて運用できます。
           全スタッフが不在になる時間帯は患者LP の予約スロットから自動的に消えます。
         </p>
       </header>
@@ -33,6 +34,7 @@ export default async function StaffSchedulePage() {
       <StaffScheduleClient
         initialStaff={staffRes.staff ?? []}
         initialOverrides={overridesRes.rows ?? []}
+        initialWorkingHours={workingHoursRes.rows ?? []}
         initialStartDate={startDate}
         initialEndDate={endDate}
       />
