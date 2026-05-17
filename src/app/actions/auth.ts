@@ -11,23 +11,59 @@ export type AdminAuthInfo = {
   role: ClinicRole;
 };
 
+// Supabase の getUser/select が cold start でハングしても画面真っ白にしないための
+// 安全タイムアウト。これを超えたら未認証扱いで /admin-login に戻す or デフォルト値で続行する。
+async function withTimeout<T>(promise: PromiseLike<T>, ms: number, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+  });
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 // Supabaseセッションを確認し、テナントのclinic_idと role を返す関数
 // 戻り値の clinicId は既存呼び出しと互換、role/userId/email は Phase 1 で追加。
 export async function checkAdminAuth(): Promise<AdminAuthInfo> {
   const { createClient } = await import("@/lib/supabase/server");
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+
+  // getUser は Supabase Auth API への外部呼び出し。cold start で詰まる場合があるため
+  // 10s のタイムアウトで囲む。タイムアウト/エラー時は user=null として通常の未認証
+  // フローに合流させる（=ログイン画面へ戻す）。
+  let user: Awaited<ReturnType<typeof supabase.auth.getUser>>["data"]["user"] = null;
+  try {
+    const result = await withTimeout(supabase.auth.getUser(), 10_000, "auth.getUser");
+    user = result.data.user;
+  } catch (err) {
+    console.error("[checkAdminAuth] auth.getUser failed:", err);
+  }
 
   if (!user) {
     redirect("/admin-login");
   }
 
-  const { data } = await supabase
-    .from("clinic_users")
-    .select("clinic_id, role")
-    .eq("user_id", user.id)
-    .limit(1)
-    .single();
+  // clinic_users 検索も外部呼び出し。失敗時はデフォルト clinicId/role でフォールバック
+  // して画面を出す（既存の挙動と同じ）。
+  let data: { clinic_id: string | null; role: string | null } | null = null;
+  try {
+    const result = await withTimeout(
+      supabase
+        .from("clinic_users")
+        .select("clinic_id, role")
+        .eq("user_id", user.id)
+        .limit(1)
+        .single(),
+      5_000,
+      "clinic_users.select",
+    );
+    data = result.data;
+  } catch (err) {
+    console.error("[checkAdminAuth] clinic_users lookup failed:", err);
+  }
 
   const clinicId = data?.clinic_id ?? "00000000-0000-0000-0000-000000000001";
   const role = (data?.role as ClinicRole | undefined) ?? "owner";
