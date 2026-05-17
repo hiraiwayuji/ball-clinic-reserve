@@ -32,6 +32,7 @@ export default function AdminSidebar({ role = "owner", variant = "desktop", onNa
           ? "hidden md:flex md:flex-col w-60 shrink-0 bg-[var(--sidebar)] border-r border-[var(--sidebar-border)] min-h-screen sticky top-0"
           : "flex flex-col w-72 max-w-[85vw] bg-white dark:bg-slate-900 h-full pb-[env(safe-area-inset-bottom)]"
       }
+      style={variant === "mobile" ? { backgroundColor: "#ffffff" } : undefined}
     >
       {/* ロゴ・院名 */}
       <div className="h-16 flex items-center gap-2 px-5 border-b border-[var(--sidebar-border)]">
