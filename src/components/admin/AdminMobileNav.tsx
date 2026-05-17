@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { usePathname } from "next/navigation";
 import { Menu, X } from "lucide-react";
 import AdminSidebar from "@/components/admin/AdminSidebar";
@@ -8,7 +9,13 @@ import type { Role } from "@/lib/admin-nav";
 
 export default function AdminMobileNav({ role = "owner" }: { role?: Role }) {
   const [open, setOpen] = useState(false);
+  const [mounted, setMounted] = useState(false);
   const pathname = usePathname();
+
+  // CSR でのみ Portal を有効化（SSR hydration mismatch 回避）
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   // パス変更で自動クローズ
   useEffect(() => {
@@ -35,6 +42,36 @@ export default function AdminMobileNav({ role = "owner" }: { role?: Role }) {
     };
   }, [open]);
 
+  // 親(AdminTopBar) に backdrop-filter があると position:fixed が viewport 基準にならず
+  // ヘッダー領域内に閉じ込められる。Portal で body 直下にレンダーして回避する。
+  const drawer = open ? (
+    <div className="fixed inset-0 z-50 flex" role="dialog" aria-modal="true">
+      {/* オーバーレイ */}
+      <button
+        type="button"
+        className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm"
+        onClick={() => setOpen(false)}
+        aria-label="メニューを閉じる"
+      />
+      {/* Drawer 本体 */}
+      {/* style で白を強制（Tailwind CSS が古いキャッシュで欠けても背景が透けない保険） */}
+      <div
+        className="relative z-10 h-full bg-white dark:bg-slate-900 shadow-xl animate-in slide-in-from-left duration-200"
+        style={{ backgroundColor: "#ffffff" }}
+      >
+        <button
+          type="button"
+          onClick={() => setOpen(false)}
+          className="absolute top-3 right-3 z-20 p-2 rounded-md text-slate-500 hover:bg-slate-100"
+          aria-label="メニューを閉じる"
+        >
+          <X className="w-5 h-5" />
+        </button>
+        <AdminSidebar role={role} variant="mobile" onNavigate={() => setOpen(false)} />
+      </div>
+    </div>
+  ) : null;
+
   return (
     <div className="md:hidden">
       <button
@@ -47,33 +84,7 @@ export default function AdminMobileNav({ role = "owner" }: { role?: Role }) {
         <Menu className="w-5 h-5" />
       </button>
 
-      {open && (
-        <div className="fixed inset-0 z-50 flex" role="dialog" aria-modal="true">
-          {/* オーバーレイ */}
-          <button
-            type="button"
-            className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm"
-            onClick={() => setOpen(false)}
-            aria-label="メニューを閉じる"
-          />
-          {/* Drawer 本体 */}
-          {/* style で白を強制（Tailwind CSS が古いキャッシュで欠けても背景が透けない保険） */}
-          <div
-            className="relative z-10 h-full bg-white dark:bg-slate-900 shadow-xl animate-in slide-in-from-left duration-200"
-            style={{ backgroundColor: "#ffffff" }}
-          >
-            <button
-              type="button"
-              onClick={() => setOpen(false)}
-              className="absolute top-3 right-3 z-20 p-2 rounded-md text-slate-500 hover:bg-slate-100"
-              aria-label="メニューを閉じる"
-            >
-              <X className="w-5 h-5" />
-            </button>
-            <AdminSidebar role={role} variant="mobile" onNavigate={() => setOpen(false)} />
-          </div>
-        </div>
-      )}
+      {mounted && drawer ? createPortal(drawer, document.body) : null}
     </div>
   );
 }
