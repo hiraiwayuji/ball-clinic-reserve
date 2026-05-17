@@ -57,7 +57,11 @@ export default function AdminMobileNav({ role = "owner" }: { role?: Role }) {
             aria-label="メニューを閉じる"
           />
           {/* Drawer 本体 */}
-          <div className="relative z-10 h-full bg-white dark:bg-slate-900 shadow-xl animate-in slide-in-from-left duration-200">
+          {/* style で白を強制（Tailwind CSS が古いキャッシュで欠けても背景が透けない保険） */}
+          <div
+            className="relative z-10 h-full bg-white dark:bg-slate-900 shadow-xl animate-in slide-in-from-left duration-200"
+            style={{ backgroundColor: "#ffffff" }}
+          >
             <button
               type="button"
               onClick={() => setOpen(false)}
