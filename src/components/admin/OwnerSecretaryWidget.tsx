@@ -9,6 +9,7 @@ import {
   type OwnerAlert,
   type AlertCategory,
 } from "@/app/actions/ai-secretary-multi";
+import TeamTaskLoadPanel from "./TeamTaskLoadPanel";
 
 const CATEGORY_META: Record<AlertCategory, { label: string; icon: typeof AlertTriangle; tone: string; toneBg: string }> = {
   urgent:    { label: "緊急",       icon: AlertTriangle, tone: "text-rose-700 dark:text-rose-300",     toneBg: "bg-rose-100 dark:bg-rose-900/40 border-rose-300" },
@@ -151,6 +152,11 @@ export default function OwnerSecretaryWidget() {
               warn={briefing.metrics.last7DaysDeletedByStaff >= 3}
             />
           </dl>
+
+          {/* チームタスク負荷ウィジェット */}
+          <div className="mt-4">
+            <TeamTaskLoadPanel />
+          </div>
         </>
       )}
     </section>
