@@ -24,4 +24,6 @@ export const CLINIC_CONFIG = {
   hoursLine1: process.env.NEXT_PUBLIC_CLINIC_HOURS_1 ?? "月・火・木・金: 12:00 ～ 23:00（最終受付 22:30）",
   hoursLine2: process.env.NEXT_PUBLIC_CLINIC_HOURS_2 ?? "土: 10:00 ～ 18:00（最終受付 17:30）",
   hoursClosed: process.env.NEXT_PUBLIC_CLINIC_HOURS_CLOSED ?? "※水・日・祝日は休診",
+  /** AI 秘書がオーナーを呼ぶ呼びかけ名（ボール接骨院: "ぼーるくん"、からだ: "藤川先生" 等） */
+  ownerNickname: process.env.NEXT_PUBLIC_CLINIC_OWNER_NICKNAME ?? "院長先生",
 } as const;

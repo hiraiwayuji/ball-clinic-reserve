@@ -8,6 +8,7 @@
 import { checkAdminAuth, requireRole } from "@/app/actions/auth";
 import { getLatestSignalsForClinic } from "@/app/actions/external-signals";
 import { getTaskLoadByStaff, listTasks } from "@/app/actions/staff-schedule";
+import { CLINIC_CONFIG } from "@/lib/clinic-config";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 
@@ -473,7 +474,7 @@ export async function generateOwnerBriefing(): Promise<{ success: boolean; brief
   const alerts: string[] = alertsV2.map((a) => a.message);
 
   // ── Gemini で経営アドバイスを 1 文生成 ──
-  const prompt = `あなたはぼーるくん（接骨院オーナー）専属の経営秘書 AI です。
+  const prompt = `あなたは${CLINIC_CONFIG.ownerNickname}（接骨院オーナー）専属の経営秘書 AI です。
 直近 7 日のデータを見て、200 字以内で「今週のひと言」を生成してください。
 無駄な前置き禁止、語尾は「〜です」体、絵文字 1 つだけ使用可。
 ${externalSignalsText ? "\n地域情報があれば、最後に1文「今日のひと言」として患者さんへの声かけ素材を添えること。" : ""}
