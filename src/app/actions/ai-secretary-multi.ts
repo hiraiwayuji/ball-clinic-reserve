@@ -7,6 +7,7 @@
 
 import { checkAdminAuth, requireRole } from "@/app/actions/auth";
 import { getLatestSignalsForClinic } from "@/app/actions/external-signals";
+import { getTaskLoadByStaff, listTasks } from "@/app/actions/staff-schedule";
 import { CLINIC_CONFIG } from "@/lib/clinic-config";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
@@ -418,6 +419,57 @@ export async function generateOwnerBriefing(): Promise<{ success: boolean; brief
     }
   } catch {}
 
+  // 10) タスク管理（偏り・期限超過・期限近・長期未完了）
+  try {
+    const taskLoadRes = await getTaskLoadByStaff();
+    if (taskLoadRes.success && taskLoadRes.rows && taskLoadRes.rows.length > 0) {
+      const assignedRows = taskLoadRes.rows.filter((r) => r.staff_id !== null);
+      const sorted = [...assignedRows].sort((a, b) => b.pending - a.pending);
+      const top = sorted[0];
+      const others = sorted.slice(1);
+      const otherAvg = others.length > 0
+        ? others.reduce((s, r) => s + r.pending, 0) / others.length
+        : 0;
+
+      // タスク集中
+      if (top && top.pending >= 8 && (otherAvg === 0 || top.pending >= otherAvg * 2.5)) {
+        pushAlert(
+          "thisWeek",
+          `${top.staff_name} にタスクが集中しています（${top.pending} 件、他平均 ${otherAvg.toFixed(1)} 件）。再分配を検討してください。`
+        );
+      }
+
+      // 期限超過合計
+      const overdueTotal = taskLoadRes.rows.reduce((s, r) => s + r.overdue, 0);
+      if (overdueTotal > 0) {
+        pushAlert("urgent", `期限超過のタスクが ${overdueTotal} 件あります。`);
+      }
+    }
+
+    // 期限近 (2日以内) の高優先度
+    const tasksRes = await listTasks({ status: "pending" });
+    if (tasksRes.success && tasksRes.rows) {
+      const todayStr = now.toISOString().slice(0, 10);
+      const twoDaysLater = new Date(now.getTime() + 2 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+      const soon = tasksRes.rows.filter(
+        (t) => t.due_date && t.due_date >= todayStr && t.due_date <= twoDaysLater && t.priority === "high"
+      );
+      if (soon.length >= 2) {
+        pushAlert("thisWeek", `期限が 2 日以内の高優先度タスクが ${soon.length} 件あります。早めの対応を。`);
+      }
+
+      // 長期未完了 (作成から 30 日経過の pending)
+      const since30 = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString();
+      const stale = tasksRes.rows.filter((t) => t.created_at < since30);
+      if (stale.length > 0) {
+        pushAlert(
+          "longTerm",
+          `30 日以上未完了のタスクが ${stale.length} 件あります。やる気が出ない案件は思い切って削除も検討してください。`
+        );
+      }
+    }
+  } catch {}
+
   // ── 後方互換: フラット alerts を生成 ──
   const alerts: string[] = alertsV2.map((a) => a.message);
 
@@ -529,14 +581,34 @@ export async function generateStaffBriefing(): Promise<{ success: boolean; brief
     }
   }
 
-  // Gemini で励ましメッセージを 1 つ生成（80 字以内、絵文字可）
+  // 自分の未完了タスクをコンテキストに追加（StaffSecretaryWidget の表示と別に、励ましメッセージ内で言及）
+  let myTaskContext = "";
+  let myTaskCount = 0;
+  try {
+    const myTasksRes = await listTasks({ status: "pending", staff_id: "me" });
+    if (myTasksRes.success && myTasksRes.rows && myTasksRes.rows.length > 0) {
+      const todayStr = now.toISOString().slice(0, 10);
+      const twoDaysLater = new Date(now.getTime() + 2 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+      const overdue = myTasksRes.rows.filter((t) => t.due_date && t.due_date < todayStr);
+      const soon = myTasksRes.rows.filter((t) => t.due_date && t.due_date >= todayStr && t.due_date <= twoDaysLater);
+      myTaskCount = myTasksRes.rows.length;
+
+      const parts = [`未完了タスク ${myTaskCount} 件`];
+      if (overdue.length > 0) parts.push(`期限超過 ${overdue.length} 件`);
+      if (soon.length > 0) parts.push(`期限 2 日以内 ${soon.length} 件`);
+      myTaskContext = `\n- ${parts.join(" / ")}`;
+    }
+  } catch {}
+
+  // Gemini で励ましメッセージを 1 つ生成（100 字以内、絵文字可）
   const prompt = `あなたは接骨院スタッフ専属のモチベ向上 AI 秘書です。
-スタッフの直近実績を見て、80 字以内で「今日の一言」を生成してください。
+スタッフの直近実績を見て、100 字以内で「今日の一言」を生成してください。
 ポジティブで具体的、絵文字 1 つだけ可。
+${myTaskContext ? "期限超過・期限近のタスクがあれば、優しく1文で言及して。プレッシャー与えすぎず、寄り添う雰囲気で。" : ""}
 
 【スタッフ ${staffEmail ?? "(匿名)"} の実績】
 - 直近 7 日の対応予約数: ${handledLast7Days}
-- 担当顧客のリピート率: ${repeatRate}%`;
+- 担当顧客のリピート率: ${repeatRate}%${myTaskContext}`;
 
   const ai = await callGemini(prompt, { temperature: 0.85, maxTokens: 120 });
   const message = ai.ok
