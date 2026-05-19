@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { loginAction, sendPasswordResetEmail, demoLoginAction } from "@/app/actions/auth";
 import { Button } from "@/components/ui/button";
@@ -17,7 +17,17 @@ const ERROR_MESSAGES: Record<string, string> = {
     "システム設定に問題があります。管理者にお問い合わせください（NEXT_PUBLIC_CLINIC_ID 未設定）。",
 };
 
+// Next.js 15+ では useSearchParams を含む client component は Suspense で包む必要がある
+// （static prerender 時の bailout 防止）
 export default function AdminLoginPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-gradient-to-br from-[#F7FAFC] via-white to-[#E0F2FE]/40" />}>
+      <AdminLoginContent />
+    </Suspense>
+  );
+}
+
+function AdminLoginContent() {
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isDemoLoading, setIsDemoLoading] = useState(false);
