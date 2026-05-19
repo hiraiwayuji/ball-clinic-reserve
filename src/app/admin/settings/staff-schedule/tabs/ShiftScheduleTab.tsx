@@ -104,6 +104,30 @@ function snapTimeToSlot(t: string): string {
   return `${String(h).padStart(2, "0")}:${String(min).padStart(2, "0")}`;
 }
 
+/**
+ * 同じ場所内のシフト群を時間帯重複に応じて row に詰め込む。
+ * 重複しないシフトは 1 row に並ぶ、重複するシフトは別 row になる。
+ * 戻り値: rows[i] = i 行目に並ぶシフト配列（start_time 順）
+ */
+function packShiftsIntoRows(shifts: StaffShiftRow[]): StaffShiftRow[][] {
+  const sorted = [...shifts].sort((a, b) => a.start_time.localeCompare(b.start_time));
+  const rows: StaffShiftRow[][] = [];
+  for (const s of sorted) {
+    // 既存 row の最後の end_time <= 新シフト start_time なら同じ row に入れる
+    let placed = false;
+    for (const row of rows) {
+      const last = row[row.length - 1];
+      if (last.end_time <= s.start_time) {
+        row.push(s);
+        placed = true;
+        break;
+      }
+    }
+    if (!placed) rows.push([s]);
+  }
+  return rows;
+}
+
 /** 色キー → HEX（プリセット内なら HEX、そうでなければそのまま、null なら null） */
 function resolveColor(c: string | null | undefined): string | null {
   if (!c) return null;
@@ -533,32 +557,43 @@ function ShiftGrid({
         const dayColor =
           dayOfWeek === 0 ? "text-rose-600" : dayOfWeek === 6 ? "text-sky-600" : "text-slate-800";
 
-        return locations.map((loc, locIdx) => {
+        return locations.flatMap((loc, locIdx) => {
           const key = `${dateStr}|${loc.id}`;
           const shiftsHere = shiftsByDayLocation.get(key) ?? [];
+          // 時間帯重複するシフトは別 row に分ける。重複なしなら 1 row。
+          // 空の場合も「空 1 行」を保証して、空きセルクリック領域を残す。
+          const shiftRows = shiftsHere.length === 0 ? [[]] : packShiftsIntoRows(shiftsHere);
           const isFirstLocation = locIdx === 0;
           const isLastLocation = locIdx === locations.length - 1;
 
+          return shiftRows.map((rowShifts, rowIdx) => {
+            const isFirstRow = rowIdx === 0;
+            const isLastRowOfLocation = rowIdx === shiftRows.length - 1;
+            // 場所の最後の行 かつ 場所自体も最後 = 太線（次の日付との境界）
+            const isBottomOfDay = isLastLocation && isLastRowOfLocation;
+
           return (
             <div
-              key={`${dateStr}-${loc.id}`}
+              key={`${dateStr}-${loc.id}-${rowIdx}`}
               className={
-                isLastLocation
+                isBottomOfDay
                   ? "flex border-b-2 border-slate-200 relative"
-                  : "flex border-b border-slate-100 relative"
+                  : isLastRowOfLocation
+                  ? "flex border-b border-slate-200 relative"
+                  : "flex border-b border-slate-100/50 relative"
               }
               style={{ height: `${ROW_HEIGHT}px` }}
             >
-              {/* 日付列（最初の場所行にだけ表示、rowspan 的に） */}
+              {/* 日付列（最初の場所×最初の row にだけ表示） */}
               <div
                 className={
-                  isFirstLocation
+                  isFirstLocation && isFirstRow
                     ? `shrink-0 border-r border-slate-200 flex flex-col items-center justify-center text-xs font-bold ${dayColor} bg-slate-50/50`
                     : "shrink-0 border-r border-slate-200 bg-slate-50/30"
                 }
                 style={{ width: `${DATE_COL_WIDTH}px` }}
               >
-                {isFirstLocation && (
+                {isFirstLocation && isFirstRow && (
                   <>
                     <span className="text-[10px] leading-none">{date.getMonth() + 1}/{date.getDate()}</span>
                     <span className="text-[11px] leading-tight">{dayLabel}</span>
@@ -566,13 +601,13 @@ function ShiftGrid({
                 )}
               </div>
 
-              {/* 場所列 */}
+              {/* 場所列（各場所の最初の row のみ表示、続きは空） */}
               <div
                 className="shrink-0 border-r border-slate-200 flex items-center justify-center text-[11px] text-slate-700 bg-slate-50/30 px-1 truncate"
                 style={{ width: `${LOC_COL_WIDTH}px` }}
                 title={loc.name}
               >
-                {loc.name}
+                {isFirstRow ? loc.name : ""}
               </div>
 
               {/* タイムライン (空きセル + シフトブロック absolute) */}
@@ -598,8 +633,8 @@ function ShiftGrid({
                   ))}
                 </div>
 
-                {/* シフトブロック */}
-                {shiftsHere.map((s) => {
+                {/* シフトブロック（この row 分のみ） */}
+                {(rowShifts as StaffShiftRow[]).map((s) => {
                   const startIdx = timeToSlotIndex(s.start_time);
                   const endIdx = timeToSlotIndex(s.end_time);
                   if (startIdx < 0) return null;
@@ -638,6 +673,7 @@ function ShiftGrid({
               </div>
             </div>
           );
+          });
         });
       })}
     </div>
