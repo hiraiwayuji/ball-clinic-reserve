@@ -392,20 +392,8 @@ export async function copyShifts(input: {
 // スタッフ表示色の設定
 // ─────────────────────────────────────────────────────────────────
 
-/** プリセット色キー → 表示用 HEX。シフト表セル描画と色選択UIで共有。 */
-export const STAFF_COLOR_PRESETS = {
-  blue:   "#2563EB",  // 青 = 平岡 など
-  green:  "#16A34A",
-  yellow: "#EAB308",
-  pink:   "#EC4899",
-  orange: "#F97316",
-  red:    "#DC2626",
-  purple: "#9333EA",
-  teal:   "#0D9488",
-  gray:   "#6B7280",
-} as const;
-
-export type StaffColorKey = keyof typeof STAFF_COLOR_PRESETS;
+// プリセット色（STAFF_COLOR_PRESETS）と StaffColorKey 型は
+// @/lib/staff-colors.ts に分離（"use server" ファイルからは object を export できないため）
 
 export async function updateStaffColor(
   staffId: string,

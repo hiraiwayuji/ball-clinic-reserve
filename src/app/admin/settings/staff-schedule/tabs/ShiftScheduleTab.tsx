@@ -11,13 +11,12 @@ import {
   upsertShiftLocation,
   deactivateShiftLocation,
   updateStaffColor,
-  STAFF_COLOR_PRESETS,
   type StaffShiftRow,
   type ShiftLocationRow,
   type ShiftTaskType,
   type ShiftStatus,
-  type StaffColorKey,
 } from "@/app/actions/staff-shifts";
+import { STAFF_COLOR_PRESETS, type StaffColorKey } from "@/lib/staff-colors";
 import { type StaffOption } from "@/app/actions/staff-schedule";
 import { Button } from "@/components/ui/button";
 import {
