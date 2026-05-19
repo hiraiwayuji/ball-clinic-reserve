@@ -20,6 +20,7 @@ import { createManualReservation } from "@/app/actions/adminReserve";
 import { searchPatientsForBooking, PatientSuggestion } from "@/app/actions/patientSearch";
 import { toast } from "sonner";
 import { getTimeSlots } from "@/lib/time-slots";
+import { useClinicSlotDuration } from "@/lib/use-clinic-slot-duration";
 
 export function AddAppointmentDialog({
   onSuccess,
@@ -34,6 +35,7 @@ export function AddAppointmentDialog({
   defaultDate?: Date;
   defaultTime?: string;
 }) {
+  const slotMinutes = useClinicSlotDuration();
   const [internalOpen, setInternalOpen] = useState(false);
   const open = externalOpen !== undefined ? externalOpen : internalOpen;
   const setOpen = (val: boolean) => {
@@ -222,12 +224,12 @@ export function AddAppointmentDialog({
                 <select value={time} onChange={(e) => setTime(e.target.value)} className={selectClass}>
                   {!date ? (
                     <option value="" disabled>先に日付を選択</option>
-                  ) : getTimeSlots(date, true).length === 0 ? (
+                  ) : getTimeSlots(date, { bypassRestrictions: true, slotMinutes }).length === 0 ? (
                     <option value="" disabled>休診日</option>
                   ) : (
                     <option value="" disabled>時間を選択</option>
                   )}
-                  {date && getTimeSlots(date, true).map((t) => (
+                  {date && getTimeSlots(date, { bypassRestrictions: true, slotMinutes }).map((t) => (
                     <option key={t} value={t}>{t}</option>
                   ))}
                 </select>
