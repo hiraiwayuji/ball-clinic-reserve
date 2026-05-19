@@ -55,9 +55,10 @@ const TASK_SYMBOL: Record<NonNullable<ShiftTaskType>, string> = {
   break: "▶",
 };
 
+// task_type 内部キーは toko のまま（DB 互換）、表示ラベルは「はなきん」
 const TASK_LABEL: Record<NonNullable<ShiftTaskType>, string> = {
   hanamaru: "（はなまる）",
-  toko: "（とこ）",
+  toko: "（はなきん）",
   break: "（休憩）",
 };
 
