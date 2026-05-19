@@ -285,30 +285,6 @@ export default function ShiftScheduleTab({
           </div>
         </div>
 
-        {/* 凡例 */}
-        <div className="mt-3 pt-3 border-t border-slate-100 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs">
-          <div className="flex items-center gap-2 text-slate-500 font-bold">凡例:</div>
-          {staffList.map((s) => {
-            const color = resolveColor(s.display_color ?? null);
-            if (!color) return null;
-            return (
-              <div key={s.id} className="flex items-center gap-1.5">
-                <span
-                  className="inline-block w-3 h-3 rounded"
-                  style={{ backgroundColor: color }}
-                />
-                <span className="text-slate-700">{s.name}</span>
-              </div>
-            );
-          })}
-          <span className="text-slate-300">|</span>
-          {(["hanamaru", "toko", "break"] as const).map((t) => (
-            <div key={t} className="flex items-center gap-1 text-slate-700">
-              <span className="text-base leading-none">{TASK_SYMBOL[t]}</span>
-              <span>{TASK_LABEL[t].replace(/[（）]/g, "")}</span>
-            </div>
-          ))}
-        </div>
       </section>
 
       {error && (
