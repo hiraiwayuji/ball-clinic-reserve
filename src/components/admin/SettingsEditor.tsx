@@ -11,6 +11,7 @@ import { toast } from "sonner";
 import { useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import LPSettingsEditor from "./LPSettingsEditor";
+import PaymentCategoriesEditor from "./PaymentCategoriesEditor";
 
 export default function SettingsEditor({ initialSettings }: { initialSettings: ClinicSettings | null }) {
   const router = useRouter();
@@ -94,6 +95,9 @@ export default function SettingsEditor({ initialSettings }: { initialSettings: C
 
           {/* 患者向けLP設定 */}
           <LPSettingsEditor settings={settings} updateField={updateField} />
+
+          {/* 支払区分マスタ */}
+          <PaymentCategoriesEditor />
 
           {/* LINE連携設定（ここを一番目立つようにしました！） */}
           <Card className="border-green-400 shadow-md ring-2 ring-green-100">

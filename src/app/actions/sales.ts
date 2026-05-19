@@ -214,15 +214,19 @@ export async function getTodayPendingSales(dateStr?: string): Promise<{ success:
   }
 }
 
-// 一括売上登録
-export type CashSalePaymentType = "self_pay" | "jibaiseki" | "rosai" | "hagukumi" | "other";
-const ALLOWED_PAYMENT_TYPES: CashSalePaymentType[] = ["self_pay", "jibaiseki", "rosai", "hagukumi", "other"];
+// 支払区分は payment_categories マスタで管理（院ごとに追加・編集可）。
+// 型は string に緩めて、validation は DB レベルで行う（FK 強制ではなく、
+// 値の存在チェックは UI 側の listPaymentCategories に委譲）。
+// 互換のため、self_pay は「指定なし=自費通常」として扱う。
+export type CashSalePaymentType = string;
 
 function normalizePaymentType(value: unknown): CashSalePaymentType | null {
   if (typeof value !== "string") return null;
   const v = value.trim();
   if (!v) return null;
-  return (ALLOWED_PAYMENT_TYPES as string[]).includes(v) ? (v as CashSalePaymentType) : null;
+  // 50 文字制限と非空文字のみチェック。具体的な key 妥当性は payment_categories の参照側で判定。
+  if (v.length > 50) return null;
+  return v;
 }
 
 export async function bulkAddCashSales(rows: Array<{
