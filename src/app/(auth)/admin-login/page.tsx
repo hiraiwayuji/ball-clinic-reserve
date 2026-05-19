@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { loginAction, sendPasswordResetEmail, demoLoginAction } from "@/app/actions/auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -9,6 +9,13 @@ import { Lock, Mail, Eye, EyeOff, Shield, ArrowRight, FlaskConical } from "lucid
 import Image from "next/image";
 import { isDemo, isFamilyGift, APP_TITLE } from "@/lib/app-mode";
 import { CLINIC_CONFIG } from "@/lib/clinic-config";
+
+const ERROR_MESSAGES: Record<string, string> = {
+  "no-clinic-access":
+    "このアカウントは当院の管理画面にアクセス権がありません。別のアカウントでログインするか、管理者にお問い合わせください。",
+  "misconfigured":
+    "システム設定に問題があります。管理者にお問い合わせください（NEXT_PUBLIC_CLINIC_ID 未設定）。",
+};
 
 export default function AdminLoginPage() {
   const [error, setError] = useState<string | null>(null);
@@ -19,6 +26,15 @@ export default function AdminLoginPage() {
   const [resetEmail, setResetEmail] = useState("");
   const [resetSent, setResetSent] = useState(false);
   const router = useRouter();
+  const searchParams = useSearchParams();
+
+  // URL の ?error=... を読んでメッセージ表示（checkAdminAuth からのリダイレクト用）
+  useEffect(() => {
+    const errCode = searchParams.get("error");
+    if (errCode && ERROR_MESSAGES[errCode]) {
+      setError(ERROR_MESSAGES[errCode]);
+    }
+  }, [searchParams]);
 
   const handleDemoLogin = async () => {
     setIsDemoLoading(true);
