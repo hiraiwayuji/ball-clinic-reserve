@@ -31,6 +31,9 @@ export type PublicClinicSettings = {
   hp_url: string | null;
   instagram_url: string | null;
   line_official_account_url: string | null;
+
+  /** 予約画面のグリッド刻み（15/20/30分） */
+  slot_duration_minutes: 15 | 20 | 30;
 };
 
 export type LPFeature = {
@@ -88,7 +91,8 @@ export async function getPublicClinicSettings(): Promise<PublicClinicSettings | 
       id, clinic_name, hero_title, hero_subtitle, hero_image_url, hero_background_url,
       lp_features, lp_target_problems, lp_voice_quote, lp_voice_author, lp_cta_text,
       theme_color, primary_color,
-      phone_number, address, area_name, hp_url, instagram_url, line_official_account_url
+      phone_number, address, area_name, hp_url, instagram_url, line_official_account_url,
+      slot_duration_minutes
     `)
     .eq("id", PUBLIC_CLINIC_ID)
     .maybeSingle();
@@ -115,7 +119,13 @@ export async function getPublicClinicSettings(): Promise<PublicClinicSettings | 
     hp_url: data.hp_url ?? null,
     instagram_url: data.instagram_url ?? null,
     line_official_account_url: data.line_official_account_url ?? null,
+    slot_duration_minutes: normalizeSlotDuration(data.slot_duration_minutes),
   };
+}
+
+function normalizeSlotDuration(raw: unknown): 15 | 20 | 30 {
+  if (raw === 15 || raw === 20 || raw === 30) return raw;
+  return 30;
 }
 
 function parseLPFeatures(raw: unknown): LPFeature[] | null {

@@ -15,26 +15,27 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { createClient } from "@/lib/supabase/client";
 
-import { getTimeSlots, getMaxSlots, isDateWithinAllowedRange, isTimeSlotWithinTwoHours } from "@/lib/time-slots";
+import { getTimeSlots, getMaxSlots, isDateWithinAllowedRange, isTimeSlotWithinTwoHours, type SlotMinutes } from "@/lib/time-slots";
+import { useClinicSlotDuration } from "@/lib/use-clinic-slot-duration";
 import { CLINIC_CONFIG } from "@/lib/clinic-config";
 
 // 静的なTIME_SLOTS, MAX_SLOTSを削除
 
 type AvailabilityLevel = "available" | "few" | "full" | "closed" | "past";
 
-function getAvailabilityLevel(dateStr: string, bookedCount: number, date: Date, clinicHolidays: ClinicHoliday[]): AvailabilityLevel {
+function getAvailabilityLevel(dateStr: string, bookedCount: number, date: Date, clinicHolidays: ClinicHoliday[], slotMinutes: SlotMinutes): AvailabilityLevel {
   const isHoliday = clinicHolidays.some(h => h.date === dateStr);
   if (isHoliday) return "closed";
 
   const day = date.getDay();
   if (day === 0 || day === 3) return "closed";
   if (isPast(startOfDay(date)) && !isToday(date)) return "past";
-  
+
   // 1ヶ月制限のチェック
   if (!isDateWithinAllowedRange(date)) return "closed";
-  
+
   // 実際に予約可能なスロット（2時間前制限にかかっていないもの）をカウントする
-  const allSlots = getTimeSlots(date);
+  const allSlots = getTimeSlots(date, { slotMinutes });
   const totalSlots = allSlots.length;
 
   if (totalSlots === 0) return "closed";
@@ -120,6 +121,7 @@ function CalendarLoading() {
 }
 
 function ReserveCalendarContent() {
+  const slotMinutes = useClinicSlotDuration();
   const searchParams = useSearchParams();
   const courseIdParam = searchParams.get("courseId");
 
@@ -526,7 +528,7 @@ function ReserveCalendarContent() {
               {calDays.map((day, idx) => {
                 const dateStr = format(day, "yyyy-MM-dd");
                 const bookedCount = monthlyData[dateStr] || 0;
-                const level = getAvailabilityLevel(dateStr, bookedCount, day, clinicHolidays);
+                const level = getAvailabilityLevel(dateStr, bookedCount, day, clinicHolidays, slotMinutes);
                 const isSelected = selectedDate && isSameDay(day, selectedDate);
                 const isCurrentMonth = isSameMonth(day, currentMonth);
                 const isClickable = level !== "closed" && level !== "past" && isCurrentMonth;
@@ -625,9 +627,9 @@ function ReserveCalendarContent() {
                   <p className="text-zinc-300 text-sm font-bold">時間を読み込み中...</p>
                 </div>
               ) : (() => {
-                const allSlots = getTimeSlots(selectedDate);
+                const allSlots = getTimeSlots(selectedDate, { slotMinutes });
                 const slotDuration = selectedCourse?.duration_minutes ?? 30;
-                const requiredSteps = Math.max(1, Math.ceil(slotDuration / 30));
+                const requiredSteps = Math.max(1, Math.ceil(slotDuration / slotMinutes));
 
                 // 連続枠が確保できるか判定
                 const canFitDuration = (slot: string): boolean => {
@@ -716,7 +718,7 @@ function ReserveCalendarContent() {
 
               {/* CTA or 満員案内 */}
               {!loadingDay && (
-                dailySlots.length < getTimeSlots(selectedDate).length ? (
+                dailySlots.length < getTimeSlots(selectedDate, { slotMinutes }).length ? (
                   <Link
                     href={`/reserve?date=${format(selectedDate, "yyyy-MM-dd")}${selectedCourse ? `&courseId=${selectedCourse.id}` : ""}`}
                     className="flex items-center justify-center gap-2 w-full h-14 rounded-2xl bg-blue-600 hover:bg-blue-500 active:scale-95 text-white text-base font-black shadow-xl shadow-blue-950 transition-all"
@@ -763,7 +765,7 @@ function ReserveCalendarContent() {
                         onChange={e => setWaitlistStart(e.target.value)}
                         className="flex-1 bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-3 text-white text-sm font-bold focus:outline-none focus:border-amber-500"
                       >
-                        {getTimeSlots(selectedDate).map(t => {
+                        {getTimeSlots(selectedDate, { slotMinutes }).map(t => {
                           const isTooClose = isTimeSlotWithinTwoHours(selectedDate, t);
                           return <option key={t} value={t} disabled={isTooClose}>{t}{isTooClose ? " (電話のみ)" : ""}</option>;
                         })}
@@ -774,7 +776,7 @@ function ReserveCalendarContent() {
                         onChange={e => setWaitlistEnd(e.target.value)}
                         className="flex-1 bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-3 text-white text-sm font-bold focus:outline-none focus:border-amber-500"
                       >
-                        {getTimeSlots(selectedDate).filter(t => t > waitlistStart).concat([selectedDate.getDay() === 6 ? "18:00" : "23:00"]).map(t => (
+                        {getTimeSlots(selectedDate, { slotMinutes }).filter(t => t > waitlistStart).concat([selectedDate.getDay() === 6 ? "18:00" : "23:00"]).map(t => (
                           <option key={t} value={t}>{t}</option>
                         ))}
                       </select>

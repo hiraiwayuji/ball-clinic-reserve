@@ -26,6 +26,7 @@ import {
 } from "@/app/actions/adminReserve";
 import { toast } from "sonner";
 import { getTimeSlots } from "@/lib/time-slots";
+import { useClinicSlotDuration } from "@/lib/use-clinic-slot-duration";
 
 interface EditAppointmentDialogProps {
   open: boolean;
@@ -40,6 +41,7 @@ export function EditAppointmentDialog({
   appointment,
   onSuccess,
 }: EditAppointmentDialogProps) {
+  const slotMinutes = useClinicSlotDuration();
   const [date, setDate] = useState<Date | undefined>();
   const [time, setTime] = useState<string>("");
   const [duration, setDuration] = useState<string>("30");
@@ -308,13 +310,13 @@ export function EditAppointmentDialog({
                 >
                   {!date ? (
                     <option value="" disabled>先に日付を選択</option>
-                  ) : getTimeSlots(date, true).length === 0 ? (
+                  ) : getTimeSlots(date, { bypassRestrictions: true, slotMinutes }).length === 0 ? (
                     <option value="" disabled>休診日</option>
                   ) : (
                     <option value="" disabled>時間を選択</option>
                   )}
                   {date &&
-                    getTimeSlots(date, true).map((t) => (
+                    getTimeSlots(date, { bypassRestrictions: true, slotMinutes }).map((t) => (
                       <option key={t} value={t}>
                         {t}
                       </option>

@@ -12,6 +12,7 @@ export type ClinicSettings = {
   hero_title: string;
   primary_color: string;
   max_beds: number;
+  slot_duration_minutes: 15 | 20 | 30;
   // SNS URLs
   tiktok_url?: string;
   instagram_url?: string;

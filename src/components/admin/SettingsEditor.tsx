@@ -80,6 +80,24 @@ export default function SettingsEditor({ initialSettings }: { initialSettings: C
                 <div className="space-y-2"><Label className="font-bold">院名</Label><Input value={settings?.clinic_name || ""} onChange={(e) => updateField("clinic_name", e.target.value)} /></div>
                 <div className="space-y-2"><Label className="font-bold">キャッチコピー</Label><Input value={settings?.hero_title || ""} onChange={(e) => updateField("hero_title", e.target.value)} /></div>
               </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label className="font-bold">予約枠サイズ</Label>
+                  <select
+                    value={settings?.slot_duration_minutes ?? 30}
+                    onChange={(e) => updateField("slot_duration_minutes", parseInt(e.target.value, 10) as 15 | 20 | 30)}
+                    className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm bg-white"
+                  >
+                    <option value={15}>15分刻み</option>
+                    <option value={20}>20分刻み</option>
+                    <option value={30}>30分刻み</option>
+                  </select>
+                  <p className="text-xs text-slate-500 leading-relaxed">
+                    予約画面に表示する時間の刻みです。<br />
+                    予約 1 件あたりの所要時間はメニュー側で別途設定します。
+                  </p>
+                </div>
+              </div>
             </CardContent>
           </Card>
 
