@@ -25,8 +25,10 @@ async function withTimeout<T>(promise: PromiseLike<T>, ms: number, label: string
   }
 }
 
-// Supabaseセッションを確認し、テナントのclinic_idと role を返す関数
-// 戻り値の clinicId は既存呼び出しと互換、role/userId/email は Phase 1 で追加。
+// Supabaseセッションを確認し、テナントのclinic_idと role を返す関数。
+// マルチテナント方針: 各 Vercel デプロイには NEXT_PUBLIC_CLINIC_ID が設定されており、
+// そのデプロイは「その clinic 専用」として動く。複数院に紐付くユーザーでも、
+// このデプロイの clinic_id に登録がなければ unauthorized 扱い。
 export async function checkAdminAuth(): Promise<AdminAuthInfo> {
   const { createClient } = await import("@/lib/supabase/server");
   const supabase = await createClient();
@@ -46,17 +48,25 @@ export async function checkAdminAuth(): Promise<AdminAuthInfo> {
     redirect("/admin-login");
   }
 
-  // clinic_users 検索も外部呼び出し。失敗時はデフォルト clinicId/role でフォールバック
-  // して画面を出す（既存の挙動と同じ）。
-  let data: { clinic_id: string | null; role: string | null } | null = null;
+  const expectedClinicId = process.env.NEXT_PUBLIC_CLINIC_ID;
+  if (!expectedClinicId) {
+    // 各 Vercel デプロイには必ず設定されているはず。未設定なら設定漏れ。
+    console.error(
+      "[checkAdminAuth] NEXT_PUBLIC_CLINIC_ID is not set. Cannot resolve clinic for user.",
+    );
+    redirect("/admin-login?error=misconfigured");
+  }
+
+  // このデプロイの clinic に対する権限のみを参照（user_id + clinic_id で絞る）。
+  let data: { clinic_id: string; role: string | null } | null = null;
   try {
     const result = await withTimeout(
       supabase
         .from("clinic_users")
         .select("clinic_id, role")
         .eq("user_id", user.id)
-        .limit(1)
-        .single(),
+        .eq("clinic_id", expectedClinicId)
+        .maybeSingle(),
       5_000,
       "clinic_users.select",
     );
@@ -65,9 +75,22 @@ export async function checkAdminAuth(): Promise<AdminAuthInfo> {
     console.error("[checkAdminAuth] clinic_users lookup failed:", err);
   }
 
-  const clinicId = data?.clinic_id ?? "00000000-0000-0000-0000-000000000001";
-  const role = (data?.role as ClinicRole | undefined) ?? "owner";
-  return { clinicId, userId: user.id, email: user.email ?? null, role };
+  if (!data) {
+    // この clinic に紐付いていない。誤った clinic_id で続行すると別院のデータが
+    // 見えてしまうので、明示的に unauthorized 扱いでログイン画面に戻す。
+    console.warn(
+      `[checkAdminAuth] user ${user.id} is not registered for clinic ${expectedClinicId}`,
+    );
+    redirect("/admin-login?error=no-clinic-access");
+  }
+
+  const role = (data.role as ClinicRole | null) ?? "owner";
+  return {
+    clinicId: data.clinic_id,
+    userId: user.id,
+    email: user.email ?? null,
+    role,
+  };
 }
 
 /**
@@ -86,38 +109,46 @@ export async function requireRole(
   return info;
 }
 
-/** リダイレクトせずに role のみ返す（クライアント表示制御用） */
+/** リダイレクトせずに role のみ返す（クライアント表示制御用）。
+ * このデプロイの clinic に紐付いていない場合は null を返す。 */
 export async function getMyRole(): Promise<ClinicRole | null> {
   const { createClient } = await import("@/lib/supabase/server");
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return null;
 
+  const expectedClinicId = process.env.NEXT_PUBLIC_CLINIC_ID;
+  if (!expectedClinicId) return null;
+
   const { data } = await supabase
     .from("clinic_users")
     .select("role")
     .eq("user_id", user.id)
-    .limit(1)
-    .single();
+    .eq("clinic_id", expectedClinicId)
+    .maybeSingle();
 
-  return (data?.role as ClinicRole | undefined) ?? "owner";
+  return (data?.role as ClinicRole | undefined) ?? null;
 }
 
-/** クライアントコンポーネントからログイン中ユーザーの clinic_id を取得する（リダイレクトなし） */
+/** クライアントコンポーネントからログイン中ユーザーの clinic_id を取得する（リダイレクトなし）。
+ * このデプロイの clinic に紐付いていない場合は null を返す。 */
 export async function getMyClinicId(): Promise<string | null> {
   const { createClient } = await import("@/lib/supabase/server");
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return null;
 
+  const expectedClinicId = process.env.NEXT_PUBLIC_CLINIC_ID;
+  if (!expectedClinicId) return null;
+
   const { data } = await supabase
     .from("clinic_users")
     .select("clinic_id")
     .eq("user_id", user.id)
-    .limit(1)
-    .single();
+    .eq("clinic_id", expectedClinicId)
+    .maybeSingle();
 
-  return data?.clinic_id ?? "00000000-0000-0000-0000-000000000001";
+  return data?.clinic_id ?? null;
 }
 
 export async function loginAction(formData: FormData) {

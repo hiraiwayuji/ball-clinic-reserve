@@ -27,7 +27,7 @@ export type StaffOverrideRow = {
   created_at: string;
 };
 
-export type StaffOption = { id: string; name: string };
+export type StaffOption = { id: string; name: string; display_color?: string | null };
 
 export async function listActiveStaff(): Promise<{ success: boolean; staff?: StaffOption[]; error?: string }> {
   const auth = await checkAdminAuth();
@@ -36,7 +36,7 @@ export async function listActiveStaff(): Promise<{ success: boolean; staff?: Sta
 
   const { data, error } = await sb
     .from("reservation_staff")
-    .select("id, name")
+    .select("id, name, display_color")
     .eq("clinic_id", auth.clinicId)
     .eq("is_active", true)
     .order("sort_order", { ascending: true });

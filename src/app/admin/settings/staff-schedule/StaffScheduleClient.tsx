@@ -7,15 +7,21 @@ import {
   type WorkingHourRow,
   type StaffTaskRow,
 } from "@/app/actions/staff-schedule";
+import {
+  type StaffShiftRow,
+  type ShiftLocationRow,
+} from "@/app/actions/staff-shifts";
 import SpotScheduleTab from "./tabs/SpotScheduleTab";
 import WorkingHoursTab from "./tabs/WorkingHoursTab";
 import TasksTab from "./tabs/TasksTab";
 import ImportTab from "./tabs/ImportTab";
-import { CalendarClock, Clock, ListTodo, Upload } from "lucide-react";
+import ShiftScheduleTab from "./tabs/ShiftScheduleTab";
+import { CalendarClock, Clock, ListTodo, Upload, LayoutGrid } from "lucide-react";
 
-type TabKey = "spot" | "working-hours" | "tasks" | "import";
+type TabKey = "shift" | "spot" | "working-hours" | "tasks" | "import";
 
 const TABS: { key: TabKey; label: string; icon: typeof CalendarClock }[] = [
+  { key: "shift", label: "シフト表", icon: LayoutGrid },
   { key: "spot", label: "スポット予定", icon: CalendarClock },
   { key: "working-hours", label: "基本勤務時間", icon: Clock },
   { key: "tasks", label: "タスク管理", icon: ListTodo },
@@ -29,6 +35,9 @@ type Props = {
   initialTasks: StaffTaskRow[];
   initialStartDate: string;
   initialEndDate: string;
+  initialShifts: StaffShiftRow[];
+  initialLocations: ShiftLocationRow[];
+  initialShiftWeekStart: string;
 };
 
 export default function StaffScheduleClient({
@@ -38,8 +47,11 @@ export default function StaffScheduleClient({
   initialTasks,
   initialStartDate,
   initialEndDate,
+  initialShifts,
+  initialLocations,
+  initialShiftWeekStart,
 }: Props) {
-  const [tab, setTab] = useState<TabKey>("spot");
+  const [tab, setTab] = useState<TabKey>("shift");
 
   return (
     <div className="space-y-5">
@@ -68,6 +80,14 @@ export default function StaffScheduleClient({
       </div>
 
       {/* タブ中身 */}
+      {tab === "shift" && (
+        <ShiftScheduleTab
+          staff={initialStaff}
+          initialShifts={initialShifts}
+          initialLocations={initialLocations}
+          initialWeekStart={initialShiftWeekStart}
+        />
+      )}
       {tab === "spot" && (
         <SpotScheduleTab
           staff={initialStaff}
