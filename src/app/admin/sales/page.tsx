@@ -28,6 +28,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Calendar as CalendarIcon, Plus, Trash2, Loader2, Coins, User, UserPlus, Landmark, Receipt, Upload, Download, Clock, Bot, X, AlertTriangle, Zap, Pencil, ShieldCheck } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { addCashSale, getCashSales, deleteCashSale, updateCashSale, searchSalesPatients, SalesPatientSuggestion, type CashSalePaymentType } from "@/app/actions/sales";
+import { usePaymentCategories } from "@/lib/use-payment-categories";
 import { toast } from "sonner";
 import Link from "next/link";
 import CashSalesImportDialog from "@/components/admin/CashSalesImportDialog";
@@ -35,6 +36,7 @@ import { exportToExcel } from "@/lib/excel";
 
 function SalesPageInner() {
   const searchParams = useSearchParams();
+  const { categories: paymentCategories } = usePaymentCategories();
   const [date, setDate] = useState<Date | null>(null);
   const [sales, setSales] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -539,26 +541,31 @@ function SalesPageInner() {
                 {isFirstVisit ? "✓ 新患（タップで解除）" : "新患の場合はここをタップ"}
               </button>
 
-              {/* 支払区分（自賠責・はぐくみ医療等の 0 円計上用） */}
+              {/* 支払区分（payment_categories マスタから動的取得） */}
               <div className="space-y-1.5">
                 <Label className="text-xs font-semibold text-slate-600 dark:text-slate-300 flex items-center gap-1">
                   <ShieldCheck className="w-3.5 h-3.5" />
                   支払区分（0円計上の場合は必須）
                 </Label>
                 <div className="grid grid-cols-2 gap-2">
-                  {([
-                    { value: "", label: "通常（自費）" },
-                    { value: "jibaiseki", label: "自賠責" },
-                    { value: "rosai", label: "労災" },
-                    { value: "hagukumi", label: "はぐくみ医療" },
-                    { value: "other", label: "その他" },
-                  ] as { value: CashSalePaymentType | ""; label: string }[]).map(opt => (
+                  <button
+                    type="button"
+                    onClick={() => setPaymentType("")}
+                    className={`px-2 py-2 rounded-md text-xs font-bold border transition-all ${
+                      paymentType === ""
+                        ? "bg-emerald-500 border-emerald-600 text-white shadow-sm"
+                        : "bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100"
+                    }`}
+                  >
+                    通常（自費）
+                  </button>
+                  {paymentCategories.map(opt => (
                     <button
-                      key={opt.value || "self_pay"}
+                      key={opt.key}
                       type="button"
-                      onClick={() => setPaymentType(opt.value)}
+                      onClick={() => setPaymentType(opt.key)}
                       className={`px-2 py-2 rounded-md text-xs font-bold border transition-all ${
-                        paymentType === opt.value
+                        paymentType === opt.key
                           ? "bg-emerald-500 border-emerald-600 text-white shadow-sm"
                           : "bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100"
                       }`}
@@ -568,7 +575,7 @@ function SalesPageInner() {
                   ))}
                 </div>
                 <p className="text-[10px] text-slate-500">
-                  ※ 0 円計上時は必須。自賠責・労災・はぐくみ医療等
+                  ※ 0 円計上時は必須。区分は「設定」→「支払区分」で追加・編集できます。
                 </p>
               </div>
 
@@ -645,18 +652,15 @@ function SalesPageInner() {
                         </TableCell>
                         <TableCell className="text-slate-500 dark:text-slate-400 text-sm">
                           <div className="flex items-center gap-1.5 flex-wrap">
-                            {sale.payment_type === "jibaiseki" && (
-                              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400">自賠責</span>
-                            )}
-                            {sale.payment_type === "rosai" && (
-                              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400">労災</span>
-                            )}
-                            {sale.payment_type === "hagukumi" && (
-                              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400">はぐくみ</span>
-                            )}
-                            {sale.payment_type === "other" && (
-                              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400">その他</span>
-                            )}
+                            {sale.payment_type && (() => {
+                              const cat = paymentCategories.find(c => c.key === sale.payment_type);
+                              if (!cat) return null;
+                              return (
+                                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400">
+                                  {cat.label}
+                                </span>
+                              );
+                            })()}
                             <span className="truncate">{parseMemo(sale.memo)}</span>
                           </div>
                         </TableCell>
@@ -759,19 +763,24 @@ function SalesPageInner() {
                   支払区分
                 </Label>
                 <div className="grid grid-cols-2 gap-2">
-                  {([
-                    { value: "", label: "通常（自費）" },
-                    { value: "jibaiseki", label: "自賠責" },
-                    { value: "rosai", label: "労災" },
-                    { value: "hagukumi", label: "はぐくみ医療" },
-                    { value: "other", label: "その他" },
-                  ] as { value: CashSalePaymentType | ""; label: string }[]).map(opt => (
+                  <button
+                    type="button"
+                    onClick={() => setEditForm(f => ({ ...f, payment_type: "" }))}
+                    className={`px-2 py-2 rounded-md text-xs font-bold border transition-all ${
+                      editForm.payment_type === ""
+                        ? "bg-emerald-500 border-emerald-600 text-white shadow-sm"
+                        : "bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100"
+                    }`}
+                  >
+                    通常（自費）
+                  </button>
+                  {paymentCategories.map(opt => (
                     <button
-                      key={opt.value || "self_pay"}
+                      key={opt.key}
                       type="button"
-                      onClick={() => setEditForm(f => ({ ...f, payment_type: opt.value }))}
+                      onClick={() => setEditForm(f => ({ ...f, payment_type: opt.key }))}
                       className={`px-2 py-2 rounded-md text-xs font-bold border transition-all ${
-                        editForm.payment_type === opt.value
+                        editForm.payment_type === opt.key
                           ? "bg-emerald-500 border-emerald-600 text-white shadow-sm"
                           : "bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100"
                       }`}

@@ -10,6 +10,8 @@ import {
   type PendingSalePatient,
   type CashSalePaymentType,
 } from "@/app/actions/sales";
+import { usePaymentCategories } from "@/lib/use-payment-categories";
+import type { PaymentCategoryRow } from "@/app/actions/payment-categories";
 import { toast } from "sonner";
 import Link from "next/link";
 import {
@@ -34,6 +36,7 @@ function BulkSalesPageInner() {
   const targetDateStr = dateParam ?? new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" });
   const targetDate = new Date(targetDateStr + "T00:00:00+09:00");
 
+  const { categories: paymentCategories } = usePaymentCategories();
   const [rows, setRows] = useState<DraftRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [isPending, startTransition] = useTransition();
@@ -264,6 +267,7 @@ function BulkSalesPageInner() {
               <DraftRowItem
                 key={row.appointmentId}
                 row={row}
+                paymentCategories={paymentCategories}
                 onChange={(updated) =>
                   setRows(prev => prev.map(r => r.appointmentId === row.appointmentId ? updated : r))
                 }
@@ -313,9 +317,11 @@ export default function BulkSalesPage() {
 function DraftRowItem({
   row,
   onChange,
+  paymentCategories,
 }: {
   row: DraftRow;
   onChange: (updated: DraftRow) => void;
+  paymentCategories: PaymentCategoryRow[];
 }) {
   const hasAmount = row.editAmount !== "";
   const isZero = hasAmount && parseInt(row.editAmount, 10) === 0;
@@ -411,22 +417,17 @@ function DraftRowItem({
         </div>
       </div>
 
-      {/* 0円のときだけ支払区分選択を表示（自賠責・はぐくみ医療等） */}
+      {/* 0円のときだけ支払区分選択を表示（payment_categories マスタから動的取得） */}
       {isZero && (
         <div className="mt-2 ml-8 flex items-center gap-2 flex-wrap">
           <span className="text-[11px] font-bold text-emerald-600 dark:text-emerald-400">0円の支払区分:</span>
-          {([
-            { value: "jibaiseki", label: "自賠責" },
-            { value: "rosai", label: "労災" },
-            { value: "hagukumi", label: "はぐくみ医療" },
-            { value: "other", label: "その他" },
-          ] as { value: CashSalePaymentType; label: string }[]).map(opt => (
+          {paymentCategories.map(opt => (
             <button
-              key={opt.value}
+              key={opt.key}
               type="button"
-              onClick={() => onChange({ ...row, paymentType: opt.value })}
+              onClick={() => onChange({ ...row, paymentType: opt.key })}
               className={`px-2 py-0.5 rounded-md text-[11px] font-bold border transition-all ${
-                row.paymentType === opt.value
+                row.paymentType === opt.key
                   ? "bg-emerald-500 border-emerald-600 text-white"
                   : "bg-white border-slate-200 text-slate-500 hover:bg-slate-50"
               }`}
