@@ -50,21 +50,22 @@ async function getLineAccessToken() {
  * 1. 当日の予約リマインドを「送信」するモック処理
  */
 export async function sendAppointmentReminders(testLineId: string | null = null) {
-  await checkAdminAuth();
-  
+  const { clinicId } = await checkAdminAuth();
+
   // Use provided testLineId or fallback to environment variable
   const effectiveTestId = testLineId || process.env.TEST_LINE_USER_ID;
   const todayStart = new Date();
   todayStart.setHours(0, 0, 0, 0);
-  
+
   const todayEnd = new Date();
   todayEnd.setHours(23, 59, 59, 999);
 
   const supabase = await getSupabase();
-  // 本日の予約を取得
+  // 本日の予約を取得（自院のみ）
   const { data: appointments, error } = await supabase
     .from("appointments")
     .select("*, customers(name, phone, line_user_id)")
+    .eq("clinic_id", clinicId)
     .gte("start_time", todayStart.toISOString())
     .lte("start_time", todayEnd.toISOString())
     .neq("status", "cancelled");
@@ -185,7 +186,7 @@ export async function sendAppointmentReminders(testLineId: string | null = null)
  * 2. 指定した誕生月の顧客にクーポンを送信
  */
 export async function sendBirthdayCoupons(month: number, testLineId: string | null = null) {
-  await checkAdminAuth();
+  const { clinicId } = await checkAdminAuth();
   const effectiveTestId = testLineId || process.env.TEST_LINE_USER_ID || null;
   const channelToken = await getLineAccessToken() || process.env.LINE_CHANNEL_ACCESS_TOKEN;
 
@@ -218,6 +219,7 @@ export async function sendBirthdayCoupons(month: number, testLineId: string | nu
   const { data: customers, error } = await supabase
     .from("customers")
     .select("name, birth_month, birth_date, line_user_id")
+    .eq("clinic_id", clinicId)
     .not("line_user_id", "is", null);
 
   if (error) throw new Error("顧客データの取得に失敗しました: " + error.message);
@@ -284,11 +286,12 @@ export async function sendBirthdayCoupons(month: number, testLineId: string | nu
  * マーケティング施策の対象者数統計を取得
  */
 export async function getMarketingStats() {
-  await checkAdminAuth();
+  const { clinicId } = await checkAdminAuth();
   const supabase = await getSupabase();
   const { data: customers, error } = await supabase
     .from("customers")
-    .select("id, gender, birth_month, birth_date, city_name, line_user_id");
+    .select("id, gender, birth_month, birth_date, city_name, line_user_id")
+    .eq("clinic_id", clinicId);
 
   if (error) throw new Error("統計の取得に失敗しました");
 
@@ -329,7 +332,7 @@ export async function sendSegmentedCampaign(options: {
   message: string;
   testLineId?: string | null;
 }) {
-  await checkAdminAuth();
+  const { clinicId } = await checkAdminAuth();
   const effectiveTestId = options.testLineId || process.env.TEST_LINE_USER_ID || null;
   const channelToken = await getLineAccessToken() || process.env.LINE_CHANNEL_ACCESS_TOKEN;
 
@@ -347,7 +350,10 @@ export async function sendSegmentedCampaign(options: {
   }
 
   const supabase = await getSupabase();
-  let query = supabase.from("customers").select("name, line_user_id");
+  let query = supabase
+    .from("customers")
+    .select("name, line_user_id")
+    .eq("clinic_id", clinicId);
 
   if (options.gender) query = query.eq("gender", options.gender);
   if (options.city) query = query.eq("city_name", options.city);
@@ -385,7 +391,7 @@ export async function sendSegmentedCampaign(options: {
  * 2b. 女性限定キャンペーン送信
  */
 export async function sendWomenOnlyCampaign(campaignMessage: string, testLineId: string | null = null) {
-  await checkAdminAuth();
+  const { clinicId } = await checkAdminAuth();
   const effectiveTestId = testLineId || process.env.TEST_LINE_USER_ID || null;
   const channelToken = await getLineAccessToken() || process.env.LINE_CHANNEL_ACCESS_TOKEN;
 
@@ -409,6 +415,7 @@ export async function sendWomenOnlyCampaign(campaignMessage: string, testLineId:
   const { data: customers, error } = await supabase
     .from("customers")
     .select("name, gender, line_user_id")
+    .eq("clinic_id", clinicId)
     .eq("gender", "female")
     .not("line_user_id", "is", null);
 
@@ -457,7 +464,7 @@ export async function sendWomenOnlyCampaign(campaignMessage: string, testLineId:
  *    当選者にはLINEでクーポンメッセージを送信する
  */
 export async function runMonthlyLottery(testLineId: string | null = null) {
-  await checkAdminAuth();
+  const { clinicId } = await checkAdminAuth();
   const effectiveTestId = testLineId || process.env.TEST_LINE_USER_ID || null;
 
   const channelToken = await getLineAccessToken() || process.env.LINE_CHANNEL_ACCESS_TOKEN;
@@ -502,10 +509,11 @@ export async function runMonthlyLottery(testLineId: string | null = null) {
 
   const supabase = await getSupabase();
 
-  // LINE連携済み かつ 来院実績あり（confirmed）の顧客を取得
+  // LINE連携済み かつ 来院実績あり（confirmed）の顧客を取得（自院のみ）
   const { data: appointments, error } = await supabase
     .from("appointments")
     .select("customers(id, name, line_user_id)")
+    .eq("clinic_id", clinicId)
     .eq("status", "confirmed")
     .not("customers", "is", null);
 
@@ -625,7 +633,7 @@ export async function runMonthlyLottery(testLineId: string | null = null) {
  * 4. 初回アンケートを送信する処理
  */
 export async function sendWelcomeQuestionnaire(testLineId: string | null = null) {
-  await checkAdminAuth();
+  const { clinicId } = await checkAdminAuth();
   const effectiveTestId = testLineId || process.env.TEST_LINE_USER_ID || null;
   const channelToken = await getLineAccessToken() || process.env.LINE_CHANNEL_ACCESS_TOKEN;
 
@@ -653,11 +661,12 @@ export async function sendWelcomeQuestionnaire(testLineId: string | null = null)
     };
   }
 
-  // 本番：初診かつ LINE 連携済みの顧客を対象
+  // 本番：初診かつ LINE 連携済みの顧客を対象（自院のみ）
   const supabase = await getSupabase();
   const { data: customers, error } = await supabase
     .from("customers")
     .select("id, name, line_user_id, is_first_visit")
+    .eq("clinic_id", clinicId)
     .not("line_user_id", "is", null)
     .order("created_at", { ascending: false })
     .limit(50);

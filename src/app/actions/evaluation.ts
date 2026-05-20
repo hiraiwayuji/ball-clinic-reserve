@@ -335,7 +335,8 @@ export async function getMonthlyReportData(
     const [evalRes, breakdownRes, settingsRes] = await Promise.all([
       getMonthlyEvaluation(year, month),
       getMonthDetailedBreakdown(year, month),
-      supabase.from("clinic_settings").select("name").eq("clinic_id", clinicId).maybeSingle(),
+      // clinic_settings は id がclinic_id を兼ねる（clinic_id カラムは無い・name カラムも無い）
+      supabase.from("clinic_settings").select("clinic_name").eq("id", clinicId).maybeSingle(),
     ]);
 
     if (!evalRes.success || !evalRes.data) return { success: false, error: evalRes.error };
@@ -343,7 +344,7 @@ export async function getMonthlyReportData(
 
     const evalData = evalRes.data;
     const bd = breakdownRes.data;
-    const clinicName = (settingsRes.data as any)?.name ?? "クリニック";
+    const clinicName = (settingsRes.data as any)?.clinic_name ?? "クリニック";
 
     const data: MonthlyReportData = {
       year,

@@ -12,6 +12,9 @@ export async function getCurrentClinicId(): Promise<string> {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return DEFAULT_CLINIC_ID;
 
+  // tenant-isolation-ignore: user_id から所属 clinic を引く認証ヘルパー。
+  // 構造上、ここで clinic_id を絞ると「クリニックの解決」自体ができない。
+  // ※ メモリの「マルチテナント clinic_id 解決バグ」も別途要修正（複数院紐付き対応）。
   const { data } = await supabase
     .from("clinic_users")
     .select("clinic_id")

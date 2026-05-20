@@ -385,10 +385,11 @@ export async function sendLineConfirmation(appointmentId: string) {
     const supabase = await getSupabase();
     if (!supabase) return { success: false, error: "DB接続エラー" };
 
-    // 予約と顧客情報（line_user_id含む）を取得
+    // 予約と顧客情報（line_user_id含む）を取得（自院のみ）
     const { data: apt, error } = await supabase
       .from("appointments")
       .select("id, start_time, is_first_visit, status, customers(name, line_user_id)")
+      .eq("clinic_id", clinicId)
       .eq("id", appointmentId)
       .single();
 

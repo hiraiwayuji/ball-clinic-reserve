@@ -9,6 +9,8 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   );
+  // tenant-isolation-ignore: 公開 iCal 取得。calendar_id はランダムなトークン的IDなので
+  // 同じトークンを知っている人だけが各 calendar にアクセス可能。clinic_id 横断で OK。
   let query = supabase.from("calendar_events").select("*").eq("calendar_id", calendarId).order("start_time", { ascending: true });
   if (memberFilter) query = query.eq("member_name", memberFilter);
   const { data: events, error } = await query;

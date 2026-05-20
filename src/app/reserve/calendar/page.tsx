@@ -163,21 +163,21 @@ function ReserveCalendarContent() {
     const startOfMonthUTC = startOfMonthJST.toISOString();
     const endOfMonthUTC = endOfMonthJST.toISOString();
 
-    // 直接Supabaseからデータを取得 (キャッシュ完全破棄のためダミー条件付与)
+    // 直接Supabaseからデータを取得（マルチテナント漏洩対策で clinic_id フィルタ必須・
+    // customers JOIN は他院の患者名漏洩リスクのため取得しない）
     const [ { data: aptData }, { data: holidayData } ] = await Promise.all([
-      supabase.from("appointments").select("start_time, end_time, customers(name)")
+      supabase.from("appointments").select("start_time, end_time")
+        .eq("clinic_id", PUBLIC_CLINIC_ID)
         .gte("start_time", startOfMonthUTC)
         .lte("start_time", endOfMonthUTC)
         .neq("status", "cancelled"),
       supabase.from("clinic_holidays").select("*")
+        .eq("clinic_id", PUBLIC_CLINIC_ID),
     ]);
 
     const counts: Record<string, number> = {};
     if (aptData) {
-      aptData.forEach((app: any) => {
-        // ユーザー指示のJSTログ出力
-        console.log(`[予約データ取得] ${app.customers?.name || 'Unknown'}: start_time=${new Date(app.start_time).toLocaleString("ja-JP", {timeZone: "Asia/Tokyo"})}`);
-        
+      aptData.forEach((app: { start_time: string; end_time?: string | null }) => {
         const dStart = new Date(app.start_time);
         const dEnd = app.end_time ? new Date(app.end_time) : new Date(dStart.getTime() + 30 * 60000);
         let current = dStart.getTime();
@@ -254,6 +254,7 @@ function ReserveCalendarContent() {
             const startOfDayUTC = new Date(`${dateStr}T00:00:00+09:00`).toISOString();
             const endOfDayUTC = new Date(`${dateStr}T23:59:59+09:00`).toISOString();
             supabase.from("appointments").select("start_time, end_time")
+              .eq("clinic_id", PUBLIC_CLINIC_ID)
               .gte("start_time", startOfDayUTC)
               .lte("start_time", endOfDayUTC)
               .neq("status", "cancelled")

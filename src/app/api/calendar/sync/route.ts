@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { format, addHours } from "date-fns";
+import { PUBLIC_CLINIC_ID } from "@/lib/default-clinic-id";
 
 // Supabase クライアントは GET 内で遅延初期化する（ビルド時に env var が
 // 未定義でも 'supabaseUrl is required' でビルドが落ちないようにするため）
@@ -74,10 +75,13 @@ export async function GET(request: Request) {
     const supabase = getSupabase();
     const eventsToSync: any[] = [];
 
-    // 1. 接骨院の予約データを取得 (appointments)
+    // 1. 接骨院の予約データを取得 (appointments) — 自院のみ
+    // 注: このエンドポイントは認証なし公開。clinic_id フィルタが無いと他院の
+    // 予約データ（患者名・電話含む）まで ICS で漏洩する。
     const { data: appointments, error: aptError } = await supabase
       .from("appointments")
       .select("id, start_time, memo, is_first_visit, status, customers(name, phone)")
+      .eq("clinic_id", PUBLIC_CLINIC_ID)
       // 過去1ヶ月〜未来の予約を取得
       .gte("start_time", new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString())
       .not("status", "eq", "cancelled");
@@ -98,10 +102,11 @@ export async function GET(request: Request) {
       });
     }
 
-    // 2. 家族カレンダーの予定を取得 (calendar_events)
+    // 2. 家族カレンダーの予定を取得 (calendar_events) — 自院のみ
     const { data: familyEvents, error: famError } = await supabase
       .from("calendar_events")
       .select("*")
+      .eq("clinic_id", PUBLIC_CLINIC_ID)
       .gte("start_time", new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString());
 
     if (!famError && familyEvents) {

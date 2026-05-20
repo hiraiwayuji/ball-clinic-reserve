@@ -79,10 +79,11 @@ export async function POST(req: NextRequest) {
     const customer = Array.isArray(apt.customers) ? apt.customers[0] : apt.customers;
     if (!customer?.id) continue;
 
-    // この customer に紐付く全 LINE userId を取得（家族紐付け対応）
+    // この customer に紐付く全 LINE userId を取得（家族紐付け対応・自院のみ）
     const { data: links } = await supabase
       .from("customer_line_links")
       .select("line_user_id")
+      .eq("clinic_id", DEFAULT_CLINIC_ID)
       .eq("customer_id", customer.id);
     const lineIds = Array.from(
       new Set(

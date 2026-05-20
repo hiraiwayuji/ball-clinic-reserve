@@ -72,12 +72,18 @@ export function EditAppointmentDialog({
       setDate(startDateTime);
       setTime(format(startDateTime, "HH:mm"));
 
-      // 前回来院日・来院回数を取得
+      // 前回来院日・来院回数を取得（マルチテナント漏洩防止のため clinic_id でも絞る）
       if (appointment.customer_id) {
         const supabase = createClient();
-        supabase
-          .from("appointments")
-          .select("start_time")
+        const aptClinicId = appointment.clinic_id ?? null;
+        const baseQuery = () => {
+          let q = supabase
+            .from("appointments")
+            .select("start_time");
+          if (aptClinicId) q = q.eq("clinic_id", aptClinicId);
+          return q;
+        };
+        baseQuery()
           .eq("customer_id", appointment.customer_id)
           .neq("status", "cancelled")
           .neq("id", appointment.id)
@@ -87,9 +93,11 @@ export function EditAppointmentDialog({
           .then(({ data }) => {
             setLastVisitDate(data && data.length > 0 ? new Date(data[0].start_time) : null);
           });
-        supabase
+        let countQuery = supabase
           .from("appointments")
-          .select("id", { count: "exact", head: true })
+          .select("id", { count: "exact", head: true });
+        if (aptClinicId) countQuery = countQuery.eq("clinic_id", aptClinicId);
+        countQuery
           .eq("customer_id", appointment.customer_id)
           .neq("status", "cancelled")
           .neq("id", appointment.id)
@@ -189,12 +197,14 @@ export function EditAppointmentDialog({
   const handleDeleteClick = async () => {
     if (!appointment) return;
     if (appointment.series_id) {
-      // 同一シリーズ内のこの予約を含む将来の件数を数える（モーダルに件数表示）
+      // 同一シリーズ内のこの予約を含む将来の件数を数える（モーダルに件数表示・自院のみ）
       try {
         const supabase = createClient();
-        const { count } = await supabase
+        let q = supabase
           .from("appointments")
-          .select("id", { count: "exact", head: true })
+          .select("id", { count: "exact", head: true });
+        if (appointment.clinic_id) q = q.eq("clinic_id", appointment.clinic_id);
+        const { count } = await q
           .eq("series_id", appointment.series_id)
           .neq("status", "cancelled")
           .gte("start_time", appointment.start_time);

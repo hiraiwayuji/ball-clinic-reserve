@@ -119,7 +119,7 @@ export async function GET(req: NextRequest) {
   const expandTo = new Date(now.getTime() + 24 * 60 * 60 * 1000);
 
   const { data: candidates, error } = await supabase
-    .from("calendar_events")
+    .from("calendar_events") // tenant-isolation-ignore: cron で全カレンダーをスキャンする目的・calendar_id 単位
     .select("id, calendar_id, title, start_time, end_time, is_all_day, member_name, is_recurring, recurrence_rule, reminder_minutes_before")
     .not("reminder_minutes_before", "is", null);
 

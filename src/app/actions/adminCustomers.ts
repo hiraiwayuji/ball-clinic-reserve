@@ -451,7 +451,7 @@ export async function getLineLinksForCustomer(customerId: string): Promise<{
   linked_via: string | null;
   linked_at: string;
 }[]> {
-  await checkAdminAuth();
+  const { clinicId } = await checkAdminAuth();
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !key) return [];
@@ -459,6 +459,7 @@ export async function getLineLinksForCustomer(customerId: string): Promise<{
   const { data } = await supabase
     .from("customer_line_links")
     .select("line_user_id, is_primary, display_label, linked_via, linked_at")
+    .eq("clinic_id", clinicId)
     .eq("customer_id", customerId)
     .order("is_primary", { ascending: false });
   return data ?? [];
@@ -471,22 +472,24 @@ export async function getFamilyMembersForCustomer(customerId: string): Promise<{
   display_name: string | null;
   is_primary: boolean;
 }[]> {
-  await checkAdminAuth();
+  const { clinicId } = await checkAdminAuth();
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !key) return [];
   const supabase = createAdminClient(url, key);
-  // 自分の LINE userId 一覧
+  // 自分の LINE userId 一覧（自院内のみ）
   const { data: myLinks } = await supabase
     .from("customer_line_links")
     .select("line_user_id")
+    .eq("clinic_id", clinicId)
     .eq("customer_id", customerId);
   const lineIds = (myLinks ?? []).map((r: { line_user_id: string }) => r.line_user_id);
   if (lineIds.length === 0) return [];
-  // 同じ LINE userId に紐付いている全 customer（自分も含む）
+  // 同じ LINE userId に紐付いている全 customer（自院内、自分も含む）
   const { data: family } = await supabase
     .from("customer_line_links")
     .select("customer_id, is_primary, customers!inner(name, display_name)")
+    .eq("clinic_id", clinicId)
     .in("line_user_id", lineIds);
   const seen = new Set<string>();
   const result: { customer_id: string; name: string; display_name: string | null; is_primary: boolean }[] = [];

@@ -255,10 +255,15 @@ export async function POST(req: NextRequest) {
 
       // フォローイベント（友だち追加時の挨拶）
       if (event.type === "follow") {
-        // 既に紐づけ済みか確認
+        // 既に紐づけ済みか確認（自院のみ）
         const sb = getSupabase();
         if (sb) {
-          const { data: existing } = await sb.from("customers").select("id, name").eq("line_user_id", lineUserId).maybeSingle();
+          const { data: existing } = await sb
+            .from("customers")
+            .select("id, name")
+            .eq("clinic_id", DEFAULT_CLINIC_ID)
+            .eq("line_user_id", lineUserId)
+            .maybeSingle();
           if (existing) {
             await replyMessage(replyToken, [{
               type: "text",
@@ -293,6 +298,7 @@ export async function POST(req: NextRequest) {
       const { data: appointments, error } = await supabase
         .from("appointments")
         .select(`id, start_time, status, is_first_visit, customer_id, customers ( id, name, phone, line_user_id )`)
+        .eq("clinic_id", DEFAULT_CLINIC_ID)
         .in("status", ["pending", "confirmed", "waiting"])
         .order("created_at", { ascending: false });
 

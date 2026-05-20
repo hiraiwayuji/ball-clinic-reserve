@@ -69,7 +69,7 @@ export default function AdminWeeklyGridPage() {
         const supabase = createClient();
         const { data: aptData } = await supabase
           .from("appointments")
-          .select(`id, start_time, end_time, memo, is_first_visit, status, customer_id, series_id, course_id, course_name, staff_id, staff_name, room_id, room_name, customers(name, phone)`)
+          .select(`id, start_time, end_time, memo, is_first_visit, status, customer_id, series_id, clinic_id, course_id, course_name, staff_id, staff_name, room_id, room_name, customers(name, phone)`)
           .eq("clinic_id", clinicId)
           .gte("start_time", weekStart.toISOString())
           .lt("start_time", weekEnd.toISOString())
@@ -78,7 +78,8 @@ export default function AdminWeeklyGridPage() {
 
         const { data: holidayData, error: holidayErr } = await supabase
           .from("clinic_holidays")
-          .select("*");
+          .select("*")
+          .eq("clinic_id", clinicId);
         if (holidayData && !holidayErr) setHolidays(holidayData);
       } catch (error) {
         console.error("Error fetching data:", error);

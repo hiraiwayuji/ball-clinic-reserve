@@ -42,6 +42,7 @@ export async function GET(req: NextRequest) {
   try {
     const t = Date.now();
     const db = createAdminClient(url, key, { auth: { persistSession: false } });
+    // tenant-isolation-ignore: keepalive ping. Postgres を warm up するだけで結果は使わない。
     await db.from("clinic_settings").select("id").limit(1);
     dbMs = Date.now() - t;
   } catch (err) {

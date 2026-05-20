@@ -157,12 +157,13 @@ export async function cloneAppointmentWeeksLater(appointmentId: string, weeks: n
 
 // 過去の予約から来院パターンを分析して予測提案を生成
 export async function predictNextVisit(customerId: string): Promise<string> {
-  await checkAdminAuth();
+  const { clinicId } = await checkAdminAuth();
   const supabase = await createClient();
 
   const { data: past } = await supabase
     .from("appointments")
     .select("start_time")
+    .eq("clinic_id", clinicId)
     .eq("customer_id", customerId)
     .neq("status", "cancelled")
     .order("start_time", { ascending: false })

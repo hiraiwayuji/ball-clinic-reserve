@@ -1188,13 +1188,13 @@ export async function getAnnualTaxData(
   try {
     const supabase = await getSupabase();
 
-    // クリニック名取得
+    // クリニック名取得（clinic_settings は id がclinic_id を兼ねる）
     const { data: settings } = await supabase
       .from("clinic_settings")
-      .select("name")
-      .eq("clinic_id", clinicId)
+      .select("clinic_name")
+      .eq("id", clinicId)
       .maybeSingle();
-    const clinicName = (settings as any)?.name ?? "クリニック";
+    const clinicName = (settings as any)?.clinic_name ?? "クリニック";
 
     // 12ヶ月分を並列取得
     const monthlyResults = await Promise.all(
