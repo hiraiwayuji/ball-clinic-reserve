@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { PUBLIC_CLINIC_ID } from "@/lib/default-clinic-id";
+
+const DEFAULT_CLINIC_ID = PUBLIC_CLINIC_ID;
 
 function getSupabase() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
@@ -26,6 +29,7 @@ async function getWaitlistPosition(supabase: any, aptId: string, startTime: stri
   const { data } = await supabase
     .from("appointments")
     .select("id, created_at")
+    .eq("clinic_id", DEFAULT_CLINIC_ID)
     .eq("start_time", startTime)
     .eq("status", "waiting")
     .order("created_at", { ascending: true });
@@ -44,6 +48,7 @@ export async function GET(req: NextRequest) {
     const { data: appointments } = await supabase
       .from("appointments")
       .select("id, start_time, is_first_visit, status, customers(name)")
+      .eq("clinic_id", DEFAULT_CLINIC_ID)
       .in("status", ["pending", "confirmed", "waiting"])
       .order("created_at", { ascending: false });
     const apt = (appointments || []).find(a => a.id.startsWith(id.toLowerCase()));
@@ -64,6 +69,7 @@ export async function GET(req: NextRequest) {
     const { data: appointments } = await supabase
       .from("appointments")
       .select("id, start_time, is_first_visit, status, customers(name)")
+      .eq("clinic_id", DEFAULT_CLINIC_ID)
       .in("customer_id", customerIds)
       .in("status", ["pending", "confirmed", "waiting"])
       .order("start_time", { ascending: true });
@@ -88,6 +94,7 @@ export async function GET(req: NextRequest) {
     const { data: appointments } = await supabase
       .from("appointments")
       .select("id, start_time, is_first_visit, status, customers(name)")
+      .eq("clinic_id", DEFAULT_CLINIC_ID)
       .in("customer_id", customerIds)
       .in("status", ["pending", "confirmed", "waiting"])
       .order("start_time", { ascending: true });

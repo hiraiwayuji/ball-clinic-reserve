@@ -18,6 +18,7 @@ import { createClient } from "@/lib/supabase/client";
 import { getTimeSlots, getMaxSlots, isDateWithinAllowedRange, isTimeSlotWithinTwoHours, type SlotMinutes } from "@/lib/time-slots";
 import { useClinicSlotDuration } from "@/lib/use-clinic-slot-duration";
 import { CLINIC_CONFIG } from "@/lib/clinic-config";
+import { PUBLIC_CLINIC_ID } from "@/lib/default-clinic-id";
 
 // 静的なTIME_SLOTS, MAX_SLOTSを削除
 
@@ -305,15 +306,18 @@ function ReserveCalendarContent() {
     
     const dateStr = format(date, "yyyy-MM-dd");
     const supabase = createClient();
-    
+
     // JSTからUTC文字列に厳密に変換する (DBのUTCデータと100%一致させるため)
     const startOfDayUTC = new Date(`${dateStr}T00:00:00+09:00`).toISOString();
     const endOfDayUTC = new Date(`${dateStr}T23:59:59+09:00`).toISOString();
-    
-    // 直接Supabaseからデータを取得（キャッシュ回避のためダミー条件を付与）
+
+    // 【重要】clinic_id フィルタ必須。これが無いと他院（karada/relaq等）の予約まで
+    // 拾って「予約済」表示になり、本院の空き枠が見えなくなる（マルチテナント漏洩）。
+    // また customers JOIN は他院の患者名が leak するので start/end のみ取得する。
     const { data: aptData, error: aptError } = await supabase
       .from("appointments")
-      .select("start_time, end_time, customers(name)")
+      .select("start_time, end_time")
+      .eq("clinic_id", PUBLIC_CLINIC_ID)
       .gte("start_time", startOfDayUTC)
       .lte("start_time", endOfDayUTC)
       .neq("status", "cancelled");
@@ -327,10 +331,7 @@ function ReserveCalendarContent() {
 
     const slotCounts: Record<string, number> = {};
     if (aptData) {
-      aptData.forEach((app: any) => {
-        // ユーザー指示のJSTログ出力
-        console.log(`[予約データ取得] ${app.customers?.name || 'Unknown'}: start_time=${new Date(app.start_time).toLocaleString("ja-JP", {timeZone: "Asia/Tokyo"})}`);
-        
+      aptData.forEach((app: { start_time: string; end_time?: string | null }) => {
         const start = new Date(app.start_time);
         const end = app.end_time ? new Date(app.end_time) : new Date(start.getTime() + 30 * 60000);
         let current = start.getTime();

@@ -71,6 +71,7 @@ export async function GET(req: NextRequest) {
     const { data: appointments } = await supabase
       .from("appointments")
       .select("id, start_time, is_first_visit, status, customers(name)")
+      .eq("clinic_id", DEFAULT_CLINIC_ID)
       .in("customer_id", customerIds)
       .in("status", ["pending", "confirmed", "waiting"])
       .order("start_time", { ascending: true });

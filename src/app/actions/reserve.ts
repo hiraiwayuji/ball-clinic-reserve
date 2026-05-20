@@ -150,6 +150,7 @@ export async function getMonthlyAvailability(year: number, month: number): Promi
     const { data, error } = await supabase
       .from("appointments")
       .select("start_time, end_time")
+      .eq("clinic_id", DEFAULT_CLINIC_ID)
       .gte("start_time", startOfMonth)
       .lte("start_time", endOfMonth)
       .neq("status", "cancelled");
@@ -216,6 +217,7 @@ export async function getDailyAvailability(dateStr: string) {
     const { data, error } = await supabase
       .from("appointments")
       .select("start_time, end_time")
+      .eq("clinic_id", DEFAULT_CLINIC_ID)
       .gte("start_time", startOfDay)
       .lte("start_time", endOfDay)
       .neq("status", "cancelled");
@@ -418,10 +420,11 @@ export async function createReservation(formData: FormData) {
         return { success: false, error: "すでに予約が入っています。既存の予約をキャンセルしてから新しい予約をお取りください。" };
       }
 
-      // 予約枠の定員チェック
+      // 予約枠の定員チェック（必ず自院のみで判定）
       const { data: existingApps } = await adminDb
         .from("appointments")
         .select("id")
+        .eq("clinic_id", DEFAULT_CLINIC_ID)
         .eq("start_time", startDateTimeStr)
         .neq("status", "cancelled");
         
@@ -451,6 +454,7 @@ export async function createReservation(formData: FormData) {
         const { data: roomConflict } = await adminDb
           .from("appointments")
           .select("id")
+          .eq("clinic_id", DEFAULT_CLINIC_ID)
           .eq("room_id", roomId)
           .neq("status", "cancelled")
           .lt("start_time", endDateTimeStr)   // 既存の開始 < 新規の終了
@@ -467,6 +471,7 @@ export async function createReservation(formData: FormData) {
         const { data: staffConflict } = await adminDb
           .from("appointments")
           .select("id")
+          .eq("clinic_id", DEFAULT_CLINIC_ID)
           .eq("staff_id", staffId)
           .neq("status", "cancelled")
           .lt("start_time", endDateTimeStr)
