@@ -525,6 +525,7 @@ export async function deleteCashSale(id: string) {
     const { error } = await supabase
       .from("cash_sales")
       .delete()
+      .eq("clinic_id", clinicId)
       .eq("id", id);
 
     if (error) throw error;

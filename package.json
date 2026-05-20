@@ -4,11 +4,13 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "node scripts/migrate-on-build.mjs && next build",
+    "build": "npm run audit:tenant && node scripts/migrate-on-build.mjs && next build",
     "build:no-migrate": "next build",
     "start": "next start",
     "lint": "eslint",
-    "migrate": "node scripts/migrate-on-build.mjs"
+    "migrate": "node scripts/migrate-on-build.mjs",
+    "audit:tenant": "node scripts/audit-tenant-isolation.mjs",
+    "audit:tenant:verbose": "node scripts/audit-tenant-isolation.mjs --verbose"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.82.0",
