@@ -105,6 +105,20 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
+  // 🚨 緊急停止 (2026-05-21):
+  // Supabase の pg_cron がこのエンドポイントを高頻度で叩き、毎回 13〜57 秒の
+  // クエリ実行 → connection pool 枯渇 → 管理画面・家族カレンダーが全部「真っ白」状態に。
+  // 暫定対応として即 return で 13秒待ち止める。pg_cron 自体は Supabase Dashboard
+  // から unschedule する必要あり。クエリ最適化（calendar_events の index 追加 or
+  // クエリの WHERE 絞り込み）してから再有効化すること。
+  if (process.env.DISABLE_CHECK_REMINDERS_CRON !== "0") {
+    return NextResponse.json({
+      skipped: true,
+      reason: "temporarily disabled due to Postgres connection pool exhaustion",
+      reEnableWith: "set env DISABLE_CHECK_REMINDERS_CRON=0",
+    });
+  }
+
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !key) {
