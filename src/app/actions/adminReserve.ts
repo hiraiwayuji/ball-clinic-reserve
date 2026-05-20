@@ -47,6 +47,13 @@ export async function createManualReservation(formData: FormData) {
     const durationStr = formData.get("duration") as string;
     const durationMinutes = durationStr ? parseInt(durationStr, 10) : 30;
 
+    // コース・スタッフ・個室の選択（任意）
+    // 患者側 reserve と同じく ID と snapshot 名を併存させる。
+    // ID がマスタにない（別院/削除済み）場合は保存しないことで横断混入を防ぐ。
+    const courseId = (formData.get("courseId") as string) || null;
+    const staffId = (formData.get("staffId") as string) || null;
+    const roomId = (formData.get("roomId") as string) || null;
+
     if (!rawDate || !time || !name || !phone) {
       return { success: false, error: "必須項目が不足しています" };
     }
@@ -92,6 +99,25 @@ export async function createManualReservation(formData: FormData) {
     const baseDate = new Date(`${rawDate}T${time}:00+09:00`);
     const isFirstVisit = visitType === "new";
 
+    // コース/スタッフ/個室のマスタ名を解決（clinic_id 指定で別院ID混入を防ぐ）
+    const [courseRow, staffRow, roomRow] = await Promise.all([
+      courseId
+        ? supabase.from("reservation_courses").select("id,name").eq("id", courseId).eq("clinic_id", clinicId).maybeSingle()
+        : Promise.resolve({ data: null as { id: string; name: string } | null }),
+      staffId
+        ? supabase.from("reservation_staff").select("id,name").eq("id", staffId).eq("clinic_id", clinicId).maybeSingle()
+        : Promise.resolve({ data: null as { id: string; name: string } | null }),
+      roomId
+        ? supabase.from("reservation_rooms").select("id,name").eq("id", roomId).eq("clinic_id", clinicId).maybeSingle()
+        : Promise.resolve({ data: null as { id: string; name: string } | null }),
+    ]);
+    const courseName = courseRow.data?.name ?? null;
+    const staffName  = staffRow.data?.name ?? null;
+    const roomName   = roomRow.data?.name ?? null;
+    const courseExtra = courseId && courseName ? { course_id: courseId, course_name: courseName } : {};
+    const staffExtra  = staffId  && staffName  ? { staff_id:  staffId,  staff_name:  staffName  } : {};
+    const roomExtra   = roomId   && roomName   ? { room_id:   roomId,   room_name:   roomName   } : {};
+
     // 連続予約は同一 series_id で束ねる（後で「この日以降を全削除」できるように）
     const seriesId = recurringWeeks > 1
       ? (typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : null)
@@ -116,6 +142,9 @@ export async function createManualReservation(formData: FormData) {
         status: "confirmed",
         clinic_id: clinicId,
         series_id: seriesId,
+        ...courseExtra,
+        ...staffExtra,
+        ...roomExtra,
       });
     }
 
@@ -225,7 +254,16 @@ export async function updateAppointmentDetails(
   newTimeStr: string,
   memo: string,
   isFirstVisit: boolean,
-  durationMinutes: number = 30
+  durationMinutes: number = 30,
+  // コース・スタッフ・個室の更新（任意）
+  // - undefined : この呼び出しでは変更しない（既存値を維持）
+  // - null      : 明示的にクリア
+  // - string    : この ID に変更（マスタにない場合は保存しない）
+  options?: {
+    courseId?: string | null;
+    staffId?: string | null;
+    roomId?: string | null;
+  }
 ) {
   const auth = await checkAdminAuth();
   try {
@@ -234,21 +272,71 @@ export async function updateAppointmentDetails(
       // 変更前を保存
       const { data: before } = await supabase
         .from("appointments")
-        .select("id, start_time, end_time, memo, is_first_visit, customers(name)")
+        .select("id, start_time, end_time, memo, is_first_visit, course_id, course_name, staff_id, staff_name, room_id, room_name, customers(name)")
         .eq("id", appointmentId)
         .maybeSingle();
 
       const startDateTimeStr = `${newDateStr}T${newTimeStr}:00+09:00`;
       const endDate = new Date(new Date(startDateTimeStr).getTime() + durationMinutes * 60 * 1000);
 
+      // コース/スタッフ/個室のマスタ名解決
+      const resolveName = async (table: string, id: string) => {
+        const { data } = await supabase
+          .from(table)
+          .select("id,name")
+          .eq("id", id)
+          .eq("clinic_id", auth.clinicId)
+          .maybeSingle();
+        return data?.name ?? null;
+      };
+
+      const updatePayload: Record<string, unknown> = {
+        start_time: startDateTimeStr,
+        end_time: endDate.toISOString(),
+        memo,
+        is_first_visit: isFirstVisit,
+      };
+
+      if (options && "courseId" in options) {
+        if (options.courseId === null) {
+          updatePayload.course_id = null;
+          updatePayload.course_name = null;
+        } else if (typeof options.courseId === "string") {
+          const name = await resolveName("reservation_courses", options.courseId);
+          if (name) {
+            updatePayload.course_id = options.courseId;
+            updatePayload.course_name = name;
+          }
+        }
+      }
+      if (options && "staffId" in options) {
+        if (options.staffId === null) {
+          updatePayload.staff_id = null;
+          updatePayload.staff_name = null;
+        } else if (typeof options.staffId === "string") {
+          const name = await resolveName("reservation_staff", options.staffId);
+          if (name) {
+            updatePayload.staff_id = options.staffId;
+            updatePayload.staff_name = name;
+          }
+        }
+      }
+      if (options && "roomId" in options) {
+        if (options.roomId === null) {
+          updatePayload.room_id = null;
+          updatePayload.room_name = null;
+        } else if (typeof options.roomId === "string") {
+          const name = await resolveName("reservation_rooms", options.roomId);
+          if (name) {
+            updatePayload.room_id = options.roomId;
+            updatePayload.room_name = name;
+          }
+        }
+      }
+
       const { error } = await supabase
         .from("appointments")
-        .update({
-          start_time: startDateTimeStr,
-          end_time: endDate.toISOString(),
-          memo: memo,
-          is_first_visit: isFirstVisit
-        })
+        .update(updatePayload)
         .eq("id", appointmentId);
 
       if (error) {
@@ -265,8 +353,11 @@ export async function updateAppointmentDetails(
         actionType: "appointment.update",
         targetTable: "appointments",
         targetId: appointmentId,
-        before: { start_time: before?.start_time, memo: before?.memo, is_first_visit: before?.is_first_visit },
-        after: { start_time: startDateTimeStr, memo, is_first_visit: isFirstVisit },
+        before: {
+          start_time: before?.start_time, memo: before?.memo, is_first_visit: before?.is_first_visit,
+          course_name: before?.course_name, staff_name: before?.staff_name, room_name: before?.room_name,
+        },
+        after: { ...updatePayload },
       });
       await notifyOwnerOfStaffAction({
         clinicId: auth.clinicId,
@@ -277,6 +368,7 @@ export async function updateAppointmentDetails(
       });
 
       revalidatePath("/admin/appointments");
+      revalidatePath("/admin/counter");
       revalidatePath("/admin");
     }
     return { success: true };
@@ -490,7 +582,7 @@ export async function getTodayAppointments() {
       .from("appointments")
       .select(`
         id, start_time, end_time, status, checkin_status,
-        is_first_visit, memo, course_name, staff_name,
+        is_first_visit, memo, course_name, staff_name, room_name,
         customers(id, name, phone, line_user_id)
       `)
       .eq("clinic_id", clinicId)
@@ -520,7 +612,7 @@ export async function getAppointmentsByDate(dateStr: string) {
       .from("appointments")
       .select(`
         id, start_time, end_time, status, checkin_status,
-        is_first_visit, memo, course_name, staff_name,
+        is_first_visit, memo, course_name, staff_name, room_name,
         customers(id, name, phone, line_user_id)
       `)
       .eq("clinic_id", clinicId)

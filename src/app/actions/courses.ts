@@ -10,6 +10,8 @@ export type ReservationCourse = {
   name: string;
   duration_minutes: number;
   price: number | null;
+  /** 初診時の税込価格。NULL なら price をフォールバックに使う。 */
+  first_visit_price: number | null;
   description: string | null;
   is_active: boolean;
   sort_order: number;
@@ -116,6 +118,7 @@ export async function saveCourse(course: Partial<ReservationCourse> & { name: st
     name: course.name,
     duration_minutes: course.duration_minutes,
     price: course.price ?? null,
+    first_visit_price: course.first_visit_price ?? null,
     description: course.description ?? null,
     is_active: course.is_active ?? true,
     sort_order: course.sort_order ?? 0,

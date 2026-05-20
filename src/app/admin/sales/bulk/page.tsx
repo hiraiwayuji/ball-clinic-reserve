@@ -16,7 +16,7 @@ import { toast } from "sonner";
 import Link from "next/link";
 import {
   Bot, CheckSquare, Square, Loader2, Zap, AlertTriangle,
-  ChevronLeft, Save, RefreshCw, User, Clock, Info,
+  ChevronLeft, Save, RefreshCw, User, Clock, Info, ClipboardList,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -51,8 +51,8 @@ function BulkSalesPageInner() {
           .map((p) => ({
             ...p,
             checked: p.confidence === "certain" || p.confidence === "likely",
-            editAmount: p.prediction ? String(p.prediction.predictedAmount) : "",
-            editMemo: p.prediction?.predictedMemo ?? "",
+            editAmount: p.initialAmount,
+            editMemo: p.initialMemo,
             paymentType: "" as CashSalePaymentType | "",
           }))
       );
@@ -369,20 +369,27 @@ function DraftRowItem({
               <span className="text-[10px] font-black px-1.5 py-0.5 rounded-full bg-rose-500 text-white">初診</span>
             )}
           </div>
-          <div className="flex items-center gap-1 mt-0.5 text-xs text-slate-400">
+          <div className="flex items-center gap-1 mt-0.5 text-xs text-slate-400 flex-wrap">
             <Clock className="w-3 h-3" />
             {time}
-            {row.prediction && (
-              <>
-                <Bot className="w-3 h-3 ml-2 text-violet-500" />
-                <span className="text-violet-500 font-medium">AI予測 確度{row.prediction.confidence}%</span>
-              </>
+            {row.amountSource === "course" && (
+              <span className="flex items-center gap-1 ml-2 text-emerald-600 font-medium">
+                <ClipboardList className="w-3 h-3" />
+                予約のコース
+                {row.reservedCourseName && <span className="text-emerald-700">「{row.reservedCourseName}」</span>}
+              </span>
             )}
-            {!row.prediction && (
-              <>
-                <Info className="w-3 h-3 ml-2 text-slate-300" />
-                <span className="text-slate-400">履歴なし・手入力</span>
-              </>
+            {row.amountSource === "ai" && row.prediction && (
+              <span className="flex items-center gap-1 ml-2 text-violet-500 font-medium">
+                <Bot className="w-3 h-3" />
+                AI履歴 確度{row.prediction.confidence}%
+              </span>
+            )}
+            {row.amountSource === "empty" && (
+              <span className="flex items-center gap-1 ml-2 text-slate-400">
+                <Info className="w-3 h-3" />
+                履歴なし・手入力
+              </span>
             )}
           </div>
           {row.prediction?.warning && (

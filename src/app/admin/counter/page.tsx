@@ -42,6 +42,7 @@ type Appointment = {
   memo: string | null;
   course_name: string | null;
   staff_name: string | null;
+  room_name: string | null;
   customers: { id: string; name: string; phone: string; line_user_id: string | null } | null;
 };
 
@@ -217,12 +218,17 @@ function AppointmentCard({
               <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-rose-500 text-white uppercase tracking-wide">初診</span>
             )}
             {apt.course_name && (
-              <span className="text-xs text-slate-500 dark:text-slate-400 bg-white/60 dark:bg-slate-800/60 px-2 py-0.5 rounded-full border border-slate-200 dark:border-slate-700">
+              <span className="text-xs font-medium text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-900/30 px-2 py-0.5 rounded-full border border-emerald-200 dark:border-emerald-700/50">
                 {apt.course_name}
               </span>
             )}
             {apt.staff_name && (
               <span className="text-xs text-slate-500 dark:text-slate-400">担当: {apt.staff_name}</span>
+            )}
+            {apt.room_name && (
+              <span className="text-xs text-indigo-600 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-900/30 px-2 py-0.5 rounded-full border border-indigo-200 dark:border-indigo-700/50">
+                {apt.room_name}
+              </span>
             )}
           </div>
           {apt.customers?.phone && (

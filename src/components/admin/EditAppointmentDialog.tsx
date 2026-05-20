@@ -24,6 +24,7 @@ import {
   updateAppointmentStatus,
   sendLineConfirmation,
 } from "@/app/actions/adminReserve";
+import { getCourses, getStaffList, getRooms, type ReservationCourse, type ReservationStaff, type ReservationRoom } from "@/app/actions/courses";
 import { toast } from "sonner";
 import { getTimeSlots } from "@/lib/time-slots";
 import { useClinicSlotDuration } from "@/lib/use-clinic-slot-duration";
@@ -52,6 +53,18 @@ export function EditAppointmentDialog({
   const [visitCount, setVisitCount] = useState<number | null>(null);
   const [deleteChoiceOpen, setDeleteChoiceOpen] = useState(false);
   const [seriesFutureCount, setSeriesFutureCount] = useState<number>(0);
+
+  // コース・スタッフ・個室マスタ
+  const [courses, setCourses] = useState<ReservationCourse[]>([]);
+  const [staffList, setStaffList] = useState<ReservationStaff[]>([]);
+  const [rooms, setRooms] = useState<ReservationRoom[]>([]);
+  const [courseId, setCourseId] = useState<string>("");
+  const [staffId, setStaffId] = useState<string>("");
+  const [roomId, setRoomId] = useState<string>("");
+  // 元の値（変更検知用：未変更なら updateAppointmentDetails に options を渡さない）
+  const [initialCourseId, setInitialCourseId] = useState<string>("");
+  const [initialStaffId, setInitialStaffId] = useState<string>("");
+  const [initialRoomId, setInitialRoomId] = useState<string>("");
 
   useEffect(() => {
     if (open && appointment) {
@@ -99,8 +112,40 @@ export function EditAppointmentDialog({
       setDuration(diffMinutes > 0 ? diffMinutes.toString() : "30");
       setVisitType(appointment.is_first_visit ? "new" : "return");
       setMemo(appointment.memo || "");
+
+      // 既存の course_id / staff_id / room_id をセット
+      const cId = appointment.course_id ?? "";
+      const sId = appointment.staff_id ?? "";
+      const rId = appointment.room_id ?? "";
+      setCourseId(cId);
+      setStaffId(sId);
+      setRoomId(rId);
+      setInitialCourseId(cId);
+      setInitialStaffId(sId);
+      setInitialRoomId(rId);
+
+      // マスタ取得（既に取得済みなら再取得しない）
+      if (courses.length === 0) {
+        getCourses().then(setCourses).catch(() => {});
+      }
+      if (staffList.length === 0) {
+        getStaffList().then(setStaffList).catch(() => {});
+      }
+      if (rooms.length === 0) {
+        getRooms().then(setRooms).catch(() => {});
+      }
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, appointment]);
+
+  // コース選択時に所要時間も連動して更新
+  const handleCourseChange = (id: string) => {
+    setCourseId(id);
+    if (id) {
+      const c = courses.find(c => c.id === id);
+      if (c) setDuration(String(c.duration_minutes));
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -110,13 +155,20 @@ export function EditAppointmentDialog({
     }
     setIsSubmitting(true);
     try {
+      // 変更があった項目だけ options に含める（"" は「解除」扱い → null）
+      const options: { courseId?: string | null; staffId?: string | null; roomId?: string | null } = {};
+      if (courseId !== initialCourseId) options.courseId = courseId === "" ? null : courseId;
+      if (staffId !== initialStaffId) options.staffId = staffId === "" ? null : staffId;
+      if (roomId !== initialRoomId) options.roomId = roomId === "" ? null : roomId;
+
       const result = await updateAppointmentDetails(
         appointment.id,
         format(date, "yyyy-MM-dd"),
         time,
         memo,
         visitType === "new",
-        Number(duration)
+        Number(duration),
+        Object.keys(options).length > 0 ? options : undefined,
       );
       if (result.success) {
         toast.success("予約を更新しました");
@@ -367,6 +419,65 @@ export function EditAppointmentDialog({
                 ))}
               </div>
             </div>
+
+            {/* コース・メニュー */}
+            {courses.length > 0 && (
+              <div className="space-y-1.5">
+                <Label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">
+                  メニュー / コース
+                </Label>
+                <select value={courseId} onChange={(e) => handleCourseChange(e.target.value)} className={selectClass}>
+                  <option value="">指定なし</option>
+                  {courses
+                    .filter(c => c.is_active || c.id === initialCourseId)
+                    .map(c => (
+                      <option key={c.id} value={c.id}>
+                        {c.name}（{c.duration_minutes}分{c.price != null ? ` / ¥${c.price.toLocaleString()}` : ""}）
+                        {!c.is_active ? "（非公開）" : ""}
+                      </option>
+                    ))}
+                </select>
+                <p className="text-[10px] text-slate-500">変更すると売上一括入力の元情報も更新されます。</p>
+              </div>
+            )}
+
+            {/* 担当スタッフ */}
+            {staffList.length > 0 && (
+              <div className="space-y-1.5">
+                <Label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">
+                  担当スタッフ
+                </Label>
+                <select value={staffId} onChange={(e) => setStaffId(e.target.value)} className={selectClass}>
+                  <option value="">指定なし</option>
+                  {staffList
+                    .filter(s => s.is_active || s.id === initialStaffId)
+                    .map(s => (
+                      <option key={s.id} value={s.id}>
+                        {s.name}{!s.is_active ? "（非公開）" : ""}
+                      </option>
+                    ))}
+                </select>
+              </div>
+            )}
+
+            {/* 個室 */}
+            {rooms.length > 0 && (
+              <div className="space-y-1.5">
+                <Label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">
+                  個室
+                </Label>
+                <select value={roomId} onChange={(e) => setRoomId(e.target.value)} className={selectClass}>
+                  <option value="">指定なし</option>
+                  {rooms
+                    .filter(r => r.is_active || r.id === initialRoomId)
+                    .map(r => (
+                      <option key={r.id} value={r.id}>
+                        {r.name}{!r.is_active ? "（非公開）" : ""}
+                      </option>
+                    ))}
+                </select>
+              </div>
+            )}
 
             {/* メモ */}
             <div className="space-y-1.5">

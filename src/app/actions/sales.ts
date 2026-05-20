@@ -86,6 +86,16 @@ export type PendingSalePatient = {
   checkinStatus: string | null;
   confidence: "certain" | "likely" | "unknown";
   prediction?: SalesPrediction | null;
+  /** 予約時に選ばれていたコース（snapshot 名）。null なら未選択。 */
+  reservedCourseName: string | null;
+  /** 予約コースから算出した提案金額。is_first_visit に応じて first_visit_price / price を選ぶ。 */
+  reservedCoursePrice: number | null;
+  /** 金額の元情報の出所。bulk画面で表示バッジを切り替えるのに使う。 */
+  amountSource: "course" | "ai" | "empty";
+  /** bulk画面で初期表示する金額（コース > AI > 空欄 の優先順位） */
+  initialAmount: string;
+  /** bulk画面で初期表示するメモ（コース名 > AI予測メモ > "" の優先順位） */
+  initialMemo: string;
 };
 
 function getJstDateString(date = new Date()) {
@@ -119,10 +129,10 @@ export async function getTodayPendingSales(dateStr?: string): Promise<{ success:
     const targetDate = dateStr ?? getJstDateString();
     const { dayStart, dayEnd } = buildJstDayRange(targetDate);
 
-    // 指定日の「会計完了」予約を取得
+    // 指定日の「会計完了」予約を取得（コース情報も snapshot として一緒に取る）
     const { data: appointments, error: aptError } = await supabase
       .from("appointments")
-      .select("id, is_first_visit, start_time, checkin_status, status, customers(name)")
+      .select("id, is_first_visit, start_time, checkin_status, status, course_id, course_name, customers(name)")
       .eq("clinic_id", clinicId)
       .neq("status", "cancelled")
       .gte("start_time", dayStart)
@@ -130,6 +140,24 @@ export async function getTodayPendingSales(dateStr?: string): Promise<{ success:
 
     if (aptError) throw aptError;
     if (!appointments || appointments.length === 0) return { success: true, data: [] };
+
+    // 予約で参照されている course_id の最新マスタ価格を一括取得（N+1 回避）。
+    // course_id snapshot が削除済みコースを指していると null。その場合は AI 履歴フォールバック。
+    const courseIds = Array.from(new Set(
+      (appointments as Array<{ course_id?: string | null }>)
+        .map((a) => a.course_id ?? null)
+        .filter((id): id is string => !!id)
+    ));
+    type CourseMasterRow = { id: string; name: string; price: number | null; first_visit_price: number | null };
+    let courseMaster: Map<string, CourseMasterRow> = new Map();
+    if (courseIds.length > 0) {
+      const { data: courseRows } = await supabase
+        .from("reservation_courses")
+        .select("id, name, price, first_visit_price")
+        .eq("clinic_id", clinicId)
+        .in("id", courseIds);
+      courseMaster = new Map((courseRows ?? []).map((c) => [c.id as string, c as CourseMasterRow]));
+    }
 
     // 指定日の既存売上を取得（名前で照合）
     const { data: existingSales } = await supabase
@@ -145,10 +173,19 @@ export async function getTodayPendingSales(dateStr?: string): Promise<{ success:
       enteredCounts.set(normalizedName, (enteredCounts.get(normalizedName) ?? 0) + 1);
     }
 
-    // 売上未入力の患者だけ抽出して予測を添付
+    // 売上未入力の患者だけ抽出して、コース価格 → AI履歴 → 空欄 の順で元情報を決める
     const pending: PendingSalePatient[] = [];
-    for (const apt of appointments) {
-      const customerName = getAppointmentCustomerName(apt.customers as { name?: string } | { name?: string }[] | null);
+    for (const apt of appointments as Array<{
+      id: string;
+      is_first_visit: boolean | null;
+      start_time: string;
+      checkin_status: string | null;
+      status: string;
+      course_id: string | null;
+      course_name: string | null;
+      customers: { name?: string } | { name?: string }[] | null;
+    }>) {
+      const customerName = getAppointmentCustomerName(apt.customers);
       if (!customerName) continue;
       const currentEnteredCount = enteredCounts.get(customerName) ?? 0;
       if (currentEnteredCount > 0) {
@@ -156,9 +193,23 @@ export async function getTodayPendingSales(dateStr?: string): Promise<{ success:
         continue;
       }
 
-      // 予測取得（3ヶ月履歴）
+      const isFirstVisit = apt.is_first_visit ?? false;
+
+      // ── 第1優先: 予約時のコース価格 ──
+      // course_id がマスタに残っていれば、初診→first_visit_price（無ければprice）、再診→price
+      let reservedCoursePrice: number | null = null;
+      const courseRow = apt.course_id ? courseMaster.get(apt.course_id) ?? null : null;
+      if (courseRow) {
+        if (isFirstVisit) {
+          reservedCoursePrice = courseRow.first_visit_price ?? courseRow.price ?? null;
+        } else {
+          reservedCoursePrice = courseRow.price ?? null;
+        }
+      }
+
+      // ── 第2優先: AI履歴予測（コース価格が無い時だけ計算） ──
       let prediction: SalesPrediction | null = null;
-      if (!apt.is_first_visit) {
+      if (reservedCoursePrice == null && !isFirstVisit) {
         const { data: hist } = await supabase
           .from("cash_sales")
           .select("treatment_fee, memo, sale_date")
@@ -196,14 +247,36 @@ export async function getTodayPendingSales(dateStr?: string): Promise<{ success:
         }
       }
 
+      // 元情報の出所と初期値を決定
+      const reservedCourseName = apt.course_name ?? courseRow?.name ?? null;
+      let amountSource: "course" | "ai" | "empty";
+      let initialAmount = "";
+      let initialMemo = "";
+      if (reservedCoursePrice != null) {
+        amountSource = "course";
+        initialAmount = String(reservedCoursePrice);
+        initialMemo = reservedCourseName ?? "";
+      } else if (prediction) {
+        amountSource = "ai";
+        initialAmount = String(prediction.predictedAmount);
+        initialMemo = prediction.predictedMemo;
+      } else {
+        amountSource = "empty";
+      }
+
       pending.push({
         appointmentId: apt.id,
         customerName,
-        isFirstVisit: apt.is_first_visit ?? false,
+        isFirstVisit,
         checkinTime: apt.start_time,
         checkinStatus: apt.checkin_status ?? null,
         confidence: getConfidence(apt.checkin_status ?? null),
         prediction,
+        reservedCourseName,
+        reservedCoursePrice,
+        amountSource,
+        initialAmount,
+        initialMemo,
       });
     }
 

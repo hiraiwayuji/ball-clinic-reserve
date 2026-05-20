@@ -39,6 +39,7 @@ function CourseRow({
   const [isFirstVisitOnly, setIsFirstVisitOnly] = useState(course.is_first_visit_only);
   const [isRepeatOnly, setIsRepeatOnly] = useState(course.is_repeat_only);
   const [regularPrice, setRegularPrice] = useState(course.regular_price?.toString() ?? "");
+  const [firstVisitPrice, setFirstVisitPrice] = useState(course.first_visit_price?.toString() ?? "");
   const [badgeLabel, setBadgeLabel] = useState(course.badge_label ?? "");
   const [saving, setSaving] = useState(false);
 
@@ -58,6 +59,7 @@ function CourseRow({
       is_first_visit_only: isFirstVisitOnly,
       is_repeat_only: isRepeatOnly,
       regular_price: regularPrice ? Number(regularPrice) : null,
+      first_visit_price: firstVisitPrice ? Number(firstVisitPrice) : null,
       badge_label: badgeLabel.trim() || null,
     });
     setSaving(false);
@@ -103,17 +105,29 @@ function CourseRow({
           <div>
             <Label className="text-xs text-slate-600 dark:text-slate-300">料金（円）</Label>
             <Input type="number" value={price} onChange={e => setPrice(e.target.value)} className="h-9 mt-1" placeholder="未設定可" />
+            <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">再診時の通常価格</p>
           </div>
           <div>
-            <Label className="text-xs text-slate-600 dark:text-slate-300">通常価格（円）</Label>
+            <Label className="text-xs text-slate-600 dark:text-slate-300">初診時価格（円）</Label>
             <Input
               type="number"
-              value={regularPrice}
-              onChange={e => setRegularPrice(e.target.value)}
+              value={firstVisitPrice}
+              onChange={e => setFirstVisitPrice(e.target.value)}
               className="h-9 mt-1"
-              placeholder="例: 9000（割引前）"
+              placeholder="未設定なら料金と同額"
             />
+            <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">初診の時はこちらが売上元情報に</p>
           </div>
+        </div>
+        <div>
+          <Label className="text-xs text-slate-600 dark:text-slate-300">通常価格（円）</Label>
+          <Input
+            type="number"
+            value={regularPrice}
+            onChange={e => setRegularPrice(e.target.value)}
+            className="h-9 mt-1"
+            placeholder="例: 9000（割引前・LPで取り消し線表示）"
+          />
         </div>
         <div>
           <Label className="text-xs text-slate-600 dark:text-slate-300">説明</Label>
@@ -490,6 +504,7 @@ export default function CourseStaffSettings({ initialCourses, initialStaff, init
   const [newCourseIsFirstVisitOnly, setNewCourseIsFirstVisitOnly] = useState(false);
   const [newCourseIsRepeatOnly, setNewCourseIsRepeatOnly] = useState(false);
   const [newCourseRegularPrice, setNewCourseRegularPrice] = useState("");
+  const [newCourseFirstVisitPrice, setNewCourseFirstVisitPrice] = useState("");
   const [newCourseBadge, setNewCourseBadge] = useState("");
   const [savingCourse, setSavingCourse] = useState(false);
 
@@ -530,6 +545,7 @@ export default function CourseStaffSettings({ initialCourses, initialStaff, init
       is_first_visit_only: newCourseIsFirstVisitOnly,
       is_repeat_only: newCourseIsRepeatOnly,
       regular_price: newCourseRegularPrice ? Number(newCourseRegularPrice) : null,
+      first_visit_price: newCourseFirstVisitPrice ? Number(newCourseFirstVisitPrice) : null,
       badge_label: newCourseBadge.trim() || null,
     });
     setSavingCourse(false);
@@ -545,6 +561,7 @@ export default function CourseStaffSettings({ initialCourses, initialStaff, init
       setNewCourseIsFirstVisitOnly(false);
       setNewCourseIsRepeatOnly(false);
       setNewCourseRegularPrice("");
+      setNewCourseFirstVisitPrice("");
       setNewCourseBadge("");
       window.location.reload();
     } else {
@@ -640,17 +657,29 @@ export default function CourseStaffSettings({ initialCourses, initialStaff, init
                 <div>
                   <Label className="text-xs text-slate-600 dark:text-slate-300">料金（円）</Label>
                   <Input type="number" value={newCoursePrice} onChange={e => setNewCoursePrice(e.target.value)} className="h-9 mt-1" placeholder="未設定可" />
+                  <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">再診時の通常価格</p>
                 </div>
                 <div>
-                  <Label className="text-xs text-slate-600 dark:text-slate-300">通常価格（円）</Label>
+                  <Label className="text-xs text-slate-600 dark:text-slate-300">初診時価格（円）</Label>
                   <Input
                     type="number"
-                    value={newCourseRegularPrice}
-                    onChange={e => setNewCourseRegularPrice(e.target.value)}
+                    value={newCourseFirstVisitPrice}
+                    onChange={e => setNewCourseFirstVisitPrice(e.target.value)}
                     className="h-9 mt-1"
-                    placeholder="例: 9000（割引前）"
+                    placeholder="未設定なら料金と同額"
                   />
+                  <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">初診の時はこちらが売上元情報に</p>
                 </div>
+              </div>
+              <div>
+                <Label className="text-xs text-slate-600 dark:text-slate-300">通常価格（円）</Label>
+                <Input
+                  type="number"
+                  value={newCourseRegularPrice}
+                  onChange={e => setNewCourseRegularPrice(e.target.value)}
+                  className="h-9 mt-1"
+                  placeholder="例: 9000（割引前・LPで取り消し線表示）"
+                />
               </div>
               <div>
                 <Label className="text-xs text-slate-600 dark:text-slate-300">説明</Label>

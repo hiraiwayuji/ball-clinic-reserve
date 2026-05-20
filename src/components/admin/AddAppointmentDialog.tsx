@@ -18,6 +18,7 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { createManualReservation } from "@/app/actions/adminReserve";
 import { searchPatientsForBooking, PatientSuggestion } from "@/app/actions/patientSearch";
+import { getCourses, getStaffList, getRooms, type ReservationCourse, type ReservationStaff, type ReservationRoom } from "@/app/actions/courses";
 import { toast } from "sonner";
 import { getTimeSlots } from "@/lib/time-slots";
 import { useClinicSlotDuration } from "@/lib/use-clinic-slot-duration";
@@ -47,7 +48,16 @@ export function AddAppointmentDialog({
   const [time, setTime] = useState<string>(defaultTime || "");
   const [visitType, setVisitType] = useState<string>("new");
   const [recurringWeeks, setRecurringWeeks] = useState<string>("1");
+  const [duration, setDuration] = useState<string>("30");
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // コース・スタッフ・個室マスタ（ダイアログを開いたとき1回だけ取得）
+  const [courses, setCourses] = useState<ReservationCourse[]>([]);
+  const [staffList, setStaffList] = useState<ReservationStaff[]>([]);
+  const [rooms, setRooms] = useState<ReservationRoom[]>([]);
+  const [courseId, setCourseId] = useState<string>("");
+  const [staffId, setStaffId] = useState<string>("");
+  const [roomId, setRoomId] = useState<string>("");
 
   // 患者サジェスト
   const [nameValue, setNameValue] = useState("");
@@ -63,6 +73,16 @@ export function AddAppointmentDialog({
     if (open) {
       if (defaultDate) setDate(defaultDate);
       if (defaultTime) setTime(defaultTime);
+      // マスタ取得（既に取得済みなら再取得しない）
+      if (courses.length === 0) {
+        getCourses().then(setCourses).catch(() => {});
+      }
+      if (staffList.length === 0) {
+        getStaffList().then(setStaffList).catch(() => {});
+      }
+      if (rooms.length === 0) {
+        getRooms().then(setRooms).catch(() => {});
+      }
     } else {
       // ダイアログを閉じたらリセット
       setNameValue("");
@@ -72,8 +92,22 @@ export function AddAppointmentDialog({
       setSelectedPatient(null);
       setVisitType("new");
       setRecurringWeeks("1");
+      setDuration("30");
+      setCourseId("");
+      setStaffId("");
+      setRoomId("");
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, defaultDate, defaultTime]);
+
+  // コース選択時に所要時間も連動して更新
+  const handleCourseChange = (id: string) => {
+    setCourseId(id);
+    if (id) {
+      const c = courses.find(c => c.id === id);
+      if (c) setDuration(String(c.duration_minutes));
+    }
+  };
 
   // 名前入力でデバウンス検索
   const handleNameChange = useCallback((value: string) => {
@@ -135,6 +169,10 @@ export function AddAppointmentDialog({
       formData.append("time", time);
       formData.append("visitType", visitType);
       formData.append("recurringWeeks", recurringWeeks);
+      formData.set("duration", duration);
+      if (courseId) formData.append("courseId", courseId);
+      if (staffId) formData.append("staffId", staffId);
+      if (roomId) formData.append("roomId", roomId);
 
       const result = await createManualReservation(formData);
       if (result.success) {
@@ -148,6 +186,10 @@ export function AddAppointmentDialog({
         setTime("");
         setVisitType("new");
         setRecurringWeeks("1");
+        setDuration("30");
+        setCourseId("");
+        setStaffId("");
+        setRoomId("");
         onSuccess?.();
       } else {
         toast.error(result.error || "エラーが発生しました");
@@ -239,7 +281,7 @@ export function AddAppointmentDialog({
                 <Label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">
                   所要時間
                 </Label>
-                <select name="duration" defaultValue="30" className={selectClass}>
+                <select value={duration} onChange={(e) => setDuration(e.target.value)} className={selectClass}>
                   <option value="30">30分</option>
                   <option value="60">60分</option>
                   <option value="90">90分</option>
@@ -372,6 +414,54 @@ export function AddAppointmentDialog({
                 ))}
               </div>
             </div>
+
+            {/* コース・メニュー */}
+            {courses.length > 0 && (
+              <div className="space-y-1.5">
+                <Label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">
+                  メニュー / コース
+                </Label>
+                <select value={courseId} onChange={(e) => handleCourseChange(e.target.value)} className={selectClass}>
+                  <option value="">指定なし</option>
+                  {courses.filter(c => c.is_active).map(c => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}（{c.duration_minutes}分{c.price != null ? ` / ¥${c.price.toLocaleString()}` : ""}）
+                    </option>
+                  ))}
+                </select>
+                <p className="text-[10px] text-slate-500">選ぶと所要時間も自動で入ります。売上一括入力の元情報にも反映されます。</p>
+              </div>
+            )}
+
+            {/* 担当スタッフ */}
+            {staffList.length > 0 && (
+              <div className="space-y-1.5">
+                <Label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">
+                  担当スタッフ
+                </Label>
+                <select value={staffId} onChange={(e) => setStaffId(e.target.value)} className={selectClass}>
+                  <option value="">指定なし</option>
+                  {staffList.filter(s => s.is_active).map(s => (
+                    <option key={s.id} value={s.id}>{s.name}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {/* 個室 */}
+            {rooms.length > 0 && (
+              <div className="space-y-1.5">
+                <Label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">
+                  個室
+                </Label>
+                <select value={roomId} onChange={(e) => setRoomId(e.target.value)} className={selectClass}>
+                  <option value="">指定なし</option>
+                  {rooms.filter(r => r.is_active).map(r => (
+                    <option key={r.id} value={r.id}>{r.name}</option>
+                  ))}
+                </select>
+              </div>
+            )}
 
             {/* 繰り返し */}
             <div className="space-y-1.5">
