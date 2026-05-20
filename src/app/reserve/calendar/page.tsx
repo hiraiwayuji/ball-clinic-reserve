@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { format, isSameMonth, isSameDay, isToday, isPast, startOfDay, startOfMonth, endOfMonth, eachDayOfInterval, startOfWeek, endOfWeek } from "date-fns";
 import { ja } from "date-fns/locale";
-import { ChevronLeft, ChevronRight, ArrowLeft, Clock, CalendarDays, X, CheckCircle2, AlertCircle, Sparkles } from "lucide-react";
+import { ChevronLeft, ChevronRight, ArrowLeft, Clock, CalendarDays, X, CheckCircle2, AlertCircle, Sparkles, Phone, MessageCircle } from "lucide-react";
 import { createWaitlistReservation } from "@/app/actions/reserve";
 import { getClinicHolidays, type ClinicHoliday } from "@/app/actions/holidays";
 import { getActiveCourses, type ReservationCourse } from "@/app/actions/courses";
@@ -72,12 +72,14 @@ const levelConfig = {
     labelClass: "text-amber-400",
     text: "text-white",
   },
+  // ぼーるくんメモ: 「× 予約済」は廃止し、超混雑＝赤△「要問合せ」に統一。
+  // クリック時はキャンセル待ち登録 or お電話/LINE問合せの2択モーダルを表示。
   full: {
     bg: "bg-rose-500/10 hover:bg-rose-500/20",
     border: "border-rose-500/30",
     dot: "bg-rose-400",
-    label: "× 予約済",
-    symbol: "×",
+    label: "△ 要問合せ",
+    symbol: "△",
     labelClass: "text-rose-300",
     text: "text-white",
   },
@@ -546,7 +548,8 @@ function ReserveCalendarContent() {
                   ? "bg-zinc-900 hover:bg-rose-950"
                   : "bg-slate-900";
 
-                const statusSymbol = level === "available" ? "◯" : level === "few" ? "△" : level === "full" ? "×" : "";
+                // × は廃止。full（空き0）も △ で表示し、色（赤）で「要問合せ」を区別。
+                const statusSymbol = level === "available" ? "◯" : (level === "few" || level === "full") ? "△" : "";
                 const symbolColor = level === "available"
                   ? "text-emerald-400"
                   : level === "few"
@@ -716,49 +719,108 @@ function ReserveCalendarContent() {
                 );
               })()}
 
-              {/* CTA or 満員案内 */}
-              {!loadingDay && (
-                dailySlots.length < getTimeSlots(selectedDate, { slotMinutes }).length ? (
-                  <Link
-                    href={`/reserve?date=${format(selectedDate, "yyyy-MM-dd")}${selectedCourse ? `&courseId=${selectedCourse.id}` : ""}`}
-                    className="flex items-center justify-center gap-2 w-full h-14 rounded-2xl bg-blue-600 hover:bg-blue-500 active:scale-95 text-white text-base font-black shadow-xl shadow-blue-950 transition-all"
-                  >
-                    <CalendarDays className="w-5 h-5" />
-                    {format(selectedDate, "M月d日", { locale: ja })} に予約する
-                  </Link>
-                ) : (
+              {/* CTA or 要問合せ案内
+                  判定方法: 「実際にタップできる空き枠」が 0 個になった時だけ要問合せに切り替える。
+                  以前は dailySlots.length < getTimeSlots.length だったが、dailySlots 側に
+                  営業時間外の予約まで 30分刻みで積算されて satisfy せず、空きがあっても
+                  満員扱いになるバグがあった。
+
+                  キャンセル待ち登録は「空きの有無に関わらず常時出す」方針（ぼーるくん指示）。
+                  既に埋まっている時間帯にどうしても来たい患者の動線確保のため。
+              */}
+              {!loadingDay && (() => {
+                const allSlotsForCheck = getTimeSlots(selectedDate, { slotMinutes });
+                const availableSlotsCount = allSlotsForCheck.filter(s =>
+                  !dailySlots.includes(s) &&
+                  !blockedSlots.includes(s) &&
+                  !isTimeSlotWithinTwoHours(selectedDate, s)
+                ).length;
+                const hasAvailable = availableSlotsCount > 0;
+                return (
                   <div className="space-y-3">
-                    <div className="flex items-start gap-3 bg-rose-950 border border-rose-900 rounded-2xl p-4 text-sm text-rose-300 font-bold">
-                      <AlertCircle className="w-5 h-5 shrink-0 mt-0.5 text-rose-400" />
-                      <span>この日の予約枠はすべて埋まっています。キャンセル待ちに登録できます。</span>
-                    </div>
+                    {hasAvailable ? (
+                      <Link
+                        href={`/reserve?date=${format(selectedDate, "yyyy-MM-dd")}${selectedCourse ? `&courseId=${selectedCourse.id}` : ""}`}
+                        className="flex items-center justify-center gap-2 w-full h-14 rounded-2xl bg-blue-600 hover:bg-blue-500 active:scale-95 text-white text-base font-black shadow-xl shadow-blue-950 transition-all"
+                      >
+                        <CalendarDays className="w-5 h-5" />
+                        {format(selectedDate, "M月d日", { locale: ja })} に予約する
+                      </Link>
+                    ) : (
+                      <>
+                        <div className="flex items-start gap-3 bg-rose-950 border border-rose-900 rounded-2xl p-4 text-sm text-rose-300 font-bold">
+                          <AlertCircle className="w-5 h-5 shrink-0 mt-0.5 text-rose-400" />
+                          <span>
+                            この日は予約が大変混み合っております。
+                            お電話・LINEにて直接お問合せいただくか、下のキャンセル待ち登録をご利用ください。
+                          </span>
+                        </div>
+
+                        {/* お電話で問合せ */}
+                        <a
+                          href={`tel:${CLINIC_CONFIG.phone.replace(/[-\s]/g, "")}`}
+                          className="flex items-center justify-center gap-2 w-full h-14 rounded-2xl bg-blue-600 hover:bg-blue-500 active:scale-95 text-white text-sm font-black shadow-xl shadow-blue-950 transition-all"
+                        >
+                          <Phone className="w-5 h-5" />
+                          お電話で問合せ（{CLINIC_CONFIG.phone}）
+                        </a>
+
+                        {/* LINE で問合せ */}
+                        {process.env.NEXT_PUBLIC_LINE_OFFICIAL_ACCOUNT_URL && (
+                          <a
+                            href={process.env.NEXT_PUBLIC_LINE_OFFICIAL_ACCOUNT_URL}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex items-center justify-center gap-2 w-full h-14 rounded-2xl bg-green-600 hover:bg-green-500 active:scale-95 text-white text-sm font-black shadow-xl shadow-green-950 transition-all"
+                          >
+                            <MessageCircle className="w-5 h-5" />
+                            LINEで問合せ
+                          </a>
+                        )}
+                      </>
+                    )}
+
+                    {/* キャンセル待ち登録（常時表示） */}
                     {waitlistState === "idle" && (
                       <button
                         onClick={() => setWaitlistState("form")}
-                        className="flex items-center justify-center gap-2 w-full h-14 rounded-2xl bg-amber-500 hover:bg-amber-400 active:scale-95 text-white text-sm font-black shadow-xl shadow-amber-950 transition-all"
+                        className={`flex items-center justify-center gap-2 w-full h-12 rounded-2xl active:scale-95 text-sm font-black shadow-xl transition-all ${
+                          hasAvailable
+                            ? "bg-zinc-800 hover:bg-zinc-700 text-amber-300 border border-amber-700/50 shadow-zinc-950"
+                            : "bg-amber-500 hover:bg-amber-400 text-white shadow-amber-950"
+                        }`}
                       >
-                        <Clock className="w-5 h-5" />
-                        希望時間帯を指定してキャンセル待ち登録
+                        <Clock className="w-4 h-4" />
+                        {hasAvailable
+                          ? "埋まっている時間に来院したい方は キャンセル待ち登録"
+                          : "キャンセルが出たら来院したい時間帯を登録"}
                       </button>
                     )}
                   </div>
-                )
-              )}
+                );
+              })()}
             </div>
 
             {/* ─── キャンセル待ちフォーム ─── */}
             {(waitlistState === "form" || waitlistState === "submitting") && (
               <div className="border-t border-zinc-800 bg-slate-900 px-5 py-6">
-                <h4 className="font-black text-amber-400 mb-5 flex items-center gap-2 text-base">
+                <h4 className="font-black text-amber-400 mb-1 flex items-center gap-2 text-base">
                   <Clock className="w-5 h-5" />
-                  キャンセル待ちに登録
+                  キャンセル待ち登録
                 </h4>
+                <p className="text-xs text-zinc-300 mb-5 leading-relaxed">
+                  この時間帯にキャンセルが出たら施術を希望、という形で登録します。<br />
+                  キャンセルが発生した時点で順に当院からご連絡します。
+                </p>
                 <form onSubmit={handleWaitlistSubmit} className="space-y-4">
                   {/* 希望時間帯 */}
                   <div className="bg-zinc-900 rounded-2xl border border-zinc-800 p-4">
-                    <Label className="text-[11px] font-bold text-zinc-300 uppercase tracking-widest mb-3 block">
-                      ご希望の時間帯 <span className="text-rose-400">*</span>
+                    <Label className="text-[11px] font-bold text-zinc-300 uppercase tracking-widest mb-1 block">
+                      キャンセルが出たら来院したい時間帯 <span className="text-rose-400">*</span>
                     </Label>
+                    <p className="text-[11px] text-zinc-400 mb-3">
+                      例: 「17:00 〜 20:00」のように、この範囲内でキャンセル空きが出た時にご連絡します。
+                    </p>
                     <div className="flex items-center gap-2">
                       <select
                         value={waitlistStart}
@@ -781,7 +843,7 @@ function ReserveCalendarContent() {
                         ))}
                       </select>
                     </div>
-                    <p className="text-[11px] text-amber-300 mt-2 font-bold">※ 範囲内で空きが出た際にご連絡いたします</p>
+                    <p className="text-[11px] text-amber-300 mt-2 font-bold">※ この時間帯にキャンセル空きが出た時、当院よりご連絡いたします</p>
                   </div>
 
                   {/* お名前 */}
