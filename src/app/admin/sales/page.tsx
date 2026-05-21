@@ -28,7 +28,6 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Calendar as CalendarIcon, Plus, Trash2, Loader2, Coins, User, UserPlus, Landmark, Receipt, Upload, Download, Clock, Bot, X, AlertTriangle, Zap, Pencil, ShieldCheck } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { addCashSale, getCashSales, deleteCashSale, updateCashSale, searchSalesPatients, SalesPatientSuggestion, type CashSalePaymentType } from "@/app/actions/sales";
-import { getActiveCourses, type ReservationCourse } from "@/app/actions/courses";
 import { usePaymentCategories } from "@/lib/use-payment-categories";
 import { toast } from "sonner";
 import Link from "next/link";
@@ -48,18 +47,12 @@ function SalesPageInner() {
 
   // 患者名サジェスト
   const [nameValue, setNameValue] = useState("");
-  const [jippiItems, setJippiItems] = useState<SalesLineItem[]>([{ name: "", amount: 0 }]);
+  const [jippiItems, setJippiItems] = useState<SalesLineItem[]>([{ name: "施術費", amount: 0 }]);
   const [buhanItems, setBuhanItems] = useState<SalesLineItem[]>([]);
   const [savedMenuItems, setSavedMenuItems] = useState<string[]>(() => {
     if (typeof window === "undefined") return [];
     return JSON.parse(localStorage.getItem("custom_sales_items") || "[]");
   });
-  const [activeCourses, setActiveCourses] = useState<ReservationCourse[]>([]);
-
-  // コース一覧をマウント時に取得（実費プルダウンの選択肢）
-  useEffect(() => {
-    getActiveCourses().then(setActiveCourses).catch(() => setActiveCourses([]));
-  }, []);
 
   const totalAmount = useMemo(() => {
     const sum = (items: SalesLineItem[]) => items.reduce((s, i) => s + (i.amount || 0), 0);
@@ -125,7 +118,7 @@ function SalesPageInner() {
     if (predictedAmount && aiMessage && !presetFirstVisit) {
       const amount = parseInt(predictedAmount, 10);
       const conf = parseInt(confidence ?? "0", 10);
-      setJippiItems(prev => [{ name: prev[0]?.name || "", amount }, ...prev.slice(1)]);
+      setJippiItems(prev => [{ name: prev[0]?.name || "施術費", amount }, ...prev.slice(1)]);
       setAiDraft({ message: aiMessage, amount, memo: predictedMemo, confidence: conf, warning: null });
       setShowAiBanner(true);
       return;
@@ -195,7 +188,7 @@ function SalesPageInner() {
           formRef.current?.reset();
           setIsFirstVisit(false);
           setNameValue("");
-          setJippiItems([{ name: "", amount: 0 }]);
+          setJippiItems([{ name: "施術費", amount: 0 }]);
           setBuhanItems([]);
           setSuggestions([]);
           setShowAiBanner(false);
@@ -498,7 +491,6 @@ function SalesPageInner() {
                 </div>
                 {jippiItems.map((item, i) => (
                   <LineItemRow key={`jippi-${i}`} item={item} savedItems={savedMenuItems}
-                    courses={activeCourses} isFirstVisit={isFirstVisit}
                     onChange={updated => setJippiItems(v => v.map((x, j) => j === i ? updated : x))}
                     onRemove={() => setJippiItems(v => v.filter((_, j) => j !== i))}
                     onSaveToMaster={name => {
@@ -519,7 +511,6 @@ function SalesPageInner() {
                 </div>
                 {buhanItems.map((item, i) => (
                   <LineItemRow key={`buhan-${i}`} item={item} savedItems={savedMenuItems}
-                    courses={[]} isFirstVisit={false}
                     onChange={updated => setBuhanItems(v => v.map((x, j) => j === i ? updated : x))}
                     onRemove={() => setBuhanItems(v => v.filter((_, j) => j !== i))}
                     onSaveToMaster={name => {
@@ -826,86 +817,28 @@ function SalesPageInner() {
   );
 }
 
-const CUSTOM_NAME = "__custom__";
-
 function LineItemRow({
-  item, savedItems, courses, isFirstVisit, onChange, onRemove, onSaveToMaster
+  item, savedItems, onChange, onRemove, onSaveToMaster
 }: {
   item: SalesLineItem;
   savedItems: string[];
-  courses: ReservationCourse[];
-  isFirstVisit: boolean;
   onChange: (item: SalesLineItem) => void;
   onRemove: () => void;
   onSaveToMaster: (name: string) => void;
 }) {
   const [saveChecked, setSaveChecked] = useState(false);
-  const courseNames = useMemo(() => new Set(courses.map(c => c.name)), [courses]);
-  const isCourseName = item.name && courseNames.has(item.name);
-  const isSavedName = item.name && !isCourseName && savedItems.includes(item.name);
-  const isFreeText = item.name !== "" && !isCourseName && !isSavedName;
-  // select の現在値: コース名 / 保存項目名 / "__custom__"（自由入力）/ ""（未選択）
-  const selectValue = isFreeText ? CUSTOM_NAME : item.name;
-
-  const handleSelectChange = (val: string) => {
-    if (val === CUSTOM_NAME) {
-      onChange({ ...item, name: " " }); // 自由入力モード切替（空文字とは区別）
-      return;
-    }
-    if (val === "") {
-      onChange({ name: "", amount: 0 });
-      return;
-    }
-    // コース選択時は金額を自動入力（初診なら first_visit_price 優先）
-    const c = courses.find(x => x.name === val);
-    if (c) {
-      const price = isFirstVisit && c.first_visit_price != null ? c.first_visit_price : (c.price ?? 0);
-      onChange({ name: val, amount: price });
-      return;
-    }
-    // 保存項目から選択（金額は手入力）
-    onChange({ name: val, amount: item.amount });
-  };
-
   return (
     <div className="flex items-center gap-2">
-      {isFreeText ? (
-        <input
-          autoFocus
-          value={item.name.trim() === "" ? "" : item.name}
-          onChange={e => onChange({ ...item, name: e.target.value })}
-          onBlur={e => { if (e.target.value === "") onChange({ name: "", amount: item.amount }); }}
-          placeholder="項目名（自由入力）"
-          className="flex-1 border border-slate-200 dark:border-slate-700 rounded px-2 py-1 text-sm bg-transparent dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
-        />
-      ) : (
-        <select
-          value={selectValue}
-          onChange={e => handleSelectChange(e.target.value)}
-          className="flex-1 border border-slate-200 dark:border-slate-700 rounded px-2 py-1 text-sm bg-transparent dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
-        >
-          <option value="">— 項目を選択 —</option>
-          {courses.length > 0 && (
-            <optgroup label="コース">
-              {courses.map(c => {
-                const price = isFirstVisit && c.first_visit_price != null ? c.first_visit_price : c.price;
-                const priceLabel = price != null ? ` ¥${price.toLocaleString()}` : "";
-                return <option key={c.id} value={c.name}>{c.name}{priceLabel}</option>;
-              })}
-            </optgroup>
-          )}
-          {savedItems.length > 0 && (
-            <optgroup label="保存した項目">
-              {savedItems.map(s => <option key={s} value={s}>{s}</option>)}
-            </optgroup>
-          )}
-          <option value={CUSTOM_NAME}>＋ その他（自由入力）</option>
-        </select>
-      )}
+      <input list="saved-items-list" value={item.name}
+        onChange={e => onChange({ ...item, name: e.target.value })}
+        placeholder="項目名" className="flex-1 border border-slate-200 dark:border-slate-700 rounded px-2 py-1 text-sm bg-transparent dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+      <datalist id="saved-items-list">
+        {savedItems.map(s => <option key={s} value={s} />)}
+      </datalist>
       <input type="number" value={item.amount || ""}
         onChange={e => onChange({ ...item, amount: Number(e.target.value) })}
         placeholder="金額" className="w-24 border border-slate-200 dark:border-slate-700 rounded px-2 py-1 text-sm text-right bg-transparent dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500" />
-      {isFreeText && item.name.trim() !== "" && !savedItems.includes(item.name) && (
+      {item.name && !savedItems.includes(item.name) && (
         <label className="flex items-center gap-1 text-xs text-slate-500 whitespace-nowrap cursor-pointer">
           <input type="checkbox" checked={saveChecked}
             onChange={e => {
