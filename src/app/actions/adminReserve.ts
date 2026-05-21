@@ -79,7 +79,8 @@ export async function createManualReservation(formData: FormData) {
       await supabase
         .from("customers")
         .update({ name: name.trim() })
-        .eq("id", customerId);
+        .eq("id", customerId)
+        .eq("clinic_id", clinicId);
     } else {
       // 新規顧客を作成
       const { data: newCustomer, error: customerErr } = await supabase
@@ -148,6 +149,7 @@ export async function createManualReservation(formData: FormData) {
       });
     }
 
+    // tenant-isolation-ignore: appointmentsToInsert の各行に clinic_id を埋め込み済み（L143）
     const { error: appointmentErr } = await supabase
       .from("appointments")
       .insert(appointmentsToInsert);
@@ -207,12 +209,14 @@ export async function updateAppointmentStatus(appointmentId: string, newStatus: 
         .from("appointments")
         .select("id, status, start_time, customers(name)")
         .eq("id", appointmentId)
+        .eq("clinic_id", auth.clinicId)
         .maybeSingle();
 
       const { error } = await supabase
         .from("appointments")
         .update({ status: newStatus })
-        .eq("id", appointmentId);
+        .eq("id", appointmentId)
+        .eq("clinic_id", auth.clinicId);
 
       if (error) {
         console.error("Failed to update status:", error);
@@ -274,6 +278,7 @@ export async function updateAppointmentDetails(
         .from("appointments")
         .select("id, start_time, end_time, memo, is_first_visit, course_id, course_name, staff_id, staff_name, room_id, room_name, customers(name)")
         .eq("id", appointmentId)
+        .eq("clinic_id", auth.clinicId)
         .maybeSingle();
 
       const startDateTimeStr = `${newDateStr}T${newTimeStr}:00+09:00`;
@@ -337,7 +342,8 @@ export async function updateAppointmentDetails(
       const { error } = await supabase
         .from("appointments")
         .update(updatePayload)
-        .eq("id", appointmentId);
+        .eq("id", appointmentId)
+        .eq("clinic_id", auth.clinicId);
 
       if (error) {
         console.error("Failed to update appointment:", error);
@@ -649,6 +655,7 @@ export async function deleteAppointment(
       .from("appointments")
       .select("id, start_time, end_time, status, memo, series_id, customers(name, phone)")
       .eq("id", appointmentId)
+      .eq("clinic_id", auth.clinicId)
       .maybeSingle();
 
     if (!before) {
@@ -799,15 +806,15 @@ export async function bulkCreateManualReservations(reservations: any[]) {
         // 電話番号が空でパース結果に電話番号があれば更新
         if (hasPhone) updateData.phone = phoneTrimmed;
         
-        await supabase.from("customers").update(updateData).eq("id", customerId);
+        await supabase.from("customers").update(updateData).eq("id", customerId).eq("clinic_id", clinicId);
       } else {
         const { data: newCustomer, error: customerErr } = await supabase
           .from("customers")
-          .insert([{ 
-            name: nameTrimmed, 
+          .insert([{
+            name: nameTrimmed,
             phone: hasPhone ? phoneTrimmed : "", // phone は NOT NULL なので空文字を入れる
             name_kana: r.name_kana || null,
-            clinic_id: clinicId 
+            clinic_id: clinicId
           }])
           .select("id")
           .single();

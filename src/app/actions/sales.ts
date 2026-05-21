@@ -418,6 +418,7 @@ export async function addCashSale(formData: FormData) {
       clinic_id: clinicId
     };
 
+    // tenant-isolation-ignore: saleData.clinic_id は L418 で設定済み
     const { error } = await supabase
       .from("cash_sales")
       .insert([saleData]);
@@ -605,6 +606,7 @@ export async function updateInsurancePayment(id: string, data: {
   notes: string | null;
 }) {
   await requireRole(["owner", "admin"]);
+  const { clinicId } = await checkAdminAuth();
   try {
     const supabase = await getSupabase();
     const { error } = await supabase
@@ -615,7 +617,8 @@ export async function updateInsurancePayment(id: string, data: {
         payment_date: data.payment_date || null,
         notes: data.notes || null,
       })
-      .eq("id", id);
+      .eq("id", id)
+      .eq("clinic_id", clinicId);
 
     if (error) throw error;
     revalidatePath("/admin/insurance");
@@ -627,13 +630,14 @@ export async function updateInsurancePayment(id: string, data: {
 }
 
 export async function updateInsurancePassbookCheck(id: string, checked: boolean) {
-  await checkAdminAuth();
+  const { clinicId } = await checkAdminAuth();
   try {
     const supabase = await getSupabase();
     const { error } = await supabase
       .from("insurance_payments")
       .update({ passbook_checked: checked })
-      .eq("id", id);
+      .eq("id", id)
+      .eq("clinic_id", clinicId);
 
     if (error) throw error;
     revalidatePath("/admin/insurance");
@@ -652,7 +656,8 @@ export async function deleteInsurancePayment(id: string) {
     const { error } = await supabase
       .from("insurance_payments")
       .delete()
-      .eq("id", id);
+      .eq("id", id)
+      .eq("clinic_id", clinicId);
 
     if (error) throw error;
 
@@ -849,7 +854,8 @@ export async function deleteExpense(id: string) {
     const { error } = await supabase
       .from("clinic_expenses")
       .delete()
-      .eq("id", id);
+      .eq("id", id)
+      .eq("clinic_id", clinicId);
 
     if (error) throw error;
 
@@ -1103,6 +1109,7 @@ export async function getTodayDashboardData() {
       const { data: snsDone } = await supabase
         .from("daily_tasks")
         .select("id", { count: "exact" })
+        .eq("clinic_id", clinicId)
         .gte("task_date", firstDay)
         .lte("task_date", lastDayStr)
         .eq("status", "completed");
@@ -1388,7 +1395,8 @@ export async function addPendingExpense(imageUrl: string | null, triageData: any
       .insert([{
         image_url: imageUrl,
         status: 'unprocessed',
-        ...triageData
+        clinic_id: clinicId,
+        ...triageData,
       }])
       .select()
       .single();
@@ -1406,8 +1414,8 @@ export async function getPendingExpenses(statusFilter?: string) {
   const { clinicId } = await checkAdminAuth();
   try {
     const supabase = await getSupabase();
-    let query = supabase.from("pending_expenses").select("*");
-    
+    let query = supabase.from("pending_expenses").select("*").eq("clinic_id", clinicId);
+
     if (statusFilter) {
       query = query.eq("status", statusFilter);
     }
@@ -1432,7 +1440,8 @@ export async function updatePendingExpense(id: string, updates: any) {
         ...updates,
         updated_at: new Date().toISOString()
       })
-      .eq("id", id);
+      .eq("id", id)
+      .eq("clinic_id", clinicId);
 
     if (error) throw error;
     revalidatePath("/admin/expenses/triage");
@@ -1453,6 +1462,7 @@ export async function finalizePendingExpense(id: string, finalData: any) {
       .from("pending_expenses")
       .select("image_url")
       .eq("id", id)
+      .eq("clinic_id", clinicId)
       .single();
     
     // finalDataに新しいURLがある場合はそちらを優先
@@ -1477,7 +1487,8 @@ export async function finalizePendingExpense(id: string, finalData: any) {
     const { error: deleteErr } = await supabase
       .from("pending_expenses")
       .delete()
-      .eq("id", id);
+      .eq("id", id)
+      .eq("clinic_id", clinicId);
 
     if (deleteErr) throw deleteErr;
 

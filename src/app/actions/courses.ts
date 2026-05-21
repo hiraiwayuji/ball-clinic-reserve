@@ -138,6 +138,7 @@ export async function saveCourse(course: Partial<ReservationCourse> & { name: st
       .eq("clinic_id", clinicId);
     if (error) return { success: false, error: error.message };
   } else {
+    // tenant-isolation-ignore: payload.clinic_id 設定済み（このファイルの saveCourse 内）
     const { error } = await supabase
       .from("reservation_courses")
       .insert(payload);
@@ -186,6 +187,7 @@ export async function saveStaff(staff: Partial<ReservationStaff> & { name: strin
       .eq("clinic_id", clinicId);
     if (error) return { success: false, error: error.message };
   } else {
+    // tenant-isolation-ignore: payload.clinic_id 設定済み（このファイルの saveStaff 内）
     const { error } = await supabase
       .from("reservation_staff")
       .insert(payload);
@@ -287,6 +289,7 @@ export async function saveRoom(room: Partial<ReservationRoom> & { name: string }
       .eq("clinic_id", clinicId);
     if (error) return { success: false, error: error.message };
   } else {
+    // tenant-isolation-ignore: payload.clinic_id 設定済み（このファイルの saveRoom 内）
     const { error } = await supabase
       .from("reservation_rooms")
       .insert(payload);

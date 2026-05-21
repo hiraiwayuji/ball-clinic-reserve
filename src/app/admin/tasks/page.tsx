@@ -47,6 +47,7 @@ export default function TasksPage() {
     const supabase = createClient();
     supabase.auth.getUser().then(async ({ data: { user } }) => {
       if (!user) return;
+      // tenant-isolation-ignore: clinic_id 解決自体のクエリ（user → clinic）。Phase 6 で複数院対応予定
       const { data } = await supabase.from("clinic_users").select("clinic_id").eq("user_id", user.id).single();
       setClinicId(data?.clinic_id ?? (process.env.NEXT_PUBLIC_CLINIC_ID ?? "00000000-0000-0000-0000-000000000001"));
     });
@@ -87,16 +88,18 @@ export default function TasksPage() {
   };
 
   const toggleStatus = async (id: string, current: string) => {
+    if (!clinicId) return;
     const supabase = createClient();
     const next = current === "completed" ? "pending" : "completed";
-    const { error } = await supabase.from("daily_tasks").update({ status: next }).eq("id", id);
+    const { error } = await supabase.from("daily_tasks").update({ status: next }).eq("id", id).eq("clinic_id", clinicId);
     if (error) toast.error("\u66f4\u65b0\u306b\u5931\u6557\u3057\u307e\u3057\u305f");
     else setTasks(prev => prev.map(t => t.id === id ? { ...t, status: next } : t));
   };
 
   const deleteTask = async (id: string) => {
+    if (!clinicId) return;
     const supabase = createClient();
-    const { error } = await supabase.from("daily_tasks").delete().eq("id", id);
+    const { error } = await supabase.from("daily_tasks").delete().eq("id", id).eq("clinic_id", clinicId);
     if (error) toast.error("\u524a\u9664\u306b\u5931\u6557\u3057\u307e\u3057\u305f");
     else { setTasks(prev => prev.filter(t => t.id !== id)); toast.success("\u524a\u9664\u3057\u307e\u3057\u305f"); }
   };

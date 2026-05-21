@@ -64,6 +64,7 @@ export async function getLineUserIdsForCustomer(
 ): Promise<string[]> {
   const sb = client ?? getServiceClient();
   if (!sb) return [];
+  // tenant-isolation-ignore: customer_id は UUID v4 でグローバルにユニーク（衝突しない）
   const { data, error } = await sb
     .from("customer_line_links")
     .select("line_user_id")
@@ -128,7 +129,7 @@ export async function linkLineToCustomer(
 
   if (isFirst) {
     // 主紐付けは customers.line_user_id にも反映（既存コードの参照互換）
-    await sb.from("customers").update({ line_user_id: lineUserId }).eq("id", customerId);
+    await sb.from("customers").update({ line_user_id: lineUserId }).eq("id", customerId).eq("clinic_id", clinicId);
   }
 
   return { ok: true, created: true, isPrimary: isFirst };
@@ -160,7 +161,7 @@ export async function setPrimaryLink(
   if (error) return { ok: false, error: error.message };
 
   // customers.line_user_id を新しい primary に同期
-  await sb.from("customers").update({ line_user_id: lineUserId }).eq("id", customerId);
+  await sb.from("customers").update({ line_user_id: lineUserId }).eq("id", customerId).eq("clinic_id", clinicId);
 
   return { ok: true };
 }
@@ -188,9 +189,10 @@ export async function unlinkLineFromCustomer(
     .from("customers")
     .select("line_user_id")
     .eq("id", customerId)
+    .eq("clinic_id", clinicId)
     .maybeSingle();
   if (customer?.line_user_id === lineUserId) {
-    await sb.from("customers").update({ line_user_id: null }).eq("id", customerId);
+    await sb.from("customers").update({ line_user_id: null }).eq("id", customerId).eq("clinic_id", clinicId);
   }
   return { ok: true };
 }

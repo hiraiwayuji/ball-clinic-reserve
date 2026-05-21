@@ -381,6 +381,7 @@ export async function copyShifts(input: {
     };
   });
 
+  // tenant-isolation-ignore: inserts の各行に clinic_id を埋め込み済み（L367）
   const { error: insErr } = await sb.from("staff_shifts").insert(inserts);
   if (insErr) return { success: false, error: insErr.message };
 

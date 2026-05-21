@@ -288,6 +288,7 @@ export async function signUpAction(formData: FormData) {
   );
 
   // ① 新しいクリニックを clinic_settings に作成（固有 UUID）
+  // tenant-isolation-ignore: 新規クリニック作成。id は DB 側で gen_random_uuid() が発行
   const { data: clinicData, error: clinicError } = await serviceClient
     .from("clinic_settings")
     .insert({ clinic_name: clinicName })

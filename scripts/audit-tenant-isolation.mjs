@@ -85,6 +85,72 @@ const IGNORE_FILES = [
 
 const violations = [];
 
+/**
+ * `.from(` の位置から、クエリチェーン（≒ 単一ステートメント）の終端を返す。
+ * depth=0 で `;`、`)` 過剰閉じ、または連続改行に達するまで読む。
+ * 文字列リテラル / テンプレートリテラル内は無視。
+ * 最大 3000 文字までスキャン。
+ */
+function findChainEnd(src, startIdx) {
+  let depth = 0;
+  let i = startIdx;
+  const max = Math.min(src.length, startIdx + 3000);
+  let prevWasNewline = false;
+  while (i < max) {
+    const c = src[i];
+    if (c === '"' || c === "'" || c === '`') {
+      const quote = c;
+      i++;
+      while (i < max) {
+        if (src[i] === '\\') { i += 2; continue; }
+        if (src[i] === quote) { i++; break; }
+        if (quote === '`' && src[i] === '$' && src[i + 1] === '{') {
+          // template literal expression: skip until matching `}`
+          let braceDepth = 1;
+          i += 2;
+          while (i < max && braceDepth > 0) {
+            if (src[i] === '{') braceDepth++;
+            else if (src[i] === '}') braceDepth--;
+            i++;
+          }
+          continue;
+        }
+        i++;
+      }
+      prevWasNewline = false;
+      continue;
+    }
+    if (c === '/' && src[i + 1] === '/') {
+      // line comment
+      while (i < max && src[i] !== '\n') i++;
+      continue;
+    }
+    if (c === '/' && src[i + 1] === '*') {
+      i += 2;
+      while (i < max && !(src[i] === '*' && src[i + 1] === '/')) i++;
+      i += 2;
+      continue;
+    }
+    if (c === '(' || c === '[' || c === '{') { depth++; i++; prevWasNewline = false; continue; }
+    if (c === ')' || c === ']' || c === '}') {
+      depth--;
+      if (depth < 0) return i;
+      i++;
+      prevWasNewline = false;
+      continue;
+    }
+    if (c === ';' && depth === 0) return i + 1;
+    if (c === '\n') {
+      if (prevWasNewline && depth === 0) return i;
+      prevWasNewline = true;
+    } else if (c !== ' ' && c !== '\t' && c !== '\r') {
+      prevWasNewline = false;
+    }
+    i++;
+  }
+  return max;
+}
+
 /** ファイルを再帰的に列挙 */
 function walk(dir) {
   const out = [];
@@ -121,9 +187,10 @@ function checkFile(filePath) {
 
     const startIdx = m.index;
     // この .from(...) から「クエリチェーンの終わり」までを抽出する。
-    // 終わりは、awaitの終了や ; or 空行 で雑に判定。
-    // 厳密ではないが、近接 1500 文字を見れば十分。
-    const chunk = src.slice(startIdx, startIdx + 1500);
+    // depth=0 で `;` か空行に当たるまでを 1 クエリチェーンとみなす。
+    // 文字列リテラル/テンプレートリテラル内のカッコや ; は無視する。
+    const endIdx = findChainEnd(src, startIdx);
+    const chunk = src.slice(startIdx, endIdx);
 
     // 同じファイル内の前後 200 文字に // tenant-isolation-ignore がある場合は許容。
     const ignoreWindow = src.slice(Math.max(0, startIdx - 200), startIdx + chunk.length + 200);
@@ -138,7 +205,11 @@ function checkFile(filePath) {
     const hasInsertOrUpsertWithClinic = /\.(insert|upsert)\s*\(/.test(chunk) && /clinic_id\s*:/.test(chunk);
 
     // INSERT (clinic_id 含む) は OK。UPDATE/DELETE は .eq("clinic_id", ...) 必須。
-    const isInsertOrUpsertOnly = /\.(insert|upsert)\s*\(/.test(chunk) && !/\.(select|update|delete)\b/.test(chunk);
+    // `.insert().select()` の `.select()` は returning clause なので無視。
+    // つまりチェーンに insert/upsert があれば、select は returning と解釈。
+    const hasInsertOrUpsert = /\.(insert|upsert)\s*\(/.test(chunk);
+    const hasUpdateOrDelete = /\.(update|delete)\s*\(/.test(chunk);
+    const isInsertOrUpsertOnly = hasInsertOrUpsert && !hasUpdateOrDelete;
 
     if (hasEqFilter) continue;
     if (isInsertOrUpsertOnly && hasInsertOrUpsertWithClinic) continue;
@@ -147,7 +218,7 @@ function checkFile(filePath) {
     //   - SELECT 漏れ: 別院データが見える → ERROR（CI fail）
     //   - INSERT/UPDATE/DELETE 漏れ: 別院 IDが衝突した場合の誤操作リスク → WARN
     const hasSelect = /\.select\s*\(/.test(chunk);
-    const hasMutation = /\.(insert|upsert|update|delete)\s*\(/.test(chunk);
+    const hasMutation = hasInsertOrUpsert || hasUpdateOrDelete;
     const severity = hasSelect && !hasMutation ? "ERROR" : "WARN";
 
     // 行番号を計算

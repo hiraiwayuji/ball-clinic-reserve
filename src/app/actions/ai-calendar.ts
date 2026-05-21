@@ -73,6 +73,7 @@ export async function extractEventsFromImage(base64Image: string, calendarId: st
       color: "#3B82F6", // デフォルト：ブルー
     }));
 
+    // tenant-isolation-ignore: appointmentsToInsert の各行に clinic_id を埋め込み済み（L67）
     const { error } = await supabase
       .from("calendar_events")
       .insert(appointmentsToInsert);

@@ -262,6 +262,7 @@ export async function POST(request: NextRequest) {
     const { data: { user } } = await supabase.auth.getUser();
     const userClinicInfo = await (async () => {
       if (!user) return { clinicId: process.env.NEXT_PUBLIC_CLINIC_ID ?? "00000000-0000-0000-0000-000000000001", role: null as string | null };
+      // tenant-isolation-ignore: clinic_id 解決自体のクエリ（user → clinic）
       const { data } = await supabase
         .from("clinic_users")
         .select("clinic_id, role")
@@ -458,6 +459,7 @@ export async function GET() {
     const { data: { user } } = await supabase.auth.getUser();
     const DEFAULT_CLINIC_ID = await (async () => {
       if (!user) return process.env.NEXT_PUBLIC_CLINIC_ID ?? "00000000-0000-0000-0000-000000000001";
+      // tenant-isolation-ignore: clinic_id 解決自体のクエリ（user → clinic）
       const { data } = await supabase
         .from("clinic_users")
         .select("clinic_id")

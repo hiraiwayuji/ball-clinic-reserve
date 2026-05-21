@@ -28,6 +28,7 @@ export async function consumeLineReserveToken(token: string): Promise<FamilySess
   const sb = getServiceClient();
   if (!sb) return { ok: false, error: "server unavailable" };
 
+  // tenant-isolation-ignore: token は 32文字以上のランダム文字列で全院グローバルにユニーク（pre-auth フロー）
   const { data: row, error } = await sb
     .from("line_reserve_tokens")
     .select("line_user_id, clinic_id, expires_at")
@@ -37,11 +38,13 @@ export async function consumeLineReserveToken(token: string): Promise<FamilySess
 
   const expiresAt = new Date(row.expires_at).getTime();
   if (Number.isFinite(expiresAt) && expiresAt < Date.now()) {
+    // tenant-isolation-ignore: token がグローバルユニーク
     await sb.from("line_reserve_tokens").delete().eq("token", token);
     return { ok: false, error: "token expired" };
   }
 
   // 1 度だけ使えるトークンとして即削除
+  // tenant-isolation-ignore: token がグローバルユニーク
   await sb.from("line_reserve_tokens").delete().eq("token", token);
 
   const cookieStore = await cookies();

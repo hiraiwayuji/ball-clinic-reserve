@@ -35,14 +35,14 @@ export default function WaitlistPage() {
     try {
       const supabase = createClient();
       const clinicId = await getMyClinicId();
-      let query = supabase
+      if (!clinicId) { toast.error("clinic_id が解決できませんでした"); return; }
+      const { data, error } = await supabase
         .from("appointments")
         .select("id, start_time, is_first_visit, created_at, customers(name, phone)")
+        .eq("clinic_id", clinicId)
         .eq("status", "waiting")
         .order("start_time", { ascending: true })
         .order("created_at", { ascending: true });
-      if (clinicId) query = query.eq("clinic_id", clinicId);
-      const { data, error } = await query;
 
       if (error || !data) {
         toast.error("データの取得に失敗しました");
@@ -86,10 +86,13 @@ export default function WaitlistPage() {
     setCancelling(aptId);
     try {
       const supabase = createClient();
+      const clinicId = await getMyClinicId();
+      if (!clinicId) { toast.error("clinic_id が解決できませんでした"); return; }
       const { error } = await supabase
         .from("appointments")
         .update({ status: "cancelled" })
-        .eq("id", aptId);
+        .eq("id", aptId)
+        .eq("clinic_id", clinicId);
       if (error) { toast.error("削除に失敗しました"); return; }
       toast.success("キャンセル待ちを削除しました");
       fetchWaitlist();

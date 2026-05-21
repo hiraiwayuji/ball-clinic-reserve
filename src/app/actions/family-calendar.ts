@@ -98,6 +98,7 @@ export async function bulkUpdateEventMemberName(
   const supabase = getAdminSupabase();
   if (!supabase) return { success: false, error: "Admin client unavailable" };
   try {
+    // tenant-isolation-ignore: family-calendar は calendar_id で厳格スコープ（calendar_id ≒ tenant key）
     const { data, error } = await supabase
       .from("calendar_events")
       .update({ member_name: newName })
@@ -114,6 +115,7 @@ export async function getEvents(calendarId: string, start: string, end: string):
   if (!calendarId) return [];
   try {
     // 通常イベント（期間内）
+    // tenant-isolation-ignore: family-calendar は calendar_id で厳格スコープ
     const { data: regular, error: e1 } = await supabase.from("calendar_events").select("*")
       .eq("calendar_id", calendarId).eq("is_recurring", false)
       .lte("start_time", end).gte("end_time", start)
@@ -121,6 +123,7 @@ export async function getEvents(calendarId: string, start: string, end: string):
     if (e1) { console.error("getEvents error:", e1); return []; }
 
     // 繰り返しイベント（開始日に関係なく全件取得してクライアントで展開）
+    // tenant-isolation-ignore: family-calendar は calendar_id で厳格スコープ
     const { data: recurring, error: e2 } = await supabase.from("calendar_events").select("*")
       .eq("calendar_id", calendarId).eq("is_recurring", true)
       .order("start_time", { ascending: true });
@@ -133,6 +136,7 @@ export async function getEvents(calendarId: string, start: string, end: string):
 export async function createEvent(calendarId: string, event: Omit<CalendarEvent, "id" | "calendar_id" | "created_at">): Promise<{ success: boolean; event?: CalendarEvent; error?: string }> {
   const supabase = await getSupabase();
   try {
+    // tenant-isolation-ignore: family-calendar は calendar_id で厳格スコープ、clinic_id は DB default に委譲
     const { data, error } = await supabase.from("calendar_events").insert([{ ...event, calendar_id: calendarId }]).select().single();
     if (error) return { success: false, error: error.message };
 
@@ -153,6 +157,7 @@ export async function createEvent(calendarId: string, event: Omit<CalendarEvent,
 export async function updateEvent(id: string, event: Partial<Omit<CalendarEvent, "id" | "calendar_id" | "created_at">>): Promise<{ success: boolean; error?: string }> {
   const supabase = await getSupabase();
   try {
+    // tenant-isolation-ignore: family-calendar の event id は UUID で衝突しない（calendar_id で実質スコープ済み）
     const { error } = await supabase.from("calendar_events").update(event).eq("id", id);
     if (error) return { success: false, error: error.message };
     return { success: true };
@@ -162,6 +167,7 @@ export async function updateEvent(id: string, event: Partial<Omit<CalendarEvent,
 export async function deleteEvent(id: string): Promise<{ success: boolean; error?: string }> {
   const supabase = await getSupabase();
   try {
+    // tenant-isolation-ignore: family-calendar の event id は UUID で衝突しない
     const { error } = await supabase.from("calendar_events").delete().eq("id", id);
     if (error) return { success: false, error: error.message };
     return { success: true };

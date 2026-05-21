@@ -209,7 +209,8 @@ export async function approvePendingChange(id: string, note?: string): Promise<{
       reviewed_at: new Date().toISOString(),
       reviewer_note: note ?? null,
     })
-    .eq("id", id);
+    .eq("id", id)
+    .eq("clinic_id", auth.clinicId);
 
   await writeAudit({
     clinicId: auth.clinicId,

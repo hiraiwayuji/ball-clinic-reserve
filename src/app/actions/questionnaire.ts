@@ -30,10 +30,11 @@ export async function submitQuestionnaire(data: QuestionnaireData): Promise<{ su
   const db = getAdminSupabase();
   const DEFAULT_CLINIC_ID = PUBLIC_CLINIC_ID;
 
-  // 電話番号で既存顧客を照合
+  // 電話番号で既存顧客を照合（同一院内のみ）
   const { data: existing } = await db
     .from("customers")
     .select("id, name, line_user_id")
+    .eq("clinic_id", DEFAULT_CLINIC_ID)
     .eq("phone", phone.trim())
     .maybeSingle();
 
@@ -44,7 +45,7 @@ export async function submitQuestionnaire(data: QuestionnaireData): Promise<{ su
     if (gender) patch.gender = gender;
     if (age_group) { try { patch.age_group = age_group; } catch {} }
     if (guardian_name) { try { patch.guardian_name = guardian_name; } catch {} }
-    await db.from("customers").update(patch).eq("id", existing.id);
+    await db.from("customers").update(patch).eq("id", existing.id).eq("clinic_id", DEFAULT_CLINIC_ID);
 
     return { success: true, alreadyRegistered: !!existing.line_user_id };
   }
@@ -60,6 +61,7 @@ export async function submitQuestionnaire(data: QuestionnaireData): Promise<{ su
   if (age_group) { try { insertData.age_group = age_group; } catch {} }
   if (guardian_name) { try { insertData.guardian_name = guardian_name; } catch {} }
 
+  // tenant-isolation-ignore: insertData.clinic_id を L56 で設定済み
   const { error } = await db.from("customers").insert([insertData]);
   if (error) {
     console.error("questionnaire insert error:", error);

@@ -13,12 +13,13 @@ function getAdminClient() {
 
 // IDで患者を取得
 export async function getPatientById(id: string) {
-  await checkAdminAuth();
+  const { clinicId } = await checkAdminAuth();
   const supabase = await createClient();
   const { data } = await supabase
     .from("customers")
     .select("id, name, phone, line_user_id")
     .eq("id", id)
+    .eq("clinic_id", clinicId)
     .single();
   return data;
 }
@@ -111,12 +112,13 @@ export async function searchPatientsForBooking(name: string): Promise<PatientSug
 
 // 患者の予約一覧（過去＋今後）
 export async function getPatientAppointments(customerId: string) {
-  await checkAdminAuth();
+  const { clinicId } = await checkAdminAuth();
   const supabase = await createClient();
   const { data } = await supabase
     .from("appointments")
     .select("id, start_time, end_time, status, is_first_visit, memo")
     .eq("customer_id", customerId)
+    .eq("clinic_id", clinicId)
     .neq("status", "cancelled")
     .order("start_time", { ascending: true });
   return data || [];
@@ -131,6 +133,7 @@ export async function cloneAppointmentWeeksLater(appointmentId: string, weeks: n
     .from("appointments")
     .select("*")
     .eq("id", appointmentId)
+    .eq("clinic_id", clinicId)
     .single();
 
   if (!apt) throw new Error("予約が見つかりません");

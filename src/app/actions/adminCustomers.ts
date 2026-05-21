@@ -525,7 +525,7 @@ export async function setPrimaryLinkForCustomer(customerId: string, lineUserId: 
 
 // 最近LINEからメッセージを送ってきた未紐づけのユーザーIDを取得
 export async function getRecentUnlinkedLineLogs(): Promise<{ user_id: string; message: string | null; created_at: string }[]> {
-  await checkAdminAuth();
+  const { clinicId } = await checkAdminAuth();
 
   // RLSをバイパスするためにservice roleキーで接続
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -551,6 +551,7 @@ export async function getRecentUnlinkedLineLogs(): Promise<{ user_id: string; me
   const { data: linked } = await supabase
     .from("customers")
     .select("line_user_id")
+    .eq("clinic_id", clinicId)
     .not("line_user_id", "is", null);
 
   const linkedIds = new Set((linked || []).map((c: { line_user_id: string | null }) => c.line_user_id));
@@ -795,6 +796,7 @@ export async function bulkImportCustomers(rows: ImportCustomerRow[]): Promise<Im
   }
 
   if (toInsert.length > 0) {
+    // tenant-isolation-ignore: toInsert の各レコードに clinic_id を埋め込み済み（L781）
     const { error } = await supabase.from("customers").insert(toInsert);
     if (error) throw new Error("一括登録に失敗しました: " + error.message);
     inserted = toInsert.length;

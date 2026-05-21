@@ -70,7 +70,7 @@ export async function getEvents(
   start: string,
   end: string
 ): Promise<CalendarEvent[]> {
-  await checkAdminAuth();
+  const { clinicId } = await checkAdminAuth();
   const supabase = await getSupabase();
   console.log("getEvents: params=", { calendarId, start, end });
   if (!supabase || !calendarId) return [];
@@ -78,6 +78,7 @@ export async function getEvents(
     const { data, error } = await supabase
       .from("calendar_events")
       .select("*")
+      .eq("clinic_id", clinicId)
       .eq("calendar_id", calendarId)
       .lte("start_time", end)
       .gte("end_time", start)
@@ -124,14 +125,15 @@ export async function updateEvent(
   id: string,
   event: Partial<Omit<CalendarEvent, "id" | "calendar_id" | "created_at">>
 ): Promise<{ success: boolean; error?: string }> {
-  await checkAdminAuth();
+  const { clinicId } = await checkAdminAuth();
   const supabase = await getSupabase();
   if (!supabase) return { success: false, error: "DB not configured" };
   try {
     const { error } = await supabase
       .from("calendar_events")
       .update(event)
-      .eq("id", id);
+      .eq("id", id)
+      .eq("clinic_id", clinicId);
     if (error) return { success: false, error: error.message };
     return { success: true };
   } catch (e: unknown) {
@@ -141,14 +143,15 @@ export async function updateEvent(
 
 // イベント削除
 export async function deleteEvent(id: string): Promise<{ success: boolean; error?: string }> {
-  await checkAdminAuth();
+  const { clinicId } = await checkAdminAuth();
   const supabase = await getSupabase();
   if (!supabase) return { success: false, error: "DB not configured" };
   try {
     const { error } = await supabase
       .from("calendar_events")
       .delete()
-      .eq("id", id);
+      .eq("id", id)
+      .eq("clinic_id", clinicId);
     if (error) return { success: false, error: error.message };
     return { success: true };
   } catch (e: unknown) {

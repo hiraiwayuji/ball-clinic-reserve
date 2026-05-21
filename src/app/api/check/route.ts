@@ -62,6 +62,7 @@ export async function GET(req: NextRequest) {
     const { data: customers } = await supabase
       .from("customers")
       .select("id")
+      .eq("clinic_id", DEFAULT_CLINIC_ID)
       .or(`phone.ilike.%${cleanPhone}%,phone.ilike.%${phone}%`);
     if (!customers || customers.length === 0)
       return NextResponse.json({ error: "この電話番号の予約が見つかりませんでした" }, { status: 404 });
@@ -87,6 +88,7 @@ export async function GET(req: NextRequest) {
     const { data: customers } = await supabase
       .from("customers")
       .select("id")
+      .eq("clinic_id", DEFAULT_CLINIC_ID)
       .ilike("name", `%${name.trim()}%`);
     if (!customers || customers.length === 0)
       return NextResponse.json({ error: "この名前の予約が見つかりませんでした" }, { status: 404 });

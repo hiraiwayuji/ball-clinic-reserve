@@ -196,9 +196,10 @@ export async function updateClinicSettings(
   };
 
   // 2. Upsert clinic_settings
+  // tenant-isolation-ignore: clinic_settings は id 自体が clinic_id。upsert body の id: clinicId で特定
   const { error: settingsError } = await supabase
     .from("clinic_settings")
-    .upsert({ 
+    .upsert({
       id: clinicId,
       ...settingsData
     });

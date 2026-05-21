@@ -325,6 +325,7 @@ export async function createReservation(formData: FormData) {
               .from("customers")
               .select("id, name, booking_suspended")
               .eq("id", requestedCustomerId)
+              .eq("clinic_id", PUBLIC_CLINIC_ID)
               .maybeSingle();
             if (cust) {
               if (cust.booking_suspended) {
@@ -343,6 +344,7 @@ export async function createReservation(formData: FormData) {
         const { data: existing } = await adminDb
           .from("customers")
           .select("id, name, booking_suspended, line_user_id")
+          .eq("clinic_id", PUBLIC_CLINIC_ID)
           .eq("phone", phone)
           .maybeSingle();
 
@@ -352,7 +354,7 @@ export async function createReservation(formData: FormData) {
           }
           customerId = existing.id;
           if (existing.name !== name) {
-            await adminDb.from("customers").update({ name }).eq("id", customerId);
+            await adminDb.from("customers").update({ name }).eq("id", customerId).eq("clinic_id", PUBLIC_CLINIC_ID);
           }
         } else {
           // 電話番号で見つからない場合 → アンケートへ誘導
@@ -408,6 +410,7 @@ export async function createReservation(formData: FormData) {
       const { data: existingAppts } = await adminDb
         .from("appointments")
         .select("id, start_time, status")
+        .eq("clinic_id", PUBLIC_CLINIC_ID)
         .eq("customer_id", customerId)
         .in("status", ["pending", "confirmed", "waiting"])
         .gte("start_time", nowIso)

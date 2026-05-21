@@ -31,7 +31,7 @@ export async function upsertAIMemo(content: string, id?: string) {
     const supabase = await getSupabase();
     if (id) {
       const { error } = await supabase.from("ai_memos")
-        .update({ content, updated_at: new Date().toISOString() }).eq("id", id);
+        .update({ content, updated_at: new Date().toISOString() }).eq("id", id).eq("clinic_id", clinicId);
       if (error) throw error;
     } else {
       const { error } = await supabase.from("ai_memos")
@@ -47,10 +47,10 @@ export async function upsertAIMemo(content: string, id?: string) {
 }
 
 export async function deleteAIMemo(id: string) {
-  await checkAdminAuth();
+  const { clinicId } = await checkAdminAuth();
   try {
     const supabase = await getSupabase();
-    const { error } = await supabase.from("ai_memos").delete().eq("id", id);
+    const { error } = await supabase.from("ai_memos").delete().eq("id", id).eq("clinic_id", clinicId);
     if (error) throw error;
     revalidatePath("/admin/dashboard");
     return { success: true };
@@ -158,6 +158,7 @@ export async function generateDailySnsTasks(dateStr: string) {
       clinic_id: clinicId, task_date: dateStr, task_name: t.title,
       title: t.title, status: "pending", priority: t.priority, reference_content: t.reference_content,
     }));
+    // tenant-isolation-ignore: insertData の各行に clinic_id を埋め込み済み（L158）
     const { error } = await supabase.from("daily_tasks").insert(insertData);
     if (error) {
       if (error.code === "42703") throw new Error("DBカラムエラー。管理者に連絡してください。");
