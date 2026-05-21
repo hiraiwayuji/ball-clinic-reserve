@@ -4,6 +4,8 @@ import { PUBLIC_CLINIC_ID } from "@/lib/default-clinic-id";
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import type { SlotMinutes } from "@/lib/time-slots";
 
+export type ClinicViewType = "list" | "timeline";
+
 /**
  * 現在のクリニックの予約枠サイズ（分）を取得。
  * client component が初期化時に呼ぶ用途。anon でも読める clinic_settings 前提。
@@ -26,4 +28,26 @@ export async function getCurrentSlotDuration(): Promise<SlotMinutes> {
   const v = data?.slot_duration_minutes;
   if (v === 15 || v === 20 || v === 30) return v;
   return 30;
+}
+
+/**
+ * ダッシュボードの予約ビュー形式（'list' / 'timeline'）。
+ * 院ごとに設定（clinic_settings.view_type）。
+ */
+export async function getCurrentViewType(): Promise<ClinicViewType> {
+  if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    return "list";
+  }
+  const sb = createSupabaseClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL,
+    process.env.SUPABASE_SERVICE_ROLE_KEY,
+    { auth: { persistSession: false } },
+  );
+  const { data } = await sb
+    .from("clinic_settings")
+    .select("view_type")
+    .eq("id", PUBLIC_CLINIC_ID)
+    .maybeSingle();
+  const v = data?.view_type;
+  return v === "timeline" ? "timeline" : "list";
 }

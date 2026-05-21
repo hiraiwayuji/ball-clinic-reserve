@@ -13,6 +13,7 @@ export type ClinicSettings = {
   primary_color: string;
   max_beds: number;
   slot_duration_minutes: 15 | 20 | 30;
+  view_type?: "list" | "timeline";
   // SNS URLs
   tiktok_url?: string;
   instagram_url?: string;
@@ -154,6 +155,8 @@ export async function updateClinicSettings(
   // 1. Separate settings for clinic_settings and clinic_targets
   const settingsData = {
     clinic_name: settings.clinic_name,
+    slot_duration_minutes: settings.slot_duration_minutes,
+    view_type: settings.view_type ?? "list",
     hero_title: settings.hero_title,
     tiktok_url: settings.tiktok_url,
     instagram_url: settings.instagram_url,

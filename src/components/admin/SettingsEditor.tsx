@@ -98,6 +98,21 @@ export default function SettingsEditor({ initialSettings }: { initialSettings: C
                     予約 1 件あたりの所要時間はメニュー側で別途設定します。
                   </p>
                 </div>
+                <div className="space-y-2">
+                  <Label className="font-bold">ダッシュボードの予約ビュー</Label>
+                  <select
+                    value={settings?.view_type ?? "list"}
+                    onChange={(e) => updateField("view_type", e.target.value as "list" | "timeline")}
+                    className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm bg-white"
+                  >
+                    <option value="list">一覧ビュー（従来）</option>
+                    <option value="timeline">タイムテーブル（先生×時間軸）</option>
+                  </select>
+                  <p className="text-xs text-slate-500 leading-relaxed">
+                    タイムテーブルは手書き予約表のように<br />
+                    先生ごとに横並びで表示します。
+                  </p>
+                </div>
               </div>
             </CardContent>
           </Card>

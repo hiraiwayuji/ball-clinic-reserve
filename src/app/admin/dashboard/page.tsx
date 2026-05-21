@@ -1,6 +1,8 @@
 import { getMyRole } from "@/app/actions/auth";
+import { getCurrentViewType } from "@/app/actions/clinic-slot";
 import OwnerSecretaryWidget from "@/components/admin/OwnerSecretaryWidget";
 import StaffSecretaryWidget from "@/components/admin/StaffSecretaryWidget";
+import TodayTimelineWidget from "@/components/admin/TodayTimelineWidget";
 import DashboardClient from "./DashboardClient";
 
 export default async function DashboardPage({
@@ -10,6 +12,7 @@ export default async function DashboardPage({
 }) {
   const sp = await searchParams;
   const role = (await getMyRole()) ?? "owner";
+  const viewType = await getCurrentViewType();
 
   return (
     <div className="space-y-6">
@@ -21,6 +24,9 @@ export default async function DashboardPage({
 
       {/* Phase 3: AI 秘書（role 別） */}
       {role === "owner" ? <OwnerSecretaryWidget /> : <StaffSecretaryWidget />}
+
+      {/* 予約タイムテーブル（clinic_settings.view_type='timeline' の院のみ） */}
+      {viewType === "timeline" && <TodayTimelineWidget />}
 
       <DashboardClient />
     </div>
