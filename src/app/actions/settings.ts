@@ -43,9 +43,15 @@ export type ClinicSettings = {
   staff_count?: number;
   branch_count?: number;
   hp_url?: string;
-  // 営業時間
+  // 営業時間（表示用テキスト）
   hours_lines?: string[];
   hours_closed?: string;
+  // 営業時間（予約スロット生成用）
+  business_open_weekday?: string | null;
+  business_close_weekday?: string | null;
+  business_open_saturday?: string | null;
+  business_close_saturday?: string | null;
+  closed_weekdays?: string | null;
   // 患者向けLP（/reserve, /reserve/menu）用
   hero_subtitle?: string | null;
   hero_image_url?: string | null;
@@ -179,6 +185,11 @@ export async function updateClinicSettings(
     hp_url: settings.hp_url,
     hours_lines: settings.hours_lines,
     hours_closed: settings.hours_closed,
+    business_open_weekday:   settings.business_open_weekday ?? null,
+    business_close_weekday:  settings.business_close_weekday ?? null,
+    business_open_saturday:  settings.business_open_saturday ?? null,
+    business_close_saturday: settings.business_close_saturday ?? null,
+    closed_weekdays:         settings.closed_weekdays ?? null,
     hero_subtitle: settings.hero_subtitle ?? null,
     hero_image_url: settings.hero_image_url ?? null,
     hero_background_url: settings.hero_background_url ?? null,

@@ -2,7 +2,7 @@
 
 import { PUBLIC_CLINIC_ID } from "@/lib/default-clinic-id";
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
-import type { SlotMinutes } from "@/lib/time-slots";
+import { type SlotMinutes, type Schedule, buildSchedule } from "@/lib/time-slots";
 
 export type ClinicViewType = "list" | "timeline";
 
@@ -39,6 +39,32 @@ export async function getCurrentSlotDuration(): Promise<SlotMinutes> {
  * ここで例外を投げると /admin/dashboard が 500 になり
  * ログイン後の遷移先が落ちる事故を起こす（2026-05-21 実例）。
  */
+/**
+ * 院ごとの営業時間スケジュール（曜日別営業時間 + 休診曜日）を取得。
+ * 失敗時は DEFAULT_SCHEDULE（ボール接骨院互換）を返す。
+ */
+export async function getCurrentSchedule(): Promise<Schedule> {
+  try {
+    if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
+      return buildSchedule(null);
+    }
+    const sb = createSupabaseClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL,
+      process.env.SUPABASE_SERVICE_ROLE_KEY,
+      { auth: { persistSession: false } },
+    );
+    const { data } = await sb
+      .from("clinic_settings")
+      .select("business_open_weekday, business_close_weekday, business_open_saturday, business_close_saturday, closed_weekdays")
+      .eq("id", PUBLIC_CLINIC_ID)
+      .maybeSingle();
+    return buildSchedule(data);
+  } catch (e: any) {
+    console.error("[getCurrentSchedule] fallback to default:", e?.message ?? e);
+    return buildSchedule(null);
+  }
+}
+
 export async function getCurrentViewType(): Promise<ClinicViewType> {
   try {
     if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {

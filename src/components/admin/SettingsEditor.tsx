@@ -114,6 +114,70 @@ export default function SettingsEditor({ initialSettings }: { initialSettings: C
                   </p>
                 </div>
               </div>
+
+              {/* 営業時間（予約スロット範囲） */}
+              <div className="border-t pt-4 mt-2 space-y-3">
+                <Label className="font-bold">営業時間（予約画面・予約一覧のグリッド範囲）</Label>
+                <p className="text-xs text-slate-500 -mt-1">
+                  ここで設定した時間が、患者向け予約画面と /admin/appointments のグリッド範囲になります。
+                </p>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">平日 開始</Label>
+                    <Input type="time" value={settings?.business_open_weekday ?? ""} placeholder="12:00"
+                      onChange={(e) => updateField("business_open_weekday", e.target.value || null)} />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">平日 終了</Label>
+                    <Input type="time" value={settings?.business_close_weekday ?? ""} placeholder="22:30"
+                      onChange={(e) => updateField("business_close_weekday", e.target.value || null)} />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">土曜 開始</Label>
+                    <Input type="time" value={settings?.business_open_saturday ?? ""} placeholder="10:00"
+                      onChange={(e) => updateField("business_open_saturday", e.target.value || null)} />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">土曜 終了</Label>
+                    <Input type="time" value={settings?.business_close_saturday ?? ""} placeholder="17:30"
+                      onChange={(e) => updateField("business_close_saturday", e.target.value || null)} />
+                  </div>
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs">休診曜日</Label>
+                  <div className="flex gap-1.5 flex-wrap">
+                    {[
+                      { v: 0, label: "日" },
+                      { v: 1, label: "月" },
+                      { v: 2, label: "火" },
+                      { v: 3, label: "水" },
+                      { v: 4, label: "木" },
+                      { v: 5, label: "金" },
+                      { v: 6, label: "土" },
+                    ].map(({ v, label }) => {
+                      const current = (settings?.closed_weekdays ?? "0,3")
+                        .split(",")
+                        .map((s) => parseInt(s.trim(), 10))
+                        .filter((n) => Number.isInteger(n));
+                      const isOn = current.includes(v);
+                      const toggle = () => {
+                        const next = isOn ? current.filter((n) => n !== v) : [...current, v];
+                        next.sort((a, b) => a - b);
+                        updateField("closed_weekdays", next.join(","));
+                      };
+                      return (
+                        <button key={v} type="button" onClick={toggle}
+                          className={`px-3 py-1.5 rounded-md text-xs font-bold border transition-colors ${
+                            isOn ? "bg-rose-100 border-rose-300 text-rose-700" : "bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100"
+                          }`}>
+                          {label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <p className="text-[10px] text-slate-500">クリックで切替（赤=休診）。祝日は別途「定休日（祝日）」設定で管理。</p>
+                </div>
+              </div>
             </CardContent>
           </Card>
 

@@ -20,6 +20,7 @@ import { getActiveCourses, getActiveStaff, getActiveRooms, type ReservationCours
 import { useSearchParams } from "next/navigation";
 import { getTimeSlots, isDateWithinAllowedRange } from "@/lib/time-slots";
 import { useClinicSlotDuration } from "@/lib/use-clinic-slot-duration";
+import { useClinicSchedule } from "@/lib/use-clinic-schedule";
 import { toast } from "sonner";
 import { CLINIC_CONFIG } from "@/lib/clinic-config";
 import ReserveLandingPage from "./ReserveLandingPage";
@@ -35,6 +36,7 @@ const LINE_URL = process.env.NEXT_PUBLIC_LINE_OFFICIAL_ACCOUNT_URL ?? "https://l
 
 function ReserveContent() {
   const slotMinutes = useClinicSlotDuration();
+  const schedule = useClinicSchedule();
   const searchParams = useSearchParams();
   const initialDateStr = searchParams.get("date");
   const initialTime = searchParams.get("time");
@@ -151,7 +153,7 @@ function ReserveContent() {
       return;
     }
 
-    const availableSlots = getTimeSlots(date, { slotMinutes });
+    const availableSlots = getTimeSlots(date, { slotMinutes, schedule });
     if (!availableSlots.includes(time)) {
       toast.error("選択された時間は予約できません。別の時間を選択してください");
       return;
@@ -315,7 +317,7 @@ function ReserveContent() {
                           <SelectValue placeholder="時間を選択" />
                         </SelectTrigger>
                         <SelectContent className="bg-slate-900 border-white/10 text-white">
-                          {(date ? getTimeSlots(date, { slotMinutes }) : []).map((t) => (
+                          {(date ? getTimeSlots(date, { slotMinutes, schedule }) : []).map((t) => (
                             <SelectItem key={t} value={t} className="bg-slate-900 text-white focus:bg-slate-800">{t}</SelectItem>
                           ))}
                         </SelectContent>

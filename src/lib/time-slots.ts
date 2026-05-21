@@ -1,12 +1,49 @@
 // 予約画面・管理画面で表示する時刻スロットの定義。
 // 院ごとの slot_duration_minutes (clinic_settings) で 15 / 20 / 30 分を切替可能。
-// 営業時間は曜日ごとに固定（平日 12:00-22:30、土曜 10:00-17:30、日水休）。
+// 営業時間も clinic_settings.business_open_*/close_*/closed_weekdays で院ごとに変更可能。
+// DEFAULT_SCHEDULE は未設定時のフォールバック（既存ボール接骨院互換）。
 
-export const SCHEDULE = {
+export const DEFAULT_SCHEDULE = {
   weekday: { start: "12:00", end: "22:30" },
   saturday: { start: "10:00", end: "17:30" },
   admin:   { start: "08:00", end: "23:30" },
 } as const;
+
+/** 後方互換 alias（旧コード参照） */
+export const SCHEDULE = DEFAULT_SCHEDULE;
+
+export type Schedule = {
+  weekday:  { start: string; end: string };
+  saturday: { start: string; end: string };
+  closedDays: number[]; // JS getDay(): 0=日, 3=水, ...
+};
+
+/** clinic_settings からの値を Schedule に正規化。NULL は DEFAULT で補う。 */
+export function buildSchedule(settings: {
+  business_open_weekday?: string | null;
+  business_close_weekday?: string | null;
+  business_open_saturday?: string | null;
+  business_close_saturday?: string | null;
+  closed_weekdays?: string | null;
+} | null | undefined): Schedule {
+  const s = settings ?? {};
+  const closedRaw = s.closed_weekdays ?? "0,3";
+  const closedDays = closedRaw
+    .split(",")
+    .map((v) => parseInt(v.trim(), 10))
+    .filter((n) => Number.isInteger(n) && n >= 0 && n <= 6);
+  return {
+    weekday: {
+      start: s.business_open_weekday  || DEFAULT_SCHEDULE.weekday.start,
+      end:   s.business_close_weekday || DEFAULT_SCHEDULE.weekday.end,
+    },
+    saturday: {
+      start: s.business_open_saturday  || DEFAULT_SCHEDULE.saturday.start,
+      end:   s.business_close_saturday || DEFAULT_SCHEDULE.saturday.end,
+    },
+    closedDays: closedDays.length > 0 ? closedDays : [0, 3],
+  };
+}
 
 export type SlotMinutes = 15 | 20 | 30;
 
@@ -32,9 +69,17 @@ export const ADMIN_TIME_SLOTS = generateSlots(
   30,
 );
 
-/** 管理画面用の全時間スロット（slot_duration_minutes 連動）。8:00〜23:30 を slotMinutes 刻みで返す */
-export function getAdminTimeSlots(slotMinutes: SlotMinutes = 30): string[] {
-  return generateSlots(SCHEDULE.admin.start, SCHEDULE.admin.end, slotMinutes);
+/** 管理画面用の全時間スロット（slot_duration_minutes 連動）。
+ * schedule を渡すと平日∪土曜の最広範囲。未指定なら 8:00〜23:30 (admin range)。 */
+export function getAdminTimeSlots(slotMinutes: SlotMinutes = 30, schedule?: Schedule): string[] {
+  if (!schedule) {
+    return generateSlots(DEFAULT_SCHEDULE.admin.start, DEFAULT_SCHEDULE.admin.end, slotMinutes);
+  }
+  const toMin = (hm: string) => { const [h, m] = hm.split(":").map(Number); return h * 60 + m; };
+  const fromMin = (n: number) => `${String(Math.floor(n / 60)).padStart(2, "0")}:${String(n % 60).padStart(2, "0")}`;
+  const startMin = Math.min(toMin(schedule.weekday.start), toMin(schedule.saturday.start));
+  const endMin   = Math.max(toMin(schedule.weekday.end),   toMin(schedule.saturday.end));
+  return generateSlots(fromMin(startMin), fromMin(endMin), slotMinutes);
 }
 
 export type GetTimeSlotsOptions = {
@@ -42,6 +87,8 @@ export type GetTimeSlotsOptions = {
   slotMinutes?: SlotMinutes;
   /** 管理画面で営業時間外も含めるか */
   bypassRestrictions?: boolean;
+  /** 院ごとの営業時間。未指定なら DEFAULT_SCHEDULE */
+  schedule?: Schedule;
 };
 
 /**
@@ -52,7 +99,7 @@ export type GetTimeSlotsOptions = {
  *   getTimeSlots(date)                              → 30分刻み（既存挙動）
  *   getTimeSlots(date, true)                        → 30分刻み + admin range（既存挙動）
  *   getTimeSlots(date, { slotMinutes: 20 })         → 20分刻み
- *   getTimeSlots(date, { slotMinutes: 15, bypassRestrictions: true })
+ *   getTimeSlots(date, { slotMinutes: 20, schedule }) → 院ごとの営業時間で 20分刻み
  */
 export function getTimeSlots(
   date: Date | undefined,
@@ -67,20 +114,21 @@ export function getTimeSlots(
 
   if (!date) return [];
   if (bypassRestrictions) {
-    return generateSlots(SCHEDULE.admin.start, SCHEDULE.admin.end, slotMinutes);
+    return generateSlots(DEFAULT_SCHEDULE.admin.start, DEFAULT_SCHEDULE.admin.end, slotMinutes);
   }
+  const sched = opts.schedule ?? buildSchedule(null);
   const day = date.getDay();
-  // 日曜・水曜は休診
-  if (day === 0 || day === 3) return [];
-  const range = day === 6 ? SCHEDULE.saturday : SCHEDULE.weekday;
+  if (sched.closedDays.includes(day)) return [];
+  const range = day === 6 ? sched.saturday : sched.weekday;
   return generateSlots(range.start, range.end, slotMinutes);
 }
 
 /** 指定日の最大スロット数（営業時間 / slot_duration から動的計算） */
-export function getMaxSlots(date: Date, slotMinutes: SlotMinutes = 30): number {
+export function getMaxSlots(date: Date, slotMinutes: SlotMinutes = 30, schedule?: Schedule): number {
+  const sched = schedule ?? buildSchedule(null);
   const day = date.getDay();
-  if (day === 0 || day === 3) return 0;
-  const range = day === 6 ? SCHEDULE.saturday : SCHEDULE.weekday;
+  if (sched.closedDays.includes(day)) return 0;
+  const range = day === 6 ? sched.saturday : sched.weekday;
   const [sh, sm] = range.start.split(":").map(Number);
   const [eh, em] = range.end.split(":").map(Number);
   const totalMin = (eh * 60 + em) - (sh * 60 + sm);
