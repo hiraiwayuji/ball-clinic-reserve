@@ -302,7 +302,11 @@ function StaffRow({
   const handleSave = async () => {
     if (!name.trim()) return;
     setSaving(true);
-    const res = await saveStaff({ id: staff.id, name: name.trim(), is_active: staff.is_active, sort_order: staff.sort_order });
+    const res = await saveStaff({
+      id: staff.id, name: name.trim(),
+      is_active: staff.is_active, sort_order: staff.sort_order,
+      show_in_timeline: staff.show_in_timeline ?? true,
+    });
     setSaving(false);
     if (res.success) {
       toast.success("スタッフを保存しました");
@@ -315,6 +319,12 @@ function StaffRow({
 
   const handleToggleActive = async () => {
     await saveStaff({ ...staff, is_active: !staff.is_active });
+    onSaved();
+  };
+
+  const handleToggleTimeline = async () => {
+    const next = !(staff.show_in_timeline ?? true);
+    await saveStaff({ ...staff, show_in_timeline: next });
     onSaved();
   };
 
@@ -349,6 +359,13 @@ function StaffRow({
       <User className="w-4 h-4 text-slate-400 shrink-0" />
       <span className="font-semibold text-slate-800 dark:text-slate-100 flex-1">{staff.name}</span>
       <div className="flex items-center gap-1 shrink-0">
+        <button
+          onClick={handleToggleTimeline}
+          title="ダッシュボードのタイムテーブルビューに表示するか"
+          className={`text-xs px-2 py-1 rounded-md font-semibold transition-colors ${(staff.show_in_timeline ?? true) ? "bg-sky-100 text-sky-700 hover:bg-sky-200" : "bg-slate-200 text-slate-500 hover:bg-slate-300"}`}
+        >
+          {(staff.show_in_timeline ?? true) ? "TL表示" : "TL非表示"}
+        </button>
         <button
           onClick={handleToggleActive}
           className={`text-xs px-2 py-1 rounded-md font-semibold transition-colors ${staff.is_active ? "bg-emerald-100 text-emerald-700 hover:bg-emerald-200" : "bg-slate-200 text-slate-500 hover:bg-slate-300"}`}

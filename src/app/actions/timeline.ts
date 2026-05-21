@@ -57,6 +57,7 @@ export async function getTimelineForDate(dateStr: string): Promise<{ success: bo
         .select("id, name, sort_order")
         .eq("clinic_id", clinicId)
         .eq("is_active", true)
+        .eq("show_in_timeline", true)
         .order("sort_order", { ascending: true })
         .order("name", { ascending: true }),
       sb.from("appointments")

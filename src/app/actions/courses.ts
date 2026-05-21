@@ -29,6 +29,8 @@ export type ReservationStaff = {
   name: string;
   is_active: boolean;
   sort_order: number;
+  /** ダッシュボードのタイムテーブルビューに表示するか（受付助手等を非表示にする） */
+  show_in_timeline?: boolean;
 };
 
 // ── コース取得（管理側：全件） ──
@@ -177,6 +179,7 @@ export async function saveStaff(staff: Partial<ReservationStaff> & { name: strin
     name: staff.name,
     is_active: staff.is_active ?? true,
     sort_order: staff.sort_order ?? 0,
+    show_in_timeline: staff.show_in_timeline ?? true,
   };
 
   if (staff.id) {
