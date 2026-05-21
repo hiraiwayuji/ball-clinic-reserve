@@ -6,7 +6,9 @@
 export const DEFAULT_SCHEDULE = {
   weekday: { start: "12:00", end: "22:30" },
   saturday: { start: "10:00", end: "17:30" },
-  admin:   { start: "08:00", end: "23:30" },
+  // admin: 管理画面グリッドの表示範囲。営業時間外の準備時間も含めて広めに。
+  // 実際の営業時間（白セル）は schedule の business_open/close 連動。
+  admin:   { start: "09:00", end: "23:00" },
 } as const;
 
 /** 後方互換 alias（旧コード参照） */
@@ -70,16 +72,31 @@ export const ADMIN_TIME_SLOTS = generateSlots(
 );
 
 /** 管理画面用の全時間スロット（slot_duration_minutes 連動）。
- * schedule を渡すと平日∪土曜の最広範囲。未指定なら 8:00〜23:30 (admin range)。 */
+ * 表示範囲は admin range と schedule の合算（min(starts), max(ends)）。
+ * 営業時間外の準備時間も視野に入るよう admin range 09:00-23:00 を最低保証。
+ * 白/灰色判定はこの一覧の各時刻に対して isBusinessHour で別途実施する。 */
 export function getAdminTimeSlots(slotMinutes: SlotMinutes = 30, schedule?: Schedule): string[] {
-  if (!schedule) {
-    return generateSlots(DEFAULT_SCHEDULE.admin.start, DEFAULT_SCHEDULE.admin.end, slotMinutes);
-  }
   const toMin = (hm: string) => { const [h, m] = hm.split(":").map(Number); return h * 60 + m; };
   const fromMin = (n: number) => `${String(Math.floor(n / 60)).padStart(2, "0")}:${String(n % 60).padStart(2, "0")}`;
-  const startMin = Math.min(toMin(schedule.weekday.start), toMin(schedule.saturday.start));
-  const endMin   = Math.max(toMin(schedule.weekday.end),   toMin(schedule.saturday.end));
+  const adminStartMin = toMin(DEFAULT_SCHEDULE.admin.start);
+  const adminEndMin   = toMin(DEFAULT_SCHEDULE.admin.end);
+  if (!schedule) {
+    return generateSlots(fromMin(adminStartMin), fromMin(adminEndMin), slotMinutes);
+  }
+  const startMin = Math.min(adminStartMin, toMin(schedule.weekday.start), toMin(schedule.saturday.start));
+  const endMin   = Math.max(adminEndMin,   toMin(schedule.weekday.end),   toMin(schedule.saturday.end));
   return generateSlots(fromMin(startMin), fromMin(endMin), slotMinutes);
+}
+
+/** ある時刻文字列 (HH:MM) が指定日の営業時間内かを判定。
+ * グリッドの白/灰色判定に使う。closedDays/clinic_holidays 判定は呼び出し側で。 */
+export function isWithinBusinessHours(date: Date, timeSlot: string, schedule: Schedule): boolean {
+  const day = date.getDay();
+  if (schedule.closedDays.includes(day)) return false;
+  const range = day === 6 ? schedule.saturday : schedule.weekday;
+  const toMin = (hm: string) => { const [h, m] = hm.split(":").map(Number); return h * 60 + m; };
+  const slotMin = toMin(timeSlot);
+  return slotMin >= toMin(range.start) && slotMin <= toMin(range.end);
 }
 
 export type GetTimeSlotsOptions = {

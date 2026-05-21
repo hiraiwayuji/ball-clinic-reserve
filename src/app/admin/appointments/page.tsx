@@ -16,7 +16,7 @@ import Link from "next/link";
 import { EditAppointmentDialog } from "@/components/admin/EditAppointmentDialog";
 import { AddAppointmentDialog } from "@/components/admin/AddAppointmentDialog";
 import { PatientSearchPanel } from "@/components/admin/PatientSearchPanel";
-import { getAdminTimeSlots } from "@/lib/time-slots";
+import { getAdminTimeSlots, isWithinBusinessHours } from "@/lib/time-slots";
 import { useClinicSlotDuration } from "@/lib/use-clinic-slot-duration";
 import { useClinicSchedule } from "@/lib/use-clinic-schedule";
 import { getMyClinicId } from "@/app/actions/auth";
@@ -128,19 +128,14 @@ export default function AdminWeeklyGridPage() {
   };
 
   const isBusinessHour = (date: Date, timeSlot: string) => {
-    const day = date.getDay();
     if (holidays.some(h => isSameDay(parseISO(h.date), date))) return false;
-    if (day === 0 || day === 3) return false;
-    const [hour, min] = timeSlot.split(":").map(Number);
-    const timeValue = hour + min / 60;
-    if (day === 6) return timeValue >= 10 && timeValue <= 17.5;
-    return timeValue >= 12 && timeValue <= 22.5;
+    return isWithinBusinessHours(date, timeSlot, schedule);
   };
 
   const isDayOff = (date: Date) => {
     const day = date.getDay();
     if (holidays.some(h => isSameDay(parseISO(h.date), date))) return true;
-    return day === 0 || day === 3;
+    return schedule.closedDays.includes(day);
   };
 
   const selectedDayAppointments = useMemo(() => {
