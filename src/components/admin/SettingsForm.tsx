@@ -203,6 +203,74 @@ export default function SettingsForm({ initialSettings }: { initialSettings: Cli
                     )}
                   </div>
                 </div>
+
+                {/* ─── 予約スロット範囲（表示テキストとは別の、グリッド生成用） ─── */}
+                <div className="pt-4 mt-2 border-t border-dashed border-slate-200 dark:border-white/10 space-y-3">
+                  <div className="space-y-1">
+                    <Label className="text-slate-700 dark:text-slate-300 font-bold">予約画面・予約一覧のグリッド範囲</Label>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                      上の「営業時間（表示用テキスト）」とは別。<br />
+                      ここで設定した時間が、患者向け予約画面と /admin/appointments の<br />
+                      グリッドの開始〜終了時刻と休診曜日になります。
+                    </p>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1.5">
+                      <Label className="text-xs text-slate-600 dark:text-slate-400">平日 開始</Label>
+                      <Input type="time" value={settings?.business_open_weekday ?? ""} placeholder="12:00"
+                        onChange={(e) => updateField("business_open_weekday", e.target.value || null)} />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs text-slate-600 dark:text-slate-400">平日 終了</Label>
+                      <Input type="time" value={settings?.business_close_weekday ?? ""} placeholder="22:30"
+                        onChange={(e) => updateField("business_close_weekday", e.target.value || null)} />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs text-slate-600 dark:text-slate-400">土曜 開始</Label>
+                      <Input type="time" value={settings?.business_open_saturday ?? ""} placeholder="10:00"
+                        onChange={(e) => updateField("business_open_saturday", e.target.value || null)} />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs text-slate-600 dark:text-slate-400">土曜 終了</Label>
+                      <Input type="time" value={settings?.business_close_saturday ?? ""} placeholder="17:30"
+                        onChange={(e) => updateField("business_close_saturday", e.target.value || null)} />
+                    </div>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs text-slate-600 dark:text-slate-400">休診曜日</Label>
+                    <div className="flex gap-1.5 flex-wrap">
+                      {[
+                        { v: 0, label: "日" },
+                        { v: 1, label: "月" },
+                        { v: 2, label: "火" },
+                        { v: 3, label: "水" },
+                        { v: 4, label: "木" },
+                        { v: 5, label: "金" },
+                        { v: 6, label: "土" },
+                      ].map(({ v, label }) => {
+                        const raw = settings?.closed_weekdays ?? "0,3";
+                        const current = raw.split(",").map((s) => parseInt(s.trim(), 10)).filter((n) => Number.isInteger(n));
+                        const isOn = current.includes(v);
+                        const toggle = () => {
+                          const next = isOn ? current.filter((n) => n !== v) : [...current, v];
+                          next.sort((a, b) => a - b);
+                          updateField("closed_weekdays", next.join(","));
+                        };
+                        return (
+                          <button key={v} type="button" onClick={toggle}
+                            className={`px-3 py-1.5 rounded-md text-xs font-bold border transition-colors ${
+                              isOn
+                                ? "bg-rose-100 border-rose-300 text-rose-700 dark:bg-rose-900/40 dark:border-rose-700 dark:text-rose-200"
+                                : "bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-300"
+                            }`}>
+                            {label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <p className="text-[10px] text-slate-500 dark:text-slate-500">クリックで切替（赤=休診）。祝日は clinic_holidays（別画面）で管理。</p>
+                  </div>
+                </div>
               </div>
 
               <div className="space-y-4 pt-4 border-t border-slate-100 dark:border-white/10">
