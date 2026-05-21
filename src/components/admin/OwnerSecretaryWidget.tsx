@@ -1,15 +1,18 @@
 "use client";
 
 import { useEffect, useState, useTransition } from "react";
+import Link from "next/link";
 import { Button } from "@/components/ui/button";
-import { Sparkles, AlertTriangle, RefreshCcw, CalendarDays, Target, Clock } from "lucide-react";
+import { Sparkles, AlertTriangle, RefreshCcw, CalendarDays, Target, Clock, ArrowRight, ListTodo, X } from "lucide-react";
 import {
   generateOwnerBriefing,
+  dismissAlertToTask,
   type OwnerBriefing,
   type OwnerAlert,
   type AlertCategory,
 } from "@/app/actions/ai-secretary-multi";
 import TeamTaskLoadPanel from "./TeamTaskLoadPanel";
+import { toast } from "sonner";
 
 const CATEGORY_META: Record<AlertCategory, { label: string; icon: typeof AlertTriangle; tone: string; toneBg: string }> = {
   urgent:    { label: "緊急",       icon: AlertTriangle, tone: "text-rose-700 dark:text-rose-300",     toneBg: "bg-rose-100 dark:bg-rose-900/40 border-rose-300" },
@@ -30,6 +33,43 @@ export default function OwnerSecretaryWidget() {
     thisMonth: false,
     longTerm: false,
   });
+  const [selectedAlert, setSelectedAlert] = useState<OwnerAlert | null>(null);
+  const [dismissing, setDismissing] = useState(false);
+
+  async function handleDismissToTask() {
+    if (!selectedAlert?.id) {
+      toast.error("このアラートはタスク化に対応していません");
+      return;
+    }
+    setDismissing(true);
+    try {
+      const priority: "high" | "medium" | "low" =
+        selectedAlert.category === "urgent" ? "high" :
+        selectedAlert.category === "longTerm" ? "low" : "medium";
+      const res = await dismissAlertToTask({
+        alertId: selectedAlert.id,
+        alertMessage: selectedAlert.message,
+        priority,
+      });
+      if (res.success) {
+        toast.success("タスクに登録しました（/admin/tasks で確認できます）");
+        // ローカルで該当 alert を即時除外
+        setBriefing(prev => {
+          if (!prev?.alertsV2) return prev;
+          return {
+            ...prev,
+            alertsV2: prev.alertsV2.filter(a => a.id !== selectedAlert.id),
+            alerts: prev.alerts.filter(m => m !== selectedAlert.message),
+          };
+        });
+        setSelectedAlert(null);
+      } else {
+        toast.error(res.error || "タスク登録に失敗しました");
+      }
+    } finally {
+      setDismissing(false);
+    }
+  }
 
   function load() {
     setError(null);
@@ -113,11 +153,22 @@ export default function OwnerSecretaryWidget() {
                       <span className={`text-xs ${meta.tone}`}>{isExpanded ? "折りたたむ" : items.length > VISIBLE ? `すべて表示 (+${items.length - VISIBLE})` : ""}</span>
                     </button>
                     <ul className="px-3 pb-2 space-y-1">
-                      {visibleItems.map((a, i) => (
-                        <li key={i} className={`text-sm ${meta.tone}`}>
-                          ・{a.message}
-                        </li>
-                      ))}
+                      {visibleItems.map((a, i) => {
+                        const clickable = !!a.id || !!a.actionUrl;
+                        return (
+                          <li key={i}>
+                            <button
+                              type="button"
+                              onClick={() => clickable && setSelectedAlert(a)}
+                              className={`w-full text-left text-sm ${meta.tone} ${clickable ? "hover:bg-white/40 dark:hover:bg-black/20 rounded px-1 -mx-1 transition-colors cursor-pointer" : "cursor-default"}`}
+                              disabled={!clickable}
+                            >
+                              ・{a.message}
+                              {clickable && <span className="ml-1 opacity-50 text-xs">›</span>}
+                            </button>
+                          </li>
+                        );
+                      })}
                       {!isExpanded && hiddenCount > 0 && (
                         <li className={`text-xs italic ${meta.tone}`}>+{hiddenCount} 件</li>
                       )}
@@ -158,6 +209,72 @@ export default function OwnerSecretaryWidget() {
             <TeamTaskLoadPanel />
           </div>
         </>
+      )}
+
+      {/* アラート詳細モーダル */}
+      {selectedAlert && (
+        <div
+          className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4"
+          onClick={() => !dismissing && setSelectedAlert(null)}
+        >
+          <div
+            className="bg-white dark:bg-slate-900 rounded-xl shadow-xl max-w-md w-full p-5 space-y-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-center gap-2 min-w-0">
+                {(() => {
+                  const meta = CATEGORY_META[selectedAlert.category];
+                  const Icon = meta.icon;
+                  return (
+                    <>
+                      <Icon className={`w-5 h-5 ${meta.tone} shrink-0`} />
+                      <h3 className={`text-base font-bold ${meta.tone}`}>{meta.label}</h3>
+                    </>
+                  );
+                })()}
+              </div>
+              <button
+                type="button"
+                onClick={() => !dismissing && setSelectedAlert(null)}
+                className="text-slate-400 hover:text-slate-600 text-xl leading-none shrink-0"
+                disabled={dismissing}
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <p className="text-sm text-slate-800 dark:text-slate-100 whitespace-pre-wrap leading-relaxed">
+              {selectedAlert.message}
+            </p>
+            <div className="grid grid-cols-1 gap-2 pt-2">
+              {selectedAlert.actionUrl && (
+                <Link
+                  href={selectedAlert.actionUrl}
+                  className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold transition-colors"
+                  onClick={() => setSelectedAlert(null)}
+                >
+                  <ArrowRight className="w-4 h-4" />
+                  解決ページへ移動
+                </Link>
+              )}
+              {selectedAlert.id && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={handleDismissToTask}
+                  disabled={dismissing}
+                  className="gap-2"
+                >
+                  <ListTodo className="w-4 h-4" />
+                  {dismissing ? "登録中..." : "今は解決しない（タスクに降格）"}
+                </Button>
+              )}
+              <p className="text-xs text-slate-500 dark:text-slate-400 text-center pt-1">
+                「タスクに降格」を選ぶと /admin/tasks に登録され、ここからは消えます
+              </p>
+            </div>
+          </div>
+        </div>
       )}
     </section>
   );

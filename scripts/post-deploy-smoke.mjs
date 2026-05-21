@@ -23,7 +23,7 @@ const TARGETS = [
 const PATHS = [
   { path: "/api/health",      expect: [200],      critical: true  },
   { path: "/reserve",         expect: [200],      critical: true  },
-  { path: "/admin/dashboard", expect: [302, 401], critical: true  }, // 未認証で 5xx は SSR エラー
+  { path: "/admin/dashboard", expect: [302, 307, 401], critical: true  }, // 未認証で 5xx は SSR エラー。Next.js は 307 でリダイレクト
   { path: "/admin-login",     expect: [200],      critical: true  },
 ];
 

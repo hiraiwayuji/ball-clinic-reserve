@@ -44,6 +44,10 @@ export type AlertCategory = "urgent" | "thisWeek" | "thisMonth" | "longTerm";
 export type OwnerAlert = {
   category: AlertCategory;
   message: string;
+  /** dismiss 用の決定的キー（同内容なら同じ値）。dismiss されたら以後の briefing で除外 */
+  id?: string;
+  /** タップで遷移する解決ページの URL */
+  actionUrl?: string;
 };
 
 export type OwnerBriefing = {
@@ -127,23 +131,35 @@ export async function generateOwnerBriefing(): Promise<{ success: boolean; brief
 
   // ── ローカル異常検知（Gemini が動かなくてもアラートは出る） ──
   const alertsV2: OwnerAlert[] = [];
-  const pushAlert = (category: AlertCategory, message: string) => {
-    alertsV2.push({ category, message });
+  const pushAlert = (category: AlertCategory, message: string, opts?: { id?: string; actionUrl?: string }) => {
+    alertsV2.push({ category, message, id: opts?.id, actionUrl: opts?.actionUrl });
   };
 
   if (last7DaysDeletedByStaff >= 3) {
-    pushAlert("urgent", `スタッフによる予約削除が ${last7DaysDeletedByStaff} 件あります。理由を確認してください。`);
+    pushAlert("urgent", `スタッフによる予約削除が ${last7DaysDeletedByStaff} 件あります。理由を確認してください。`, {
+      id: "staff-delete-spike-7d",
+      actionUrl: "/admin/appointments?status=cancelled",
+    });
   }
   if (cancelRate >= 30) {
-    pushAlert("urgent", `キャンセル率が ${cancelRate}% と高めです。リマインド運用を見直しましょう。`);
+    pushAlert("urgent", `キャンセル率が ${cancelRate}% と高めです。リマインド運用を見直しましょう。`, {
+      id: "high-cancel-rate-7d",
+      actionUrl: "/admin/appointments?status=cancelled",
+    });
   }
   const failedUnlocks = audits.filter((a: any) => a.action_type === "passcode.unlock_failed").length;
   if (failedUnlocks >= 3) {
-    pushAlert("urgent", `設定画面の解錠失敗が ${failedUnlocks} 回。第三者操作の可能性。`);
+    pushAlert("urgent", `設定画面の解錠失敗が ${failedUnlocks} 回。第三者操作の可能性。`, {
+      id: "passcode-unlock-failed-7d",
+      actionUrl: "/admin/settings",
+    });
   }
   const settingsRequests = audits.filter((a: any) => a.action_type === "settings.request").length;
   if (settingsRequests > 0) {
-    pushAlert("urgent", `スタッフからの設定変更申請が ${settingsRequests} 件、承認待ちです。`);
+    pushAlert("urgent", `スタッフからの設定変更申請が ${settingsRequests} 件、承認待ちです。`, {
+      id: "settings-requests-pending",
+      actionUrl: "/admin/approvals",
+    });
   }
 
   // ── 違和感検知（予約・顧客の整合性チェック） ──
@@ -165,11 +181,17 @@ export async function generateOwnerBriefing(): Promise<{ success: boolean; brief
   if (duplicates.length > 0) {
     const head = duplicates.slice(0, 3);
     const tail = duplicates.length > 3 ? `（他 ${duplicates.length - 3} 件）` : "";
+    // 最初の重複を actionUrl のターゲットにする
+    const first = duplicates[0];
     pushAlert(
       "urgent",
       `同じ日に同名の予約が重複しています。確認してください: ${head
         .map((d) => `${d.date} ${d.name}様（${d.ids.length}件）`)
-        .join(" / ")}${tail}`
+        .join(" / ")}${tail}`,
+      {
+        id: `duplicate-booking-${first.date}-${first.name}`,
+        actionUrl: `/admin/appointments?date=${first.date}&q=${encodeURIComponent(first.name)}`,
+      }
     );
   }
 
@@ -191,7 +213,11 @@ export async function generateOwnerBriefing(): Promise<{ success: boolean; brief
       return `${masked}（${[...names].slice(0, 3).join("・")}）`;
     });
     const tail = phoneConflicts.length > 3 ? `（他 ${phoneConflicts.length - 3} 件）` : "";
-    pushAlert("urgent", `同じ電話番号で別名義の登録が ${phoneConflicts.length} 組あります: ${head.join(" / ")}${tail}（家族予約か入力ミスを確認）`);
+    const firstPhone = phoneConflicts[0][0];
+    pushAlert("urgent", `同じ電話番号で別名義の登録が ${phoneConflicts.length} 組あります: ${head.join(" / ")}${tail}（家族予約か入力ミスを確認）`, {
+      id: `phone-conflict-${firstPhone}`,
+      actionUrl: `/admin/customers?phone=${encodeURIComponent(firstPhone)}`,
+    });
   }
 
   // 3) 直近 14 日に同じ顧客の連続キャンセルが 3 回以上（離脱兆候）
@@ -214,7 +240,10 @@ export async function generateOwnerBriefing(): Promise<{ success: boolean; brief
     const heavyCancellers = [...byCustomer.values()].filter((v) => v.n >= 3);
     if (heavyCancellers.length > 0) {
       const head = heavyCancellers.slice(0, 3).map((v) => `${v.name}様（${v.n}回）`);
-      pushAlert("urgent", `直近2週間でキャンセルが続いている方がいます: ${head.join(" / ")}（連絡確認を）`);
+      pushAlert("urgent", `直近2週間でキャンセルが続いている方がいます: ${head.join(" / ")}（連絡確認を）`, {
+        id: `heavy-cancellers-${heavyCancellers.length}`,
+        actionUrl: "/admin/appointments?status=cancelled",
+      });
     }
   } catch {}
 
@@ -262,7 +291,10 @@ export async function generateOwnerBriefing(): Promise<{ success: boolean; brief
     if (upcoming.length > 0) {
       const head = upcoming.slice(0, 4).map((u) => `${u.name}様(${u.mmdd}${u.hasLine ? "・LINE◯" : ""})`);
       const tail = upcoming.length > 4 ? `（他 ${upcoming.length - 4} 名）` : "";
-      pushAlert("thisWeek", `今週お誕生日: ${head.join(" / ")}${tail}。LINE のお祝い・割引クーポン送付を検討`);
+      pushAlert("thisWeek", `今週お誕生日: ${head.join(" / ")}${tail}。LINE のお祝い・割引クーポン送付を検討`, {
+        id: `birthday-this-week-${currentMonth}-${currentDay}`,
+        actionUrl: "/admin/marketing",
+      });
     }
     // 月内誕生日合計（今月のキャンペーン提案用）
     const thisMonthTotal = (birthCustomers ?? []).filter((c: any) => {
@@ -270,7 +302,10 @@ export async function generateOwnerBriefing(): Promise<{ success: boolean; brief
       return c.birth_month === currentMonth;
     }).length;
     if (thisMonthTotal >= 5 && upcoming.length === 0) {
-      pushAlert("thisMonth", `今月の誕生日患者は合計 ${thisMonthTotal} 名。誕生月キャンペーンの一斉配信を準備しましょう。`);
+      pushAlert("thisMonth", `今月の誕生日患者は合計 ${thisMonthTotal} 名。誕生月キャンペーンの一斉配信を準備しましょう。`, {
+        id: `birthday-this-month-${currentMonth}`,
+        actionUrl: "/admin/marketing",
+      });
     }
     // sevenDaysLater は将来の判定で使う可能性あるが今は未使用
     void sevenDaysLater;
@@ -299,7 +334,10 @@ export async function generateOwnerBriefing(): Promise<{ success: boolean; brief
       }
     }
     if (upcoming.length > 0) {
-      pushAlert("thisWeek", `スタッフの誕生日が近いです: ${upcoming.join(" / ")}。お祝いの準備を`);
+      pushAlert("thisWeek", `スタッフの誕生日が近いです: ${upcoming.join(" / ")}。お祝いの準備を`, {
+        id: `staff-birthday-this-week-${upcoming.length}`,
+        actionUrl: "/admin/leaderboard",
+      });
     }
   } catch {}
 
@@ -341,7 +379,11 @@ export async function generateOwnerBriefing(): Promise<{ success: boolean; brief
     if (candidates.length > 0) {
       const head = candidates.slice(0, 4).map((c) => `${c.name}様(${c.date}初診${c.hasLine ? "・LINE◯" : ""})`);
       const tail = candidates.length > 4 ? `（他 ${candidates.length - 4} 名）` : "";
-      pushAlert("thisMonth", `初診後フォロー候補: ${head.join(" / ")}${tail}。LINE で「その後いかがですか？」声かけを`);
+      const first = candidates[0];
+      pushAlert("thisMonth", `初診後フォロー候補: ${head.join(" / ")}${tail}。LINE で「その後いかがですか？」声かけを`, {
+        id: `first-visit-followup-${first.date}-${first.name}`,
+        actionUrl: "/admin/customers",
+      });
     }
   } catch {}
 
@@ -373,7 +415,10 @@ export async function generateOwnerBriefing(): Promise<{ success: boolean; brief
     if (lapsed.length > 0) {
       const head = lapsed.slice(0, 4).map((v) => `${v.name}様(${v.count}回・最終${v.last.slice(0, 10)}${v.hasLine ? "・LINE◯" : ""})`);
       const tail = lapsed.length > 4 ? `（他 ${lapsed.length - 4} 名）` : "";
-      pushAlert("longTerm", `60日以上ご来院のない優良患者: ${head.join(" / ")}${tail}。リテンション施策を`);
+      pushAlert("longTerm", `60日以上ご来院のない優良患者: ${head.join(" / ")}${tail}。リテンション施策を`, {
+        id: `long-inactive-${lapsed.length}`,
+        actionUrl: "/admin/customers",
+      });
     }
   } catch {}
 
@@ -401,7 +446,11 @@ export async function generateOwnerBriefing(): Promise<{ success: boolean; brief
       if (avg > 0 && max.n - min.n >= Math.max(3, avg * 0.6)) {
         pushAlert(
           "thisWeek",
-          `担当配分の偏り: ${max.name} ${max.n}件 ／ ${min.name} ${min.n}件（過去7日）。配分の見直しを`
+          `担当配分の偏り: ${max.name} ${max.n}件 ／ ${min.name} ${min.n}件（過去7日）。配分の見直しを`,
+          {
+            id: `staff-load-imbalance-${max.name}-${min.name}`,
+            actionUrl: "/admin/settings/staff-schedule",
+          }
         );
       }
     }
@@ -435,14 +484,21 @@ export async function generateOwnerBriefing(): Promise<{ success: boolean; brief
       if (top && top.pending >= 8 && (otherAvg === 0 || top.pending >= otherAvg * 2.5)) {
         pushAlert(
           "thisWeek",
-          `${top.staff_name} にタスクが集中しています（${top.pending} 件、他平均 ${otherAvg.toFixed(1)} 件）。再分配を検討してください。`
+          `${top.staff_name} にタスクが集中しています（${top.pending} 件、他平均 ${otherAvg.toFixed(1)} 件）。再分配を検討してください。`,
+          {
+            id: `task-concentration-${top.staff_name}`,
+            actionUrl: "/admin/tasks",
+          }
         );
       }
 
       // 期限超過合計
       const overdueTotal = taskLoadRes.rows.reduce((s, r) => s + r.overdue, 0);
       if (overdueTotal > 0) {
-        pushAlert("urgent", `期限超過のタスクが ${overdueTotal} 件あります。`);
+        pushAlert("urgent", `期限超過のタスクが ${overdueTotal} 件あります。`, {
+          id: `task-overdue-${overdueTotal}`,
+          actionUrl: "/admin/tasks",
+        });
       }
     }
 
@@ -455,7 +511,10 @@ export async function generateOwnerBriefing(): Promise<{ success: boolean; brief
         (t) => t.due_date && t.due_date >= todayStr && t.due_date <= twoDaysLater && t.priority === "high"
       );
       if (soon.length >= 2) {
-        pushAlert("thisWeek", `期限が 2 日以内の高優先度タスクが ${soon.length} 件あります。早めの対応を。`);
+        pushAlert("thisWeek", `期限が 2 日以内の高優先度タスクが ${soon.length} 件あります。早めの対応を。`, {
+          id: `task-due-soon-${soon.length}`,
+          actionUrl: "/admin/tasks",
+        });
       }
 
       // 長期未完了 (作成から 30 日経過の pending)
@@ -464,11 +523,36 @@ export async function generateOwnerBriefing(): Promise<{ success: boolean; brief
       if (stale.length > 0) {
         pushAlert(
           "longTerm",
-          `30 日以上未完了のタスクが ${stale.length} 件あります。やる気が出ない案件は思い切って削除も検討してください。`
+          `30 日以上未完了のタスクが ${stale.length} 件あります。やる気が出ない案件は思い切って削除も検討してください。`,
+          {
+            id: `task-stale-${stale.length}`,
+            actionUrl: "/admin/tasks",
+          }
         );
       }
     }
   } catch {}
+
+  // ── dismiss 済み alert を除外 ──
+  // alert_dismissals に記録された alert_id は緊急枠から外す（=「タスクに降格」済み）
+  try {
+    const dismissedSince = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString();
+    const { data: dismissed } = await sb
+      .from("alert_dismissals")
+      .select("alert_id")
+      .eq("clinic_id", auth.clinicId)
+      .gte("dismissed_at", dismissedSince);
+    const dismissedSet = new Set((dismissed ?? []).map((r: any) => r.alert_id));
+    if (dismissedSet.size > 0) {
+      for (let i = alertsV2.length - 1; i >= 0; i--) {
+        if (alertsV2[i].id && dismissedSet.has(alertsV2[i].id!)) {
+          alertsV2.splice(i, 1);
+        }
+      }
+    }
+  } catch (e) {
+    console.error("[ai-secretary] dismissed filter error (non-fatal):", e);
+  }
 
   // ── 後方互換: フラット alerts を生成 ──
   const alerts: string[] = alertsV2.map((a) => a.message);
@@ -625,4 +709,75 @@ ${myTaskContext ? "期限超過・期限近のタスクがあれば、優しく1
       message,
     },
   };
+}
+
+// ───────── 緊急アラート: 「タスクに降格」する ─────────
+/**
+ * AI秘書 OwnerAlert をタップして「今は解決しない」を選んだ時の処理。
+ * 1. daily_tasks に登録（あとで /admin/tasks で消化）
+ * 2. alert_dismissals に記録 → 次回 briefing 生成時に同 alert_id を緊急枠から除外
+ *
+ * 戻り値: success と新規 task の id（リダイレクト先に使える）
+ */
+export async function dismissAlertToTask(input: {
+  alertId: string;
+  alertMessage: string;
+  priority?: "high" | "medium" | "low";
+}): Promise<{ success: boolean; taskId?: string; error?: string }> {
+  try {
+    const { clinicId, userId } = await requireRole(["owner", "admin"]);
+    const sb = getServiceClient();
+    if (!sb) return { success: false, error: "service role unavailable" };
+
+    if (!input.alertId || !input.alertMessage) {
+      return { success: false, error: "alertId/alertMessage が必要です" };
+    }
+
+    const taskDateStr = new Date().toISOString().slice(0, 10);
+    // メッセージ全文をタスク名にすると長いので 60 文字で切る
+    const taskName = input.alertMessage.length > 60
+      ? input.alertMessage.slice(0, 57) + "..."
+      : input.alertMessage;
+
+    const { data: inserted, error: insertErr } = await sb
+      .from("daily_tasks")
+      .insert([{
+        clinic_id: clinicId,
+        task_date: taskDateStr,
+        task_name: taskName,
+        title: taskName,
+        status: "pending",
+        priority: input.priority ?? "medium",
+        reference_content: input.alertMessage, // 全文は reference_content に保持
+      }])
+      .select("id")
+      .single();
+
+    if (insertErr) {
+      console.error("[dismissAlertToTask] daily_tasks insert error:", insertErr);
+      return { success: false, error: insertErr.message };
+    }
+
+    const { error: dismissErr } = await sb
+      .from("alert_dismissals")
+      .upsert(
+        {
+          clinic_id: clinicId,
+          alert_id: input.alertId,
+          dismissed_at: new Date().toISOString(),
+          dismissed_by: userId,
+        },
+        { onConflict: "clinic_id,alert_id" }
+      );
+
+    if (dismissErr) {
+      // task は登録されたが dismiss 記録失敗。次回 briefing で再表示されるが致命的ではない
+      console.error("[dismissAlertToTask] alert_dismissals upsert error (non-fatal):", dismissErr);
+    }
+
+    return { success: true, taskId: inserted?.id };
+  } catch (e: any) {
+    console.error("[dismissAlertToTask] unexpected error:", e);
+    return { success: false, error: e?.message ?? "unknown error" };
+  }
 }
