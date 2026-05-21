@@ -25,12 +25,17 @@ function generateSlots(start: string, end: string, minutes: number): string[] {
   return slots;
 }
 
-/** 管理画面の「予約枠の制限を外す」モードで使う全時間スロット（30分固定） */
+/** 管理画面の「予約枠の制限を外す」モードで使う全時間スロット（30分固定・後方互換用） */
 export const ADMIN_TIME_SLOTS = generateSlots(
   SCHEDULE.admin.start,
   SCHEDULE.admin.end,
   30,
 );
+
+/** 管理画面用の全時間スロット（slot_duration_minutes 連動）。8:00〜23:30 を slotMinutes 刻みで返す */
+export function getAdminTimeSlots(slotMinutes: SlotMinutes = 30): string[] {
+  return generateSlots(SCHEDULE.admin.start, SCHEDULE.admin.end, slotMinutes);
+}
 
 export type GetTimeSlotsOptions = {
   /** 予約枠サイズ（分）。default 30。clinic_settings.slot_duration_minutes から渡す */

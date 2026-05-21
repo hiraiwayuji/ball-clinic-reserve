@@ -16,10 +16,13 @@ import Link from "next/link";
 import { EditAppointmentDialog } from "@/components/admin/EditAppointmentDialog";
 import { AddAppointmentDialog } from "@/components/admin/AddAppointmentDialog";
 import { PatientSearchPanel } from "@/components/admin/PatientSearchPanel";
-import { ADMIN_TIME_SLOTS as TIME_SLOTS } from "@/lib/time-slots";
+import { getAdminTimeSlots } from "@/lib/time-slots";
+import { useClinicSlotDuration } from "@/lib/use-clinic-slot-duration";
 import { getMyClinicId } from "@/app/actions/auth";
 
 export default function AdminWeeklyGridPage() {
+  const slotMinutes = useClinicSlotDuration();
+  const TIME_SLOTS = useMemo(() => getAdminTimeSlots(slotMinutes), [slotMinutes]);
   const [currentDate, setCurrentDate] = useState<Date | null>(null);
   const [selectedDay, setSelectedDay] = useState<Date | null>(null);
   const [appointments, setAppointments] = useState<any[]>([]);

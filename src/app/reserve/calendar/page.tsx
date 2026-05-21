@@ -177,11 +177,12 @@ function ReserveCalendarContent() {
 
     const counts: Record<string, number> = {};
     if (aptData) {
+      const stepMs = slotMinutes * 60000;
       aptData.forEach((app: { start_time: string; end_time?: string | null }) => {
         const dStart = new Date(app.start_time);
-        const dEnd = app.end_time ? new Date(app.end_time) : new Date(dStart.getTime() + 30 * 60000);
+        const dEnd = app.end_time ? new Date(app.end_time) : new Date(dStart.getTime() + stepMs);
         let current = dStart.getTime();
-        
+
         while (current < dEnd.getTime()) {
           // 絶対時間 (UTC) に 9時間 (JST) を足して、UTCのメソッドでJSTの時刻を取得する
           const jstDate = new Date(current + 9 * 3600000);
@@ -190,17 +191,17 @@ function ReserveCalendarContent() {
           const dd = String(jstDate.getUTCDate()).padStart(2, '0');
           const hh = String(jstDate.getUTCHours()).padStart(2, '0');
           const mm = String(jstDate.getUTCMinutes()).padStart(2, '0');
-          
+
           const dateKey = `${yyyy}-${mon}-${dd}`; // YYYY-MM-DD
           const slotTime = `${hh}:${mm}`; // HH:mm
-          
+
           const slotDateObj = new Date(`${dateKey}T00:00:00+09:00`);
-          const businessSlots = getTimeSlots(slotDateObj);
-          
+          const businessSlots = getTimeSlots(slotDateObj, { slotMinutes });
+
           if (businessSlots.includes(slotTime)) {
             counts[dateKey] = (counts[dateKey] || 0) + 1;
           }
-          current += 30 * 60000;
+          current += stepMs;
         }
       });
     }
