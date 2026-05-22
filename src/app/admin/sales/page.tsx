@@ -28,11 +28,12 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Calendar as CalendarIcon, Plus, Trash2, Loader2, Coins, User, UserPlus, Landmark, Receipt, Upload, Download, Clock, Bot, X, AlertTriangle, Zap, Pencil, ShieldCheck } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { addCashSale, getCashSales, deleteCashSale, updateCashSale, searchSalesPatients, SalesPatientSuggestion, type CashSalePaymentType } from "@/app/actions/sales";
-import { getActiveCourses, type ReservationCourse } from "@/app/actions/courses";
+import { getActiveCoursesByPopularity, type ReservationCourse } from "@/app/actions/courses";
 import { usePaymentCategories } from "@/lib/use-payment-categories";
 import { toast } from "sonner";
 import Link from "next/link";
 import CashSalesImportDialog from "@/components/admin/CashSalesImportDialog";
+import { AddAppointmentDialog } from "@/components/admin/AddAppointmentDialog";
 import { exportToExcel } from "@/lib/excel";
 
 function SalesPageInner() {
@@ -46,8 +47,24 @@ function SalesPageInner() {
   const [showImport, setShowImport] = useState(false);
   const formRef = useRef<HTMLFormElement>(null);
 
+  // 「次回予約」モーダル（会計成功直後に開く）
+  const [nextReserveOpen, setNextReserveOpen] = useState(false);
+  const [nextReserveConfirmOpen, setNextReserveConfirmOpen] = useState(false);
+  const [pendingNextReserve, setPendingNextReserve] = useState<{
+    name: string;
+    courseId?: string;
+    staffId?: string;
+    time?: string;
+  } | null>(null);
+  // 元の予約情報（受付タイムテーブルからの遷移時に URL params で受け取る）
+  const sourceCourseId = searchParams.get("course_id") || undefined;
+  const sourceStaffId = searchParams.get("staff_id") || undefined;
+  const sourceNextTime = searchParams.get("next_time") || undefined;
+
   // 患者名サジェスト
   const [nameValue, setNameValue] = useState("");
+  // カルテ番号（親子で同じ名前の場合の本人特定に使用）
+  const [medicalRecordNumberValue, setMedicalRecordNumberValue] = useState("");
   const [jippiItems, setJippiItems] = useState<SalesLineItem[]>([{ name: "", amount: 0 }]);
   const [buhanItems, setBuhanItems] = useState<SalesLineItem[]>([]);
   const [savedMenuItems, setSavedMenuItems] = useState<string[]>(() => {
@@ -58,7 +75,7 @@ function SalesPageInner() {
 
   // コース一覧をマウント時に取得（実費プルダウンの選択肢）
   useEffect(() => {
-    getActiveCourses().then(setActiveCourses).catch(() => setActiveCourses([]));
+    getActiveCoursesByPopularity().then(setActiveCourses).catch(() => setActiveCourses([]));
   }, []);
 
   const totalAmount = useMemo(() => {
@@ -82,7 +99,8 @@ function SalesPageInner() {
   const [showAiBanner, setShowAiBanner] = useState(false);
 
   // 支払区分（0円計上時に自賠責・はぐくみ医療等を選ぶ）
-  const [paymentType, setPaymentType] = useState<CashSalePaymentType | "">("");
+  // デフォルトは「自費施術」（旧「通常（自費）」を統合・2026-05-23）
+  const [paymentType, setPaymentType] = useState<CashSalePaymentType | "">("jihi");
 
   // 編集ダイアログ。memo に明細 JSON が入っている場合は明細を温存して名前/金額/支払区分のみ編集可能。
   const [editTarget, setEditTarget] = useState<any | null>(null);
@@ -171,6 +189,9 @@ function SalesPageInner() {
     const breakdown = {
       jippi: jippiItems.filter(i => i.name || i.amount > 0),
       buhan: buhanItems.filter(i => i.name || i.amount > 0),
+      ...(medicalRecordNumberValue.trim()
+        ? { medicalRecordNumber: medicalRecordNumberValue.trim() }
+        : {}),
     };
 
     // 0 円計上時は支払区分必須
@@ -192,15 +213,25 @@ function SalesPageInner() {
         const res = await addCashSale(formData);
         if (res.success) {
           toast.success(isFirstVisit ? "登録しました（新患）" : "登録しました");
+          // 会計直後の「次回予約しますか？」確認（タイムテーブルから遷移してきた場合）
+          if (sourceCourseId || sourceStaffId) {
+            setPendingNextReserve({
+              name: nameValue,
+              courseId: sourceCourseId,
+              staffId: sourceStaffId,
+              time: sourceNextTime,
+            });
+            setNextReserveConfirmOpen(true);
+          }
           formRef.current?.reset();
           setIsFirstVisit(false);
-          setNameValue("");
+          setMedicalRecordNumberValue("");
           setJippiItems([{ name: "", amount: 0 }]);
           setBuhanItems([]);
           setSuggestions([]);
           setShowAiBanner(false);
           setAiDraft(null);
-          setPaymentType("");
+          setPaymentType("jihi");
           fetchSales(date);
         } else {
           toast.error(res.error || "エラーが発生しました");
@@ -489,6 +520,21 @@ function SalesPageInner() {
                 </div>
               </div>
 
+              {/* カルテ番号（親子で同じ名前の場合の特定用・任意） */}
+              <div className="space-y-2">
+                <Label htmlFor="medical_record_number" className="text-xs font-semibold text-slate-600 uppercase tracking-wide">
+                  カルテ番号 <span className="text-slate-400 font-normal normal-case">（任意）</span>
+                </Label>
+                <Input
+                  id="medical_record_number"
+                  type="text"
+                  placeholder="例: A-1234（親子で同じ名前の場合に入力）"
+                  value={medicalRecordNumberValue}
+                  onChange={(e) => setMedicalRecordNumberValue(e.target.value)}
+                  autoComplete="off"
+                />
+              </div>
+
               {/* 実費セクション */}
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
@@ -557,17 +603,6 @@ function SalesPageInner() {
                   支払区分（0円計上の場合は必須）
                 </Label>
                 <div className="grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setPaymentType("")}
-                    className={`px-2 py-2 rounded-md text-xs font-bold border transition-all ${
-                      paymentType === ""
-                        ? "bg-emerald-500 border-emerald-600 text-white shadow-sm"
-                        : "bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100"
-                    }`}
-                  >
-                    通常（自費）
-                  </button>
                   {paymentCategories.map(opt => (
                     <button
                       key={opt.key}
@@ -772,17 +807,6 @@ function SalesPageInner() {
                   支払区分
                 </Label>
                 <div className="grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setEditForm(f => ({ ...f, payment_type: "" }))}
-                    className={`px-2 py-2 rounded-md text-xs font-bold border transition-all ${
-                      editForm.payment_type === ""
-                        ? "bg-emerald-500 border-emerald-600 text-white shadow-sm"
-                        : "bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100"
-                    }`}
-                  >
-                    通常（自費）
-                  </button>
                   {paymentCategories.map(opt => (
                     <button
                       key={opt.key}
@@ -822,6 +846,55 @@ function SalesPageInner() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* 会計直後の「次回予約しますか？」確認 */}
+      <Dialog open={nextReserveConfirmOpen} onOpenChange={setNextReserveConfirmOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>次回予約を入れますか？</DialogTitle>
+            <DialogDescription>
+              今回と同じメニュー・同じ担当・同じ時間帯で次回予約を作成できます。<br />
+              「はい」を押すと日時選択画面が開きます。
+            </DialogDescription>
+          </DialogHeader>
+          <div className="text-sm text-slate-600 space-y-1 py-2 border-y border-slate-100">
+            {pendingNextReserve?.name && <div><span className="text-slate-400">お名前:</span> {pendingNextReserve.name}</div>}
+            {pendingNextReserve?.time && <div><span className="text-slate-400">時間枠:</span> {pendingNextReserve.time}</div>}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setNextReserveConfirmOpen(false); setPendingNextReserve(null); }}>
+              いいえ
+            </Button>
+            <Button
+              onClick={() => { setNextReserveConfirmOpen(false); setNextReserveOpen(true); }}
+              className="bg-blue-600 hover:bg-blue-700"
+            >
+              はい、日時を選ぶ
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* 次回予約の AddAppointmentDialog（同じメニュー・担当・時間枠をプリセット） */}
+      {nextReserveOpen && (
+        <AddAppointmentDialog
+          open={nextReserveOpen}
+          onOpenChange={(o) => {
+            setNextReserveOpen(o);
+            if (!o) setPendingNextReserve(null);
+          }}
+          defaultName={pendingNextReserve?.name}
+          defaultCourseId={pendingNextReserve?.courseId}
+          defaultStaffId={pendingNextReserve?.staffId}
+          defaultTime={pendingNextReserve?.time}
+          hideTrigger
+          onSuccess={() => {
+            toast.success("次回予約を登録しました");
+            setNextReserveOpen(false);
+            setPendingNextReserve(null);
+          }}
+        />
+      )}
     </div>
   );
 }

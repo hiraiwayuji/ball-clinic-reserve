@@ -49,14 +49,25 @@ export function buildSchedule(settings: {
 
 export type SlotMinutes = 15 | 20 | 30;
 
-/** "HH:MM" 形式の時刻配列を、start〜end (inclusive) の範囲で minutes 刻みに生成 */
+/**
+ * "HH:MM" 形式の時刻配列を、start〜end の範囲で minutes 刻みに生成。
+ *
+ * end は「営業終了時刻」であり、その時刻に予約を開始すると施術が閉店時間を跨いでしまうため、
+ * 最終枠は end - minutes（= start + minutes <= end）で打ち切る。
+ *
+ * 例:
+ *   start='12:00', end='23:00', minutes=30 → 12:00, 12:30, ..., 22:30（23:00 は含まない）
+ *   start='10:00', end='18:00', minutes=30 → 10:00, ..., 17:30（18:00 は含まない）
+ *
+ * 2026-05-23 ぼーるくん指摘で end inclusive → exclusive へ変更。
+ */
 function generateSlots(start: string, end: string, minutes: number): string[] {
   const slots: string[] = [];
   const [sh, sm] = start.split(":").map(Number);
   const [eh, em] = end.split(":").map(Number);
   const startMin = sh * 60 + sm;
   const endMin = eh * 60 + em;
-  for (let t = startMin; t <= endMin; t += minutes) {
+  for (let t = startMin; t + minutes <= endMin; t += minutes) {
     const h = Math.floor(t / 60);
     const m = t % 60;
     slots.push(`${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`);
@@ -140,7 +151,11 @@ export function getTimeSlots(
   return generateSlots(range.start, range.end, slotMinutes);
 }
 
-/** 指定日の最大スロット数（営業時間 / slot_duration から動的計算） */
+/**
+ * 指定日の最大スロット数（営業時間 / slot_duration から動的計算）。
+ * end は exclusive（end 時刻自体は予約候補に含めない）なので +1 不要。
+ * 2026-05-23 generateSlots と整合させるため修正。
+ */
 export function getMaxSlots(date: Date, slotMinutes: SlotMinutes = 30, schedule?: Schedule): number {
   const sched = schedule ?? buildSchedule(null);
   const day = date.getDay();
@@ -149,7 +164,7 @@ export function getMaxSlots(date: Date, slotMinutes: SlotMinutes = 30, schedule?
   const [sh, sm] = range.start.split(":").map(Number);
   const [eh, em] = range.end.split(":").map(Number);
   const totalMin = (eh * 60 + em) - (sh * 60 + sm);
-  return Math.floor(totalMin / slotMinutes) + 1;
+  return Math.floor(totalMin / slotMinutes);
 }
 
 export function isDateWithinAllowedRange(date: Date, isAdmin: boolean = false): boolean {

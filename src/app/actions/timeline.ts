@@ -24,12 +24,15 @@ export type TimelineAppointment = {
   checkin_status: string | null;
   is_first_visit: boolean;
   memo: string | null;
+  course_id: string | null;
   course_name: string | null;
   staff_id: string | null;
   staff_name: string | null;
   room_name: string | null;
   customer_id: string | null;
   customer_name: string | null;
+  additional_courses: { course_id: string; course_name: string }[] | null;
+  additional_staff: { staff_id: string; staff_name: string }[] | null;
 };
 
 export type TimelineData = {
@@ -61,7 +64,7 @@ export async function getTimelineForDate(dateStr: string): Promise<{ success: bo
         .order("sort_order", { ascending: true })
         .order("name", { ascending: true }),
       sb.from("appointments")
-        .select("id, start_time, end_time, status, checkin_status, is_first_visit, memo, course_name, staff_id, staff_name, room_name, customer_id, customers(name)")
+        .select("id, start_time, end_time, status, checkin_status, is_first_visit, memo, course_id, course_name, staff_id, staff_name, room_name, customer_id, additional_courses, additional_staff, customers(name)")
         .eq("clinic_id", clinicId)
         .neq("status", "cancelled")
         .gte("start_time", dayStart)
@@ -92,12 +95,15 @@ export async function getTimelineForDate(dateStr: string): Promise<{ success: bo
         checkin_status: a.checkin_status ?? null,
         is_first_visit: !!a.is_first_visit,
         memo: a.memo ?? null,
+        course_id: a.course_id ?? null,
         course_name: a.course_name ?? null,
         staff_id: a.staff_id ?? null,
         staff_name: a.staff_name ?? null,
         room_name: a.room_name ?? null,
         customer_id: a.customer_id ?? null,
         customer_name: cust?.name ?? null,
+        additional_courses: (a.additional_courses ?? null) as { course_id: string; course_name: string }[] | null,
+        additional_staff:   (a.additional_staff   ?? null) as { staff_id:  string; staff_name:  string }[] | null,
       };
     });
 

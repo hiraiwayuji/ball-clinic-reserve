@@ -64,28 +64,74 @@ export async function createManualReservation(formData: FormData) {
       return { success: false, error: "サーバー設定エラー（service role key 未設定）" };
     }
 
-    // 1. 同じ電話番号の顧客が既に存在するか確認（同一院内）
-    const { data: existing } = await supabase
-      .from("customers")
-      .select("id")
-      .eq("phone", phone.trim())
-      .eq("clinic_id", clinicId)
-      .maybeSingle();
+    // 1. 既存顧客の特定（同一院内）
+    //    親子で同じ電話番号を共有しているケースに対応するため、カルテ番号 → (phone+name) → phone単独 の順でフォールバック
+    const medicalRecordNumber = ((formData.get("medicalRecordNumber") as string) || "").trim() || null;
+
+    let existing: { id: string } | null = null;
+
+    // 1-a. カルテ番号があれば最優先で一意特定
+    if (medicalRecordNumber) {
+      const { data } = await supabase
+        .from("customers")
+        .select("id")
+        .eq("medical_record_number", medicalRecordNumber)
+        .eq("clinic_id", clinicId)
+        .maybeSingle();
+      if (data) existing = data;
+    }
+
+    // 1-b. カルテ番号で見つからなければ (phone + name) の組合せで検索
+    if (!existing) {
+      const { data } = await supabase
+        .from("customers")
+        .select("id")
+        .eq("phone", phone.trim())
+        .eq("name", name.trim())
+        .eq("clinic_id", clinicId)
+        .maybeSingle();
+      if (data) existing = data;
+    }
+
+    // 1-c. それでも見つからなければ phone 単独で検索（単一ヒット時のみ採用）
+    //      複数ヒットなら親子別人と判断して新規作成
+    if (!existing) {
+      const { data: byPhone } = await supabase
+        .from("customers")
+        .select("id, name")
+        .eq("phone", phone.trim())
+        .eq("clinic_id", clinicId);
+      if (byPhone && byPhone.length === 1) {
+        existing = { id: byPhone[0].id };
+      } else if (byPhone && byPhone.length > 1) {
+        console.warn(
+          `[addAppointmentByAdmin] multiple customers with phone ${phone.trim()} - creating new record for ${name.trim()}`,
+        );
+      }
+    }
 
     let customerId: string;
     if (existing) {
-      // 既存顧客を使用（名前も最新に更新）
+      // 既存顧客を使用（名前とカルテ番号を最新に更新）
       customerId = existing.id;
+      const updateData: { name: string; medical_record_number?: string | null } = { name: name.trim() };
+      if (medicalRecordNumber) updateData.medical_record_number = medicalRecordNumber;
       await supabase
         .from("customers")
-        .update({ name: name.trim() })
+        .update(updateData)
         .eq("id", customerId)
         .eq("clinic_id", clinicId);
     } else {
       // 新規顧客を作成
+      const insertData: { name: string; phone: string; clinic_id: string; medical_record_number?: string } = {
+        name: name.trim(),
+        phone: phone.trim(),
+        clinic_id: clinicId,
+      };
+      if (medicalRecordNumber) insertData.medical_record_number = medicalRecordNumber;
       const { data: newCustomer, error: customerErr } = await supabase
         .from("customers")
-        .insert([{ name: name.trim(), phone: phone.trim(), clinic_id: clinicId }])
+        .insert([insertData])
         .select("id")
         .single();
 
@@ -119,6 +165,40 @@ export async function createManualReservation(formData: FormData) {
     const staffExtra  = staffId  && staffName  ? { staff_id:  staffId,  staff_name:  staffName  } : {};
     const roomExtra   = roomId   && roomName   ? { room_id:   roomId,   room_name:   roomName   } : {};
 
+    // 追加メニュー・追加担当（同一予約に複数項目を紐付け）
+    let additionalCoursesJson: { course_id: string; course_name: string }[] = [];
+    let additionalStaffJson:   { staff_id:  string; staff_name:  string }[] = [];
+    try {
+      const raw = (formData.get("additionalCourseIds") as string) || "";
+      const ids: string[] = raw ? JSON.parse(raw).filter(Boolean) : [];
+      if (ids.length > 0) {
+        const { data: addCourses } = await supabase
+          .from("reservation_courses")
+          .select("id, name")
+          .in("id", ids)
+          .eq("clinic_id", clinicId);
+        additionalCoursesJson = (addCourses ?? []).map((c) => ({ course_id: c.id, course_name: c.name }));
+      }
+    } catch (err) {
+      console.warn("[addAppointmentByAdmin] failed to parse additionalCourseIds:", err);
+    }
+    try {
+      const raw = (formData.get("additionalStaffIds") as string) || "";
+      const ids: string[] = raw ? JSON.parse(raw).filter(Boolean) : [];
+      if (ids.length > 0) {
+        const { data: addStaff } = await supabase
+          .from("reservation_staff")
+          .select("id, name")
+          .in("id", ids)
+          .eq("clinic_id", clinicId);
+        additionalStaffJson = (addStaff ?? []).map((s) => ({ staff_id: s.id, staff_name: s.name }));
+      }
+    } catch (err) {
+      console.warn("[addAppointmentByAdmin] failed to parse additionalStaffIds:", err);
+    }
+    const additionalCoursesExtra = additionalCoursesJson.length > 0 ? { additional_courses: additionalCoursesJson } : {};
+    const additionalStaffExtra   = additionalStaffJson.length   > 0 ? { additional_staff:   additionalStaffJson   } : {};
+
     // 連続予約は同一 series_id で束ねる（後で「この日以降を全削除」できるように）
     const seriesId = recurringWeeks > 1
       ? (typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : null)
@@ -146,6 +226,8 @@ export async function createManualReservation(formData: FormData) {
         ...courseExtra,
         ...staffExtra,
         ...roomExtra,
+        ...additionalCoursesExtra,
+        ...additionalStaffExtra,
       });
     }
 

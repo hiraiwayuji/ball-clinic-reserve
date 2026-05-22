@@ -72,6 +72,58 @@ export async function getActiveCourses(): Promise<ReservationCourse[]> {
   return data ?? [];
 }
 
+/**
+ * アクティブコースを「使用回数（人気順）」で取得。同数のときは sort_order でフォールバック。
+ * 過去 daysBack 日（デフォルト 90 日）の appointments を集計。
+ * Fail-safe: 集計失敗時は sort_order 順を返す。
+ */
+export async function getActiveCoursesByPopularity(daysBack: number = 90): Promise<ReservationCourse[]> {
+  const { createClient: createAdminClient } = await import("@supabase/supabase-js");
+  const DEFAULT_CLINIC_ID = PUBLIC_CLINIC_ID;
+
+  try {
+    const adminClient = createAdminClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!,
+    );
+
+    const { data: courses } = await adminClient
+      .from("reservation_courses")
+      .select("*")
+      .eq("clinic_id", DEFAULT_CLINIC_ID)
+      .eq("is_active", true);
+
+    if (!courses || courses.length === 0) return [];
+
+    // 過去 daysBack 日の予約から course_id 別の使用回数を集計
+    const since = new Date();
+    since.setDate(since.getDate() - daysBack);
+    const { data: apts } = await adminClient
+      .from("appointments")
+      .select("course_id")
+      .eq("clinic_id", DEFAULT_CLINIC_ID)
+      .neq("status", "cancelled")
+      .gte("start_time", since.toISOString())
+      .not("course_id", "is", null);
+
+    const countMap = new Map<string, number>();
+    for (const a of apts ?? []) {
+      if (a.course_id) countMap.set(a.course_id, (countMap.get(a.course_id) ?? 0) + 1);
+    }
+
+    // 使用回数 DESC、同数なら sort_order ASC
+    return [...courses].sort((a, b) => {
+      const ca = countMap.get(a.id) ?? 0;
+      const cb = countMap.get(b.id) ?? 0;
+      if (cb !== ca) return cb - ca;
+      return (a.sort_order ?? 9999) - (b.sort_order ?? 9999);
+    });
+  } catch (e) {
+    console.error("[getActiveCoursesByPopularity] fallback to sort_order:", e);
+    return getActiveCourses();
+  }
+}
+
 // ── スタッフ取得（管理側：全件） ──
 export async function getStaffList(): Promise<ReservationStaff[]> {
   const { clinicId } = await checkAdminAuth();

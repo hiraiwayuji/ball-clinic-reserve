@@ -1,13 +1,20 @@
 "use client";
 
 import { useEffect, useMemo, useState, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import { format } from "date-fns";
 import { ja } from "date-fns/locale";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { ChevronLeft, ChevronRight, Loader2, RotateCcw } from "lucide-react";
+import {
+  ChevronLeft, ChevronRight, Loader2, RotateCcw,
+  UserCheck, CreditCard, XCircle, Plus,
+} from "lucide-react";
+import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
 import { getTimelineForDate, type TimelineData, type TimelineAppointment } from "@/app/actions/timeline";
+import { updateCheckinStatus } from "@/app/actions/adminReserve";
+import { AddAppointmentDialog } from "@/components/admin/AddAppointmentDialog";
 
 // スタッフ未指定の予約をまとめる仮想列
 const UNASSIGNED_KEY = "__unassigned__";
@@ -39,11 +46,23 @@ function statusColor(status: string, checkin: string | null, isFirstVisit: boole
 }
 
 export default function TodayTimelineWidget() {
+  const router = useRouter();
   const [date, setDate] = useState<Date | null>(null);
   const [data, setData] = useState<TimelineData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedApt, setSelectedApt] = useState<TimelineAppointment | null>(null);
+
+  // 新規予約ダイアログ（空きセルクリックで開く）
+  const [reserveDialog, setReserveDialog] = useState<{
+    open: boolean;
+    staffId?: string;
+    time?: string;
+    date?: Date;
+  }>({ open: false });
+
+  // 受付・会計ボタンの非同期処理ロック
+  const [actionLoading, setActionLoading] = useState(false);
 
   useEffect(() => { setDate(new Date()); }, []);
 
@@ -77,6 +96,60 @@ export default function TodayTimelineWidget() {
   const goPrev = () => date && setDate(new Date(date.getTime() - 24 * 3600 * 1000));
   const goNext = () => date && setDate(new Date(date.getTime() + 24 * 3600 * 1000));
   const goToday = () => setDate(new Date());
+
+  // 空きセルクリック → 新規予約ダイアログを開く
+  const handleEmptyCellClick = (staffId: string, minuteOfDay: number) => {
+    if (!date) return;
+    const hh = Math.floor(minuteOfDay / 60);
+    const mm = minuteOfDay % 60;
+    const timeStr = `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
+    setReserveDialog({
+      open: true,
+      staffId: staffId === UNASSIGNED_KEY ? undefined : staffId,
+      time: timeStr,
+      date: date,
+    });
+  };
+
+  // 受付（チェックイン）
+  const handleCheckin = async (apt: TimelineAppointment) => {
+    if (actionLoading) return;
+    setActionLoading(true);
+    try {
+      const res = await updateCheckinStatus(apt.id, "arrived");
+      if (res.success) {
+        toast.success(`${apt.customer_name ?? "患者"} を受付しました`);
+        setSelectedApt(null);
+        if (date) fetchData(date);
+      } else {
+        toast.error(res.error ?? "受付処理に失敗しました");
+      }
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  // 会計画面へ遷移（会計後の「次回予約ワンクリック」用に元予約の情報も URL に詰める）
+  const handleGoToSales = (apt: TimelineAppointment) => {
+    const params = new URLSearchParams();
+    params.set("name", apt.customer_name ?? "");
+    params.set("first_visit", String(apt.is_first_visit));
+    if (apt.course_name) params.set("course", apt.course_name);
+    // 次回予約用: コース・担当・時間枠（時刻部分）を引き継ぐ
+    if (apt.customer_id) params.set("customer_id", apt.customer_id);
+    if (apt.staff_id) params.set("staff_id", apt.staff_id);
+    if (apt.staff_name) params.set("staff_name", apt.staff_name);
+    if (apt.course_id) params.set("course_id", apt.course_id);
+    // 時間枠（hh:mm）も引き継ぐ
+    try {
+      const t = new Date(apt.start_time);
+      const hh = t.toLocaleString("ja-JP", { timeZone: "Asia/Tokyo", hour: "2-digit", hour12: false }).padStart(2, "0");
+      const mm = t.toLocaleString("ja-JP", { timeZone: "Asia/Tokyo", minute: "2-digit" }).padStart(2, "0");
+      params.set("next_time", `${hh}:${mm}`);
+    } catch {}
+    setSelectedApt(null);
+    router.push(`/admin/sales?${params.toString()}`);
+  };
 
   // スタッフ未指定の予約があれば仮想列を末尾に追加
   const staffWithUnassigned = useMemo(() => {
@@ -183,11 +256,19 @@ export default function TodayTimelineWidget() {
                     <div className="px-2 py-1 text-sm font-medium text-slate-800 dark:text-slate-100 flex items-center sticky left-0 bg-white dark:bg-slate-900 z-10 border-r border-slate-200 dark:border-slate-700">
                       {s.name}
                     </div>
-                    {/* グリッド線 */}
+                    {/* グリッドセル（クリックで新規予約） */}
                     {timeMarks.map((m, i) => (
-                      <div
+                      <button
                         key={i}
-                        className={`h-full ${m.label.includes(":00") ? "border-l border-slate-300 dark:border-slate-600" : "border-l border-slate-100 dark:border-slate-800"}`}
+                        type="button"
+                        onClick={() => handleEmptyCellClick(s.id, m.minute)}
+                        aria-label={`${s.name} ${m.label} に新規予約を追加`}
+                        title={`${s.name} ${m.label} ・クリックで新規予約`}
+                        className={`h-full hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors cursor-pointer ${
+                          m.label.includes(":00")
+                            ? "border-l border-slate-300 dark:border-slate-600"
+                            : "border-l border-slate-100 dark:border-slate-800"
+                        }`}
                       />
                     ))}
                     {/* 予約バー（absolute 配置） */}
@@ -220,8 +301,19 @@ export default function TodayTimelineWidget() {
                           }}
                           title={`${fmtTime(a.start_time)} ${a.customer_name ?? ""} ${a.course_name ?? ""}`}
                         >
-                          <div className="truncate font-semibold">{a.customer_name ?? "(顧客名なし)"}{a.is_first_visit ? " ⓢ" : ""}</div>
-                          {a.course_name && <div className="truncate opacity-80">{a.course_name}</div>}
+                          <div className="truncate font-semibold">
+                            {a.customer_name ?? "(顧客名なし)"}
+                            {a.is_first_visit ? " ⓢ" : ""}
+                            {((a.additional_staff?.length ?? 0) > 0) && (
+                              <span className="ml-1 text-[9px] font-normal opacity-70">×{(a.additional_staff?.length ?? 0) + 1}人</span>
+                            )}
+                          </div>
+                          {a.course_name && (
+                            <div className="truncate opacity-80">
+                              {a.course_name}
+                              {((a.additional_courses?.length ?? 0) > 0) && ` ＋${a.additional_courses?.length}`}
+                            </div>
+                          )}
                         </button>
                       );
                     })}
@@ -260,14 +352,72 @@ export default function TodayTimelineWidget() {
               >×</button>
             </div>
             <div className="space-y-1.5 text-sm">
-              {selectedApt.course_name && <div><span className="text-slate-500">コース:</span> {selectedApt.course_name}</div>}
-              {selectedApt.staff_name && <div><span className="text-slate-500">担当:</span> {selectedApt.staff_name}</div>}
+              {(selectedApt.course_name || (selectedApt.additional_courses?.length ?? 0) > 0) && (
+                <div>
+                  <span className="text-slate-500">メニュー:</span>{" "}
+                  {[
+                    selectedApt.course_name,
+                    ...(selectedApt.additional_courses ?? []).map((c) => c.course_name),
+                  ].filter(Boolean).join("、")}
+                </div>
+              )}
+              {(selectedApt.staff_name || (selectedApt.additional_staff?.length ?? 0) > 0) && (
+                <div>
+                  <span className="text-slate-500">担当:</span>{" "}
+                  {[
+                    selectedApt.staff_name,
+                    ...(selectedApt.additional_staff ?? []).map((s) => s.staff_name),
+                  ].filter(Boolean).join("、")}
+                </div>
+              )}
               {selectedApt.room_name && <div><span className="text-slate-500">部屋:</span> {selectedApt.room_name}</div>}
-              <div><span className="text-slate-500">状態:</span> {selectedApt.status}{selectedApt.is_first_visit && " (初診)"}</div>
+              <div>
+                <span className="text-slate-500">状態:</span> {selectedApt.status}{selectedApt.is_first_visit && " (初診)"}
+                {selectedApt.checkin_status && (
+                  <span className="ml-2 text-xs px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200 font-semibold">
+                    {selectedApt.checkin_status === "arrived" ? "受付済" :
+                     selectedApt.checkin_status === "in_treatment" ? "施術中" :
+                     selectedApt.checkin_status === "done" ? "完了" : selectedApt.checkin_status}
+                  </span>
+                )}
+              </div>
               {selectedApt.memo && <div><span className="text-slate-500">メモ:</span> <span className="whitespace-pre-wrap">{selectedApt.memo}</span></div>}
+            </div>
+
+            {/* アクションボタン: 受付 / 会計へ */}
+            <div className="flex gap-2 pt-3 border-t border-slate-200 dark:border-slate-700">
+              <Button
+                onClick={() => handleCheckin(selectedApt)}
+                disabled={actionLoading || selectedApt.checkin_status === "arrived"}
+                className="flex-1 bg-blue-600 hover:bg-blue-700 text-white"
+              >
+                <UserCheck className="w-4 h-4 mr-1.5" />
+                {selectedApt.checkin_status === "arrived" ? "受付済" : "受付"}
+              </Button>
+              <Button
+                onClick={() => handleGoToSales(selectedApt)}
+                disabled={actionLoading}
+                className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white"
+              >
+                <CreditCard className="w-4 h-4 mr-1.5" />
+                会計へ
+              </Button>
             </div>
           </div>
         </div>
+      )}
+
+      {/* 空きセルクリックで開く新規予約ダイアログ */}
+      {reserveDialog.open && (
+        <AddAppointmentDialog
+          open={reserveDialog.open}
+          onOpenChange={(o) => setReserveDialog((s) => ({ ...s, open: o }))}
+          defaultDate={reserveDialog.date}
+          defaultTime={reserveDialog.time}
+          defaultStaffId={reserveDialog.staffId}
+          hideTrigger
+          onSuccess={() => date && fetchData(date)}
+        />
       )}
     </Card>
   );

@@ -19,7 +19,12 @@ import { getUpcomingBirthdays } from "@/app/actions/admin-marketing-actions";
 import { Cake, Sparkles as SparklesIcon, Star } from "lucide-react";
 import AISecretaryBriefing from "@/components/admin/AISecretaryBriefing";
 
-export default function DashboardClient() {
+type DashboardClientProps = {
+  /** AI秘書 (ブリーフィングダイアログ) を表示するか。clinic_settings.ai_secretary_mode と role の組合せで決定 */
+  aiSecretaryEnabled?: boolean;
+};
+
+export default function DashboardClient({ aiSecretaryEnabled = true }: DashboardClientProps = {}) {
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
@@ -236,7 +241,7 @@ export default function DashboardClient() {
         </div>
       )}
 
-      {data && data.appointments && (
+      {aiSecretaryEnabled && data && data.appointments && (
         <AISecretaryBriefing
           appointments={data.appointments}
           onComplete={() => {}}

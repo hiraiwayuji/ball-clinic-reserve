@@ -5,6 +5,7 @@ import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { type SlotMinutes, type Schedule, buildSchedule } from "@/lib/time-slots";
 
 export type ClinicViewType = "list" | "timeline";
+export type AiSecretaryMode = "global" | "admin_only";
 
 /**
  * 現在のクリニックの予約枠サイズ（分）を取得。
@@ -89,5 +90,38 @@ export async function getCurrentViewType(): Promise<ClinicViewType> {
   } catch (e: any) {
     console.error("[getCurrentViewType] unexpected error, fallback to 'list':", e?.message ?? e);
     return "list";
+  }
+}
+
+/**
+ * AI秘書 の表示範囲（'global' / 'admin_only'）。
+ * 院ごとに設定（clinic_settings.ai_secretary_mode）。
+ *
+ * Fail-safe: Supabase 取得失敗時は "global" を返す（破壊的変更を避ける）。
+ */
+export async function getCurrentAiSecretaryMode(): Promise<AiSecretaryMode> {
+  try {
+    if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
+      return "global";
+    }
+    const sb = createSupabaseClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL,
+      process.env.SUPABASE_SERVICE_ROLE_KEY,
+      { auth: { persistSession: false } },
+    );
+    const { data, error } = await sb
+      .from("clinic_settings")
+      .select("ai_secretary_mode")
+      .eq("id", PUBLIC_CLINIC_ID)
+      .maybeSingle();
+    if (error) {
+      console.error("[getCurrentAiSecretaryMode] supabase error, fallback to 'global':", error.message);
+      return "global";
+    }
+    const v = data?.ai_secretary_mode;
+    return v === "admin_only" ? "admin_only" : "global";
+  } catch (e: any) {
+    console.error("[getCurrentAiSecretaryMode] unexpected error, fallback to 'global':", e?.message ?? e);
+    return "global";
   }
 }

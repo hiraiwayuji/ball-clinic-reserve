@@ -29,12 +29,24 @@ export function AddAppointmentDialog({
   onOpenChange: externalOnOpenChange,
   defaultDate,
   defaultTime,
+  defaultStaffId,
+  defaultCourseId,
+  defaultName,
+  defaultPhone,
+  defaultMedicalRecordNumber,
+  hideTrigger = false,
 }: {
   onSuccess?: () => void;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
   defaultDate?: Date;
   defaultTime?: string;
+  defaultStaffId?: string;
+  defaultCourseId?: string;
+  defaultName?: string;
+  defaultPhone?: string;
+  defaultMedicalRecordNumber?: string;
+  hideTrigger?: boolean;
 }) {
   const slotMinutes = useClinicSlotDuration();
   const [internalOpen, setInternalOpen] = useState(false);
@@ -58,10 +70,14 @@ export function AddAppointmentDialog({
   const [courseId, setCourseId] = useState<string>("");
   const [staffId, setStaffId] = useState<string>("");
   const [roomId, setRoomId] = useState<string>("");
+  // 追加メニュー・追加担当（同じ予約に複数項目を紐付け）
+  const [additionalCourses, setAdditionalCourses] = useState<string[]>([]);
+  const [additionalStaff, setAdditionalStaff] = useState<string[]>([]);
 
   // 患者サジェスト
   const [nameValue, setNameValue] = useState("");
   const [phoneValue, setPhoneValue] = useState("");
+  const [medicalRecordNumberValue, setMedicalRecordNumberValue] = useState("");
   const [suggestions, setSuggestions] = useState<PatientSuggestion[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [selectedPatient, setSelectedPatient] = useState<PatientSuggestion | null>(null);
@@ -73,6 +89,16 @@ export function AddAppointmentDialog({
     if (open) {
       if (defaultDate) setDate(defaultDate);
       if (defaultTime) setTime(defaultTime);
+      if (defaultStaffId) setStaffId(defaultStaffId);
+      if (defaultCourseId) {
+        setCourseId(defaultCourseId);
+        // 既存コースの duration を反映
+        const c = courses.find((c) => c.id === defaultCourseId);
+        if (c) setDuration(String(c.duration_minutes));
+      }
+      if (defaultName) setNameValue(defaultName);
+      if (defaultPhone) setPhoneValue(defaultPhone);
+      if (defaultMedicalRecordNumber) setMedicalRecordNumberValue(defaultMedicalRecordNumber);
       // マスタ取得（既に取得済みなら再取得しない）
       if (courses.length === 0) {
         getCourses().then(setCourses).catch(() => {});
@@ -87,6 +113,7 @@ export function AddAppointmentDialog({
       // ダイアログを閉じたらリセット
       setNameValue("");
       setPhoneValue("");
+      setMedicalRecordNumberValue("");
       setSuggestions([]);
       setShowSuggestions(false);
       setSelectedPatient(null);
@@ -96,6 +123,8 @@ export function AddAppointmentDialog({
       setCourseId("");
       setStaffId("");
       setRoomId("");
+      setAdditionalCourses([]);
+      setAdditionalStaff([]);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, defaultDate, defaultTime]);
@@ -138,6 +167,7 @@ export function AddAppointmentDialog({
     setSelectedPatient(patient);
     setNameValue(patient.name);
     setPhoneValue(patient.phone);
+    setMedicalRecordNumberValue(patient.medicalRecordNumber ?? "");
     setShowSuggestions(false);
     // 来院履歴があれば再診に設定
     if (patient.totalVisits > 0) setVisitType("return");
@@ -165,6 +195,9 @@ export function AddAppointmentDialog({
       const formData = new FormData(e.currentTarget);
       formData.set("name", nameValue);
       formData.set("phone", phoneValue);
+      formData.set("medicalRecordNumber", medicalRecordNumberValue.trim());
+      formData.set("additionalCourseIds", JSON.stringify(additionalCourses.filter(Boolean)));
+      formData.set("additionalStaffIds", JSON.stringify(additionalStaff.filter(Boolean)));
       formData.append("date", format(date, "yyyy-MM-dd"));
       formData.append("time", time);
       formData.append("visitType", visitType);
@@ -206,10 +239,12 @@ export function AddAppointmentDialog({
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger className="inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 bg-blue-600 text-white shadow-sm hover:bg-blue-700 h-9 px-4 py-2">
-        <Plus className="w-4 h-4 mr-2" />
-        新規予約を追加
-      </DialogTrigger>
+      {!hideTrigger && (
+        <DialogTrigger className="inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 bg-blue-600 text-white shadow-sm hover:bg-blue-700 h-9 px-4 py-2">
+          <Plus className="w-4 h-4 mr-2" />
+          新規予約を追加
+        </DialogTrigger>
+      )}
 
       <DialogContent className="w-full max-w-lg mx-auto max-h-[92dvh] overflow-y-auto p-0 gap-0 rounded-2xl">
         {/* Header */}
@@ -332,7 +367,14 @@ export function AddAppointmentDialog({
                           <div className="flex items-center gap-2">
                             <User className="w-3.5 h-3.5 text-slate-400 shrink-0 mt-0.5" />
                             <div>
-                              <p className="text-sm font-bold text-slate-800">{patient.name}</p>
+                              <p className="text-sm font-bold text-slate-800">
+                                {patient.name}
+                                {patient.medicalRecordNumber && (
+                                  <span className="ml-2 text-[10px] font-semibold text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded">
+                                    カルテ {patient.medicalRecordNumber}
+                                  </span>
+                                )}
+                              </p>
                               <p className="text-xs text-slate-500">{patient.phone}</p>
                             </div>
                           </div>
@@ -390,6 +432,25 @@ export function AddAppointmentDialog({
               />
             </div>
 
+            {/* カルテ番号（任意。親子で同じ電話番号の場合の本人特定に使用） */}
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">
+                カルテ番号 <span className="text-slate-400 font-normal normal-case">（任意）</span>
+              </Label>
+              <Input
+                type="text"
+                placeholder="例: A-1234（親子で電話番号が同じ場合は必ず入力）"
+                value={medicalRecordNumberValue}
+                onChange={(e) => setMedicalRecordNumberValue(e.target.value)}
+                className="h-11"
+                autoComplete="off"
+              />
+              <p className="text-[10px] text-slate-500">
+                紙カルテに振った番号をそのまま入力してください。<br />
+                同じ番号があれば「同じ人」として上書き、なければ新規カルテになります。
+              </p>
+            </div>
+
             {/* 初診/再診 */}
             <div className="space-y-1.5">
               <Label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">
@@ -430,6 +491,42 @@ export function AddAppointmentDialog({
                   ))}
                 </select>
                 <p className="text-[10px] text-slate-500">選ぶと所要時間も自動で入ります。売上一括入力の元情報にも反映されます。</p>
+
+                {/* 追加メニュー（複数選択可） */}
+                {additionalCourses.map((cid, idx) => (
+                  <div key={`addc-${idx}`} className="flex gap-2 items-center mt-1.5">
+                    <span className="text-[10px] text-slate-400 w-10 shrink-0">＋{idx + 2}個目</span>
+                    <select
+                      value={cid}
+                      onChange={(e) => {
+                        const next = [...additionalCourses];
+                        next[idx] = e.target.value;
+                        setAdditionalCourses(next);
+                      }}
+                      className={`${selectClass} flex-1`}
+                    >
+                      <option value="">追加メニューを選択</option>
+                      {courses.filter(c => c.is_active).map(c => (
+                        <option key={c.id} value={c.id}>
+                          {c.name}（{c.duration_minutes}分{c.price != null ? ` / ¥${c.price.toLocaleString()}` : ""}）
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={() => setAdditionalCourses(additionalCourses.filter((_, i) => i !== idx))}
+                      className="px-2 py-1 text-rose-500 hover:bg-rose-50 rounded text-sm"
+                      aria-label="追加メニューを削除"
+                    >×</button>
+                  </div>
+                ))}
+                <button
+                  type="button"
+                  onClick={() => setAdditionalCourses([...additionalCourses, ""])}
+                  className="text-xs text-blue-600 hover:text-blue-700 inline-flex items-center gap-1 mt-1"
+                >
+                  <Plus className="w-3 h-3" /> メニューを追加
+                </button>
               </div>
             )}
 
@@ -445,6 +542,40 @@ export function AddAppointmentDialog({
                     <option key={s.id} value={s.id}>{s.name}</option>
                   ))}
                 </select>
+
+                {/* 追加担当（複数選択可） */}
+                {additionalStaff.map((sid, idx) => (
+                  <div key={`adds-${idx}`} className="flex gap-2 items-center mt-1.5">
+                    <span className="text-[10px] text-slate-400 w-10 shrink-0">＋{idx + 2}人目</span>
+                    <select
+                      value={sid}
+                      onChange={(e) => {
+                        const next = [...additionalStaff];
+                        next[idx] = e.target.value;
+                        setAdditionalStaff(next);
+                      }}
+                      className={`${selectClass} flex-1`}
+                    >
+                      <option value="">追加担当を選択</option>
+                      {staffList.filter(s => s.is_active).map(s => (
+                        <option key={s.id} value={s.id}>{s.name}</option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={() => setAdditionalStaff(additionalStaff.filter((_, i) => i !== idx))}
+                      className="px-2 py-1 text-rose-500 hover:bg-rose-50 rounded text-sm"
+                      aria-label="追加担当を削除"
+                    >×</button>
+                  </div>
+                ))}
+                <button
+                  type="button"
+                  onClick={() => setAdditionalStaff([...additionalStaff, ""])}
+                  className="text-xs text-blue-600 hover:text-blue-700 inline-flex items-center gap-1 mt-1"
+                >
+                  <Plus className="w-3 h-3" /> 担当を追加
+                </button>
               </div>
             )}
 

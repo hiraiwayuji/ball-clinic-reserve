@@ -43,28 +43,44 @@ export type PatientSuggestion = {
   id: string;
   name: string;
   phone: string;
+  medicalRecordNumber: string | null;
   lastVisitDate: string | null; // "yyyy-MM-dd"
   daysSinceLastVisit: number | null;
   totalVisits: number;
 };
 
-export async function searchPatientsForBooking(name: string): Promise<PatientSuggestion[]> {
+export async function searchPatientsForBooking(query: string): Promise<PatientSuggestion[]> {
   const { clinicId } = await checkAdminAuth();
-  if (!name.trim()) return [];
+  const q = query.trim();
+  if (!q) return [];
   const supabase = await createClient();
 
-  const { data: customers } = await supabase
+  // 名前 OR カルテ番号 で部分一致検索（親子の同電話番号問題への対策として、カルテ番号でも引けるように）
+  // medical_record_number カラム未作成の旧環境でもクラッシュしないよう、エラー時は name のみで再クエリ
+  let customers: { id: string; name: string; phone: string; medical_record_number: string | null }[] = [];
+  const { data: byOr, error: orError } = await supabase
     .from("customers")
-    .select("id, name, phone")
+    .select("id, name, phone, medical_record_number")
     .eq("clinic_id", clinicId)
-    .ilike("name", `%${name.trim()}%`)
+    .or(`name.ilike.%${q}%,medical_record_number.ilike.%${q}%`)
     .limit(8);
+  if (orError) {
+    const { data: byName } = await supabase
+      .from("customers")
+      .select("id, name, phone")
+      .eq("clinic_id", clinicId)
+      .ilike("name", `%${q}%`)
+      .limit(8);
+    customers = (byName ?? []).map((c) => ({ ...c, medical_record_number: null }));
+  } else {
+    customers = byOr ?? [];
+  }
 
   if (!customers || customers.length === 0) return [];
 
   // 各顧客の最終来院日と来院回数を取得
   const results: PatientSuggestion[] = await Promise.all(
-    customers.map(async (c) => {
+    customers.map(async (c: { id: string; name: string; phone: string; medical_record_number: string | null }) => {
       const { data: apts } = await supabase
         .from("appointments")
         .select("start_time")
@@ -95,6 +111,7 @@ export async function searchPatientsForBooking(name: string): Promise<PatientSug
         id: c.id,
         name: c.name,
         phone: c.phone,
+        medicalRecordNumber: c.medical_record_number ?? null,
         lastVisitDate,
         daysSinceLastVisit,
         totalVisits: count ?? 0,
