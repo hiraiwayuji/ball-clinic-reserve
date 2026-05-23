@@ -976,7 +976,7 @@ function LineItemRow({
   };
 
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex flex-wrap items-center gap-2">
       {isFreeText ? (
         <input
           autoFocus
@@ -984,13 +984,13 @@ function LineItemRow({
           onChange={e => onChange({ ...item, name: e.target.value })}
           onBlur={e => { if (e.target.value === "") onChange({ name: "", amount: item.amount }); }}
           placeholder="項目名（自由入力）"
-          className="flex-1 border border-slate-200 dark:border-slate-700 rounded px-2 py-1 text-sm bg-transparent dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          className="flex-1 min-w-[10rem] border border-slate-200 dark:border-slate-700 rounded px-2 py-1 text-sm bg-transparent dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
         />
       ) : (
         <select
           value={selectValue}
           onChange={e => handleSelectChange(e.target.value)}
-          className="flex-1 border border-slate-200 dark:border-slate-700 rounded px-2 py-1 text-sm bg-transparent dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          className="flex-1 min-w-[10rem] border border-slate-200 dark:border-slate-700 rounded px-2 py-1 text-sm bg-transparent dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
         >
           <option value="">— 項目を選択 —</option>
           {courses.length > 0 && (
@@ -1010,9 +1010,9 @@ function LineItemRow({
           <option value={CUSTOM_NAME}>＋ その他（自由入力）</option>
         </select>
       )}
-      <input type="number" value={item.amount || ""}
+      <input type="number" inputMode="numeric" value={item.amount || ""}
         onChange={e => onChange({ ...item, amount: Number(e.target.value) })}
-        placeholder="金額" className="w-24 border border-slate-200 dark:border-slate-700 rounded px-2 py-1 text-sm text-right bg-transparent dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+        placeholder="金額" className="w-28 sm:w-32 border border-slate-200 dark:border-slate-700 rounded px-2 py-1.5 text-sm text-right bg-transparent dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500" />
       {isFreeText && item.name.trim() !== "" && !savedItems.includes(item.name) && (
         <label className="flex items-center gap-1 text-xs text-slate-500 whitespace-nowrap cursor-pointer">
           <input type="checkbox" checked={saveChecked}
