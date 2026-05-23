@@ -343,6 +343,36 @@ export type SalesPatientSuggestion = {
   visitCount: number;
 };
 
+/**
+ * カルテ番号で customers を検索。完全一致が1件→顧客返却、複数ヒット→候補配列で返す。
+ * 売上登録画面でカルテ番号入力時に名前を自動引き出すために使う。
+ */
+export async function getCustomerByMedicalRecord(
+  medicalRecordNumber: string,
+): Promise<{ ok: true; customers: { id: string; name: string; phone: string | null }[] } | { ok: false; error: string }> {
+  try {
+    const { clinicId } = await checkAdminAuth();
+    const num = medicalRecordNumber.trim();
+    if (!num) return { ok: false, error: "カルテ番号が空です" };
+
+    const supabase = await getSupabase();
+    const { data, error } = await supabase
+      .from("customers")
+      .select("id, name, phone")
+      .eq("clinic_id", clinicId)
+      .eq("medical_record_number", num)
+      .limit(5);
+
+    if (error) {
+      console.error("[getCustomerByMedicalRecord] error:", error);
+      return { ok: false, error: error.message };
+    }
+    return { ok: true, customers: (data ?? []).map((c: any) => ({ id: c.id, name: c.name, phone: c.phone })) };
+  } catch (e: any) {
+    return { ok: false, error: e?.message ?? "unknown" };
+  }
+}
+
 export async function searchSalesPatients(name: string): Promise<SalesPatientSuggestion[]> {
   const { clinicId } = await checkAdminAuth();
   if (!name.trim()) return [];

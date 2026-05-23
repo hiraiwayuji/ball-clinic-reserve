@@ -27,7 +27,7 @@ import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Calendar as CalendarIcon, Plus, Trash2, Loader2, Coins, User, UserPlus, Landmark, Receipt, Upload, Download, Clock, Bot, X, AlertTriangle, Zap, Pencil, ShieldCheck } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
-import { addCashSale, getCashSales, deleteCashSale, updateCashSale, searchSalesPatients, SalesPatientSuggestion, type CashSalePaymentType } from "@/app/actions/sales";
+import { addCashSale, getCashSales, deleteCashSale, updateCashSale, searchSalesPatients, getCustomerByMedicalRecord, SalesPatientSuggestion, type CashSalePaymentType } from "@/app/actions/sales";
 import { getActiveCoursesByPopularity, type ReservationCourse } from "@/app/actions/courses";
 import { usePaymentCategories } from "@/lib/use-payment-categories";
 import { toast } from "sonner";
@@ -528,9 +528,24 @@ function SalesPageInner() {
                 <Input
                   id="medical_record_number"
                   type="text"
-                  placeholder="例: A-1234（親子で同じ名前の場合に入力）"
+                  placeholder="例: A-1234（入力すると患者名を自動引き出し）"
                   value={medicalRecordNumberValue}
                   onChange={(e) => setMedicalRecordNumberValue(e.target.value)}
+                  onBlur={async (e) => {
+                    const num = e.target.value.trim();
+                    if (!num) return;
+                    const res = await getCustomerByMedicalRecord(num);
+                    if (!res.ok) return;
+                    if (res.customers.length === 1) {
+                      const c = res.customers[0];
+                      setNameValue(c.name);
+                      toast.success(`カルテ ${num}: ${c.name}様 を読み込みました`);
+                    } else if (res.customers.length > 1) {
+                      toast.warning(`カルテ ${num} は ${res.customers.length} 名ヒット。お名前を直接入力してください`);
+                    } else {
+                      toast.info(`カルテ ${num} に該当する患者は登録されていません`);
+                    }
+                  }}
                   autoComplete="off"
                 />
               </div>
