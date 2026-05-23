@@ -503,6 +503,20 @@ export async function addCashSale(formData: FormData) {
     const memo = formData.get("memo") as string || "";
     const isFirstVisit = formData.get("is_first_visit") === "true";
     const paymentType = normalizePaymentType(formData.get("payment_type"));
+    // 複数選択対応（2026-05-23）: payment_types を JSON 配列で受け取る
+    let paymentTypes: string[] | null = null;
+    try {
+      const raw = formData.get("payment_types");
+      if (typeof raw === "string" && raw.trim()) {
+        const arr = JSON.parse(raw);
+        if (Array.isArray(arr)) {
+          paymentTypes = arr
+            .map((v) => typeof v === "string" ? v.trim() : "")
+            .filter((v) => v && v.length <= 50);
+          if (paymentTypes.length === 0) paymentTypes = null;
+        }
+      }
+    } catch {}
 
     if (!saleDate || !customerName || isNaN(treatmentFee) || treatmentFee < 0) {
       return { success: false, error: "必須項目を入力してください" };
@@ -521,6 +535,7 @@ export async function addCashSale(formData: FormData) {
       memo,
       is_first_visit: isFirstVisit,
       payment_type: paymentType,
+      payment_types: paymentTypes,
       clinic_id: clinicId
     };
 

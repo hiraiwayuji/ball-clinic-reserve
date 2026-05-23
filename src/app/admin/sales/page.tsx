@@ -101,7 +101,12 @@ function SalesPageInner() {
 
   // 支払区分（0円計上時に自賠責・はぐくみ医療等を選ぶ）
   // デフォルトは「自費施術」（旧「通常（自費）」を統合・2026-05-23）
-  const [paymentType, setPaymentType] = useState<CashSalePaymentType | "">("jihi");
+  // 支払区分 複数選択対応（2026-05-23）。1要素なら従来挙動と同等。
+  const [paymentTypes, setPaymentTypes] = useState<CashSalePaymentType[]>(["jihi"]);
+  const primaryPaymentType = paymentTypes[0] ?? "";
+  const togglePaymentType = (key: CashSalePaymentType) => {
+    setPaymentTypes(prev => prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key]);
+  };
 
   // 編集ダイアログ。memo に明細 JSON が入っている場合は明細を温存して名前/金額/支払区分のみ編集可能。
   const [editTarget, setEditTarget] = useState<any | null>(null);
@@ -196,7 +201,7 @@ function SalesPageInner() {
     };
 
     // 0 円計上時は支払区分必須
-    if (totalAmount === 0 && !paymentType) {
+    if (totalAmount === 0 && paymentTypes.length === 0) {
       toast.error("0円で登録する場合は支払区分（自賠責・はぐくみ医療など）を選択してください");
       return;
     }
@@ -207,7 +212,8 @@ function SalesPageInner() {
     formData.set("customer_name", nameValue);
     formData.set("treatment_fee", String(totalAmount));
     formData.set("memo", JSON.stringify(breakdown));
-    if (paymentType) formData.set("payment_type", paymentType);
+    if (primaryPaymentType) formData.set("payment_type", primaryPaymentType);
+    if (paymentTypes.length > 0) formData.set("payment_types", JSON.stringify(paymentTypes));
 
     startTransition(async () => {
       try {
@@ -242,7 +248,7 @@ function SalesPageInner() {
           setSuggestions([]);
           setShowAiBanner(false);
           setAiDraft(null);
-          setPaymentType("jihi");
+          setPaymentTypes(["jihi"]);
           fetchSales(date);
         } else {
           toast.error(res.error || "エラーが発生しました");
@@ -561,7 +567,7 @@ function SalesPageInner() {
                           setBuhanItems(s.buhan);
                         }
                         if (s.paymentType) {
-                          setPaymentType(s.paymentType as CashSalePaymentType);
+                          setPaymentTypes([s.paymentType as CashSalePaymentType]);
                         }
                         const total = s.jippi.reduce((a, b) => a + (b.amount || 0), 0)
                                     + s.buhan.reduce((a, b) => a + (b.amount || 0), 0);
@@ -642,40 +648,45 @@ function SalesPageInner() {
                 {isFirstVisit ? "✓ 新患（タップで解除）" : "新患の場合はここをタップ"}
               </button>
 
-              {/* 支払区分（payment_categories マスタから動的取得） */}
+              {/* 支払区分（payment_categories マスタから動的取得・複数選択可） */}
               <div className="space-y-1.5">
                 <Label className="text-xs font-semibold text-slate-600 dark:text-slate-300 flex items-center gap-1">
                   <ShieldCheck className="w-3.5 h-3.5" />
-                  支払区分（0円計上の場合は必須）
+                  支払区分（複数選択可・0円計上の場合は必須）
                 </Label>
                 <div className="grid grid-cols-2 gap-2">
-                  {paymentCategories.map(opt => (
-                    <button
-                      key={opt.key}
-                      type="button"
-                      onClick={() => setPaymentType(opt.key)}
-                      className={`px-2 py-2 rounded-md text-xs font-bold border transition-all ${
-                        paymentType === opt.key
-                          ? "bg-emerald-500 border-emerald-600 text-white shadow-sm"
-                          : "bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100"
-                      }`}
-                    >
-                      {opt.label}
-                    </button>
-                  ))}
+                  {paymentCategories.map(opt => {
+                    const selected = paymentTypes.includes(opt.key);
+                    return (
+                      <button
+                        key={opt.key}
+                        type="button"
+                        onClick={() => togglePaymentType(opt.key)}
+                        className={`relative px-2 py-2 rounded-md text-xs font-bold border transition-all ${
+                          selected
+                            ? "bg-emerald-500 border-emerald-600 text-white shadow-sm"
+                            : "bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100"
+                        }`}
+                      >
+                        {selected && <span className="absolute top-0.5 right-1 text-[10px]">✓</span>}
+                        {opt.label}
+                      </button>
+                    );
+                  })}
                 </div>
                 <p className="text-[10px] text-slate-500">
-                  ※ 0 円計上時は必須。区分は「設定」→「支払区分」で追加・編集できます。
+                  ※ 保険＋自費＋鍼 など複数該当する場合は全て選択してください。<br />
+                  　 0 円計上時は必須。区分は「設定」→「支払区分」で追加・編集できます。
                 </p>
               </div>
 
               <Button
                 type="submit"
                 className="w-full bg-blue-600 hover:bg-blue-700 h-10"
-                disabled={isPending || (totalAmount === 0 && !paymentType)}
+                disabled={isPending || (totalAmount === 0 && paymentTypes.length === 0)}
               >
                 {isPending ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Plus className="w-4 h-4 mr-2" />}
-                {totalAmount === 0 && paymentType ? "0円で登録（公費・自賠責等）" : "登録する"}
+                {totalAmount === 0 && paymentTypes.length > 0 ? "0円で登録（公費・自賠責等）" : "登録する"}
               </Button>
             </form>
           </CardContent>
