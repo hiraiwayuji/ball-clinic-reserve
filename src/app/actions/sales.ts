@@ -373,6 +373,82 @@ export async function getCustomerByMedicalRecord(
   }
 }
 
+/** 売上登録フォーム復元用の「直近1件の売上明細」型 */
+export type LastSaleForRestore = {
+  saleDate: string;
+  treatmentFee: number;
+  isFirstVisit: boolean;
+  paymentType: string | null;
+  jippi: { name: string; amount: number }[];
+  buhan: { name: string; amount: number }[];
+};
+
+/**
+ * 指定顧客名の直近 cash_sales 1件を返す。
+ * memo に jippi/buhan の breakdown JSON が入っていればパースして items を返す。
+ * 売上登録画面で「カルテ番号→お名前→前回施術内容を復元」フローに使う。
+ */
+export async function getLastSaleForCustomer(
+  customerName: string,
+): Promise<{ ok: true; sale: LastSaleForRestore | null } | { ok: false; error: string }> {
+  try {
+    const { clinicId } = await checkAdminAuth();
+    const name = customerName.trim();
+    if (!name) return { ok: true, sale: null };
+
+    const supabase = await getSupabase();
+    const { data, error } = await supabase
+      .from("cash_sales")
+      .select("sale_date, treatment_fee, memo, is_first_visit, payment_type")
+      .eq("clinic_id", clinicId)
+      .eq("customer_name", name)
+      .order("sale_date", { ascending: false })
+      .order("created_at", { ascending: false })
+      .limit(1);
+
+    if (error) {
+      console.error("[getLastSaleForCustomer] error:", error);
+      return { ok: false, error: error.message };
+    }
+    if (!data || data.length === 0) return { ok: true, sale: null };
+    const row = data[0] as any;
+
+    // memo は JSON 文字列 {jippi:[...], buhan:[...]} の可能性 / プレーンテキストの可能性
+    let jippi: { name: string; amount: number }[] = [];
+    let buhan: { name: string; amount: number }[] = [];
+    if (row.memo) {
+      try {
+        const parsed = JSON.parse(row.memo);
+        if (Array.isArray(parsed?.jippi)) {
+          jippi = parsed.jippi
+            .filter((i: any) => i && (i.name || i.amount))
+            .map((i: any) => ({ name: String(i.name ?? ""), amount: Number(i.amount ?? 0) || 0 }));
+        }
+        if (Array.isArray(parsed?.buhan)) {
+          buhan = parsed.buhan
+            .filter((i: any) => i && (i.name || i.amount))
+            .map((i: any) => ({ name: String(i.name ?? ""), amount: Number(i.amount ?? 0) || 0 }));
+        }
+      } catch {
+        // 旧データなど JSON でない memo は無視（jippi/buhan 空のまま）
+      }
+    }
+
+    return {
+      ok: true,
+      sale: {
+        saleDate: row.sale_date,
+        treatmentFee: row.treatment_fee ?? 0,
+        isFirstVisit: !!row.is_first_visit,
+        paymentType: row.payment_type ?? null,
+        jippi, buhan,
+      },
+    };
+  } catch (e: any) {
+    return { ok: false, error: e?.message ?? "unknown" };
+  }
+}
+
 export async function searchSalesPatients(name: string): Promise<SalesPatientSuggestion[]> {
   const { clinicId } = await checkAdminAuth();
   if (!name.trim()) return [];

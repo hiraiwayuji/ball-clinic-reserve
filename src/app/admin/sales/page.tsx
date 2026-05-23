@@ -27,7 +27,7 @@ import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Calendar as CalendarIcon, Plus, Trash2, Loader2, Coins, User, UserPlus, Landmark, Receipt, Upload, Download, Clock, Bot, X, AlertTriangle, Zap, Pencil, ShieldCheck } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
-import { addCashSale, getCashSales, deleteCashSale, updateCashSale, searchSalesPatients, getCustomerByMedicalRecord, SalesPatientSuggestion, type CashSalePaymentType } from "@/app/actions/sales";
+import { addCashSale, getCashSales, deleteCashSale, updateCashSale, searchSalesPatients, getCustomerByMedicalRecord, getLastSaleForCustomer, SalesPatientSuggestion, type CashSalePaymentType } from "@/app/actions/sales";
 import { getActiveCoursesByPopularity, type ReservationCourse } from "@/app/actions/courses";
 import { usePaymentCategories } from "@/lib/use-payment-categories";
 import { toast } from "sonner";
@@ -539,7 +539,27 @@ function SalesPageInner() {
                     if (res.customers.length === 1) {
                       const c = res.customers[0];
                       setNameValue(c.name);
-                      toast.success(`カルテ ${num}: ${c.name}様 を読み込みました`);
+                      // 続けて直近の売上明細を取って復元
+                      const lastRes = await getLastSaleForCustomer(c.name);
+                      if (lastRes.ok && lastRes.sale) {
+                        const s = lastRes.sale;
+                        if (s.jippi.length > 0) {
+                          setJippiItems(s.jippi);
+                        }
+                        if (s.buhan.length > 0) {
+                          setBuhanItems(s.buhan);
+                        }
+                        if (s.paymentType) {
+                          setPaymentType(s.paymentType as CashSalePaymentType);
+                        }
+                        const total = s.jippi.reduce((a, b) => a + (b.amount || 0), 0)
+                                    + s.buhan.reduce((a, b) => a + (b.amount || 0), 0);
+                        toast.success(
+                          `${c.name}様（カルテ ${num}）: 前回 ${s.saleDate} ¥${total.toLocaleString()} を復元しました`
+                        );
+                      } else {
+                        toast.success(`カルテ ${num}: ${c.name}様 を読み込みました（過去の売上記録なし）`);
+                      }
                     } else if (res.customers.length > 1) {
                       toast.warning(`カルテ ${num} は ${res.customers.length} 名ヒット。お名前を直接入力してください`);
                     } else {
