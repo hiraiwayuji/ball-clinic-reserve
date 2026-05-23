@@ -277,7 +277,9 @@ function AppointmentCard({
           </DropdownMenuContent>
         </DropdownMenu>
 
-        {nextStep && (
+        {/* 「会計完了へ」ボタンは削除し、会計フロー（売上保存）に統合。
+            arrived/in_treatment の遷移はそのまま nextStep ボタンで進める。 */}
+        {nextStep && nextStep.value !== "done" && (
           <button
             type="button"
             onClick={handleAdvance}
@@ -314,7 +316,7 @@ function AppointmentCard({
           <div className="relative">
             <Link
               href={(() => {
-                const base = `/admin/sales?name=${encodeURIComponent(apt.customers?.name ?? "")}&first_visit=${apt.is_first_visit}`;
+                const base = `/admin/sales?name=${encodeURIComponent(apt.customers?.name ?? "")}&first_visit=${apt.is_first_visit}&apt_id=${apt.id}`;
                 if (prediction) {
                   return `${base}&predicted_amount=${prediction.predictedAmount}&predicted_memo=${encodeURIComponent(prediction.predictedMemo)}&ai_message=${encodeURIComponent(prediction.aiMessage)}&confidence=${prediction.confidence}`;
                 }

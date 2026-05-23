@@ -28,6 +28,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Calendar as CalendarIcon, Plus, Trash2, Loader2, Coins, User, UserPlus, Landmark, Receipt, Upload, Download, Clock, Bot, X, AlertTriangle, Zap, Pencil, ShieldCheck } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { addCashSale, getCashSales, deleteCashSale, updateCashSale, searchSalesPatients, getCustomerByMedicalRecord, getLastSaleForCustomer, SalesPatientSuggestion, type CashSalePaymentType } from "@/app/actions/sales";
+import { updateCheckinStatus } from "@/app/actions/adminReserve";
 import { getActiveCoursesByPopularity, type ReservationCourse } from "@/app/actions/courses";
 import { usePaymentCategories } from "@/lib/use-payment-categories";
 import { toast } from "sonner";
@@ -212,7 +213,17 @@ function SalesPageInner() {
       try {
         const res = await addCashSale(formData);
         if (res.success) {
-          toast.success(isFirstVisit ? "登録しました（新患）" : "登録しました");
+          // 受付カウンター経由なら、保存と同時に「会計完了」(checkin_status=done) も更新
+          // → counter の「会計」ボタンを押す → 売上保存 = 自動的に done になる流れ
+          const aptId = searchParams.get("apt_id");
+          if (aptId) {
+            await updateCheckinStatus(aptId, "done").catch((e) => {
+              console.warn("[sales] updateCheckinStatus failed (non-fatal):", e);
+            });
+            toast.success(isFirstVisit ? "登録 & 会計完了（新患）" : "登録 & 会計完了");
+          } else {
+            toast.success(isFirstVisit ? "登録しました（新患）" : "登録しました");
+          }
           // 会計直後の「次回予約しますか？」確認（タイムテーブルから遷移してきた場合）
           if (sourceCourseId || sourceStaffId) {
             setPendingNextReserve({
