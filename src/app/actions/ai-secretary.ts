@@ -456,6 +456,60 @@ export async function getBriefingContext() {
     latestMemo = data?.content?.slice(0, 120) ?? null;
   } catch {}
 
+  // ── 来月シフト準備状況の判定（20日以降のみ表示） ─────────────────────
+  // 毎月20日を過ぎたら「来月の休み希望・シフト未準備」を検知して
+  // オーナーにリマインドする。判定材料:
+  //   - 来月の staff_working_overrides が全くないスタッフが何人いるか
+  //   - 0人なら全員から休み希望が出ている扱い、>0 なら未提出として催促
+  let shiftReminder: {
+    needed: boolean;
+    nextMonthLabel: string;
+    missingStaffCount: number;
+    totalStaff: number;
+    daysUntilNextMonth: number;
+  } | null = null;
+  if (dayOfMonth >= 20) {
+    try {
+      // 来月の範囲
+      const nm = month === 12 ? 1 : month + 1;
+      const nmYear = month === 12 ? year + 1 : year;
+      const nextMonthStart = `${nmYear}-${String(nm).padStart(2, "0")}-01`;
+      const nextMonthEnd = new Date(nmYear, nm, 0).toISOString().split("T")[0];
+
+      // 全アクティブスタッフ
+      const { data: staffList } = await supabase
+        .from("reservation_staff")
+        .select("id")
+        .eq("clinic_id", clinicId)
+        .eq("is_active", true);
+      const totalStaff = staffList?.length ?? 0;
+
+      // 来月分の overrides（休み希望 or 既決のシフト）が登録されている staff
+      const { data: overrides } = await supabase
+        .from("staff_working_overrides")
+        .select("staff_id")
+        .eq("clinic_id", clinicId)
+        .gte("date", nextMonthStart)
+        .lte("date", nextMonthEnd);
+      const staffWithOverrides = new Set((overrides ?? []).map((o: any) => o.staff_id));
+      const missingStaffCount = Math.max(0, totalStaff - staffWithOverrides.size);
+
+      // 来月までの日数
+      const endOfMonth = new Date(year, month, 0).getDate();
+      const daysUntilNextMonth = Math.max(0, endOfMonth - dayOfMonth + 1);
+
+      shiftReminder = {
+        needed: totalStaff > 0 && missingStaffCount > 0,
+        nextMonthLabel: `${nmYear}年${nm}月`,
+        missingStaffCount,
+        totalStaff,
+        daysUntilNextMonth,
+      };
+    } catch (e) {
+      console.warn("[ai-secretary] shiftReminder calc failed:", e);
+    }
+  }
+
   // Gemini で朝のアドバイス＋SNS提言を並列生成
   let aiAdvice: string | null = null;
   let snsAdvice: string | null = null;
@@ -476,6 +530,9 @@ export async function getBriefingContext() {
         `今週の初診数: ${thisWeekNew}名`,
         isWeekStart ? "本日は週初めです。" : "",
         isMonthStart ? "本日は月初めです。" : "",
+        shiftReminder?.needed
+          ? `※${shiftReminder.nextMonthLabel}のシフト準備が未完了です（${shiftReminder.missingStaffCount}/${shiftReminder.totalStaff}名分の休み希望が未提出、月末まで${shiftReminder.daysUntilNextMonth}日）。スタッフに来月の休み希望提出を促し、シフト作成を始めてください。`
+          : "",
         latestMemo ? `最近のメモ: ${latestMemo}` : "",
       ].filter(Boolean).join(" / ");
 
@@ -536,5 +593,7 @@ export async function getBriefingContext() {
     closedDayReason,
     tomorrowAppointmentsCount,
     pendingExpensesCount,
+    // 来月シフト準備状況（20日以降のみ非null）
+    shiftReminder,
   };
 }

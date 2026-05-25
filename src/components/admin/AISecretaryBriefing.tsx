@@ -26,6 +26,7 @@ import {
   CalendarCheck,
   ReceiptText,
   ExternalLink,
+  CalendarClock,
 } from "lucide-react";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
@@ -316,6 +317,30 @@ export default function AISecretaryBriefing({
                   <p className="text-[11px] text-slate-400 leading-relaxed line-clamp-2">{ctx.latestMemo}</p>
                 </div>
               </div>
+            )}
+
+            {/* 来月シフト準備リマインダー（20日以降のみ）— 「ひと言」より優先で目立つ位置に */}
+            {ctx?.shiftReminder?.needed && (
+              <Link
+                href="/admin/settings/staff-schedule"
+                className="block bg-gradient-to-br from-amber-900/60 to-rose-900/40 border border-amber-600/50 rounded-2xl p-4 hover:from-amber-800/70 hover:to-rose-800/50 transition-colors group"
+              >
+                <div className="flex gap-3 items-start">
+                  <div className="w-9 h-9 bg-amber-500/30 rounded-xl flex items-center justify-center shrink-0">
+                    <CalendarClock className="w-4 h-4 text-amber-200" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[10px] font-black text-amber-300 uppercase tracking-wider mb-1">来月のシフト準備</p>
+                    <p className="text-xs text-amber-100 leading-relaxed font-bold mb-1">
+                      {ctx.shiftReminder.nextMonthLabel}のシフト作成を始めましょう
+                    </p>
+                    <p className="text-[11px] text-amber-200/80 leading-relaxed">
+                      {ctx.shiftReminder.missingStaffCount} / {ctx.shiftReminder.totalStaff} 名分の休み希望が未提出（月末まであと{ctx.shiftReminder.daysUntilNextMonth}日）。スタッフ予定画面で来月の休み希望を確認・登録してください。
+                    </p>
+                  </div>
+                  <ChevronRight className="w-4 h-4 text-amber-300 shrink-0 mt-1 group-hover:translate-x-0.5 transition-transform" />
+                </div>
+              </Link>
             )}
 
             {/* AI朝のアドバイス */}
