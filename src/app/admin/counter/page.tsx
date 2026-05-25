@@ -40,7 +40,9 @@ type Appointment = {
   checkin_status: CheckinStatus;
   is_first_visit: boolean;
   memo: string | null;
+  course_id: string | null;
   course_name: string | null;
+  staff_id: string | null;
   staff_name: string | null;
   room_name: string | null;
   customers: { id: string; name: string; phone: string; line_user_id: string | null } | null;
@@ -316,11 +318,30 @@ function AppointmentCard({
           <div className="relative">
             <Link
               href={(() => {
-                const base = `/admin/sales?name=${encodeURIComponent(apt.customers?.name ?? "")}&first_visit=${apt.is_first_visit}&apt_id=${apt.id}`;
+                // 次回予約ワンクリック用: コース・担当・時間枠も URL に詰める
+                // → 売上登録後に「次回予約しますか？」ダイアログが開く
+                const params = new URLSearchParams();
+                params.set("name", apt.customers?.name ?? "");
+                params.set("first_visit", String(apt.is_first_visit));
+                params.set("apt_id", apt.id);
+                if (apt.customers?.id) params.set("customer_id", apt.customers.id);
+                if (apt.course_id) params.set("course_id", apt.course_id);
+                if (apt.staff_id) params.set("staff_id", apt.staff_id);
+                if (apt.staff_name) params.set("staff_name", apt.staff_name);
+                if (apt.course_name) params.set("course", apt.course_name);
+                try {
+                  const t = new Date(apt.start_time);
+                  const hh = t.toLocaleString("ja-JP", { timeZone: "Asia/Tokyo", hour: "2-digit", hour12: false }).padStart(2, "0");
+                  const mm = t.toLocaleString("ja-JP", { timeZone: "Asia/Tokyo", minute: "2-digit" }).padStart(2, "0");
+                  params.set("next_time", `${hh}:${mm}`);
+                } catch {}
                 if (prediction) {
-                  return `${base}&predicted_amount=${prediction.predictedAmount}&predicted_memo=${encodeURIComponent(prediction.predictedMemo)}&ai_message=${encodeURIComponent(prediction.aiMessage)}&confidence=${prediction.confidence}`;
+                  params.set("predicted_amount", String(prediction.predictedAmount));
+                  params.set("predicted_memo", prediction.predictedMemo);
+                  params.set("ai_message", prediction.aiMessage);
+                  params.set("confidence", String(prediction.confidence));
                 }
-                return base;
+                return `/admin/sales?${params.toString()}`;
               })()}
               onClick={() => recordAction(COUNTER_DONE_KEY, SALES_PAGE_KEY)}
               className={[
