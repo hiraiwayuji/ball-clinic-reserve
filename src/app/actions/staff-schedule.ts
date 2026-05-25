@@ -13,6 +13,8 @@ function getServiceClient() {
 
 export type OverrideKind = "meeting" | "leave" | "training" | "other";
 
+export type OverrideStatus = "pending" | "approved" | "rejected";
+
 export type StaffOverrideRow = {
   id: string;
   staff_id: string;
@@ -23,6 +25,7 @@ export type StaffOverrideRow = {
   kind: OverrideKind;
   note: string | null;
   blocks_booking: boolean;
+  status: OverrideStatus;
   created_by_email: string | null;
   created_at: string;
 };
@@ -59,7 +62,7 @@ export async function listOverrides(
 
   const { data, error } = await sb
     .from("staff_working_overrides")
-    .select("id, staff_id, date, start_time, end_time, kind, note, blocks_booking, created_by_email, created_at, reservation_staff(name)")
+    .select("id, staff_id, date, start_time, end_time, kind, note, blocks_booking, status, created_by_email, created_at, reservation_staff(name)")
     .eq("clinic_id", auth.clinicId)
     .gte("date", opts.startDate)
     .lte("date", opts.endDate)
@@ -78,6 +81,266 @@ export async function listOverrides(
     kind: r.kind,
     note: r.note,
     blocks_booking: r.blocks_booking,
+    status: (r.status as OverrideStatus) ?? "approved",
+    created_by_email: r.created_by_email,
+    created_at: r.created_at,
+  }));
+
+  return { success: true, rows };
+}
+
+// ─── スタッフ向け：自分の休み希望提出フロー ───────────────────────────
+// staff role は staff-schedule タブにアクセス権がないので、専用 server action 経由。
+// reservation_staff.email == auth.email で自分のスタッフ ID を解決する。
+
+export type MyLeaveRequest = {
+  id: string;
+  date: string;
+  status: OverrideStatus;
+  note: string | null;
+  created_at: string;
+};
+
+/**
+ * ログインユーザーが自分の reservation_staff を解決して返す。
+ * email が一致する staff レコードが無ければ null。
+ */
+async function resolveMyStaffId(): Promise<{ staffId: string | null; clinicId: string }> {
+  const auth = await checkAdminAuth();
+  const sb = getServiceClient();
+  if (!sb || !auth.email) return { staffId: null, clinicId: auth.clinicId };
+
+  const { data } = await sb
+    .from("reservation_staff")
+    .select("id")
+    .eq("clinic_id", auth.clinicId)
+    .eq("email", auth.email)
+    .eq("is_active", true)
+    .maybeSingle();
+
+  return { staffId: data?.id ?? null, clinicId: auth.clinicId };
+}
+
+/**
+ * 指定月の自分の休み希望一覧を取得。
+ * monthStr: "YYYY-MM"（省略時は来月）
+ */
+export async function listMyLeaveRequests(
+  monthStr?: string,
+): Promise<{ success: boolean; rows?: MyLeaveRequest[]; staffId?: string | null; error?: string }> {
+  const { staffId, clinicId } = await resolveMyStaffId();
+  const sb = getServiceClient();
+  if (!sb) return { success: false, error: "サーバー設定エラー" };
+  if (!staffId) return { success: true, rows: [], staffId: null };
+
+  // 月範囲
+  const now = new Date();
+  const [y, m] = monthStr
+    ? monthStr.split("-").map(n => parseInt(n, 10))
+    : (() => {
+        // 来月
+        const nm = now.getMonth() + 1 === 12 ? 1 : now.getMonth() + 2;
+        const nmY = now.getMonth() + 1 === 12 ? now.getFullYear() + 1 : now.getFullYear();
+        return [nmY, nm];
+      })();
+  const monthStart = `${y}-${String(m).padStart(2, "0")}-01`;
+  const monthEnd = new Date(y, m, 0).toISOString().split("T")[0];
+
+  const { data, error } = await sb
+    .from("staff_working_overrides")
+    .select("id, date, status, note, created_at")
+    .eq("clinic_id", clinicId)
+    .eq("staff_id", staffId)
+    .eq("kind", "leave")
+    .gte("date", monthStart)
+    .lte("date", monthEnd)
+    .order("date", { ascending: true });
+
+  if (error) return { success: false, error: error.message };
+
+  return {
+    success: true,
+    staffId,
+    rows: (data ?? []).map((r: any) => ({
+      id: r.id,
+      date: r.date,
+      status: (r.status as OverrideStatus) ?? "pending",
+      note: r.note,
+      created_at: r.created_at,
+    })),
+  };
+}
+
+/**
+ * スタッフ自身が休み希望を提出（pending として登録）。
+ * 既に同日に override があれば二重登録しない。
+ */
+export async function requestMyLeave(
+  dateStr: string,
+  note?: string,
+): Promise<{ success: boolean; id?: string; error?: string }> {
+  const auth = await checkAdminAuth();
+  const { staffId, clinicId } = await resolveMyStaffId();
+  if (!staffId) {
+    return { success: false, error: "スタッフ情報が見つかりません。管理者に reservation_staff.email の設定を依頼してください。" };
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+    return { success: false, error: "日付の形式が不正です" };
+  }
+  const sb = getServiceClient();
+  if (!sb) return { success: false, error: "サーバー設定エラー" };
+
+  // 重複チェック（同日 leave）
+  const { data: existing } = await sb
+    .from("staff_working_overrides")
+    .select("id, status")
+    .eq("clinic_id", clinicId)
+    .eq("staff_id", staffId)
+    .eq("date", dateStr)
+    .eq("kind", "leave")
+    .maybeSingle();
+
+  if (existing) {
+    return { success: false, error: existing.status === "rejected" ? "この日は却下済みです。管理者にご相談ください" : "既に登録済みです" };
+  }
+
+  const { data, error } = await sb
+    .from("staff_working_overrides")
+    .insert({
+      clinic_id: clinicId,
+      staff_id: staffId,
+      date: dateStr,
+      start_time: null,
+      end_time: null,
+      kind: "leave" as OverrideKind,
+      note: note?.trim() || null,
+      blocks_booking: false, // pending 段階では予約をブロックしない
+      status: "pending",
+      created_by_email: auth.email ?? null,
+    })
+    .select("id")
+    .single();
+
+  if (error) return { success: false, error: error.message };
+  revalidatePath("/admin/my-schedule");
+  revalidatePath("/admin/settings/staff-schedule");
+  return { success: true, id: data?.id };
+}
+
+/**
+ * スタッフ自身が自分の休み希望（pending のみ）を取り消す。
+ * approved 済みは取り消し不可（オーナーに依頼）。
+ */
+export async function cancelMyLeaveRequest(
+  id: string,
+): Promise<{ success: boolean; error?: string }> {
+  const { staffId, clinicId } = await resolveMyStaffId();
+  if (!staffId) return { success: false, error: "スタッフ情報が見つかりません" };
+  const sb = getServiceClient();
+  if (!sb) return { success: false, error: "サーバー設定エラー" };
+
+  const { data: row } = await sb
+    .from("staff_working_overrides")
+    .select("id, status, staff_id")
+    .eq("id", id)
+    .eq("clinic_id", clinicId)
+    .maybeSingle();
+
+  if (!row) return { success: false, error: "対象が見つかりません" };
+  if (row.staff_id !== staffId) return { success: false, error: "自分の希望のみ取消できます" };
+  if (row.status !== "pending") {
+    return { success: false, error: "承認済み/却下済みの希望は管理者にご相談ください" };
+  }
+
+  const { error } = await sb
+    .from("staff_working_overrides")
+    .delete()
+    .eq("id", id)
+    .eq("clinic_id", clinicId);
+
+  if (error) return { success: false, error: error.message };
+  revalidatePath("/admin/my-schedule");
+  revalidatePath("/admin/settings/staff-schedule");
+  return { success: true };
+}
+
+/**
+ * オーナー/管理者：pending な休み希望を承認 → approved に変更し blocks_booking=true に。
+ */
+export async function approveLeaveRequest(
+  id: string,
+): Promise<{ success: boolean; error?: string }> {
+  const auth = await requireRole(["owner", "admin"]);
+  const sb = getServiceClient();
+  if (!sb) return { success: false, error: "サーバー設定エラー" };
+
+  const { error } = await sb
+    .from("staff_working_overrides")
+    .update({ status: "approved", blocks_booking: true })
+    .eq("id", id)
+    .eq("clinic_id", auth.clinicId);
+
+  if (error) return { success: false, error: error.message };
+  revalidatePath("/admin/my-schedule");
+  revalidatePath("/admin/settings/staff-schedule");
+  return { success: true };
+}
+
+/**
+ * オーナー/管理者：pending な休み希望を却下 → rejected。
+ */
+export async function rejectLeaveRequest(
+  id: string,
+): Promise<{ success: boolean; error?: string }> {
+  const auth = await requireRole(["owner", "admin"]);
+  const sb = getServiceClient();
+  if (!sb) return { success: false, error: "サーバー設定エラー" };
+
+  const { error } = await sb
+    .from("staff_working_overrides")
+    .update({ status: "rejected", blocks_booking: false })
+    .eq("id", id)
+    .eq("clinic_id", auth.clinicId);
+
+  if (error) return { success: false, error: error.message };
+  revalidatePath("/admin/my-schedule");
+  revalidatePath("/admin/settings/staff-schedule");
+  return { success: true };
+}
+
+/**
+ * オーナー画面用：clinic 内の pending な休み希望一覧を取得（承認待ち）
+ */
+export async function listPendingLeaveRequests(): Promise<{
+  success: boolean;
+  rows?: StaffOverrideRow[];
+  error?: string;
+}> {
+  const auth = await requireRole(["owner", "admin"]);
+  const sb = getServiceClient();
+  if (!sb) return { success: false, error: "サーバー設定エラー" };
+
+  const { data, error } = await sb
+    .from("staff_working_overrides")
+    .select("id, staff_id, date, start_time, end_time, kind, note, blocks_booking, status, created_by_email, created_at, reservation_staff(name)")
+    .eq("clinic_id", auth.clinicId)
+    .eq("status", "pending")
+    .eq("kind", "leave")
+    .order("date", { ascending: true });
+
+  if (error) return { success: false, error: error.message };
+
+  const rows: StaffOverrideRow[] = (data ?? []).map((r: any) => ({
+    id: r.id,
+    staff_id: r.staff_id,
+    staff_name: Array.isArray(r.reservation_staff) ? r.reservation_staff[0]?.name : r.reservation_staff?.name ?? null,
+    date: r.date,
+    start_time: r.start_time,
+    end_time: r.end_time,
+    kind: r.kind,
+    note: r.note,
+    blocks_booking: r.blocks_booking,
+    status: (r.status as OverrideStatus) ?? "pending",
     created_by_email: r.created_by_email,
     created_at: r.created_at,
   }));

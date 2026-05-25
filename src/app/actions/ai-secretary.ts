@@ -467,6 +467,7 @@ export async function getBriefingContext() {
     missingStaffCount: number;
     totalStaff: number;
     daysUntilNextMonth: number;
+    pendingCount: number;
   } | null = null;
   if (dayOfMonth >= 20) {
     try {
@@ -487,23 +488,25 @@ export async function getBriefingContext() {
       // 来月分の overrides（休み希望 or 既決のシフト）が登録されている staff
       const { data: overrides } = await supabase
         .from("staff_working_overrides")
-        .select("staff_id")
+        .select("staff_id, status")
         .eq("clinic_id", clinicId)
         .gte("date", nextMonthStart)
         .lte("date", nextMonthEnd);
       const staffWithOverrides = new Set((overrides ?? []).map((o: any) => o.staff_id));
       const missingStaffCount = Math.max(0, totalStaff - staffWithOverrides.size);
+      const pendingCount = (overrides ?? []).filter((o: any) => o.status === "pending").length;
 
       // 来月までの日数
       const endOfMonth = new Date(year, month, 0).getDate();
       const daysUntilNextMonth = Math.max(0, endOfMonth - dayOfMonth + 1);
 
       shiftReminder = {
-        needed: totalStaff > 0 && missingStaffCount > 0,
+        needed: totalStaff > 0 && (missingStaffCount > 0 || pendingCount > 0),
         nextMonthLabel: `${nmYear}年${nm}月`,
         missingStaffCount,
         totalStaff,
         daysUntilNextMonth,
+        pendingCount,
       };
     } catch (e) {
       console.warn("[ai-secretary] shiftReminder calc failed:", e);

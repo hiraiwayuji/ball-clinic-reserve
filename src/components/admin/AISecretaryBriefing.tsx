@@ -335,7 +335,13 @@ export default function AISecretaryBriefing({
                       {ctx.shiftReminder.nextMonthLabel}のシフト作成を始めましょう
                     </p>
                     <p className="text-[11px] text-amber-200/80 leading-relaxed">
-                      {ctx.shiftReminder.missingStaffCount} / {ctx.shiftReminder.totalStaff} 名分の休み希望が未提出（月末まであと{ctx.shiftReminder.daysUntilNextMonth}日）。スタッフ予定画面で来月の休み希望を確認・登録してください。
+                      {ctx.shiftReminder.missingStaffCount} / {ctx.shiftReminder.totalStaff} 名分の休み希望が未提出（月末まであと{ctx.shiftReminder.daysUntilNextMonth}日）。
+                      {ctx.shiftReminder.pendingCount > 0 && (
+                        <span className="block mt-1 font-bold text-amber-300">
+                          ⚠ {ctx.shiftReminder.pendingCount}件のスタッフ希望が承認待ちです。
+                        </span>
+                      )}
+                      スタッフ予定画面で確認・承認してください。
                     </p>
                   </div>
                   <ChevronRight className="w-4 h-4 text-amber-300 shrink-0 mt-1 group-hover:translate-x-0.5 transition-transform" />
