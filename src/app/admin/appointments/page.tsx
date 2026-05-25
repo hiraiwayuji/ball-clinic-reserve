@@ -4,6 +4,7 @@ import { useEffect, useState, useMemo } from "react";
 import { createClient } from "@/lib/supabase/client";
 import {
   format, addDays, startOfWeek, subWeeks, addWeeks, parseISO, isSameDay,
+  startOfMonth, endOfMonth, eachDayOfInterval, isSameMonth, addMonths, subMonths,
 } from "date-fns";
 import { ja } from "date-fns/locale";
 import { Card } from "@/components/ui/card";
@@ -20,6 +21,8 @@ import { getAdminTimeSlots, isWithinBusinessHours } from "@/lib/time-slots";
 import { useClinicSlotDuration } from "@/lib/use-clinic-slot-duration";
 import { useClinicSchedule } from "@/lib/use-clinic-schedule";
 import { getMyClinicId } from "@/app/actions/auth";
+import { getClinicSettings } from "@/app/actions/settings";
+import TodayTimelineWidget from "@/components/admin/TodayTimelineWidget";
 
 export default function AdminWeeklyGridPage() {
   const slotMinutes = useClinicSlotDuration();
@@ -38,7 +41,24 @@ export default function AdminWeeklyGridPage() {
   const [selectedAddTime, setSelectedAddTime] = useState("");
   const [isSearchPanelOpen, setIsSearchPanelOpen] = useState(false);
   const [clinicId, setClinicId] = useState<string | null>(null);
-  const [viewMode, setViewMode] = useState<"week" | "day">("week"); // PC表示モード
+  // PC 表示モード。timetable はスタッフ別の縦軸×時間軸（ダッシュボードと同じ UI）
+  const [viewMode, setViewMode] = useState<"week" | "day" | "month" | "timetable">("week");
+  // 院ごとのデフォルト表示モードの読み込み状態（最初の clinic_settings 取得が終わるまで切り替えを抑制）
+  const [viewModeReady, setViewModeReady] = useState(false);
+  // 複数roomを持つ院（マッスル等）でフィルタするための state
+  const [rooms, setRooms] = useState<Array<{ id: string; name: string }>>([]);
+  const [roomFilter, setRoomFilter] = useState<string>(""); // "" = 全て表示
+
+  // 月ビュー用: 月の全日付（前月末・翌月頭の空白セルも含めて週単位で並べる）
+  const monthGrid = useMemo(() => {
+    const base = currentDate ?? new Date();
+    const monthStart = startOfMonth(base);
+    const monthEnd = endOfMonth(base);
+    // 週はじまりを月曜に合わせる（既存の startOfWeek と整合）
+    const gridStart = startOfWeek(monthStart, { weekStartsOn: 1 });
+    const gridEnd = startOfWeek(addDays(monthEnd, 6), { weekStartsOn: 1 });
+    return eachDayOfInterval({ start: gridStart, end: gridEnd });
+  }, [currentDate]);
 
   const weekStart = useMemo(() => {
     if (!currentDate) return startOfWeek(new Date(), { weekStartsOn: 1 });
@@ -54,7 +74,43 @@ export default function AdminWeeklyGridPage() {
     setCurrentDate(today);
     setSelectedDay(today);
     getMyClinicId().then(setClinicId);
+
+    // 院ごとのデフォルト表示モードを取得。ユーザーが過去に切り替えていれば
+    // localStorage を優先（個人の好みを優先）。
+    (async () => {
+      try {
+        const personal = typeof window !== "undefined"
+          ? localStorage.getItem("admin_appointments_view")
+          : null;
+        const isValid = (v: string | null): v is "week" | "day" | "month" | "timetable" =>
+          v === "week" || v === "day" || v === "month" || v === "timetable";
+
+        if (isValid(personal)) {
+          setViewMode(personal);
+          setViewModeReady(true);
+          return;
+        }
+
+        const settings = await getClinicSettings();
+        const clinicDefault = settings?.default_appointments_view;
+        if (isValid(clinicDefault ?? null)) {
+          setViewMode(clinicDefault as "week" | "day" | "month" | "timetable");
+        }
+      } catch (e) {
+        console.warn("[appointments] failed to load default view mode:", e);
+      } finally {
+        setViewModeReady(true);
+      }
+    })();
   }, []);
+
+  // ユーザーが切り替えたら localStorage に保存（次回も同じビューで開く）
+  const handleViewModeChange = (mode: "week" | "day" | "month" | "timetable") => {
+    setViewMode(mode);
+    if (typeof window !== "undefined") {
+      try { localStorage.setItem("admin_appointments_view", mode); } catch {}
+    }
+  };
 
   const handleWeekChange = (newDate: Date) => {
     setCurrentDate(newDate);
@@ -86,6 +142,15 @@ export default function AdminWeeklyGridPage() {
           .select("*")
           .eq("clinic_id", clinicId);
         if (holidayData && !holidayErr) setHolidays(holidayData);
+
+        // rooms 取得（複数roomを持つ院ではフィルタタブを表示）
+        const { data: roomData } = await supabase
+          .from("reservation_rooms")
+          .select("id, name")
+          .eq("clinic_id", clinicId)
+          .eq("is_active", true)
+          .order("sort_order", { ascending: true });
+        if (roomData) setRooms(roomData);
       } catch (error) {
         console.error("Error fetching data:", error);
       } finally {
@@ -138,12 +203,18 @@ export default function AdminWeeklyGridPage() {
     return schedule.closedDays.includes(day);
   };
 
+  // room フィルタ適用後の appointments（カレンダー描画はこちらを使う）
+  const displayedAppointments = useMemo(() => {
+    if (!roomFilter) return appointments;
+    return appointments.filter(a => a.room_id === roomFilter);
+  }, [appointments, roomFilter]);
+
   const selectedDayAppointments = useMemo(() => {
     if (!selectedDay) return [];
-    return appointments
+    return displayedAppointments
       .filter(apt => isSameDay(new Date(apt.start_time), selectedDay))
       .sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime());
-  }, [appointments, selectedDay]);
+  }, [displayedAppointments, selectedDay]);
 
   if (!currentDate || !selectedDay) {
     return (
@@ -244,7 +315,7 @@ export default function AdminWeeklyGridPage() {
             const isSelected = isSameDay(date, selectedDay);
             const isToday = isSameDay(date, new Date());
             const isOff = isDayOff(date);
-            const dayApptCount = appointments.filter(a =>
+            const dayApptCount = displayedAppointments.filter(a =>
               isSameDay(new Date(a.start_time), date)
             ).length;
 
@@ -443,7 +514,8 @@ export default function AdminWeeklyGridPage() {
         {/* Navigation bar */}
         <Card className="shrink-0 rounded-b-none border-b-0">
           <div className="flex items-center justify-between p-3 px-4">
-            <div className="flex items-center gap-2">
+            {/* timetable モードのときは日付ナビは TodayTimelineWidget 側に持たせるので非表示 */}
+            <div className={`flex items-center gap-2 ${viewMode === "timetable" ? "invisible" : ""}`}>
               <Button
                 variant="outline"
                 size="icon"
@@ -472,7 +544,7 @@ export default function AdminWeeklyGridPage() {
               </Button>
             </div>
 
-            <div className="text-lg font-bold text-slate-800 dark:text-slate-100 flex items-center">
+            <div className={`text-lg font-bold text-slate-800 dark:text-slate-100 flex items-center ${viewMode === "timetable" ? "invisible" : ""}`}>
               <Calendar className="w-5 h-5 mr-2 text-slate-500 dark:text-slate-500 shrink-0" />
               {viewMode === "week" ? (
                 <>
@@ -480,8 +552,10 @@ export default function AdminWeeklyGridPage() {
                   <span className="text-slate-500 dark:text-slate-500 mx-2">〜</span>
                   <span>{format(weekDays[6], "M月 d日", { locale: ja })}</span>
                 </>
-              ) : (
+              ) : viewMode === "day" ? (
                 <span>{selectedDay ? format(selectedDay, "yyyy年M月d日（E）", { locale: ja }) : ""}</span>
+              ) : (
+                <span>{currentDate ? format(currentDate, "yyyy年 M月", { locale: ja }) : ""}</span>
               )}
             </div>
 
@@ -489,7 +563,7 @@ export default function AdminWeeklyGridPage() {
               {/* ビュー切り替えタブ */}
               <div className="flex bg-slate-100 dark:bg-slate-800 rounded-lg p-0.5 gap-0.5">
                 <button
-                  onClick={() => setViewMode("week")}
+                  onClick={() => handleViewModeChange("week")}
                   className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition-all ${
                     viewMode === "week"
                       ? "bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 shadow-sm"
@@ -499,7 +573,7 @@ export default function AdminWeeklyGridPage() {
                   <Calendar className="w-3.5 h-3.5" /> 週間
                 </button>
                 <button
-                  onClick={() => setViewMode("day")}
+                  onClick={() => handleViewModeChange("day")}
                   className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition-all ${
                     viewMode === "day"
                       ? "bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 shadow-sm"
@@ -508,7 +582,56 @@ export default function AdminWeeklyGridPage() {
                 >
                   <LayoutList className="w-3.5 h-3.5" /> 日別
                 </button>
+                <button
+                  onClick={() => handleViewModeChange("month")}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition-all ${
+                    viewMode === "month"
+                      ? "bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 shadow-sm"
+                      : "text-slate-500 hover:text-slate-700"
+                  }`}
+                >
+                  <CalendarDays className="w-3.5 h-3.5" /> 月
+                </button>
+                <button
+                  onClick={() => handleViewModeChange("timetable")}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition-all ${
+                    viewMode === "timetable"
+                      ? "bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 shadow-sm"
+                      : "text-slate-500 hover:text-slate-700"
+                  }`}
+                  title="スタッフ別の縦軸×時間軸グリッド（ダッシュボードと同じ）"
+                >
+                  <User className="w-3.5 h-3.5" /> スタッフ別
+                </button>
               </div>
+              {/* room フィルタ（複数room保有院のみ表示） */}
+              {rooms.length > 1 && (
+                <div className="flex bg-emerald-50 dark:bg-emerald-900/30 rounded-lg p-0.5 gap-0.5 border border-emerald-200 dark:border-emerald-800">
+                  <button
+                    onClick={() => setRoomFilter("")}
+                    className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-all ${
+                      roomFilter === ""
+                        ? "bg-emerald-600 text-white shadow-sm"
+                        : "text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-800/40"
+                    }`}
+                  >
+                    全て
+                  </button>
+                  {rooms.map((r) => (
+                    <button
+                      key={r.id}
+                      onClick={() => setRoomFilter(r.id)}
+                      className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-all ${
+                        roomFilter === r.id
+                          ? "bg-emerald-600 text-white shadow-sm"
+                          : "text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-800/40"
+                      }`}
+                    >
+                      {r.name}
+                    </button>
+                  ))}
+                </div>
+              )}
               <div className="flex items-center gap-2 text-sm">
                 <div className="flex items-center">
                   <div className="w-3 h-3 bg-blue-100 border border-blue-200 rounded-sm mr-1" />
@@ -523,6 +646,15 @@ export default function AdminWeeklyGridPage() {
           </div>
         </Card>
 
+        {/* タイムテーブルビュー（PC）: スタッフ別の縦軸×時間軸グリッド。
+            ダッシュボードと同じ UI（TodayTimelineWidget）を流用。
+            内部で日付ナビゲーション・データ取得・Realtime 更新を完結。 */}
+        {viewMode === "timetable" && (
+          <div className="flex-1 overflow-auto">
+            <TodayTimelineWidget />
+          </div>
+        )}
+
         {/* 日別ビュー（PC）: 日付セレクターバー */}
         {viewMode === "day" && (
           <div className="shrink-0 flex gap-1.5 overflow-x-auto pb-1 px-1">
@@ -531,7 +663,7 @@ export default function AdminWeeklyGridPage() {
               const isSelected = selectedDay ? isSameDay(date, selectedDay) : false;
               const isToday = isSameDay(date, new Date());
               const isOff = isDayOff(date);
-              const dayApptCount = appointments.filter(a => isSameDay(new Date(a.start_time), date)).length;
+              const dayApptCount = displayedAppointments.filter(a => isSameDay(new Date(a.start_time), date)).length;
               return (
                 <button
                   key={i}
@@ -550,6 +682,88 @@ export default function AdminWeeklyGridPage() {
               );
             })}
           </div>
+        )}
+
+        {/* Monthly grid（月モード）— 件数のみ表示、クリックで日別へ */}
+        {viewMode === "month" && (
+          <Card className="flex-1 overflow-auto rounded-t-none border-t bg-slate-50 p-3">
+            {loading ? (
+              <div className="h-full flex items-center justify-center">
+                <Loader2 className="h-8 w-8 animate-spin text-blue-500" />
+              </div>
+            ) : (
+              <div>
+                {/* 月ヘッダ: 前月/翌月切替 + 月集計 */}
+                <div className="flex items-center justify-between mb-3 px-1">
+                  <button
+                    onClick={() => setCurrentDate(subMonths(currentDate ?? new Date(), 1))}
+                    className="px-3 py-1.5 rounded-md bg-white border border-slate-200 hover:bg-slate-50 text-sm font-semibold"
+                  >
+                    ← 前月
+                  </button>
+                  <div className="text-base font-bold text-slate-800">
+                    {format(currentDate ?? new Date(), "yyyy年 M月", { locale: ja })}
+                    <span className="ml-3 text-sm font-semibold text-blue-600">
+                      合計 {displayedAppointments.filter(a => isSameMonth(new Date(a.start_time), currentDate ?? new Date())).length} 件
+                    </span>
+                  </div>
+                  <button
+                    onClick={() => setCurrentDate(addMonths(currentDate ?? new Date(), 1))}
+                    className="px-3 py-1.5 rounded-md bg-white border border-slate-200 hover:bg-slate-50 text-sm font-semibold"
+                  >
+                    翌月 →
+                  </button>
+                </div>
+
+                {/* 曜日ヘッダ */}
+                <div className="grid grid-cols-7 gap-1 mb-1 text-center text-xs font-bold text-slate-500">
+                  {["月", "火", "水", "木", "金", "土", "日"].map((d) => (
+                    <div key={d} className={d === "土" ? "text-blue-500" : d === "日" ? "text-rose-500" : ""}>{d}</div>
+                  ))}
+                </div>
+
+                {/* 日付グリッド */}
+                <div className="grid grid-cols-7 gap-1">
+                  {monthGrid.map((date) => {
+                    const inMonth = isSameMonth(date, currentDate ?? new Date());
+                    const isToday = isSameDay(date, new Date());
+                    const isHoliday = holidays.some(h => isSameDay(parseISO(h.date), date));
+                    const dayApps = displayedAppointments.filter(a => isSameDay(new Date(a.start_time), date));
+                    const cnt = dayApps.length;
+                    const dow = date.getDay();
+                    return (
+                      <button
+                        key={date.toISOString()}
+                        onClick={() => { setSelectedDay(date); setCurrentDate(date); handleViewModeChange("day"); }}
+                        className={`relative min-h-[78px] p-1.5 rounded-md border text-left transition-all
+                          ${inMonth ? "bg-white border-slate-200 hover:bg-blue-50 hover:border-blue-300" : "bg-slate-50 border-slate-100 opacity-50"}
+                          ${isToday ? "ring-2 ring-blue-400" : ""}
+                        `}
+                      >
+                        <div className={`text-xs font-bold
+                          ${dow === 6 && inMonth ? "text-blue-600" : ""}
+                          ${(dow === 0 || isHoliday) && inMonth ? "text-rose-600" : ""}
+                          ${!inMonth ? "text-slate-400" : ""}
+                        `}>
+                          {format(date, "d")}
+                        </div>
+                        {cnt > 0 && (
+                          <div className="absolute bottom-1.5 right-1.5">
+                            <span className="inline-flex items-center justify-center min-w-[28px] h-7 px-1.5 rounded-full bg-blue-600 text-white text-sm font-bold shadow-sm">
+                              {cnt}
+                            </span>
+                          </div>
+                        )}
+                        {isHoliday && (
+                          <div className="absolute top-1.5 right-1.5 text-[9px] font-bold text-rose-500">休</div>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </Card>
         )}
 
         {/* Weekly grid（週間モード） */}
@@ -602,7 +816,7 @@ export default function AdminWeeklyGridPage() {
                         minute: "2-digit",
                         hour12: false,
                       });
-                      const slotAppts = appointments.filter(apt => {
+                      const slotAppts = displayedAppointments.filter(apt => {
                         const aptDate = new Date(apt.start_time);
                         return isSameDay(aptDate, date) && jstTimeFormatter.format(aptDate) === slot;
                       });

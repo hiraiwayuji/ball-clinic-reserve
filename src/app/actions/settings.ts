@@ -62,6 +62,9 @@ export type ClinicSettings = {
   lp_voice_author?: string | null;
   lp_cta_text?: string | null;
   theme_color?: string | null;
+  // /admin/appointments のデフォルト表示モード
+  // week=週グリッド, day=日, month=月, timetable=スタッフ別タイムテーブル
+  default_appointments_view?: "week" | "day" | "month" | "timetable" | null;
 };
 
 
