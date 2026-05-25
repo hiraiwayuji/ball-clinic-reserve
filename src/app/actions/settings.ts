@@ -65,6 +65,10 @@ export type ClinicSettings = {
   // /admin/appointments のデフォルト表示モード
   // week=週グリッド, day=日, month=月, timetable=スタッフ別タイムテーブル
   default_appointments_view?: "week" | "day" | "month" | "timetable" | null;
+  // 患者LP /reserve の予約フロー
+  // datetime_first: 日時 → コース → 担当（既存）
+  // menu_first    : コース → 担当 → 空き日時（治療院系UX）
+  public_reserve_flow?: "datetime_first" | "menu_first" | null;
 };
 
 

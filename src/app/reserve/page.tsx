@@ -24,6 +24,7 @@ import { useClinicSchedule } from "@/lib/use-clinic-schedule";
 import { toast } from "sonner";
 import { CLINIC_CONFIG } from "@/lib/clinic-config";
 import ReserveLandingPage from "./ReserveLandingPage";
+import { getPublicClinicSettings } from "@/app/actions/publicSettings";
 import type { LinkedCustomer } from "@/lib/line-links";
 
 const SELECTED_CUSTOMER_KEY = "ballClinic_selectedCustomerId";
@@ -72,6 +73,14 @@ function ReserveContent() {
   const [clinicHolidays, setClinicHolidays] = useState<ClinicHoliday[]>([]);
   // LINE 経由で選択された家族 customer（あれば name/phone をプリフィル + customerId を送信）
   const [selectedFamilyMember, setSelectedFamilyMember] = useState<LinkedCustomer | null>(null);
+  // 予約フロー：datetime_first (既存) / menu_first (からだ等の治療院系UX)
+  const [reserveFlow, setReserveFlow] = useState<"datetime_first" | "menu_first">("datetime_first");
+
+  useEffect(() => {
+    getPublicClinicSettings().then(s => {
+      if (s?.public_reserve_flow === "menu_first") setReserveFlow("menu_first");
+    });
+  }, []);
 
   useEffect(() => {
     getClinicHolidays().then(setClinicHolidays);
@@ -278,11 +287,23 @@ function ReserveContent() {
         <div className="grid lg:grid-cols-12 gap-8 items-start">
           <div className="lg:col-span-8 space-y-6">
             <div className="bg-white/5 backdrop-blur-xl rounded-[2.5rem] border border-white/10 p-8 md:p-10 shadow-2xl">
-              <form onSubmit={handleSubmit} className="space-y-10">
+              <form onSubmit={handleSubmit} className="flex flex-col gap-10">
+
+                {/* menu_first モード時の案内 */}
+                {reserveFlow === "menu_first" && (
+                  <div className="order-0 bg-emerald-500/10 border border-emerald-500/30 rounded-2xl p-4 text-sm text-emerald-100">
+                    <p className="font-bold mb-1">📋 ご予約の流れ</p>
+                    <p className="text-emerald-200/80 text-xs leading-relaxed">
+                      ① まず「施術コース」をお選びください ② 続いて「スタッフ指名」（任意） ③ そのコース時間で空いている日時をご選択ください
+                    </p>
+                  </div>
+                )}
 
                 {/* 予約日時 */}
-                <section className="space-y-6">
-                  <h2 className="text-xl font-bold text-white tracking-tight">ご希望の日時</h2>
+                <section className={`space-y-6 ${reserveFlow === "menu_first" ? "order-3" : "order-1"}`}>
+                  <h2 className="text-xl font-bold text-white tracking-tight">
+                    {reserveFlow === "menu_first" ? "③ ご希望の日時" : "ご希望の日時"}
+                  </h2>
                   <div className="grid md:grid-cols-2 gap-6">
                     <div className="space-y-2">
                       <Label className="text-blue-100/85 font-bold text-xs uppercase">予約日</Label>
@@ -328,8 +349,10 @@ function ReserveContent() {
 
                 {/* コース・指名選択 */}
                 {courses.length > 0 && (
-                  <section className="space-y-4">
-                    <h2 className="text-xl font-bold text-white tracking-tight">施術コース</h2>
+                  <section className={`space-y-4 ${reserveFlow === "menu_first" ? "order-1" : "order-2"}`}>
+                    <h2 className="text-xl font-bold text-white tracking-tight">
+                      {reserveFlow === "menu_first" ? "① 施術コース" : "施術コース"}
+                    </h2>
                     <div className="grid gap-3">
                       {courses.map(course => {
                         const isSelected = selectedCourseId === course.id;
@@ -373,8 +396,11 @@ function ReserveContent() {
 
                 {/* 指名選択 */}
                 {staffList.length > 0 && (
-                  <section className="space-y-4">
-                    <h2 className="text-xl font-bold text-white tracking-tight">スタッフ指名 <span className="text-sm font-normal text-blue-100/80">（任意）</span></h2>
+                  <section className={`space-y-4 ${reserveFlow === "menu_first" ? "order-2" : "order-3"}`}>
+                    <h2 className="text-xl font-bold text-white tracking-tight">
+                      {reserveFlow === "menu_first" ? "② スタッフ指名" : "スタッフ指名"}
+                      <span className="text-sm font-normal text-blue-100/80">（任意）</span>
+                    </h2>
                     <div className="flex flex-wrap gap-2">
                       <button
                         type="button"
@@ -407,7 +433,7 @@ function ReserveContent() {
 
                 {/* 個室選択 */}
                 {rooms.length > 0 && (
-                  <section className="space-y-4">
+                  <section className="order-4 space-y-4">
                     <h2 className="text-xl font-bold text-white tracking-tight">ご希望のお部屋 <span className="text-sm font-normal text-blue-100/80">（任意）</span></h2>
                     <div className="flex flex-wrap gap-2">
                       <button
@@ -440,7 +466,7 @@ function ReserveContent() {
                 )}
 
                 {/* お客様情報 */}
-                <section className="space-y-6">
+                <section className="order-5 space-y-6">
                   <h2 className="text-xl font-bold text-white tracking-tight">お客様情報</h2>
 
                   {selectedFamilyMember && (
@@ -522,17 +548,17 @@ function ReserveContent() {
                   )}
                 </section>
 
-                <div className="bg-white/5 border border-white/10 p-5 rounded-2xl text-sm text-blue-100/85 space-y-1">
+                <div className="order-6 bg-white/5 border border-white/10 p-5 rounded-2xl text-sm text-blue-100/85 space-y-1">
                   <p className="font-bold text-white text-sm">⚠️ 仮予約について</p>
                   <p>こちらは仮予約です。院長がLINEにて確認後、予約確定のご連絡をいたします。</p>
                 </div>
 
-                <Button type="submit" disabled={!visitType || !name.trim() || isSubmitting} className="w-full h-20 text-xl font-black rounded-3xl bg-blue-600 hover:bg-blue-500 text-white disabled:opacity-40">
+                <Button type="submit" disabled={!visitType || !name.trim() || isSubmitting} className="order-7 w-full h-20 text-xl font-black rounded-3xl bg-blue-600 hover:bg-blue-500 text-white disabled:opacity-40">
                   {isSubmitting ? "送信中..." : "仮予約を申し込む"}
                 </Button>
 
                 {requiresQuestionnaire && (
-                  <div className="p-5 bg-blue-500/10 border border-blue-500/30 rounded-2xl space-y-4">
+                  <div className="order-8 p-5 bg-blue-500/10 border border-blue-500/30 rounded-2xl space-y-4">
                     <p className="text-blue-200 font-bold text-sm">
                       初めてオンライン予約をご希望の方は、先にアンケートへのご回答をお願いします
                     </p>

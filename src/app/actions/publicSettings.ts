@@ -34,6 +34,9 @@ export type PublicClinicSettings = {
 
   /** 予約画面のグリッド刻み（15/20/30分） */
   slot_duration_minutes: 15 | 20 | 30;
+
+  /** 患者LP /reserve の予約フロー（datetime_first|menu_first） */
+  public_reserve_flow: "datetime_first" | "menu_first";
 };
 
 export type LPFeature = {
@@ -92,7 +95,7 @@ export async function getPublicClinicSettings(): Promise<PublicClinicSettings | 
       lp_features, lp_target_problems, lp_voice_quote, lp_voice_author, lp_cta_text,
       theme_color, primary_color,
       phone_number, address, area_name, hp_url, instagram_url, line_official_account_url,
-      slot_duration_minutes
+      slot_duration_minutes, public_reserve_flow
     `)
     .eq("id", PUBLIC_CLINIC_ID)
     .maybeSingle();
@@ -120,6 +123,7 @@ export async function getPublicClinicSettings(): Promise<PublicClinicSettings | 
     instagram_url: data.instagram_url ?? null,
     line_official_account_url: data.line_official_account_url ?? null,
     slot_duration_minutes: normalizeSlotDuration(data.slot_duration_minutes),
+    public_reserve_flow: (data.public_reserve_flow === "menu_first" ? "menu_first" : "datetime_first") as "datetime_first" | "menu_first",
   };
 }
 
