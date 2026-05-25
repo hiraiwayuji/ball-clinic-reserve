@@ -31,6 +31,7 @@ import {
 import Link from "next/link";
 import { cn } from "@/lib/utils";
 import { getBriefingContext } from "@/app/actions/ai-secretary";
+import { ShiftDraftDialog } from "@/components/admin/ShiftDraftDialog";
 
 interface AISecretaryBriefingProps {
   appointments: any[];
@@ -50,6 +51,7 @@ export default function AISecretaryBriefing({
   const [open, setOpen] = useState(false);
   const [ctx, setCtx] = useState<BriefingCtx | null>(null);
   const [loadingCtx, setLoadingCtx] = useState(false);
+  const [shiftDraftOpen, setShiftDraftOpen] = useState(false);
 
   useEffect(() => {
     const hasSeen = sessionStorage.getItem("v_arc_briefing_seen_today");
@@ -321,10 +323,7 @@ export default function AISecretaryBriefing({
 
             {/* 来月シフト準備リマインダー（20日以降のみ）— 「ひと言」より優先で目立つ位置に */}
             {ctx?.shiftReminder?.needed && (
-              <Link
-                href="/admin/settings/staff-schedule"
-                className="block bg-gradient-to-br from-amber-900/60 to-rose-900/40 border border-amber-600/50 rounded-2xl p-4 hover:from-amber-800/70 hover:to-rose-800/50 transition-colors group"
-              >
+              <div className="bg-gradient-to-br from-amber-900/60 to-rose-900/40 border border-amber-600/50 rounded-2xl p-4">
                 <div className="flex gap-3 items-start">
                   <div className="w-9 h-9 bg-amber-500/30 rounded-xl flex items-center justify-center shrink-0">
                     <CalendarClock className="w-4 h-4 text-amber-200" />
@@ -334,20 +333,38 @@ export default function AISecretaryBriefing({
                     <p className="text-xs text-amber-100 leading-relaxed font-bold mb-1">
                       {ctx.shiftReminder.nextMonthLabel}のシフト作成を始めましょう
                     </p>
-                    <p className="text-[11px] text-amber-200/80 leading-relaxed">
+                    <p className="text-[11px] text-amber-200/80 leading-relaxed mb-3">
                       {ctx.shiftReminder.missingStaffCount} / {ctx.shiftReminder.totalStaff} 名分の休み希望が未提出（月末まであと{ctx.shiftReminder.daysUntilNextMonth}日）。
                       {ctx.shiftReminder.pendingCount > 0 && (
                         <span className="block mt-1 font-bold text-amber-300">
                           ⚠ {ctx.shiftReminder.pendingCount}件のスタッフ希望が承認待ちです。
                         </span>
                       )}
-                      スタッフ予定画面で確認・承認してください。
                     </p>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <Button
+                        size="sm"
+                        onClick={() => setShiftDraftOpen(true)}
+                        className="h-8 px-3 bg-violet-600 hover:bg-violet-700 text-white text-xs font-bold gap-1.5"
+                      >
+                        <Sparkles className="w-3.5 h-3.5" />
+                        AI にシフト案を作ってもらう
+                      </Button>
+                      <Link
+                        href="/admin/settings/staff-schedule"
+                        className="inline-flex items-center gap-1 h-8 px-3 rounded-md bg-amber-500/20 hover:bg-amber-500/30 text-amber-100 text-xs font-bold border border-amber-500/40 transition-colors"
+                      >
+                        スタッフ予定画面へ
+                        <ChevronRight className="w-3.5 h-3.5" />
+                      </Link>
+                    </div>
                   </div>
-                  <ChevronRight className="w-4 h-4 text-amber-300 shrink-0 mt-1 group-hover:translate-x-0.5 transition-transform" />
                 </div>
-              </Link>
+              </div>
             )}
+
+            {/* AI シフト案ダイアログ（リマインダーがなくてもボタン1つから開ける将来拡張用に独立） */}
+            <ShiftDraftDialog open={shiftDraftOpen} onOpenChange={setShiftDraftOpen} />
 
             {/* AI朝のアドバイス */}
             {ctx?.aiAdvice && (

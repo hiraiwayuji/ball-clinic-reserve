@@ -600,3 +600,213 @@ export async function getBriefingContext() {
     shiftReminder,
   };
 }
+
+// ─── AI シフト案生成 ──────────────────────────────────────────────────
+/**
+ * 指定月（デフォルト：来月）のシフト草案を Gemini で生成。
+ *
+ * 材料:
+ *   - reservation_staff（全アクティブスタッフ）
+ *   - staff_working_hours（曜日別の基本勤務時間）
+ *   - staff_working_overrides（来月分の休み希望・既決のスポット予定）
+ *   - clinic_settings（営業時間、定休日）
+ *
+ * 出力:
+ *   - draftMarkdown: スタッフ別の来月シフト提案（マークダウン）
+ *   - warnings: AI が気付いた懸念点（穴・偏り・無理など）
+ *
+ * 注意: 自動で DB に書き込まない。オーナーが内容確認したうえで手動反映。
+ */
+export type ShiftDraftResult = {
+  success: boolean;
+  monthLabel?: string;
+  draftMarkdown?: string;
+  warnings?: string[];
+  totalStaff?: number;
+  approvedLeaveCount?: number;
+  pendingLeaveCount?: number;
+  error?: string;
+};
+
+export async function generateShiftDraft(monthStr?: string): Promise<ShiftDraftResult> {
+  const { clinicId } = await checkAdminAuth();
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) return { success: false, error: "GEMINI_API_KEY が未設定です" };
+
+  const supabase = await getSupabase();
+
+  // 対象月の決定（デフォルト：来月）
+  const now = new Date();
+  const jst = new Date(now.getTime() + 9 * 60 * 60 * 1000);
+  const [year, month] = monthStr
+    ? monthStr.split("-").map(n => parseInt(n, 10))
+    : (() => {
+        const m = jst.getUTCMonth() + 1;
+        return m === 12
+          ? [jst.getUTCFullYear() + 1, 1]
+          : [jst.getUTCFullYear(), m + 1];
+      })();
+  const monthStart = `${year}-${String(month).padStart(2, "0")}-01`;
+  const monthEnd = new Date(year, month, 0).toISOString().split("T")[0];
+  const daysInMonth = new Date(year, month, 0).getDate();
+  const monthLabel = `${year}年${month}月`;
+
+  // 並列でデータ取得
+  const [staffRes, hoursRes, overridesRes, settings] = await Promise.all([
+    supabase
+      .from("reservation_staff")
+      .select("id, name, role, available_for_online_booking, birth_date")
+      .eq("clinic_id", clinicId)
+      .eq("is_active", true)
+      .order("sort_order", { ascending: true }),
+    supabase
+      .from("staff_working_hours")
+      .select("staff_id, day_of_week, start_time, end_time, break_start, break_end"),
+    supabase
+      .from("staff_working_overrides")
+      .select("staff_id, date, kind, start_time, end_time, status, note")
+      .eq("clinic_id", clinicId)
+      .gte("date", monthStart)
+      .lte("date", monthEnd),
+    getClinicSettings(),
+  ]);
+
+  if (staffRes.error) return { success: false, error: staffRes.error.message };
+
+  const staff = staffRes.data ?? [];
+  const allHours = hoursRes.data ?? [];
+  const overrides = overridesRes.data ?? [];
+  const totalStaff = staff.length;
+
+  if (totalStaff === 0) {
+    return { success: false, error: "アクティブなスタッフが登録されていません" };
+  }
+
+  // スタッフ名解決
+  const staffIdToName = new Map(staff.map((s: any) => [s.id, s.name]));
+  const hoursByStaff = new Map<string, any[]>();
+  for (const h of allHours) {
+    if (!hoursByStaff.has(h.staff_id)) hoursByStaff.set(h.staff_id, []);
+    hoursByStaff.get(h.staff_id)!.push(h);
+  }
+
+  // 休み希望をスタッフ別に集計
+  const approvedLeaveDates: Record<string, string[]> = {};
+  const pendingLeaveDates: Record<string, string[]> = {};
+  const otherOverrides: Record<string, { date: string; kind: string; note?: string | null }[]> = {};
+  let approvedLeaveCount = 0;
+  let pendingLeaveCount = 0;
+
+  for (const o of overrides) {
+    const name = staffIdToName.get(o.staff_id) ?? "不明";
+    if (o.kind === "leave") {
+      if (o.status === "approved") {
+        (approvedLeaveDates[name] ??= []).push(o.date);
+        approvedLeaveCount++;
+      } else if (o.status === "pending") {
+        (pendingLeaveDates[name] ??= []).push(o.date);
+        pendingLeaveCount++;
+      }
+    } else {
+      (otherOverrides[name] ??= []).push({ date: o.date, kind: o.kind, note: o.note });
+    }
+  }
+
+  // スタッフ別の基本勤務時間を要約
+  const DAY_NAMES = ["日", "月", "火", "水", "木", "金", "土"];
+  const staffHoursSummary = staff.map((s: any) => {
+    const hours = hoursByStaff.get(s.id) ?? [];
+    const summary = hours
+      .map((h: any) => `${DAY_NAMES[h.day_of_week]}:${h.start_time?.slice(0, 5) ?? "-"}-${h.end_time?.slice(0, 5) ?? "-"}`)
+      .join(", ");
+    return `${s.name}(${s.role ?? "—"}): ${summary || "基本勤務時間未設定"}`;
+  }).join("\n");
+
+  // プロンプト構築
+  const closedDays = settings?.closed_weekdays ?? "0,3"; // 既定: 日(0), 水(3)
+  const clinicName = settings?.clinic_name ?? "院";
+
+  const prompt = `あなたは接骨院・整骨院の経営支援AIで、特にスタッフのシフト作成が得意です。
+以下のデータから、${monthLabel}（${daysInMonth}日間）のスタッフシフト案を作成してください。
+
+【院名】${clinicName}
+【営業時間（平日）】${settings?.business_open_weekday ?? "9:00"} - ${settings?.business_close_weekday ?? "20:00"}
+【営業時間（土曜）】${settings?.business_open_saturday ?? "9:00"} - ${settings?.business_close_saturday ?? "18:00"}
+【定休曜日（0=日, 1=月, ..., 6=土）】${closedDays}
+
+【全スタッフ ${totalStaff} 名と基本勤務時間】
+${staffHoursSummary}
+
+【${monthLabel}の承認済み休み（必ず休みで確定）】
+${Object.keys(approvedLeaveDates).length > 0
+  ? Object.entries(approvedLeaveDates).map(([n, dates]) => `${n}: ${dates.join(", ")}`).join("\n")
+  : "なし"}
+
+【${monthLabel}の承認待ち希望（オーナーに承認を促す対象）】
+${Object.keys(pendingLeaveDates).length > 0
+  ? Object.entries(pendingLeaveDates).map(([n, dates]) => `${n}: ${dates.join(", ")}`).join("\n")
+  : "なし"}
+
+【${monthLabel}のその他のスポット予定（ミーティング・研修等）】
+${Object.keys(otherOverrides).length > 0
+  ? Object.entries(otherOverrides).map(([n, items]) => `${n}: ${items.map(i => `${i.date}(${i.kind}${i.note ? `:${i.note}` : ""})`).join(", ")}`).join("\n")
+  : "なし"}
+
+# 出力要件
+
+以下のフォーマットで日本語マークダウンで返してください。冒頭の前置きやコードブロックは不要、本文のみ。
+
+## 全体サマリ
+（営業日数、勤務予定の総スタッフ・日数、人員配置の偏り、留意点を3-5行で）
+
+## スタッフ別 ${monthLabel} シフト案
+（各スタッフの推奨シフトを「曜日 + 時間帯」または「日付指定」で記述。承認済み休みは必ず反映。承認待ち希望も基本尊重）
+
+### スタッフ名
+- 出勤予定: 月-火-木-金-土（9:00-20:00）／例: 6/3, 6/10 などの特記事項
+- 休み: 6/4, 6/11（承認済み）, 6/18（希望中）
+- 注意点: （あれば1-2行）
+
+（全スタッフ分を繰り返す）
+
+## ⚠ 留意点・気づき
+- （人員が薄い日、休み希望が重なる日、新規予約に影響しそうな日などを箇条書き）
+
+## 提案アクション
+- 承認待ちの希望に対しての承認推奨/再調整提案
+- 必要であれば臨時スタッフの追加検討提案
+`;
+
+  try {
+    const genAI = new GoogleGenerativeAI(apiKey);
+    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+    const result = await model.generateContent(prompt);
+    const draftMarkdown = result.response.text().trim();
+
+    // 簡易 warnings 抽出（「⚠ 留意点」セクションから箇条書き行を拾う）
+    const warnings: string[] = [];
+    const warnMatch = draftMarkdown.match(/## ⚠?\s*留意点[\s\S]+?(?=##|$)/);
+    if (warnMatch) {
+      warnings.push(
+        ...warnMatch[0]
+          .split("\n")
+          .filter(line => line.trim().startsWith("-"))
+          .map(line => line.replace(/^[-・]\s*/, "").trim())
+          .filter(Boolean)
+      );
+    }
+
+    return {
+      success: true,
+      monthLabel,
+      draftMarkdown,
+      warnings,
+      totalStaff,
+      approvedLeaveCount,
+      pendingLeaveCount,
+    };
+  } catch (e: any) {
+    console.error("[generateShiftDraft] error:", e);
+    return { success: false, error: e?.message ?? "AI 提案の生成に失敗しました" };
+  }
+}
