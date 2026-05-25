@@ -25,10 +25,10 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Calendar as CalendarIcon, Plus, Trash2, Loader2, Coins, User, UserPlus, Landmark, Receipt, Upload, Download, Clock, Bot, X, AlertTriangle, Zap, Pencil, ShieldCheck } from "lucide-react";
+import { Calendar as CalendarIcon, Plus, Trash2, Loader2, Coins, User, UserPlus, Landmark, Receipt, Upload, Download, Clock, Bot, X, AlertTriangle, Zap, Pencil, ShieldCheck, CalendarPlus } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { addCashSale, getCashSales, deleteCashSale, updateCashSale, searchSalesPatients, getCustomerByMedicalRecord, getLastSaleForCustomer, SalesPatientSuggestion, type CashSalePaymentType } from "@/app/actions/sales";
-import { updateCheckinStatus } from "@/app/actions/adminReserve";
+import { updateCheckinStatus, getLastAppointmentByCustomerName } from "@/app/actions/adminReserve";
 import { getActiveCoursesByPopularity, type ReservationCourse } from "@/app/actions/courses";
 import { usePaymentCategories } from "@/lib/use-payment-categories";
 import { getPaymentCategoryColor } from "@/lib/payment-category-color";
@@ -320,6 +320,34 @@ function SalesPageInner() {
       }
     } finally {
       setIsUpdating(false);
+    }
+  };
+
+  // 売上一覧の各行から「次回予約」ボタンで AddAppointmentDialog を開くハンドラ。
+  // 顧客名で直近の予約を引いて、コース/担当/時刻をプリセット。
+  // 見つからなければ名前だけ詰めてダイアログを開く（手動でコース等を選べる）。
+  const [reserveFromSaleLoading, setReserveFromSaleLoading] = useState<string | null>(null);
+  const handleReserveFromSale = async (sale: any) => {
+    if (reserveFromSaleLoading) return;
+    setReserveFromSaleLoading(sale.id);
+    try {
+      const res = await getLastAppointmentByCustomerName(sale.customer_name);
+      const last = res.success ? res.data : null;
+      setPendingNextReserve({
+        name: sale.customer_name,
+        courseId: last?.courseId ?? undefined,
+        staffId: last?.staffId ?? undefined,
+        time: last?.timeOfDay ?? undefined,
+      });
+      setNextReserveOpen(true);
+      if (!last?.courseId && !last?.staffId) {
+        toast.info(`${sale.customer_name}様の過去予約が見つかりませんでした。コース・担当を選んでください`);
+      }
+    } catch (e) {
+      console.warn("[handleReserveFromSale] error:", e);
+      toast.error("過去予約の取得に失敗しました");
+    } finally {
+      setReserveFromSaleLoading(null);
     }
   };
 
@@ -720,7 +748,7 @@ function SalesPageInner() {
                     <TableHead>お名前</TableHead>
                     <TableHead>備考</TableHead>
                     <TableHead className="text-right">金額</TableHead>
-                    <TableHead className="w-[80px]"></TableHead>
+                    <TableHead className="w-[130px]"></TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -778,6 +806,21 @@ function SalesPageInner() {
                         <TableCell className="text-right font-bold text-slate-700 dark:text-slate-200">¥{sale.treatment_fee.toLocaleString()}</TableCell>
                         <TableCell className="text-right text-slate-100 group">
                           <div className="flex items-center justify-end gap-1">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-950/30 transition-all rounded-full"
+                              onClick={() => handleReserveFromSale(sale)}
+                              disabled={reserveFromSaleLoading === sale.id}
+                              aria-label="次回予約"
+                              title="次回予約を入れる"
+                            >
+                              {reserveFromSaleLoading === sale.id ? (
+                                <Loader2 className="w-4 h-4 animate-spin" />
+                              ) : (
+                                <CalendarPlus className="w-4 h-4" />
+                              )}
+                            </Button>
                             <Button
                               variant="ghost"
                               size="icon"

@@ -718,6 +718,112 @@ export async function getAppointmentsByDate(dateStr: string) {
   }
 }
 
+/**
+ * 顧客名で直近の予約を1件取得（次回予約のプリセット用）。
+ * 売上登録画面の「次回予約」ボタン押下時、過去の予約から
+ *   course_id / course_name / staff_id / staff_name / 時刻(hh:mm) / customer_id
+ * を取り出して AddAppointmentDialog にプリセット出来るようにする。
+ *
+ * 同名異人が居る可能性は customer_name 完全一致 + 直近 1件で実用上問題なし
+ * （より厳密に絞りたい場合は customer_id 経由で呼ぶこと）。
+ */
+export async function getLastAppointmentByCustomerName(
+  customerName: string,
+): Promise<{
+  success: boolean;
+  data?: {
+    customerId: string | null;
+    courseId: string | null;
+    courseName: string | null;
+    staffId: string | null;
+    staffName: string | null;
+    timeOfDay: string | null; // "HH:mm" JST
+  } | null;
+  error?: string;
+}> {
+  try {
+    const { clinicId } = await checkAdminAuth();
+    const name = customerName.trim();
+    if (!name) return { success: true, data: null };
+
+    const supabase = getAdminSupabase();
+    if (!supabase) return { success: false, error: "サーバー設定エラー" };
+
+    // 1) 同名 customer を引く（複数ヒット可、最初の1件を採用）
+    const { data: customer } = await supabase
+      .from("customers")
+      .select("id")
+      .eq("clinic_id", clinicId)
+      .eq("name", name)
+      .limit(1)
+      .maybeSingle();
+
+    const customerId = customer?.id ?? null;
+
+    // 2) 同名の直近 appointment を取得（cancelled は除外）
+    let q = supabase
+      .from("appointments")
+      .select("course_id, course_name, staff_id, staff_name, start_time, customer_id, customers(name)")
+      .eq("clinic_id", clinicId)
+      .neq("status", "cancelled")
+      .order("start_time", { ascending: false })
+      .limit(1);
+
+    if (customerId) {
+      q = q.eq("customer_id", customerId);
+    }
+
+    const { data: aptRows, error: aptErr } = await q;
+    if (aptErr) {
+      return { success: false, error: aptErr.message };
+    }
+
+    // customer_id 経由で取れなかった場合、名前一致で再検索
+    let apt = aptRows?.[0] as any | undefined;
+    if (!apt && !customerId) {
+      const { data: byName } = await supabase
+        .from("appointments")
+        .select("course_id, course_name, staff_id, staff_name, start_time, customer_id, customers(name)")
+        .eq("clinic_id", clinicId)
+        .neq("status", "cancelled")
+        .order("start_time", { ascending: false })
+        .limit(20);
+      apt = (byName ?? []).find((r: any) => {
+        const n = Array.isArray(r.customers) ? r.customers[0]?.name : r.customers?.name;
+        return n === name;
+      });
+    }
+
+    if (!apt) {
+      return { success: true, data: { customerId, courseId: null, courseName: null, staffId: null, staffName: null, timeOfDay: null } };
+    }
+
+    // 時刻部分（JST hh:mm）
+    let timeOfDay: string | null = null;
+    try {
+      const t = new Date(apt.start_time);
+      const hh = t.toLocaleString("ja-JP", { timeZone: "Asia/Tokyo", hour: "2-digit", hour12: false }).padStart(2, "0");
+      const mm = t.toLocaleString("ja-JP", { timeZone: "Asia/Tokyo", minute: "2-digit" }).padStart(2, "0");
+      timeOfDay = `${hh}:${mm}`;
+    } catch {}
+
+    return {
+      success: true,
+      data: {
+        customerId: customerId ?? apt.customer_id ?? null,
+        courseId: apt.course_id ?? null,
+        courseName: apt.course_name ?? null,
+        staffId: apt.staff_id ?? null,
+        staffName: apt.staff_name ?? null,
+        timeOfDay,
+      },
+    };
+  } catch (e: any) {
+    console.error("getLastAppointmentByCustomerName error:", e);
+    return { success: false, error: e?.message ?? "取得失敗" };
+  }
+}
+
 // 予約の削除アクション
 // scope:
 //   "one"    - この予約 1 件のみ削除（既定）

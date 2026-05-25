@@ -8,7 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
   ChevronLeft, ChevronRight, Loader2, RotateCcw,
-  UserCheck, CreditCard, XCircle, Plus,
+  UserCheck, CreditCard, XCircle, Plus, CalendarPlus,
 } from "lucide-react";
 import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
@@ -59,6 +59,15 @@ export default function TodayTimelineWidget() {
     staffId?: string;
     time?: string;
     date?: Date;
+  }>({ open: false });
+
+  // 「次回予約」ダイアログ（予約詳細から起動。元予約の course_id/staff_id/時刻をプリセット）
+  const [nextReserveDialog, setNextReserveDialog] = useState<{
+    open: boolean;
+    name?: string;
+    courseId?: string;
+    staffId?: string;
+    time?: string;
   }>({ open: false });
 
   // 受付・会計ボタンの非同期処理ロック
@@ -384,27 +393,71 @@ export default function TodayTimelineWidget() {
               {selectedApt.memo && <div><span className="text-slate-500">メモ:</span> <span className="whitespace-pre-wrap">{selectedApt.memo}</span></div>}
             </div>
 
-            {/* アクションボタン: 受付 / 会計へ */}
-            <div className="flex gap-2 pt-3 border-t border-slate-200 dark:border-slate-700">
+            {/* アクションボタン: 受付 / 会計へ / 次回予約 */}
+            <div className="flex flex-col gap-2 pt-3 border-t border-slate-200 dark:border-slate-700">
+              <div className="flex gap-2">
+                <Button
+                  onClick={() => handleCheckin(selectedApt)}
+                  disabled={actionLoading || selectedApt.checkin_status === "arrived"}
+                  className="flex-1 bg-blue-600 hover:bg-blue-700 text-white"
+                >
+                  <UserCheck className="w-4 h-4 mr-1.5" />
+                  {selectedApt.checkin_status === "arrived" ? "受付済" : "受付"}
+                </Button>
+                <Button
+                  onClick={() => handleGoToSales(selectedApt)}
+                  disabled={actionLoading}
+                  className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white"
+                >
+                  <CreditCard className="w-4 h-4 mr-1.5" />
+                  会計へ
+                </Button>
+              </div>
               <Button
-                onClick={() => handleCheckin(selectedApt)}
-                disabled={actionLoading || selectedApt.checkin_status === "arrived"}
-                className="flex-1 bg-blue-600 hover:bg-blue-700 text-white"
+                onClick={() => {
+                  let timeStr: string | undefined;
+                  try {
+                    const t = new Date(selectedApt.start_time);
+                    const hh = t.toLocaleString("ja-JP", { timeZone: "Asia/Tokyo", hour: "2-digit", hour12: false }).padStart(2, "0");
+                    const mm = t.toLocaleString("ja-JP", { timeZone: "Asia/Tokyo", minute: "2-digit" }).padStart(2, "0");
+                    timeStr = `${hh}:${mm}`;
+                  } catch {}
+                  setNextReserveDialog({
+                    open: true,
+                    name: selectedApt.customer_name ?? undefined,
+                    courseId: selectedApt.course_id ?? undefined,
+                    staffId: selectedApt.staff_id ?? undefined,
+                    time: timeStr,
+                  });
+                  setSelectedApt(null);
+                }}
+                variant="outline"
+                className="w-full border-indigo-300 dark:border-indigo-700 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-50 dark:hover:bg-indigo-950/50"
               >
-                <UserCheck className="w-4 h-4 mr-1.5" />
-                {selectedApt.checkin_status === "arrived" ? "受付済" : "受付"}
-              </Button>
-              <Button
-                onClick={() => handleGoToSales(selectedApt)}
-                disabled={actionLoading}
-                className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white"
-              >
-                <CreditCard className="w-4 h-4 mr-1.5" />
-                会計へ
+                <CalendarPlus className="w-4 h-4 mr-1.5" />
+                次回予約を入れる（同じコース・担当でプリセット）
               </Button>
             </div>
           </div>
         </div>
+      )}
+
+      {/* 次回予約ダイアログ */}
+      {nextReserveDialog.open && (
+        <AddAppointmentDialog
+          open={nextReserveDialog.open}
+          onOpenChange={(o) => setNextReserveDialog((s) => ({ ...s, open: o }))}
+          defaultName={nextReserveDialog.name}
+          defaultCourseId={nextReserveDialog.courseId}
+          defaultStaffId={nextReserveDialog.staffId}
+          defaultTime={nextReserveDialog.time}
+          hideTrigger
+          onSuccess={() => {
+            toast.success("次回予約を登録しました");
+            setNextReserveDialog({ open: false });
+            if (date) fetchData(date);
+          }}
+        />
       )}
 
       {/* 空きセルクリックで開く新規予約ダイアログ */}

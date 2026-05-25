@@ -31,6 +31,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { recordAction, COUNTER_DONE_KEY, SALES_PAGE_KEY } from "@/lib/next-action";
 import DailyCompletionCelebration from "@/components/admin/DailyCompletionCelebration";
+import { AddAppointmentDialog } from "@/components/admin/AddAppointmentDialog";
 
 type Appointment = {
   id: string;
@@ -121,6 +122,8 @@ function AppointmentCard({
   const [justDone, setJustDone] = useState(false);
   const [showSecretaryTip, setShowSecretaryTip] = useState(false);
   const [prediction, setPrediction] = useState<SalesPrediction | null>(null);
+  // 「次回予約」ボタンで AddAppointmentDialog を開くための state
+  const [nextReserveOpen, setNextReserveOpen] = useState(false);
   const step = getStep(apt.checkin_status);
   const next = nextStatus(apt.checkin_status);
   const nextStep = next !== null ? getStep(next) : null;
@@ -414,7 +417,42 @@ function AppointmentCard({
           </div>
         )}
 
+        {/* 次回予約ボタン — どのステータスでも常に押せる（会計の有無に関係なく） */}
+        <button
+          type="button"
+          onClick={() => setNextReserveOpen(true)}
+          className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium text-indigo-600 dark:text-indigo-300 bg-indigo-50/80 dark:bg-indigo-900/30 border border-indigo-200 dark:border-indigo-700/50 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition-colors"
+          title="次回予約を入れる（同じコース・担当でプリセット）"
+        >
+          <CalendarPlus className="w-3.5 h-3.5" />
+          次回予約
+        </button>
+
       </div>
+
+      {/* 次回予約ダイアログ — その予約の course_id/staff_id/時刻をプリセット */}
+      {nextReserveOpen && (
+        <AddAppointmentDialog
+          open={nextReserveOpen}
+          onOpenChange={setNextReserveOpen}
+          defaultName={apt.customers?.name ?? undefined}
+          defaultCourseId={apt.course_id ?? undefined}
+          defaultStaffId={apt.staff_id ?? undefined}
+          defaultTime={(() => {
+            try {
+              const t = new Date(apt.start_time);
+              const hh = t.toLocaleString("ja-JP", { timeZone: "Asia/Tokyo", hour: "2-digit", hour12: false }).padStart(2, "0");
+              const mm = t.toLocaleString("ja-JP", { timeZone: "Asia/Tokyo", minute: "2-digit" }).padStart(2, "0");
+              return `${hh}:${mm}`;
+            } catch { return undefined; }
+          })()}
+          hideTrigger
+          onSuccess={() => {
+            toast.success("次回予約を登録しました");
+            setNextReserveOpen(false);
+          }}
+        />
+      )}
     </div>
   );
 }
