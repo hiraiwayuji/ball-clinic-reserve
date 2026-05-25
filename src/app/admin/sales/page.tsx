@@ -31,6 +31,7 @@ import { addCashSale, getCashSales, deleteCashSale, updateCashSale, searchSalesP
 import { updateCheckinStatus } from "@/app/actions/adminReserve";
 import { getActiveCoursesByPopularity, type ReservationCourse } from "@/app/actions/courses";
 import { usePaymentCategories } from "@/lib/use-payment-categories";
+import { getPaymentCategoryColor } from "@/lib/payment-category-color";
 import { toast } from "sonner";
 import Link from "next/link";
 import CashSalesImportDialog from "@/components/admin/CashSalesImportDialog";
@@ -657,15 +658,14 @@ function SalesPageInner() {
                 <div className="grid grid-cols-2 gap-2">
                   {paymentCategories.map(opt => {
                     const selected = paymentTypes.includes(opt.key);
+                    const color = getPaymentCategoryColor(opt.key);
                     return (
                       <button
                         key={opt.key}
                         type="button"
                         onClick={() => togglePaymentType(opt.key)}
                         className={`relative px-2 py-2 rounded-md text-xs font-bold border transition-all ${
-                          selected
-                            ? "bg-emerald-500 border-emerald-600 text-white shadow-sm"
-                            : "bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100"
+                          selected ? color.selected : color.unselected
                         }`}
                       >
                         {selected && <span className="absolute top-0.5 right-1 text-[10px]">✓</span>}
@@ -753,14 +753,24 @@ function SalesPageInner() {
                         </TableCell>
                         <TableCell className="text-slate-500 dark:text-slate-400 text-sm">
                           <div className="flex items-center gap-1.5 flex-wrap">
-                            {sale.payment_type && (() => {
-                              const cat = paymentCategories.find(c => c.key === sale.payment_type);
-                              if (!cat) return null;
-                              return (
-                                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400">
-                                  {cat.label}
-                                </span>
-                              );
+                            {(() => {
+                              // payment_types（複数）優先・無ければ legacy payment_type を 1 要素扱い
+                              const keys: string[] = Array.isArray(sale.payment_types) && sale.payment_types.length > 0
+                                ? sale.payment_types
+                                : (sale.payment_type ? [sale.payment_type] : []);
+                              return keys.map((key) => {
+                                const cat = paymentCategories.find(c => c.key === key);
+                                if (!cat) return null;
+                                const color = getPaymentCategoryColor(key);
+                                return (
+                                  <span
+                                    key={key}
+                                    className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${color.badge}`}
+                                  >
+                                    {cat.label}
+                                  </span>
+                                );
+                              });
                             })()}
                             <span className="truncate">{parseMemo(sale.memo)}</span>
                           </div>
@@ -864,20 +874,22 @@ function SalesPageInner() {
                   支払区分
                 </Label>
                 <div className="grid grid-cols-2 gap-2">
-                  {paymentCategories.map(opt => (
-                    <button
-                      key={opt.key}
-                      type="button"
-                      onClick={() => setEditForm(f => ({ ...f, payment_type: opt.key }))}
-                      className={`px-2 py-2 rounded-md text-xs font-bold border transition-all ${
-                        editForm.payment_type === opt.key
-                          ? "bg-emerald-500 border-emerald-600 text-white shadow-sm"
-                          : "bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100"
-                      }`}
-                    >
-                      {opt.label}
-                    </button>
-                  ))}
+                  {paymentCategories.map(opt => {
+                    const selected = editForm.payment_type === opt.key;
+                    const color = getPaymentCategoryColor(opt.key);
+                    return (
+                      <button
+                        key={opt.key}
+                        type="button"
+                        onClick={() => setEditForm(f => ({ ...f, payment_type: opt.key }))}
+                        className={`px-2 py-2 rounded-md text-xs font-bold border transition-all ${
+                          selected ? color.selected : color.unselected
+                        }`}
+                      >
+                        {opt.label}
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
               <div className="flex items-center gap-2 pt-1">

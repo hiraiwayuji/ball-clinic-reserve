@@ -11,6 +11,7 @@ import {
   type CashSalePaymentType,
 } from "@/app/actions/sales";
 import { usePaymentCategories } from "@/lib/use-payment-categories";
+import { getPaymentCategoryColor } from "@/lib/payment-category-color";
 import type { PaymentCategoryRow } from "@/app/actions/payment-categories";
 import { toast } from "sonner";
 import Link from "next/link";
@@ -428,20 +429,22 @@ function DraftRowItem({
       {isZero && (
         <div className="mt-2 ml-8 flex items-center gap-2 flex-wrap">
           <span className="text-[11px] font-bold text-emerald-600 dark:text-emerald-400">0円の支払区分:</span>
-          {paymentCategories.map(opt => (
-            <button
-              key={opt.key}
-              type="button"
-              onClick={() => onChange({ ...row, paymentType: opt.key })}
-              className={`px-2 py-0.5 rounded-md text-[11px] font-bold border transition-all ${
-                row.paymentType === opt.key
-                  ? "bg-emerald-500 border-emerald-600 text-white"
-                  : "bg-white border-slate-200 text-slate-500 hover:bg-slate-50"
-              }`}
-            >
-              {opt.label}
-            </button>
-          ))}
+          {paymentCategories.map(opt => {
+            const selected = row.paymentType === opt.key;
+            const color = getPaymentCategoryColor(opt.key);
+            return (
+              <button
+                key={opt.key}
+                type="button"
+                onClick={() => onChange({ ...row, paymentType: opt.key })}
+                className={`px-2 py-0.5 rounded-md text-[11px] font-bold border transition-all ${
+                  selected ? color.selected : color.unselected
+                }`}
+              >
+                {opt.label}
+              </button>
+            );
+          })}
           {!row.paymentType && (
             <span className="text-[10px] text-rose-500 font-medium">※ 必須</span>
           )}
