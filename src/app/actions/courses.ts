@@ -21,6 +21,8 @@ export type ReservationCourse = {
   is_repeat_only: boolean;
   regular_price: number | null;
   badge_label: string | null;
+  /** 集計用カテゴリ: jusei (柔整) / shinkyu (鍼灸) / seitai (整体) / null (未分類) */
+  category?: "jusei" | "shinkyu" | "seitai" | null;
 };
 
 export type ReservationStaff = {
@@ -33,8 +35,14 @@ export type ReservationStaff = {
   show_in_timeline?: boolean;
   /** ログイン用 email。/admin/my-schedule で本人スタッフレコード解決に使う */
   email?: string | null;
-  /** 月間施術目標数。NULL or 0 ならタイムテーブルに目標を出さない */
+  /** 月間施術目標数（合計）。NULL or 0 ならタイムテーブルに目標を出さない */
   monthly_visit_target?: number | null;
+  /** 月間目標: 柔整カテゴリ */
+  target_jusei?: number | null;
+  /** 月間目標: 鍼灸カテゴリ */
+  target_shinkyu?: number | null;
+  /** 月間目標: 整体カテゴリ */
+  target_seitai?: number | null;
 };
 
 // ── コース取得（管理側：全件） ──
@@ -171,7 +179,15 @@ export async function saveCourse(course: Partial<ReservationCourse> & { name: st
   const { createClient } = await import("@/lib/supabase/server");
   const supabase = await createClient();
 
-  const payload = {
+  // category は undefined なら touch しない（既存値を保持）
+  const normalizedCategory = (() => {
+    if (course.category === undefined) return undefined;
+    if (course.category === null) return null;
+    const c = String(course.category);
+    return (c === "jusei" || c === "shinkyu" || c === "seitai") ? c : null;
+  })();
+
+  const payload: Record<string, unknown> = {
     clinic_id: clinicId,
     name: course.name,
     duration_minutes: course.duration_minutes,
@@ -187,6 +203,9 @@ export async function saveCourse(course: Partial<ReservationCourse> & { name: st
     regular_price: course.regular_price ?? null,
     badge_label: course.badge_label ?? null,
   };
+  if (normalizedCategory !== undefined) {
+    payload.category = normalizedCategory;
+  }
 
   if (course.id) {
     const { error } = await supabase
@@ -238,12 +257,17 @@ export async function saveStaff(staff: Partial<ReservationStaff> & { name: strin
     return e || null;
   })();
 
-  // monthly_visit_target は undefined なら触らない、null/0 は null として保存
-  let normalizedTarget: number | null | undefined = undefined;
-  if (staff.monthly_visit_target !== undefined) {
-    const n = Number(staff.monthly_visit_target);
-    normalizedTarget = Number.isFinite(n) && n > 0 ? Math.floor(n) : null;
-  }
+  // 目標値: undefined なら触らない、0 や空は null として保存
+  const normalizeTarget = (v: unknown): number | null | undefined => {
+    if (v === undefined) return undefined;
+    if (v === null || v === "") return null;
+    const n = Number(v);
+    return Number.isFinite(n) && n > 0 ? Math.floor(n) : null;
+  };
+  const normalizedTarget   = normalizeTarget(staff.monthly_visit_target);
+  const normalizedJusei    = normalizeTarget(staff.target_jusei);
+  const normalizedShinkyu  = normalizeTarget(staff.target_shinkyu);
+  const normalizedSeitai   = normalizeTarget(staff.target_seitai);
 
   const payload: Record<string, unknown> = {
     clinic_id: clinicId,
@@ -258,6 +282,9 @@ export async function saveStaff(staff: Partial<ReservationStaff> & { name: strin
   if (normalizedTarget !== undefined) {
     payload.monthly_visit_target = normalizedTarget;
   }
+  if (normalizedJusei   !== undefined) payload.target_jusei   = normalizedJusei;
+  if (normalizedShinkyu !== undefined) payload.target_shinkyu = normalizedShinkyu;
+  if (normalizedSeitai  !== undefined) payload.target_seitai  = normalizedSeitai;
 
   if (staff.id) {
     const { error } = await supabase

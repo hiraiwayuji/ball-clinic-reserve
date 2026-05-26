@@ -128,7 +128,7 @@ export type VisitorDemographicsComparison = {
   citiesDiff: Record<string, { a: number; b: number; diff: number; pct: number }>;
 };
 
-// スタッフごとの当月施術実績 / 目標 / 達成率
+// スタッフごとの当月施術実績 / 目標 / 達成率（合計版・後方互換）
 export type StaffTargetProgress = {
   staff_id: string;
   staff_name: string;
@@ -136,6 +136,194 @@ export type StaffTargetProgress = {
   monthly_count: number;
   achievement_pct: number | null;  // 目標未設定なら null
 };
+
+export type CourseCategory = "jusei" | "shinkyu" | "seitai";
+export const COURSE_CATEGORIES: CourseCategory[] = ["jusei", "shinkyu", "seitai"];
+export const CATEGORY_LABELS: Record<CourseCategory, string> = {
+  jusei: "柔整",
+  shinkyu: "鍼灸",
+  seitai: "整体",
+};
+
+// スタッフ × カテゴリ別の月間実績・目標・達成率
+export type StaffCategoryProgress = {
+  staff_id: string;
+  staff_name: string;
+  by_category: Record<CourseCategory, {
+    count: number;
+    target: number | null;
+    pct: number | null;  // 目標未設定なら null
+  }>;
+  uncategorized_count: number;  // category=NULL のコース分（参考）
+  total_count: number;          // 全カテゴリ合計（uncategorized 含む）
+  total_target: number;         // 3 カテゴリの目標合計
+};
+
+export type CategoryProgressData = {
+  monthLabel: string;
+  rows: StaffCategoryProgress[];
+  // 全員の合計（スプレッドシートの「全員の合計」行）
+  totals: {
+    by_category: Record<CourseCategory, { count: number; target: number }>;
+    total_count: number;
+    total_target: number;
+  };
+};
+
+export async function getStaffCategoryProgress(): Promise<{
+  success: boolean;
+  data?: CategoryProgressData;
+  error?: string;
+}> {
+  try {
+    const { clinicId } = await checkAdminAuth();
+    const supabase = await createClient();
+
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = now.getMonth() + 1;
+    const monthStr = `${year}-${String(month).padStart(2, "0")}`;
+    const startTs = `${monthStr}-01T00:00:00+09:00`;
+    const lastDay = new Date(year, month, 0).getDate();
+    const endTs = `${monthStr}-${String(lastDay).padStart(2, "0")}T23:59:59+09:00`;
+
+    const [staffRes, courseRes, aptRes] = await Promise.all([
+      supabase
+        .from("reservation_staff")
+        .select("id, name, target_jusei, target_shinkyu, target_seitai, sort_order")
+        .eq("clinic_id", clinicId)
+        .eq("is_active", true)
+        .order("sort_order", { ascending: true })
+        .order("name", { ascending: true }),
+      supabase
+        .from("reservation_courses")
+        .select("id, category")
+        .eq("clinic_id", clinicId),
+      supabase
+        .from("appointments")
+        .select("staff_id, course_id, additional_staff, additional_courses")
+        .eq("clinic_id", clinicId)
+        .neq("status", "cancelled")
+        .gte("start_time", startTs)
+        .lte("start_time", endTs),
+    ]);
+
+    if (staffRes.error) return { success: false, error: staffRes.error.message };
+    if (courseRes.error) return { success: false, error: courseRes.error.message };
+    if (aptRes.error) return { success: false, error: aptRes.error.message };
+
+    // course_id → category マッピング
+    const courseCategory = new Map<string, CourseCategory | null>();
+    (courseRes.data ?? []).forEach((c: any) => {
+      const cat = c.category as string | null;
+      courseCategory.set(c.id, (cat === "jusei" || cat === "shinkyu" || cat === "seitai") ? cat : null);
+    });
+
+    // スタッフ ID → カテゴリ別件数
+    const tally = new Map<string, {
+      by: Record<CourseCategory, number>;
+      uncat: number;
+      total: number;
+    }>();
+    const ensure = (id: string) => {
+      let t = tally.get(id);
+      if (!t) {
+        t = { by: { jusei: 0, shinkyu: 0, seitai: 0 }, uncat: 0, total: 0 };
+        tally.set(id, t);
+      }
+      return t;
+    };
+
+    (aptRes.data ?? []).forEach((row: any) => {
+      // 対象スタッフ集合（メイン + additional_staff）
+      const staffIds = new Set<string>();
+      if (row.staff_id) staffIds.add(row.staff_id);
+      const addStaff = row.additional_staff;
+      if (Array.isArray(addStaff)) {
+        for (const s of addStaff) {
+          if (s?.staff_id) staffIds.add(s.staff_id);
+        }
+      }
+      // 対象コース集合（メイン + additional_courses）
+      const courseIds = new Set<string>();
+      if (row.course_id) courseIds.add(row.course_id);
+      const addCourses = row.additional_courses;
+      if (Array.isArray(addCourses)) {
+        for (const c of addCourses) {
+          if (c?.course_id) courseIds.add(c.course_id);
+        }
+      }
+      // 各スタッフ × 各コースでカウント
+      // （複数担当・複数コースの予約は、それぞれの組み合わせで +1。スプレッド
+      //  シートの「件数」もメニュー数で集計するため、これで自然な数値になる）
+      for (const sid of staffIds) {
+        const t = ensure(sid);
+        if (courseIds.size === 0) {
+          // コース未指定はカウント不能 → uncategorized
+          t.uncat += 1;
+          t.total += 1;
+        } else {
+          for (const cid of courseIds) {
+            const cat = courseCategory.get(cid) ?? null;
+            if (cat) {
+              t.by[cat] += 1;
+            } else {
+              t.uncat += 1;
+            }
+            t.total += 1;
+          }
+        }
+      }
+    });
+
+    const rows: StaffCategoryProgress[] = (staffRes.data ?? []).map((s: any) => {
+      const t = tally.get(s.id) ?? { by: { jusei: 0, shinkyu: 0, seitai: 0 }, uncat: 0, total: 0 };
+      const tj = s.target_jusei ?? null;
+      const ts = s.target_shinkyu ?? null;
+      const ts2 = s.target_seitai ?? null;
+      const totalTarget = (tj ?? 0) + (ts ?? 0) + (ts2 ?? 0);
+      return {
+        staff_id: s.id,
+        staff_name: s.name,
+        by_category: {
+          jusei:   { count: t.by.jusei,   target: tj,  pct: tj  && tj  > 0 ? Math.round((t.by.jusei   / tj ) * 100) : null },
+          shinkyu: { count: t.by.shinkyu, target: ts,  pct: ts  && ts  > 0 ? Math.round((t.by.shinkyu / ts ) * 100) : null },
+          seitai:  { count: t.by.seitai,  target: ts2, pct: ts2 && ts2 > 0 ? Math.round((t.by.seitai  / ts2) * 100) : null },
+        },
+        uncategorized_count: t.uncat,
+        total_count: t.total,
+        total_target: totalTarget,
+      };
+    });
+
+    // 全員の合計
+    const totals: CategoryProgressData["totals"] = {
+      by_category: {
+        jusei:   { count: 0, target: 0 },
+        shinkyu: { count: 0, target: 0 },
+        seitai:  { count: 0, target: 0 },
+      },
+      total_count: 0,
+      total_target: 0,
+    };
+    rows.forEach((r) => {
+      for (const cat of COURSE_CATEGORIES) {
+        totals.by_category[cat].count  += r.by_category[cat].count;
+        totals.by_category[cat].target += r.by_category[cat].target ?? 0;
+      }
+      totals.total_count  += r.total_count;
+      totals.total_target += r.total_target;
+    });
+
+    return {
+      success: true,
+      data: { monthLabel: `${month}月`, rows, totals },
+    };
+  } catch (error) {
+    console.error("getStaffCategoryProgress error:", error);
+    return { success: false, error: "取得に失敗しました" };
+  }
+}
 
 export async function getStaffTargetsProgress(): Promise<{
   success: boolean;

@@ -42,6 +42,9 @@ function CourseRow({
   const [firstVisitPrice, setFirstVisitPrice] = useState(course.first_visit_price?.toString() ?? "");
   const [badgeLabel, setBadgeLabel] = useState(course.badge_label ?? "");
   const [sortOrder, setSortOrder] = useState((course.sort_order ?? 0).toString());
+  const [category, setCategory] = useState<"jusei" | "shinkyu" | "seitai" | "">(
+    (course.category as any) ?? "",
+  );
   const [saving, setSaving] = useState(false);
 
   const handleSave = async () => {
@@ -62,6 +65,7 @@ function CourseRow({
       regular_price: regularPrice ? Number(regularPrice) : null,
       first_visit_price: firstVisitPrice ? Number(firstVisitPrice) : null,
       badge_label: badgeLabel.trim() || null,
+      category: category || null,
     });
     setSaving(false);
     if (res.success) {
@@ -101,6 +105,21 @@ function CourseRow({
             <Label className="text-xs text-slate-600 dark:text-slate-300">所要時間（分） *</Label>
             <Input type="number" value={duration} onChange={e => setDuration(e.target.value)} className="h-9 mt-1" min={10} step={5} />
           </div>
+        </div>
+        <div>
+          <Label className="text-xs text-slate-600 dark:text-slate-300">
+            集計カテゴリ <span className="text-slate-400 font-normal">（ダッシュボードの達成率マトリクスで使用）</span>
+          </Label>
+          <select
+            value={category}
+            onChange={e => setCategory(e.target.value as any)}
+            className="h-9 mt-1 w-full border border-slate-200 dark:border-slate-700 rounded-md px-3 text-sm bg-white dark:bg-slate-900"
+          >
+            <option value="">未分類（集計対象外）</option>
+            <option value="jusei">柔整（保険施術など）</option>
+            <option value="shinkyu">鍼灸</option>
+            <option value="seitai">整体（マッサージ・パーソナル等含む）</option>
+          </select>
         </div>
         <div className="grid grid-cols-2 gap-2">
           <div>
@@ -243,6 +262,18 @@ function CourseRow({
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 flex-wrap">
           <span className="font-semibold text-slate-800 dark:text-slate-100">{course.name}</span>
+          {course.category === "jusei" && (
+            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">柔整</span>
+          )}
+          {course.category === "shinkyu" && (
+            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-300">鍼灸</span>
+          )}
+          {course.category === "seitai" && (
+            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300">整体</span>
+          )}
+          {!course.category && (
+            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400" title="集計カテゴリ未分類">未分類</span>
+          )}
           <span className="flex items-center gap-1 text-xs text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-700 px-2 py-0.5 rounded-full">
             <Clock className="w-3 h-3" />{course.duration_minutes}分
           </span>
@@ -310,10 +341,18 @@ function StaffRow({
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(staff.name);
   const [email, setEmail] = useState(staff.email ?? "");
-  const [targetStr, setTargetStr] = useState(
-    staff.monthly_visit_target ? String(staff.monthly_visit_target) : "",
-  );
+  const [targetJusei, setTargetJusei] = useState(staff.target_jusei ? String(staff.target_jusei) : "");
+  const [targetShinkyu, setTargetShinkyu] = useState(staff.target_shinkyu ? String(staff.target_shinkyu) : "");
+  const [targetSeitai, setTargetSeitai] = useState(staff.target_seitai ? String(staff.target_seitai) : "");
   const [saving, setSaving] = useState(false);
+
+  const parseTarget = (v: string): number | null | "error" => {
+    const t = v.trim();
+    if (!t) return null;
+    const n = parseInt(t, 10);
+    if (!Number.isFinite(n) || n < 0) return "error";
+    return n > 0 ? n : null;
+  };
 
   const handleSave = async () => {
     if (!name.trim()) return;
@@ -323,16 +362,12 @@ function StaffRow({
       toast.error("メールアドレスの形式が正しくありません");
       return;
     }
-    // 目標値: 空 or 0 なら null（目標非表示）、それ以外は正の整数
-    const targetTrim = targetStr.trim();
-    let targetNum: number | null = null;
-    if (targetTrim) {
-      const n = parseInt(targetTrim, 10);
-      if (!Number.isFinite(n) || n < 0) {
-        toast.error("月間施術目標は 0 以上の整数で入力してください");
-        return;
-      }
-      targetNum = n > 0 ? n : null;
+    const tj = parseTarget(targetJusei);
+    const ts = parseTarget(targetShinkyu);
+    const tt = parseTarget(targetSeitai);
+    if (tj === "error" || ts === "error" || tt === "error") {
+      toast.error("月間目標は 0 以上の整数で入力してください");
+      return;
     }
     setSaving(true);
     const res = await saveStaff({
@@ -340,7 +375,11 @@ function StaffRow({
       is_active: staff.is_active, sort_order: staff.sort_order,
       show_in_timeline: staff.show_in_timeline ?? true,
       email: trimmedEmail || null,
-      monthly_visit_target: targetNum,
+      target_jusei:   tj,
+      target_shinkyu: ts,
+      target_seitai:  tt,
+      // 後方互換: 合計目標は 3 つの合計に自動更新（手動編集不可）
+      monthly_visit_target: ((tj ?? 0) + (ts ?? 0) + (tt ?? 0)) || null,
     });
     setSaving(false);
     if (res.success) {
@@ -377,7 +416,7 @@ function StaffRow({
   if (editing) {
     return (
       <div className="border rounded-xl p-3 bg-blue-50 border-blue-200 dark:bg-slate-900 dark:border-slate-700 space-y-2">
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
           <div>
             <Label className="text-xs text-slate-600 dark:text-slate-300">スタッフ名 *</Label>
             <Input
@@ -402,25 +441,29 @@ function StaffRow({
               autoComplete="email"
             />
           </div>
-          <div>
-            <Label className="text-xs text-slate-600 dark:text-slate-300">
-              月間施術目標 <span className="text-slate-400 font-normal">（任意）</span>
-            </Label>
-            <Input
-              type="number"
-              min={0}
-              step={1}
-              value={targetStr}
-              onChange={e => setTargetStr(e.target.value)}
-              className="h-9 mt-1"
-              placeholder="例: 120"
-              inputMode="numeric"
-            />
+        </div>
+        <div>
+          <Label className="text-xs text-slate-600 dark:text-slate-300">
+            月間目標（カテゴリ別・任意）
+          </Label>
+          <div className="grid grid-cols-3 gap-2 mt-1">
+            <div className="bg-amber-50 dark:bg-amber-900/20 rounded-md p-2 border border-amber-200 dark:border-amber-900/40">
+              <Label className="text-[10px] font-bold text-amber-700 dark:text-amber-300 uppercase">柔整</Label>
+              <Input type="number" min={0} step={1} value={targetJusei} onChange={e => setTargetJusei(e.target.value)} className="h-8 mt-1 bg-white dark:bg-slate-900" placeholder="例: 120" inputMode="numeric" />
+            </div>
+            <div className="bg-violet-50 dark:bg-violet-900/20 rounded-md p-2 border border-violet-200 dark:border-violet-900/40">
+              <Label className="text-[10px] font-bold text-violet-700 dark:text-violet-300 uppercase">鍼灸</Label>
+              <Input type="number" min={0} step={1} value={targetShinkyu} onChange={e => setTargetShinkyu(e.target.value)} className="h-8 mt-1 bg-white dark:bg-slate-900" placeholder="例: 200" inputMode="numeric" />
+            </div>
+            <div className="bg-emerald-50 dark:bg-emerald-900/20 rounded-md p-2 border border-emerald-200 dark:border-emerald-900/40">
+              <Label className="text-[10px] font-bold text-emerald-700 dark:text-emerald-300 uppercase">整体</Label>
+              <Input type="number" min={0} step={1} value={targetSeitai} onChange={e => setTargetSeitai(e.target.value)} className="h-8 mt-1 bg-white dark:bg-slate-900" placeholder="例: 10" inputMode="numeric" />
+            </div>
           </div>
         </div>
         <p className="text-[10px] text-slate-500 dark:text-slate-400">
           ※ email を登録すると本人が <code className="px-1 bg-slate-100 dark:bg-slate-800 rounded">/admin/my-schedule</code> から休み希望を出せます。<br />
-          ※ 月間施術目標を入れると、予約タイムテーブルのスタッフ名横に「実績 / 目標」が表示されます（0 や空欄なら実績のみ）。
+          ※ 月間目標を入れると、ダッシュボードに「カテゴリ別 達成率マトリクス」が出ます。空欄なら集計対象外。
         </p>
         <div className="flex gap-2 justify-end">
           <Button size="sm" variant="outline" onClick={() => setEditing(false)}>
@@ -441,10 +484,14 @@ function StaffRow({
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 flex-wrap">
           <span className="font-semibold text-slate-800 dark:text-slate-100 truncate">{staff.name}</span>
-          {staff.monthly_visit_target ? (
-            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300 tabular-nums">
-              月目標 {staff.monthly_visit_target}件
-            </span>
+          {staff.target_jusei ? (
+            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300 tabular-nums">柔整 {staff.target_jusei}</span>
+          ) : null}
+          {staff.target_shinkyu ? (
+            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-violet-50 text-violet-700 dark:bg-violet-900/30 dark:text-violet-300 tabular-nums">鍼灸 {staff.target_shinkyu}</span>
+          ) : null}
+          {staff.target_seitai ? (
+            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300 tabular-nums">整体 {staff.target_seitai}</span>
           ) : null}
         </div>
         {staff.email ? (
@@ -623,7 +670,9 @@ export default function CourseStaffSettings({ initialCourses, initialStaff, init
   const [addingStaff, setAddingStaff] = useState(false);
   const [newStaffName, setNewStaffName] = useState("");
   const [newStaffEmail, setNewStaffEmail] = useState("");
-  const [newStaffTarget, setNewStaffTarget] = useState("");
+  const [newStaffTargetJusei, setNewStaffTargetJusei] = useState("");
+  const [newStaffTargetShinkyu, setNewStaffTargetShinkyu] = useState("");
+  const [newStaffTargetSeitai, setNewStaffTargetSeitai] = useState("");
   const [savingStaff, setSavingStaff] = useState(false);
 
   const [addingRoom, setAddingRoom] = useState(false);
@@ -690,22 +739,29 @@ export default function CourseStaffSettings({ initialCourses, initialStaff, init
       toast.error("メールアドレスの形式が正しくありません");
       return;
     }
-    const targetTrim = newStaffTarget.trim();
-    let targetNum: number | null = null;
-    if (targetTrim) {
-      const n = parseInt(targetTrim, 10);
-      if (!Number.isFinite(n) || n < 0) {
-        toast.error("月間施術目標は 0 以上の整数で入力してください");
-        return;
-      }
-      targetNum = n > 0 ? n : null;
+    const parseTarget = (v: string): number | null | "error" => {
+      const t = v.trim();
+      if (!t) return null;
+      const n = parseInt(t, 10);
+      if (!Number.isFinite(n) || n < 0) return "error";
+      return n > 0 ? n : null;
+    };
+    const tj = parseTarget(newStaffTargetJusei);
+    const ts = parseTarget(newStaffTargetShinkyu);
+    const tt = parseTarget(newStaffTargetSeitai);
+    if (tj === "error" || ts === "error" || tt === "error") {
+      toast.error("月間目標は 0 以上の整数で入力してください");
+      return;
     }
     setSavingStaff(true);
     const res = await saveStaff({
       name: newStaffName.trim(),
       sort_order: staff.length,
       email: trimmedEmail || null,
-      monthly_visit_target: targetNum,
+      target_jusei: tj,
+      target_shinkyu: ts,
+      target_seitai: tt,
+      monthly_visit_target: ((tj ?? 0) + (ts ?? 0) + (tt ?? 0)) || null,
     });
     setSavingStaff(false);
     if (res.success) {
@@ -713,7 +769,9 @@ export default function CourseStaffSettings({ initialCourses, initialStaff, init
       setAddingStaff(false);
       setNewStaffName("");
       setNewStaffEmail("");
-      setNewStaffTarget("");
+      setNewStaffTargetJusei("");
+      setNewStaffTargetShinkyu("");
+      setNewStaffTargetSeitai("");
       window.location.reload();
     } else {
       toast.error(res.error ?? "追加に失敗しました");
@@ -941,7 +999,7 @@ export default function CourseStaffSettings({ initialCourses, initialStaff, init
 
           {addingStaff && (
             <div className="border rounded-xl p-3 bg-blue-50 border-blue-200 dark:bg-slate-900 dark:border-slate-700 space-y-2">
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 <div>
                   <Label className="text-xs text-slate-600 dark:text-slate-300">スタッフ名 *</Label>
                   <Input
@@ -966,25 +1024,29 @@ export default function CourseStaffSettings({ initialCourses, initialStaff, init
                     autoComplete="email"
                   />
                 </div>
-                <div>
-                  <Label className="text-xs text-slate-600 dark:text-slate-300">
-                    月間施術目標 <span className="text-slate-400 font-normal">（任意）</span>
-                  </Label>
-                  <Input
-                    type="number"
-                    min={0}
-                    step={1}
-                    value={newStaffTarget}
-                    onChange={e => setNewStaffTarget(e.target.value)}
-                    className="h-9 mt-1"
-                    placeholder="例: 120"
-                    inputMode="numeric"
-                  />
+              </div>
+              <div>
+                <Label className="text-xs text-slate-600 dark:text-slate-300">
+                  月間目標（カテゴリ別・任意）
+                </Label>
+                <div className="grid grid-cols-3 gap-2 mt-1">
+                  <div className="bg-amber-50 dark:bg-amber-900/20 rounded-md p-2 border border-amber-200 dark:border-amber-900/40">
+                    <Label className="text-[10px] font-bold text-amber-700 dark:text-amber-300 uppercase">柔整</Label>
+                    <Input type="number" min={0} step={1} value={newStaffTargetJusei} onChange={e => setNewStaffTargetJusei(e.target.value)} className="h-8 mt-1 bg-white dark:bg-slate-900" placeholder="例: 120" inputMode="numeric" />
+                  </div>
+                  <div className="bg-violet-50 dark:bg-violet-900/20 rounded-md p-2 border border-violet-200 dark:border-violet-900/40">
+                    <Label className="text-[10px] font-bold text-violet-700 dark:text-violet-300 uppercase">鍼灸</Label>
+                    <Input type="number" min={0} step={1} value={newStaffTargetShinkyu} onChange={e => setNewStaffTargetShinkyu(e.target.value)} className="h-8 mt-1 bg-white dark:bg-slate-900" placeholder="例: 200" inputMode="numeric" />
+                  </div>
+                  <div className="bg-emerald-50 dark:bg-emerald-900/20 rounded-md p-2 border border-emerald-200 dark:border-emerald-900/40">
+                    <Label className="text-[10px] font-bold text-emerald-700 dark:text-emerald-300 uppercase">整体</Label>
+                    <Input type="number" min={0} step={1} value={newStaffTargetSeitai} onChange={e => setNewStaffTargetSeitai(e.target.value)} className="h-8 mt-1 bg-white dark:bg-slate-900" placeholder="例: 10" inputMode="numeric" />
+                  </div>
                 </div>
               </div>
               <p className="text-[10px] text-slate-500 dark:text-slate-400">
                 ※ email を登録すると本人が <code className="px-1 bg-slate-100 dark:bg-slate-800 rounded">/admin/my-schedule</code> から休み希望を出せます。<br />
-                ※ 月間施術目標を入れると、予約タイムテーブルのスタッフ名横に「実績 / 目標」が表示されます。
+                ※ 月間目標を入れると、ダッシュボードの「カテゴリ別 達成率マトリクス」に集計が出ます。
               </p>
               <div className="flex gap-2 justify-end">
                 <Button size="sm" variant="outline" onClick={() => setAddingStaff(false)}>
