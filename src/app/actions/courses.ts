@@ -31,6 +31,8 @@ export type ReservationStaff = {
   sort_order: number;
   /** ダッシュボードのタイムテーブルビューに表示するか（受付助手等を非表示にする） */
   show_in_timeline?: boolean;
+  /** ログイン用 email。/admin/my-schedule で本人スタッフレコード解決に使う */
+  email?: string | null;
 };
 
 // ── コース取得（管理側：全件） ──
@@ -226,13 +228,24 @@ export async function saveStaff(staff: Partial<ReservationStaff> & { name: strin
   const { createClient } = await import("@/lib/supabase/server");
   const supabase = await createClient();
 
-  const payload = {
+  // email は trim、空文字なら null。重複バリデーションはサーバー側で軽くチェック
+  const normalizedEmail = (() => {
+    if (staff.email === undefined) return undefined; // 触らない（更新時に email を送らないケース）
+    if (staff.email === null) return null;
+    const e = String(staff.email).trim().toLowerCase();
+    return e || null;
+  })();
+
+  const payload: Record<string, unknown> = {
     clinic_id: clinicId,
     name: staff.name,
     is_active: staff.is_active ?? true,
     sort_order: staff.sort_order ?? 0,
     show_in_timeline: staff.show_in_timeline ?? true,
   };
+  if (normalizedEmail !== undefined) {
+    payload.email = normalizedEmail;
+  }
 
   if (staff.id) {
     const { error } = await supabase

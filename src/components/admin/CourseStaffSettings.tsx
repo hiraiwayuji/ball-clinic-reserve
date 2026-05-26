@@ -41,6 +41,7 @@ function CourseRow({
   const [regularPrice, setRegularPrice] = useState(course.regular_price?.toString() ?? "");
   const [firstVisitPrice, setFirstVisitPrice] = useState(course.first_visit_price?.toString() ?? "");
   const [badgeLabel, setBadgeLabel] = useState(course.badge_label ?? "");
+  const [sortOrder, setSortOrder] = useState((course.sort_order ?? 0).toString());
   const [saving, setSaving] = useState(false);
 
   const handleSave = async () => {
@@ -53,7 +54,7 @@ function CourseRow({
       price: price ? Number(price) : null,
       description: description || null,
       is_active: course.is_active,
-      sort_order: course.sort_order,
+      sort_order: Number(sortOrder) || 0,
       image_url: imageUrl.trim() || null,
       is_coupon: isCoupon,
       is_first_visit_only: isFirstVisitOnly,
@@ -132,6 +133,17 @@ function CourseRow({
         <div>
           <Label className="text-xs text-slate-600 dark:text-slate-300">説明</Label>
           <Input value={description} onChange={e => setDescription(e.target.value)} className="h-9 mt-1" placeholder="患者向け説明文" />
+        </div>
+        <div>
+          <Label className="text-xs text-slate-600 dark:text-slate-300">表示順（小さい順に上から並ぶ）</Label>
+          <Input
+            type="number"
+            value={sortOrder}
+            onChange={e => setSortOrder(e.target.value)}
+            className="h-9 mt-1"
+            min={0}
+            placeholder="例: 1（上に出したいほど小さい数字）"
+          />
         </div>
 
         {/* メニューLP用フィールド */}
@@ -297,15 +309,23 @@ function StaffRow({
 }) {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(staff.name);
+  const [email, setEmail] = useState(staff.email ?? "");
   const [saving, setSaving] = useState(false);
 
   const handleSave = async () => {
     if (!name.trim()) return;
+    // email を入れる場合は簡易バリデーション（@ 含むかだけ）
+    const trimmedEmail = email.trim();
+    if (trimmedEmail && !trimmedEmail.includes("@")) {
+      toast.error("メールアドレスの形式が正しくありません");
+      return;
+    }
     setSaving(true);
     const res = await saveStaff({
       id: staff.id, name: name.trim(),
       is_active: staff.is_active, sort_order: staff.sort_order,
       show_in_timeline: staff.show_in_timeline ?? true,
+      email: trimmedEmail || null,
     });
     setSaving(false);
     if (res.success) {
@@ -341,14 +361,44 @@ function StaffRow({
 
   if (editing) {
     return (
-      <div className="border rounded-xl p-3 bg-blue-50 border-blue-200 flex items-center gap-2">
-        <Input value={name} onChange={e => setName(e.target.value)} className="h-9 flex-1" placeholder="スタッフ名" />
-        <Button size="sm" variant="outline" onClick={() => setEditing(false)}>
-          <X className="w-3.5 h-3.5" />
-        </Button>
-        <Button size="sm" onClick={handleSave} disabled={saving} className="bg-blue-600 hover:bg-blue-700 text-white">
-          <Check className="w-3.5 h-3.5 mr-1" />{saving ? "保存中..." : "保存"}
-        </Button>
+      <div className="border rounded-xl p-3 bg-blue-50 border-blue-200 dark:bg-slate-900 dark:border-slate-700 space-y-2">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          <div>
+            <Label className="text-xs text-slate-600 dark:text-slate-300">スタッフ名 *</Label>
+            <Input
+              value={name}
+              onChange={e => setName(e.target.value)}
+              className="h-9 mt-1"
+              placeholder="スタッフ名（例: 院長 平岩）"
+              autoFocus
+            />
+          </div>
+          <div>
+            <Label className="text-xs text-slate-600 dark:text-slate-300">
+              ログイン用 email <span className="text-slate-400 font-normal">（休み希望提出に必要）</span>
+            </Label>
+            <Input
+              type="email"
+              value={email}
+              onChange={e => setEmail(e.target.value)}
+              className="h-9 mt-1"
+              placeholder="staff@example.com"
+              inputMode="email"
+              autoComplete="email"
+            />
+          </div>
+        </div>
+        <p className="text-[10px] text-slate-500 dark:text-slate-400">
+          ※ ログイン用メールを登録すると、本人が <code className="px-1 bg-slate-100 dark:bg-slate-800 rounded">/admin/my-schedule</code> から休み希望を提出できるようになります。
+        </p>
+        <div className="flex gap-2 justify-end">
+          <Button size="sm" variant="outline" onClick={() => setEditing(false)}>
+            <X className="w-3.5 h-3.5 mr-1" /> キャンセル
+          </Button>
+          <Button size="sm" onClick={handleSave} disabled={saving} className="bg-blue-600 hover:bg-blue-700 text-white">
+            <Check className="w-3.5 h-3.5 mr-1" />{saving ? "保存中..." : "保存"}
+          </Button>
+        </div>
       </div>
     );
   }
@@ -357,7 +407,14 @@ function StaffRow({
     <div className={`flex items-center gap-3 border rounded-xl px-3 py-2.5 transition-colors ${staff.is_active ? "bg-white dark:bg-slate-800" : "bg-slate-50 dark:bg-slate-800/50 opacity-60"}`}>
       <GripVertical className="w-4 h-4 text-slate-300 shrink-0" />
       <User className="w-4 h-4 text-slate-400 shrink-0" />
-      <span className="font-semibold text-slate-800 dark:text-slate-100 flex-1">{staff.name}</span>
+      <div className="flex-1 min-w-0">
+        <span className="font-semibold text-slate-800 dark:text-slate-100 block truncate">{staff.name}</span>
+        {staff.email ? (
+          <span className="text-[11px] text-slate-500 dark:text-slate-400 font-mono truncate block">📧 {staff.email}</span>
+        ) : (
+          <span className="text-[11px] text-amber-600 dark:text-amber-400">⚠ email 未登録（休み希望は提出できません）</span>
+        )}
+      </div>
       <div className="flex items-center gap-1 shrink-0">
         <button
           onClick={handleToggleTimeline}
@@ -527,6 +584,7 @@ export default function CourseStaffSettings({ initialCourses, initialStaff, init
 
   const [addingStaff, setAddingStaff] = useState(false);
   const [newStaffName, setNewStaffName] = useState("");
+  const [newStaffEmail, setNewStaffEmail] = useState("");
   const [savingStaff, setSavingStaff] = useState(false);
 
   const [addingRoom, setAddingRoom] = useState(false);
@@ -588,13 +646,23 @@ export default function CourseStaffSettings({ initialCourses, initialStaff, init
 
   const handleAddStaff = async () => {
     if (!newStaffName.trim()) return;
+    const trimmedEmail = newStaffEmail.trim();
+    if (trimmedEmail && !trimmedEmail.includes("@")) {
+      toast.error("メールアドレスの形式が正しくありません");
+      return;
+    }
     setSavingStaff(true);
-    const res = await saveStaff({ name: newStaffName.trim(), sort_order: staff.length });
+    const res = await saveStaff({
+      name: newStaffName.trim(),
+      sort_order: staff.length,
+      email: trimmedEmail || null,
+    });
     setSavingStaff(false);
     if (res.success) {
       toast.success("スタッフを追加しました");
       setAddingStaff(false);
       setNewStaffName("");
+      setNewStaffEmail("");
       window.location.reload();
     } else {
       toast.error(res.error ?? "追加に失敗しました");
@@ -821,14 +889,44 @@ export default function CourseStaffSettings({ initialCourses, initialStaff, init
           ))}
 
           {addingStaff && (
-            <div className="border rounded-xl p-3 bg-blue-50 border-blue-200 flex items-center gap-2">
-              <Input value={newStaffName} onChange={e => setNewStaffName(e.target.value)} className="h-9 flex-1" placeholder="スタッフ名（例: 院長 平岩）" autoFocus />
-              <Button size="sm" variant="outline" onClick={() => setAddingStaff(false)}>
-                <X className="w-3.5 h-3.5" />
-              </Button>
-              <Button size="sm" onClick={handleAddStaff} disabled={savingStaff} className="bg-blue-600 hover:bg-blue-700 text-white">
-                <Plus className="w-3.5 h-3.5 mr-1" />{savingStaff ? "追加中..." : "追加"}
-              </Button>
+            <div className="border rounded-xl p-3 bg-blue-50 border-blue-200 dark:bg-slate-900 dark:border-slate-700 space-y-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <div>
+                  <Label className="text-xs text-slate-600 dark:text-slate-300">スタッフ名 *</Label>
+                  <Input
+                    value={newStaffName}
+                    onChange={e => setNewStaffName(e.target.value)}
+                    className="h-9 mt-1"
+                    placeholder="例: 院長 平岩"
+                    autoFocus
+                  />
+                </div>
+                <div>
+                  <Label className="text-xs text-slate-600 dark:text-slate-300">
+                    ログイン用 email <span className="text-slate-400 font-normal">（任意・休み希望に必要）</span>
+                  </Label>
+                  <Input
+                    type="email"
+                    value={newStaffEmail}
+                    onChange={e => setNewStaffEmail(e.target.value)}
+                    className="h-9 mt-1"
+                    placeholder="staff@example.com"
+                    inputMode="email"
+                    autoComplete="email"
+                  />
+                </div>
+              </div>
+              <p className="text-[10px] text-slate-500 dark:text-slate-400">
+                ※ ログイン用メールを登録すると、本人が <code className="px-1 bg-slate-100 dark:bg-slate-800 rounded">/admin/my-schedule</code> から休み希望を提出できるようになります。あとから編集も可能。
+              </p>
+              <div className="flex gap-2 justify-end">
+                <Button size="sm" variant="outline" onClick={() => setAddingStaff(false)}>
+                  <X className="w-3.5 h-3.5 mr-1" /> キャンセル
+                </Button>
+                <Button size="sm" onClick={handleAddStaff} disabled={savingStaff} className="bg-blue-600 hover:bg-blue-700 text-white">
+                  <Plus className="w-3.5 h-3.5 mr-1" />{savingStaff ? "追加中..." : "追加する"}
+                </Button>
+              </div>
             </div>
           )}
         </div>
