@@ -17,6 +17,7 @@ import {
   Clock, User, RefreshCw, Loader2, CheckCircle2,
   Stethoscope, CreditCard, CalendarPlus, ArrowRight,
   Phone, MessageCircleMore, ChevronRight, Bot, ChevronDown, ChevronLeft,
+  Zap,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -118,6 +119,7 @@ function AppointmentCard({
   onStatusChange: (id: string, status: CheckinStatus) => void;
   onRemove: (id: string) => void;
 }) {
+  const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [justDone, setJustDone] = useState(false);
   const [showSecretaryTip, setShowSecretaryTip] = useState(false);
@@ -127,6 +129,46 @@ function AppointmentCard({
   const step = getStep(apt.checkin_status);
   const next = nextStatus(apt.checkin_status);
   const nextStep = next !== null ? getStep(next) : null;
+
+  const buildSalesUrl = useCallback(() => {
+    const params = new URLSearchParams();
+    params.set("name", apt.customers?.name ?? "");
+    params.set("first_visit", String(apt.is_first_visit));
+    params.set("apt_id", apt.id);
+    if (apt.customers?.id) params.set("customer_id", apt.customers.id);
+    if (apt.course_id) params.set("course_id", apt.course_id);
+    if (apt.staff_id) params.set("staff_id", apt.staff_id);
+    if (apt.staff_name) params.set("staff_name", apt.staff_name);
+    if (apt.course_name) params.set("course", apt.course_name);
+    try {
+      const t = new Date(apt.start_time);
+      const hh = t.toLocaleString("ja-JP", { timeZone: "Asia/Tokyo", hour: "2-digit", hour12: false }).padStart(2, "0");
+      const mm = t.toLocaleString("ja-JP", { timeZone: "Asia/Tokyo", minute: "2-digit" }).padStart(2, "0");
+      params.set("next_time", `${hh}:${mm}`);
+    } catch {}
+    if (prediction) {
+      params.set("predicted_amount", String(prediction.predictedAmount));
+      params.set("predicted_memo", prediction.predictedMemo);
+      params.set("ai_message", prediction.aiMessage);
+      params.set("confidence", String(prediction.confidence));
+    }
+    return `/admin/sales?${params.toString()}`;
+  }, [apt, prediction]);
+
+  // 「未来院」状態から一発で会計画面まで進めるショートカット
+  const handleQuickToCheckout = () => {
+    startTransition(async () => {
+      const res = await updateCheckinStatus(apt.id, "done");
+      if (!res.success) {
+        toast.error(res.error ?? "更新に失敗しました");
+        return;
+      }
+      onStatusChange(apt.id, "done");
+      recordAction(COUNTER_DONE_KEY, SALES_PAGE_KEY);
+      toast.success(`${apt.customers?.name ?? "患者"}様を会計へ進めました`);
+      router.push(buildSalesUrl());
+    });
+  };
 
   const time = format(parseISO(apt.start_time), "HH:mm");
   const endTime = format(parseISO(apt.end_time), "HH:mm");
@@ -316,36 +358,31 @@ function AppointmentCard({
           </button>
         )}
 
+        {/* 未来院から会計まで一発ジャンプ（checkin_status を done に更新しつつ /admin/sales へ） */}
+        {apt.checkin_status === null && (
+          <button
+            type="button"
+            onClick={handleQuickToCheckout}
+            disabled={isPending}
+            title="来院から会計まで一発で進めます（待合・施術中をスキップ）"
+            className={[
+              "flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-bold text-white",
+              "bg-gradient-to-r from-amber-500 to-rose-500 hover:from-amber-600 hover:to-rose-600",
+              "shadow-md active:scale-95 transition-all",
+              isPending ? "opacity-60 cursor-not-allowed" : "",
+            ].join(" ")}
+          >
+            {isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4" />}
+            <span>⭐ 受付→会計</span>
+            <ChevronRight className="w-3.5 h-3.5" />
+          </button>
+        )}
+
         {/* 会計登録へリンク（名前・初診フラグ・予測データをクエリパラメータで渡す） */}
         {(apt.checkin_status === "in_treatment" || apt.checkin_status === "arrived" || apt.checkin_status === "done") && (
           <div className="relative">
             <Link
-              href={(() => {
-                // 次回予約ワンクリック用: コース・担当・時間枠も URL に詰める
-                // → 売上登録後に「次回予約しますか？」ダイアログが開く
-                const params = new URLSearchParams();
-                params.set("name", apt.customers?.name ?? "");
-                params.set("first_visit", String(apt.is_first_visit));
-                params.set("apt_id", apt.id);
-                if (apt.customers?.id) params.set("customer_id", apt.customers.id);
-                if (apt.course_id) params.set("course_id", apt.course_id);
-                if (apt.staff_id) params.set("staff_id", apt.staff_id);
-                if (apt.staff_name) params.set("staff_name", apt.staff_name);
-                if (apt.course_name) params.set("course", apt.course_name);
-                try {
-                  const t = new Date(apt.start_time);
-                  const hh = t.toLocaleString("ja-JP", { timeZone: "Asia/Tokyo", hour: "2-digit", hour12: false }).padStart(2, "0");
-                  const mm = t.toLocaleString("ja-JP", { timeZone: "Asia/Tokyo", minute: "2-digit" }).padStart(2, "0");
-                  params.set("next_time", `${hh}:${mm}`);
-                } catch {}
-                if (prediction) {
-                  params.set("predicted_amount", String(prediction.predictedAmount));
-                  params.set("predicted_memo", prediction.predictedMemo);
-                  params.set("ai_message", prediction.aiMessage);
-                  params.set("confidence", String(prediction.confidence));
-                }
-                return `/admin/sales?${params.toString()}`;
-              })()}
+              href={buildSalesUrl()}
               onClick={() => recordAction(COUNTER_DONE_KEY, SALES_PAGE_KEY)}
               className={[
                 "flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium transition-all",
