@@ -746,6 +746,7 @@ function SalesPageInner() {
                 <TableHeader className="bg-slate-50/50 dark:bg-slate-800/30">
                   <TableRow className="border-b dark:border-white/5">
                     <TableHead>お名前</TableHead>
+                    <TableHead className="w-[90px]">カルテ番号</TableHead>
                     <TableHead>備考</TableHead>
                     <TableHead className="text-right">金額</TableHead>
                     <TableHead className="w-[130px]"></TableHead>
@@ -754,14 +755,14 @@ function SalesPageInner() {
                 <TableBody>
                   {loading ? (
                     <TableRow>
-                      <TableCell colSpan={4} className="h-48 text-center">
+                      <TableCell colSpan={5} className="h-48 text-center">
                         <Loader2 className="w-8 h-8 animate-spin mx-auto text-slate-500" />
                         <p className="text-sm text-slate-500 mt-2">読み込み中...</p>
                       </TableCell>
                     </TableRow>
                   ) : sales.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={4} className="h-48 text-center">
+                      <TableCell colSpan={5} className="h-48 text-center">
                         <div className="flex flex-col items-center justify-center text-slate-500">
                           <Coins className="w-12 h-12 mb-2 opacity-20" />
                           <p>売上データがありません</p>
@@ -778,6 +779,15 @@ function SalesPageInner() {
                               <span className="text-xs bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 font-bold px-1.5 py-0.5 rounded">新患</span>
                             )}
                           </div>
+                        </TableCell>
+                        <TableCell className="text-slate-600 dark:text-slate-300 text-sm font-mono">
+                          {sale.medical_record_number ? (
+                            <span className="inline-block px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
+                              {sale.medical_record_number}
+                            </span>
+                          ) : (
+                            <span className="text-slate-300 dark:text-slate-600">—</span>
+                          )}
                         </TableCell>
                         <TableCell className="text-slate-500 dark:text-slate-400 text-sm">
                           <div className="flex items-center gap-1.5 flex-wrap">

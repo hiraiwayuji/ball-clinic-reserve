@@ -570,17 +570,64 @@ export async function getCashSales(dateStr: string) {
   try {
     const supabase = await getSupabase();
     // Migration完了につき clinic_id フィルタを有効化
-    let query = supabase
+    const { data, error } = await supabase
       .from("cash_sales")
       .select("*")
       .eq("sale_date", dateStr)
-      .eq("clinic_id", clinicId);
-
-    const { data, error } = await query
+      .eq("clinic_id", clinicId)
       .order("created_at", { ascending: true });
 
     if (error) throw error;
-    return { success: true, data };
+
+    const sales = data ?? [];
+
+    // カルテ番号を引く: memo(JSON) の medicalRecordNumber を最優先、
+    // 無ければ customer_name で customers テーブルを bulk fetch → 同名 1 名のみ確定で採用
+    const uniqueNames = Array.from(
+      new Set(sales.map((s: any) => s.customer_name).filter(Boolean)),
+    );
+    const nameToMrn = new Map<string, string | null>();
+    if (uniqueNames.length > 0) {
+      const { data: customers } = await supabase
+        .from("customers")
+        .select("name, medical_record_number")
+        .eq("clinic_id", clinicId)
+        .in("name", uniqueNames);
+      const tally = new Map<string, { mrn: string | null; count: number }>();
+      (customers ?? []).forEach((c: any) => {
+        const name = c.name as string;
+        const mrn = c.medical_record_number ?? null;
+        const prev = tally.get(name);
+        if (prev) {
+          tally.set(name, { mrn: prev.mrn, count: prev.count + 1 });
+        } else {
+          tally.set(name, { mrn, count: 1 });
+        }
+      });
+      tally.forEach((v, name) => {
+        // 同名複数が居る場合は曖昧なので null
+        nameToMrn.set(name, v.count === 1 ? v.mrn : null);
+      });
+    }
+
+    const enriched = sales.map((s: any) => {
+      let mrnFromMemo: string | null = null;
+      try {
+        if (s.memo) {
+          const parsed = JSON.parse(s.memo);
+          if (parsed && parsed.medicalRecordNumber) {
+            mrnFromMemo = String(parsed.medicalRecordNumber);
+          }
+        }
+      } catch {}
+      return {
+        ...s,
+        medical_record_number:
+          mrnFromMemo ?? nameToMrn.get(s.customer_name) ?? null,
+      };
+    });
+
+    return { success: true, data: enriched };
   } catch (error) {
     console.error("Error fetching cash sales:", error);
     return { success: false, error: "取得に失敗しました", data: [] };
