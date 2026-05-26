@@ -12,6 +12,8 @@ export type MonthAnalytics = {
   profit: number;
   visits: { total: number; newPatients: number; returning: number };
   avgSpend: number; // 客単価（自費売上 / 来院数）
+  avgVisitsPerDay: number; // 1日あたりの平均来院数（分母は対象期間の暦日数。今月の場合は今日まで）
+  daysCounted: number; // 平均計算に使った日数（参考表示用）
 };
 
 export type ComparisonResult = {
@@ -34,6 +36,8 @@ export type ComparisonResult = {
     newPatientsPct: number;
     avgSpend: number;
     avgSpendPct: number;
+    avgVisitsPerDay: number;
+    avgVisitsPerDayPct: number;
   };
 };
 
@@ -53,6 +57,25 @@ export type CustomerAnalytics = {
   cities: Record<string, number>;
   sources: Record<string, number>;
   total: number;
+};
+
+// 来院者属性（当月予約に紐づく customer の属性集計）
+export type VisitorDemographics = {
+  year: number;
+  month: number;
+  label: string;
+  totalVisits: number;
+  uniqueVisitors: number;
+  ageGroups: Record<string, number>; // unique customer ベース
+  cities: Record<string, number>;    // unique customer ベース
+  gender: Record<string, number>;
+};
+
+export type VisitorDemographicsComparison = {
+  periodA: VisitorDemographics;
+  periodB: VisitorDemographics;
+  ageGroupsDiff: Record<string, { a: number; b: number; diff: number; pct: number }>;
+  citiesDiff: Record<string, { a: number; b: number; diff: number; pct: number }>;
 };
 
 function pct(a: number, b: number) {
@@ -117,6 +140,20 @@ export async function getMonthAnalytics(year: number, month: number): Promise<Mo
   const totalVisits = visits.length;
   const cashVisits = (cashRows ?? []).length;
 
+  // 平均来院数の分母: 過去月は月末日まで、現在月は今日まで（途中月の "1日平均" を直感的に出すため）
+  const today = new Date();
+  const isCurrentMonth = today.getFullYear() === year && today.getMonth() + 1 === month;
+  const isFutureMonth =
+    year > today.getFullYear() ||
+    (year === today.getFullYear() && month > today.getMonth() + 1);
+  const daysCounted = isFutureMonth
+    ? daysInMonth
+    : isCurrentMonth
+      ? today.getDate()
+      : daysInMonth;
+  const avgVisitsPerDay =
+    daysCounted > 0 ? Math.round((totalVisits / daysCounted) * 10) / 10 : 0;
+
   return {
     year,
     month,
@@ -126,6 +163,8 @@ export async function getMonthAnalytics(year: number, month: number): Promise<Mo
     profit: totalRevenue - expTotal,
     visits: { total: totalVisits, newPatients, returning: totalVisits - newPatients },
     avgSpend: cashVisits > 0 ? Math.round(cash / cashVisits) : 0,
+    avgVisitsPerDay,
+    daysCounted,
   };
 }
 
@@ -159,6 +198,11 @@ export async function getComparisonData(
       newPatientsPct: pct(periodA.visits.newPatients, periodB.visits.newPatients),
       avgSpend: periodA.avgSpend - periodB.avgSpend,
       avgSpendPct: pct(periodA.avgSpend, periodB.avgSpend),
+      avgVisitsPerDay: Math.round((periodA.avgVisitsPerDay - periodB.avgVisitsPerDay) * 10) / 10,
+      avgVisitsPerDayPct: pct(
+        Math.round(periodA.avgVisitsPerDay * 10),
+        Math.round(periodB.avgVisitsPerDay * 10),
+      ),
     },
   };
 }
@@ -204,6 +248,137 @@ export async function getWeekdayBreakdown(year: number, month: number) {
     counts[jstDay]++;
   });
   return days.map((day, i) => ({ day, count: counts[i] }));
+}
+
+// 年齢を年代キーに変換（要望: 「どの年齢層多いとか」）
+function ageGroupOf(age: number | null): string {
+  if (age === null) return "不明";
+  if (age < 20) return "20歳未満";
+  if (age < 30) return "20代";
+  if (age < 40) return "30代";
+  if (age < 50) return "40代";
+  if (age < 60) return "50代";
+  if (age < 70) return "60代";
+  if (age < 80) return "70代";
+  return "80歳以上";
+}
+
+function calcAge(birthDateStr: string | null | undefined): number | null {
+  if (!birthDateStr) return null;
+  const birth = new Date(birthDateStr);
+  if (isNaN(birth.getTime())) return null;
+  const today = new Date();
+  let age = today.getFullYear() - birth.getFullYear();
+  const m = today.getMonth() - birth.getMonth();
+  if (m < 0 || (m === 0 && today.getDate() < birth.getDate())) age--;
+  return age;
+}
+
+// 住所文字列から市町村名を推定（city_name 未入力時のフォールバック）
+function extractCityFromAddress(addr: string | null | undefined): string | null {
+  if (!addr) return null;
+  // 「徳島県板野郡藍住町〜」のような形式から 市/区/町/村 までを取り出す
+  const m = addr.match(/(?:[^\s　県府都道]+?[県府都道])?([^\s　市区町村]+?[市区町村])/);
+  return m ? m[1] : null;
+}
+
+// 当月の予約に紐づく customer 属性集計（来院者ベース）
+export async function getVisitorDemographics(
+  year: number,
+  month: number,
+): Promise<VisitorDemographics> {
+  const { clinicId } = await checkAdminAuth();
+  const supabase = await createClient();
+
+  const monthStr = `${year}-${String(month).padStart(2, "0")}`;
+  const startDate = `${monthStr}-01`;
+  const daysInMonth = new Date(year, month, 0).getDate();
+  const endDate = `${monthStr}-${String(daysInMonth).padStart(2, "0")}`;
+  const startTs = `${startDate}T00:00:00+09:00`;
+  const endTs = `${endDate}T23:59:59+09:00`;
+
+  const { data: apptRows } = await supabase
+    .from("appointments")
+    .select("customer_id")
+    .eq("clinic_id", clinicId)
+    .gte("start_time", startTs)
+    .lte("start_time", endTs)
+    .neq("status", "cancelled");
+
+  const totalVisits = (apptRows ?? []).length;
+  const customerIds = Array.from(
+    new Set(
+      (apptRows ?? [])
+        .map((a: any) => a.customer_id)
+        .filter((v: any): v is string => typeof v === "string" && !!v),
+    ),
+  );
+
+  const result: VisitorDemographics = {
+    year,
+    month,
+    label: `${year}年${month}月`,
+    totalVisits,
+    uniqueVisitors: customerIds.length,
+    ageGroups: {},
+    cities: {},
+    gender: {},
+  };
+
+  if (customerIds.length === 0) return result;
+
+  const { data: customers } = await supabase
+    .from("customers")
+    .select("id, gender, birth_date, city_name, address")
+    .eq("clinic_id", clinicId)
+    .in("id", customerIds);
+
+  (customers ?? []).forEach((c: any) => {
+    const age = calcAge(c.birth_date);
+    const ageKey = ageGroupOf(age);
+    result.ageGroups[ageKey] = (result.ageGroups[ageKey] ?? 0) + 1;
+
+    const cityKey = c.city_name || extractCityFromAddress(c.address) || "不明";
+    result.cities[cityKey] = (result.cities[cityKey] ?? 0) + 1;
+
+    const g = c.gender || "不明";
+    result.gender[g] = (result.gender[g] ?? 0) + 1;
+  });
+
+  return result;
+}
+
+function buildDiffMap(
+  a: Record<string, number>,
+  b: Record<string, number>,
+): Record<string, { a: number; b: number; diff: number; pct: number }> {
+  const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
+  const out: Record<string, { a: number; b: number; diff: number; pct: number }> = {};
+  keys.forEach((k) => {
+    const av = a[k] ?? 0;
+    const bv = b[k] ?? 0;
+    out[k] = { a: av, b: bv, diff: av - bv, pct: pct(av, bv) };
+  });
+  return out;
+}
+
+export async function getVisitorComparison(
+  yearA: number,
+  monthA: number,
+  yearB: number,
+  monthB: number,
+): Promise<VisitorDemographicsComparison> {
+  await checkAdminAuth();
+  const [periodA, periodB] = await Promise.all([
+    getVisitorDemographics(yearA, monthA),
+    getVisitorDemographics(yearB, monthB),
+  ]);
+  return {
+    periodA,
+    periodB,
+    ageGroupsDiff: buildDiffMap(periodA.ageGroups, periodB.ageGroups),
+    citiesDiff: buildDiffMap(periodA.cities, periodB.cities),
+  };
 }
 
 export async function getCustomerAnalytics(year: number, month: number): Promise<CustomerAnalytics> {

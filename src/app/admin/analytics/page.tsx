@@ -7,13 +7,13 @@ import {
   ComposedChart, Area,
 } from "recharts";
 import {
-  getComparisonData, getYearlyTrend, getWeekdayBreakdown, getCustomerAnalytics,
-  type ComparisonResult, type YearlyTrendPoint, type CustomerAnalytics,
+  getComparisonData, getYearlyTrend, getWeekdayBreakdown, getCustomerAnalytics, getVisitorComparison,
+  type ComparisonResult, type YearlyTrendPoint, type CustomerAnalytics, type VisitorDemographicsComparison,
 } from "@/app/actions/analytics";
 import { generateAnalyticsComment } from "@/app/actions/ai-secretary";
 import {
   TrendingUp, TrendingDown, Minus, Users, Banknote,
-  ReceiptText, ChartBar, Calendar, Sparkles, Loader2
+  ReceiptText, ChartBar, Calendar, Sparkles, Loader2, CalendarDays, MapPin
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -120,23 +120,26 @@ export default function AnalyticsPage() {
   const [trendYear, setTrendYear] = useState(THIS_YEAR);
   const [loading, setLoading] = useState(true);
   const [customerData, setCustomerData] = useState<CustomerAnalytics | null>(null);
-  const [activeTab, setActiveTab] = useState<"performance" | "customers">("performance");
+  const [visitorComparison, setVisitorComparison] = useState<VisitorDemographicsComparison | null>(null);
+  const [activeTab, setActiveTab] = useState<"performance" | "visitors" | "customers">("performance");
   const [aiComment, setAiComment] = useState<string | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
 
   const load = useCallback(() => {
     setLoading(true);
     startTransition(async () => {
-      const [comp, tr, wd, cust] = await Promise.all([
+      const [comp, tr, wd, cust, vis] = await Promise.all([
         getComparisonData(yearA, monthA, yearB, monthB),
         getYearlyTrend(trendYear),
         getWeekdayBreakdown(yearA, monthA),
         getCustomerAnalytics(yearA, monthA),
+        getVisitorComparison(yearA, monthA, yearB, monthB),
       ]);
       setComparison(comp);
       setTrend(tr);
       setWeekday(wd);
       setCustomerData(cust);
+      setVisitorComparison(vis);
       setLoading(false);
     });
   }, [yearA, monthA, yearB, monthB, trendYear]);
@@ -265,16 +268,22 @@ export default function AnalyticsPage() {
       </div>
 
       {/* タブ切り替え */}
-      <div className="flex border-b border-slate-200 dark:border-white/5">
+      <div className="flex border-b border-slate-200 dark:border-white/5 overflow-x-auto">
         <button
           onClick={() => setActiveTab("performance")}
-          className={`px-6 py-3 text-sm font-bold transition-colors border-b-2 ${activeTab === "performance" ? "border-indigo-600 text-indigo-700 dark:text-indigo-400" : "border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"}`}
+          className={`px-6 py-3 text-sm font-bold transition-colors border-b-2 whitespace-nowrap ${activeTab === "performance" ? "border-indigo-600 text-indigo-700 dark:text-indigo-400" : "border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"}`}
         >
           経営実績・トレンド
         </button>
         <button
+          onClick={() => setActiveTab("visitors")}
+          className={`px-6 py-3 text-sm font-bold transition-colors border-b-2 whitespace-nowrap ${activeTab === "visitors" ? "border-indigo-600 text-indigo-700 dark:text-indigo-400" : "border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"}`}
+        >
+          来院者属性（前月比）
+        </button>
+        <button
           onClick={() => setActiveTab("customers")}
-          className={`px-6 py-3 text-sm font-bold transition-colors border-b-2 ${activeTab === "customers" ? "border-indigo-600 text-indigo-700 dark:text-indigo-400" : "border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"}`}
+          className={`px-6 py-3 text-sm font-bold transition-colors border-b-2 whitespace-nowrap ${activeTab === "customers" ? "border-indigo-600 text-indigo-700 dark:text-indigo-400" : "border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"}`}
         >
           新規顧客属性分析
         </button>
@@ -327,6 +336,13 @@ export default function AnalyticsPage() {
               label="来院単価" valueA={a.avgSpend} valueB={b.avgSpend}
               diff={d.avgSpend} pct={d.avgSpendPct} format={yen}
               icon={<ChartBar className="w-4 h-4" />}
+            />
+            <KpiCard
+              label={`1日平均来院数（${a.daysCounted}日換算）`}
+              valueA={a.avgVisitsPerDay} valueB={b.avgVisitsPerDay}
+              diff={d.avgVisitsPerDay} pct={d.avgVisitsPerDayPct}
+              format={(n) => `${n.toFixed(1)}名`}
+              icon={<CalendarDays className="w-4 h-4" />}
             />
           </div>
 
@@ -500,6 +516,125 @@ export default function AnalyticsPage() {
         </>
       )}
 
+      {!loading && activeTab === "visitors" && visitorComparison && (
+        <div className="space-y-6">
+          {/* サマリーカード */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="bg-white dark:bg-slate-900/50 rounded-2xl border border-slate-100 dark:border-white/10 shadow-sm p-4">
+              <p className="text-xs text-slate-500 dark:text-slate-400 font-semibold mb-1">{visitorComparison.periodA.label} 来院延べ</p>
+              <p className="text-2xl font-black text-indigo-700 dark:text-indigo-400">
+                {visitorComparison.periodA.totalVisits}<span className="text-base ml-1 font-bold">件</span>
+              </p>
+              <p className="text-xs text-slate-400 mt-1">ユニーク {visitorComparison.periodA.uniqueVisitors} 名</p>
+            </div>
+            <div className="bg-white dark:bg-slate-900/50 rounded-2xl border border-slate-100 dark:border-white/10 shadow-sm p-4">
+              <p className="text-xs text-slate-500 dark:text-slate-400 font-semibold mb-1">{visitorComparison.periodB.label} 来院延べ</p>
+              <p className="text-2xl font-black text-slate-500 dark:text-slate-400">
+                {visitorComparison.periodB.totalVisits}<span className="text-base ml-1 font-bold">件</span>
+              </p>
+              <p className="text-xs text-slate-400 mt-1">ユニーク {visitorComparison.periodB.uniqueVisitors} 名</p>
+            </div>
+            <div className="bg-white dark:bg-slate-900/50 rounded-2xl border border-slate-100 dark:border-white/10 shadow-sm p-4">
+              <p className="text-xs text-slate-500 dark:text-slate-400 font-semibold mb-1">最多年代</p>
+              <p className="text-xl font-black text-slate-800 dark:text-slate-100">
+                {topKey(visitorComparison.periodA.ageGroups) ?? "—"}
+              </p>
+            </div>
+            <div className="bg-white dark:bg-slate-900/50 rounded-2xl border border-slate-100 dark:border-white/10 shadow-sm p-4">
+              <p className="text-xs text-slate-500 dark:text-slate-400 font-semibold mb-1">最多エリア</p>
+              <p className="text-xl font-black text-slate-800 dark:text-slate-100">
+                {topKey(visitorComparison.periodA.cities) ?? "—"}
+              </p>
+            </div>
+          </div>
+
+          {/* 年代別 前月比較 */}
+          <div className="bg-white dark:bg-slate-900/50 rounded-2xl border border-slate-100 dark:border-white/10 shadow-sm p-5">
+            <h2 className="font-bold text-slate-800 dark:text-slate-100 mb-4 flex items-center gap-2">
+              <div className="w-1.5 h-6 bg-indigo-400 rounded-full" />
+              年代別 来院者数（前月比）
+            </h2>
+            <ResponsiveContainer width="100%" height={280}>
+              <BarChart
+                data={ageOrder.map((k) => ({
+                  name: k,
+                  [visitorComparison.periodA.label]: visitorComparison.periodA.ageGroups[k] ?? 0,
+                  [visitorComparison.periodB.label]: visitorComparison.periodB.ageGroups[k] ?? 0,
+                }))}
+              >
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                <XAxis dataKey="name" tick={{ fontSize: 12 }} />
+                <YAxis tick={{ fontSize: 11 }} />
+                <Tooltip />
+                <Legend />
+                <Bar dataKey={visitorComparison.periodA.label} fill="#6366f1" radius={[4, 4, 0, 0]} />
+                <Bar dataKey={visitorComparison.periodB.label} fill="#cbd5e1" radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+            <DiffTable
+              rows={ageOrder
+                .map((k) => ({ name: k, ...visitorComparison.ageGroupsDiff[k] }))
+                .filter((r) => (r.a ?? 0) > 0 || (r.b ?? 0) > 0)}
+              labelA={visitorComparison.periodA.label}
+              labelB={visitorComparison.periodB.label}
+              unit="名"
+            />
+          </div>
+
+          {/* エリア別 前月比較 TOP8 */}
+          <div className="bg-white dark:bg-slate-900/50 rounded-2xl border border-slate-100 dark:border-white/10 shadow-sm p-5">
+            <h2 className="font-bold text-slate-800 dark:text-slate-100 mb-4 flex items-center gap-2">
+              <MapPin className="w-4 h-4 text-emerald-500" />
+              在住エリア別 来院者数 TOP8（前月比）
+            </h2>
+            {(() => {
+              const sortedCities = Object.entries(visitorComparison.citiesDiff)
+                .sort((x, y) => (y[1].a ?? 0) - (x[1].a ?? 0))
+                .slice(0, 8);
+              if (sortedCities.length === 0) {
+                return (
+                  <div className="h-[200px] flex items-center justify-center text-slate-400 text-sm">
+                    住所データが登録されている来院者がいません
+                  </div>
+                );
+              }
+              return (
+                <>
+                  <ResponsiveContainer width="100%" height={Math.max(220, sortedCities.length * 36)}>
+                    <BarChart
+                      data={sortedCities.map(([name, v]) => ({
+                        name,
+                        [visitorComparison.periodA.label]: v.a,
+                        [visitorComparison.periodB.label]: v.b,
+                      }))}
+                      layout="vertical"
+                      margin={{ left: 50, right: 30 }}
+                    >
+                      <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f1f5f9" />
+                      <XAxis type="number" tick={{ fontSize: 11 }} />
+                      <YAxis type="category" dataKey="name" tick={{ fontSize: 12, fontWeight: "bold" }} width={120} />
+                      <Tooltip />
+                      <Legend />
+                      <Bar dataKey={visitorComparison.periodA.label} fill="#10b981" radius={[0, 4, 4, 0]} barSize={14} />
+                      <Bar dataKey={visitorComparison.periodB.label} fill="#cbd5e1" radius={[0, 4, 4, 0]} barSize={14} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                  <DiffTable
+                    rows={sortedCities.map(([name, v]) => ({ name, ...v }))}
+                    labelA={visitorComparison.periodA.label}
+                    labelB={visitorComparison.periodB.label}
+                    unit="名"
+                  />
+                </>
+              );
+            })()}
+            <p className="text-[11px] text-slate-400 mt-3">
+              ※ customers.city_name が未入力の場合は住所文字列から市区町村名を自動抽出します。それでも判定できない場合は「不明」に集計されます。
+            </p>
+          </div>
+        </div>
+      )}
+
       {!loading && activeTab === "customers" && customerData && (
         <div className="space-y-6">
           {/* KPIサマリー */}
@@ -649,4 +784,52 @@ export default function AnalyticsPage() {
 function pctCalc(a: number, b: number) {
   if (b === 0) return a > 0 ? 100 : 0;
   return Math.round(((a - b) / b) * 100);
+}
+
+const ageOrder = ["20歳未満", "20代", "30代", "40代", "50代", "60代", "70代", "80歳以上", "不明"];
+
+function topKey(map: Record<string, number>): string | null {
+  const entries = Object.entries(map).filter(([k]) => k !== "不明");
+  if (entries.length === 0) return null;
+  return entries.sort((a, b) => b[1] - a[1])[0][0];
+}
+
+// 前月比較テーブル
+function DiffTable({
+  rows, labelA, labelB, unit,
+}: {
+  rows: Array<{ name: string; a: number; b: number; diff: number; pct: number }>;
+  labelA: string; labelB: string; unit: string;
+}) {
+  if (rows.length === 0) return null;
+  return (
+    <div className="mt-4 overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="bg-slate-50 dark:bg-slate-800/50 text-xs uppercase text-slate-500 font-bold">
+            <th className="px-3 py-2 text-left">区分</th>
+            <th className="px-3 py-2 text-right text-indigo-600 dark:text-indigo-400">{labelA}</th>
+            <th className="px-3 py-2 text-right text-slate-400">{labelB}</th>
+            <th className="px-3 py-2 text-right">差</th>
+            <th className="px-3 py-2 text-right">変化率</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-slate-50 dark:divide-slate-800">
+          {rows.map((r) => (
+            <tr key={r.name} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/30 transition-colors">
+              <td className="px-3 py-2 font-semibold text-slate-700 dark:text-slate-200">{r.name}</td>
+              <td className="px-3 py-2 text-right text-indigo-700 dark:text-indigo-400 font-bold">{r.a}{unit}</td>
+              <td className="px-3 py-2 text-right text-slate-400">{r.b}{unit}</td>
+              <td className={`px-3 py-2 text-right font-bold ${r.diff === 0 ? "text-slate-400" : r.diff > 0 ? "text-emerald-600" : "text-red-500"}`}>
+                {r.diff > 0 ? "+" : ""}{r.diff === 0 ? "±0" : r.diff}{unit}
+              </td>
+              <td className="px-3 py-2 text-right">
+                <Delta value={r.diff} pct={r.pct} />
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
 }
