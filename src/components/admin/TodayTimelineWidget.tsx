@@ -164,7 +164,8 @@ export default function TodayTimelineWidget() {
   const staffWithUnassigned = useMemo(() => {
     if (!data) return [];
     const hasUnassigned = data.appointments.some(a => !a.staff_id);
-    const rows = data.staff.map(s => ({ id: s.id, name: s.name }));
+    const rows: { id: string; name: string; monthly_visit_target?: number | null }[] =
+      data.staff.map(s => ({ id: s.id, name: s.name, monthly_visit_target: s.monthly_visit_target ?? null }));
     if (hasUnassigned) rows.push({ id: UNASSIGNED_KEY, name: "未指定" });
     return rows;
   }, [data]);
@@ -238,12 +239,12 @@ export default function TodayTimelineWidget() {
               {/* 時間軸ヘッダ */}
               <div
                 className="grid items-center text-[10px] text-slate-500 dark:text-slate-400 border-b border-slate-200 dark:border-slate-700"
-                style={{ gridTemplateColumns: `120px repeat(${timeMarks.length}, minmax(28px, 1fr))` }}
+                style={{ gridTemplateColumns: `140px repeat(${timeMarks.length}, minmax(28px, 1fr))` }}
               >
                 <div className="px-2 py-1 text-xs font-semibold text-slate-600 dark:text-slate-300 flex items-center justify-between gap-1">
                   <span>先生</span>
                   <span className="text-[9px] font-normal text-slate-400 normal-case">
-                    {data.monthLabel}合計
+                    {data.monthLabel}実績/目標
                   </span>
                 </div>
                 {timeMarks.map((m, i) => (
@@ -260,23 +261,34 @@ export default function TodayTimelineWidget() {
               {staffWithUnassigned.map((s) => {
                 const apts = aptsByStaff.get(s.id) ?? [];
                 const monthCount = data.staffMonthCounts?.[s.id] ?? 0;
+                const target = s.monthly_visit_target ?? 0;
+                // 達成率に応じてバッジ色を切替: 100%以上=緑、80%以上=青、それ未満=スレート
+                const achievementBadge = target > 0
+                  ? (monthCount >= target
+                      ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300"
+                      : monthCount >= target * 0.8
+                        ? "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300"
+                        : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300")
+                  : "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300";
                 return (
                   <div
                     key={s.id}
                     className="grid relative border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50/50 dark:hover:bg-slate-800/30"
                     style={{
-                      gridTemplateColumns: `120px repeat(${timeMarks.length}, minmax(28px, 1fr))`,
+                      gridTemplateColumns: `140px repeat(${timeMarks.length}, minmax(28px, 1fr))`,
                       minHeight: "48px",
                     }}
                   >
                     <div className="px-2 py-1 text-sm font-medium text-slate-800 dark:text-slate-100 flex items-center justify-between gap-1 sticky left-0 bg-white dark:bg-slate-900 z-10 border-r border-slate-200 dark:border-slate-700">
                       <span className="truncate">{s.name}</span>
-                      {monthCount > 0 ? (
+                      {(monthCount > 0 || target > 0) ? (
                         <span
-                          className="shrink-0 text-[10px] font-black px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300 tabular-nums"
-                          title={`${data.monthLabel}の予約件数（キャンセル除く）`}
+                          className={`shrink-0 text-[10px] font-black px-1.5 py-0.5 rounded-full tabular-nums ${achievementBadge}`}
+                          title={target > 0
+                            ? `${data.monthLabel}実績 ${monthCount} / 目標 ${target}（達成率 ${Math.round((monthCount / target) * 100)}%）`
+                            : `${data.monthLabel}の予約件数（キャンセル除く）`}
                         >
-                          {monthCount}
+                          {target > 0 ? `${monthCount} / ${target}` : monthCount}
                         </span>
                       ) : (
                         <span className="shrink-0 text-[10px] text-slate-300 dark:text-slate-600 tabular-nums">—</span>

@@ -310,6 +310,9 @@ function StaffRow({
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(staff.name);
   const [email, setEmail] = useState(staff.email ?? "");
+  const [targetStr, setTargetStr] = useState(
+    staff.monthly_visit_target ? String(staff.monthly_visit_target) : "",
+  );
   const [saving, setSaving] = useState(false);
 
   const handleSave = async () => {
@@ -320,12 +323,24 @@ function StaffRow({
       toast.error("メールアドレスの形式が正しくありません");
       return;
     }
+    // 目標値: 空 or 0 なら null（目標非表示）、それ以外は正の整数
+    const targetTrim = targetStr.trim();
+    let targetNum: number | null = null;
+    if (targetTrim) {
+      const n = parseInt(targetTrim, 10);
+      if (!Number.isFinite(n) || n < 0) {
+        toast.error("月間施術目標は 0 以上の整数で入力してください");
+        return;
+      }
+      targetNum = n > 0 ? n : null;
+    }
     setSaving(true);
     const res = await saveStaff({
       id: staff.id, name: name.trim(),
       is_active: staff.is_active, sort_order: staff.sort_order,
       show_in_timeline: staff.show_in_timeline ?? true,
       email: trimmedEmail || null,
+      monthly_visit_target: targetNum,
     });
     setSaving(false);
     if (res.success) {
@@ -362,7 +377,7 @@ function StaffRow({
   if (editing) {
     return (
       <div className="border rounded-xl p-3 bg-blue-50 border-blue-200 dark:bg-slate-900 dark:border-slate-700 space-y-2">
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
           <div>
             <Label className="text-xs text-slate-600 dark:text-slate-300">スタッフ名 *</Label>
             <Input
@@ -387,9 +402,25 @@ function StaffRow({
               autoComplete="email"
             />
           </div>
+          <div>
+            <Label className="text-xs text-slate-600 dark:text-slate-300">
+              月間施術目標 <span className="text-slate-400 font-normal">（任意）</span>
+            </Label>
+            <Input
+              type="number"
+              min={0}
+              step={1}
+              value={targetStr}
+              onChange={e => setTargetStr(e.target.value)}
+              className="h-9 mt-1"
+              placeholder="例: 120"
+              inputMode="numeric"
+            />
+          </div>
         </div>
         <p className="text-[10px] text-slate-500 dark:text-slate-400">
-          ※ ログイン用メールを登録すると、本人が <code className="px-1 bg-slate-100 dark:bg-slate-800 rounded">/admin/my-schedule</code> から休み希望を提出できるようになります。
+          ※ email を登録すると本人が <code className="px-1 bg-slate-100 dark:bg-slate-800 rounded">/admin/my-schedule</code> から休み希望を出せます。<br />
+          ※ 月間施術目標を入れると、予約タイムテーブルのスタッフ名横に「実績 / 目標」が表示されます（0 や空欄なら実績のみ）。
         </p>
         <div className="flex gap-2 justify-end">
           <Button size="sm" variant="outline" onClick={() => setEditing(false)}>
@@ -408,7 +439,14 @@ function StaffRow({
       <GripVertical className="w-4 h-4 text-slate-300 shrink-0" />
       <User className="w-4 h-4 text-slate-400 shrink-0" />
       <div className="flex-1 min-w-0">
-        <span className="font-semibold text-slate-800 dark:text-slate-100 block truncate">{staff.name}</span>
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="font-semibold text-slate-800 dark:text-slate-100 truncate">{staff.name}</span>
+          {staff.monthly_visit_target ? (
+            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300 tabular-nums">
+              月目標 {staff.monthly_visit_target}件
+            </span>
+          ) : null}
+        </div>
         {staff.email ? (
           <span className="text-[11px] text-slate-500 dark:text-slate-400 font-mono truncate block">📧 {staff.email}</span>
         ) : (
@@ -585,6 +623,7 @@ export default function CourseStaffSettings({ initialCourses, initialStaff, init
   const [addingStaff, setAddingStaff] = useState(false);
   const [newStaffName, setNewStaffName] = useState("");
   const [newStaffEmail, setNewStaffEmail] = useState("");
+  const [newStaffTarget, setNewStaffTarget] = useState("");
   const [savingStaff, setSavingStaff] = useState(false);
 
   const [addingRoom, setAddingRoom] = useState(false);
@@ -651,11 +690,22 @@ export default function CourseStaffSettings({ initialCourses, initialStaff, init
       toast.error("メールアドレスの形式が正しくありません");
       return;
     }
+    const targetTrim = newStaffTarget.trim();
+    let targetNum: number | null = null;
+    if (targetTrim) {
+      const n = parseInt(targetTrim, 10);
+      if (!Number.isFinite(n) || n < 0) {
+        toast.error("月間施術目標は 0 以上の整数で入力してください");
+        return;
+      }
+      targetNum = n > 0 ? n : null;
+    }
     setSavingStaff(true);
     const res = await saveStaff({
       name: newStaffName.trim(),
       sort_order: staff.length,
       email: trimmedEmail || null,
+      monthly_visit_target: targetNum,
     });
     setSavingStaff(false);
     if (res.success) {
@@ -663,6 +713,7 @@ export default function CourseStaffSettings({ initialCourses, initialStaff, init
       setAddingStaff(false);
       setNewStaffName("");
       setNewStaffEmail("");
+      setNewStaffTarget("");
       window.location.reload();
     } else {
       toast.error(res.error ?? "追加に失敗しました");
@@ -890,7 +941,7 @@ export default function CourseStaffSettings({ initialCourses, initialStaff, init
 
           {addingStaff && (
             <div className="border rounded-xl p-3 bg-blue-50 border-blue-200 dark:bg-slate-900 dark:border-slate-700 space-y-2">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                 <div>
                   <Label className="text-xs text-slate-600 dark:text-slate-300">スタッフ名 *</Label>
                   <Input
@@ -903,7 +954,7 @@ export default function CourseStaffSettings({ initialCourses, initialStaff, init
                 </div>
                 <div>
                   <Label className="text-xs text-slate-600 dark:text-slate-300">
-                    ログイン用 email <span className="text-slate-400 font-normal">（任意・休み希望に必要）</span>
+                    ログイン用 email <span className="text-slate-400 font-normal">（任意）</span>
                   </Label>
                   <Input
                     type="email"
@@ -915,9 +966,25 @@ export default function CourseStaffSettings({ initialCourses, initialStaff, init
                     autoComplete="email"
                   />
                 </div>
+                <div>
+                  <Label className="text-xs text-slate-600 dark:text-slate-300">
+                    月間施術目標 <span className="text-slate-400 font-normal">（任意）</span>
+                  </Label>
+                  <Input
+                    type="number"
+                    min={0}
+                    step={1}
+                    value={newStaffTarget}
+                    onChange={e => setNewStaffTarget(e.target.value)}
+                    className="h-9 mt-1"
+                    placeholder="例: 120"
+                    inputMode="numeric"
+                  />
+                </div>
               </div>
               <p className="text-[10px] text-slate-500 dark:text-slate-400">
-                ※ ログイン用メールを登録すると、本人が <code className="px-1 bg-slate-100 dark:bg-slate-800 rounded">/admin/my-schedule</code> から休み希望を提出できるようになります。あとから編集も可能。
+                ※ email を登録すると本人が <code className="px-1 bg-slate-100 dark:bg-slate-800 rounded">/admin/my-schedule</code> から休み希望を出せます。<br />
+                ※ 月間施術目標を入れると、予約タイムテーブルのスタッフ名横に「実績 / 目標」が表示されます。
               </p>
               <div className="flex gap-2 justify-end">
                 <Button size="sm" variant="outline" onClick={() => setAddingStaff(false)}>

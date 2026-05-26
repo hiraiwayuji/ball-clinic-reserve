@@ -33,6 +33,8 @@ export type ReservationStaff = {
   show_in_timeline?: boolean;
   /** ログイン用 email。/admin/my-schedule で本人スタッフレコード解決に使う */
   email?: string | null;
+  /** 月間施術目標数。NULL or 0 ならタイムテーブルに目標を出さない */
+  monthly_visit_target?: number | null;
 };
 
 // ── コース取得（管理側：全件） ──
@@ -236,6 +238,13 @@ export async function saveStaff(staff: Partial<ReservationStaff> & { name: strin
     return e || null;
   })();
 
+  // monthly_visit_target は undefined なら触らない、null/0 は null として保存
+  let normalizedTarget: number | null | undefined = undefined;
+  if (staff.monthly_visit_target !== undefined) {
+    const n = Number(staff.monthly_visit_target);
+    normalizedTarget = Number.isFinite(n) && n > 0 ? Math.floor(n) : null;
+  }
+
   const payload: Record<string, unknown> = {
     clinic_id: clinicId,
     name: staff.name,
@@ -245,6 +254,9 @@ export async function saveStaff(staff: Partial<ReservationStaff> & { name: strin
   };
   if (normalizedEmail !== undefined) {
     payload.email = normalizedEmail;
+  }
+  if (normalizedTarget !== undefined) {
+    payload.monthly_visit_target = normalizedTarget;
   }
 
   if (staff.id) {

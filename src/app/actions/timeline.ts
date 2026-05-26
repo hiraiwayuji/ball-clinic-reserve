@@ -14,6 +14,7 @@ export type TimelineStaff = {
   id: string;
   name: string;
   sort_order: number;
+  monthly_visit_target?: number | null;
 };
 
 export type TimelineAppointment = {
@@ -88,7 +89,7 @@ export async function getTimelineForDate(dateStr: string): Promise<{ success: bo
 
     const [staffRes, aptRes, monthAptRes, settingsRes] = await Promise.all([
       sb.from("reservation_staff")
-        .select("id, name, sort_order")
+        .select("id, name, sort_order, monthly_visit_target")
         .eq("clinic_id", clinicId)
         .eq("is_active", true)
         .eq("show_in_timeline", true)
@@ -121,6 +122,7 @@ export async function getTimelineForDate(dateStr: string): Promise<{ success: bo
       id: s.id,
       name: s.name,
       sort_order: s.sort_order ?? 0,
+      monthly_visit_target: s.monthly_visit_target ?? null,
     }));
 
     const appointments: TimelineAppointment[] = (aptRes.data ?? []).map(a => {
