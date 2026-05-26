@@ -109,7 +109,7 @@ export async function getTimelineForDate(dateStr: string): Promise<{ success: bo
         .gte("start_time", monthStart)
         .lte("start_time", monthEnd),
       sb.from("clinic_settings")
-        .select("slot_duration_minutes, business_open_weekday, business_close_weekday, business_open_saturday, business_close_saturday")
+        .select("slot_duration_minutes, business_open_weekday, business_close_weekday, business_open_saturday, business_close_saturday, admin_timeline_open_weekday, admin_timeline_close_weekday, admin_timeline_open_saturday, admin_timeline_close_saturday")
         .eq("id", clinicId)
         .maybeSingle(),
     ]);
@@ -148,13 +148,15 @@ export async function getTimelineForDate(dateStr: string): Promise<{ success: bo
     const slotV = settingsRes.data?.slot_duration_minutes;
     const slotMinutes = (slotV === 15 || slotV === 20 || slotV === 30) ? slotV : 30;
 
-    // 営業時間設定から表示範囲を決定（土曜は別設定、休診曜日は default に fallback）
+    // 表示範囲は「管理画面タイムテーブル専用設定 (admin_timeline_*)」を最優先、
+    // 設定が無ければ患者LP用の営業時間 (business_*) にフォールバック。
+    // 土曜は別設定を持つ（admin_timeline_*_saturday → business_*_saturday の順）
     const openStr = isSaturday
-      ? settingsRes.data?.business_open_saturday
-      : settingsRes.data?.business_open_weekday;
+      ? (settingsRes.data?.admin_timeline_open_saturday ?? settingsRes.data?.business_open_saturday)
+      : (settingsRes.data?.admin_timeline_open_weekday ?? settingsRes.data?.business_open_weekday);
     const closeStr = isSaturday
-      ? settingsRes.data?.business_close_saturday
-      : settingsRes.data?.business_close_weekday;
+      ? (settingsRes.data?.admin_timeline_close_saturday ?? settingsRes.data?.business_close_saturday)
+      : (settingsRes.data?.admin_timeline_close_weekday ?? settingsRes.data?.business_close_weekday);
     const scheduleStartHour = parseHourFloor(openStr, DEFAULT_START_HOUR);
     const scheduleEndHour = parseHourCeil(closeStr, DEFAULT_END_HOUR);
 

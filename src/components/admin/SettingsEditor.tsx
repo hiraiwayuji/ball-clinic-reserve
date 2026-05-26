@@ -117,9 +117,10 @@ export default function SettingsEditor({ initialSettings }: { initialSettings: C
 
               {/* 営業時間（予約スロット範囲） */}
               <div className="border-t pt-4 mt-2 space-y-3">
-                <Label className="font-bold">営業時間（予約画面・予約一覧のグリッド範囲）</Label>
+                <Label className="font-bold">公開予約時間（患者向け予約画面）</Label>
                 <p className="text-xs text-slate-500 -mt-1">
-                  ここで設定した時間が、患者向け予約画面と /admin/appointments のグリッド範囲になります。
+                  ここで設定した時間が、患者向け予約画面の予約可能スロット範囲になります。<br />
+                  管理画面のタイムテーブルは下の「管理画面タイムテーブル表示時間」を優先します（未設定ならここと同じ）。
                 </p>
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-1.5">
@@ -176,6 +177,38 @@ export default function SettingsEditor({ initialSettings }: { initialSettings: C
                     })}
                   </div>
                   <p className="text-[10px] text-slate-500">クリックで切替（赤=休診）。祝日は別途「定休日（祝日）」設定で管理。</p>
+                </div>
+              </div>
+
+              {/* 管理画面タイムテーブル専用の表示時間（任意） */}
+              <div className="border-t pt-4 mt-2 space-y-3">
+                <Label className="font-bold">管理画面タイムテーブル表示時間（任意）</Label>
+                <p className="text-xs text-slate-500 -mt-1">
+                  予約タイムテーブル（スタッフ別ビュー）の表示範囲をここで上書きできます。<br />
+                  例：公開は 10:00-20:00 だけど、管理画面では準備時間を含めて 9:00-21:00 まで表示したい場合に使用。<br />
+                  <span className="text-amber-600 font-semibold">空欄ならば上の公開予約時間がそのまま使われます。</span>
+                </p>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">平日 開始（管理画面）</Label>
+                    <Input type="time" value={settings?.admin_timeline_open_weekday ?? ""} placeholder="例: 09:00"
+                      onChange={(e) => updateField("admin_timeline_open_weekday", e.target.value || null)} />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">平日 終了（管理画面）</Label>
+                    <Input type="time" value={settings?.admin_timeline_close_weekday ?? ""} placeholder="例: 21:00"
+                      onChange={(e) => updateField("admin_timeline_close_weekday", e.target.value || null)} />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">土曜 開始（管理画面）</Label>
+                    <Input type="time" value={settings?.admin_timeline_open_saturday ?? ""} placeholder="例: 09:00"
+                      onChange={(e) => updateField("admin_timeline_open_saturday", e.target.value || null)} />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">土曜 終了（管理画面）</Label>
+                    <Input type="time" value={settings?.admin_timeline_close_saturday ?? ""} placeholder="例: 21:00"
+                      onChange={(e) => updateField("admin_timeline_close_saturday", e.target.value || null)} />
+                  </div>
                 </div>
               </div>
             </CardContent>
