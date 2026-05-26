@@ -3,6 +3,7 @@ import { getCurrentViewType, getCurrentAiSecretaryMode } from "@/app/actions/cli
 import OwnerSecretaryWidget from "@/components/admin/OwnerSecretaryWidget";
 import StaffSecretaryWidget from "@/components/admin/StaffSecretaryWidget";
 import TodayTimelineWidget from "@/components/admin/TodayTimelineWidget";
+import StaffTargetProgressWidget from "@/components/admin/StaffTargetProgressWidget";
 import DashboardClient from "./DashboardClient";
 
 export default async function DashboardPage({
@@ -26,6 +27,9 @@ export default async function DashboardPage({
 
       {/* 予約タイムテーブル（clinic_settings.view_type='timeline' の院は最上位に配置） */}
       {viewType === "timeline" && <TodayTimelineWidget />}
+
+      {/* スタッフごとの月間目標達成率（目標が1人以上設定されている場合のみ表示） */}
+      {role === "owner" && <StaffTargetProgressWidget />}
 
       {/* Phase 3: AI 秘書（role 別 × ai_secretary_mode 判定） */}
       {!hideAiSecretary && (role === "owner" ? <OwnerSecretaryWidget /> : <StaffSecretaryWidget />)}

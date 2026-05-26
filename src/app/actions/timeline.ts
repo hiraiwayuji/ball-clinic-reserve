@@ -102,9 +102,10 @@ export async function getTimelineForDate(dateStr: string): Promise<{ success: bo
         .gte("start_time", dayStart)
         .lte("start_time", dayEnd)
         .order("start_time", { ascending: true }),
-      // 当月の予約（件数集計のため staff_id だけ取得して件数カウント）
+      // 当月の予約（件数集計のため staff_id と additional_staff を取得）
+      // 担当が複数人の予約は、各スタッフの実績にそれぞれ +1 する
       sb.from("appointments")
-        .select("staff_id")
+        .select("staff_id, additional_staff")
         .eq("clinic_id", clinicId)
         .neq("status", "cancelled")
         .gte("start_time", monthStart)
@@ -162,11 +163,20 @@ export async function getTimelineForDate(dateStr: string): Promise<{ success: bo
     const scheduleStartHour = parseHourFloor(openStr, DEFAULT_START_HOUR);
     const scheduleEndHour = parseHourCeil(closeStr, DEFAULT_END_HOUR);
 
-    // 当月件数を staff_id 別に集計
+    // 当月件数を staff_id 別に集計（メイン担当 + 追加担当の各人に +1）
     const staffMonthCounts: Record<string, number> = {};
     (monthAptRes.data ?? []).forEach((row: any) => {
-      const key = row.staff_id ?? "__unassigned__";
-      staffMonthCounts[key] = (staffMonthCounts[key] ?? 0) + 1;
+      const targetIds = new Set<string>();
+      targetIds.add(row.staff_id ?? "__unassigned__");
+      const add = row.additional_staff;
+      if (Array.isArray(add)) {
+        for (const s of add) {
+          if (s?.staff_id) targetIds.add(s.staff_id);
+        }
+      }
+      for (const key of targetIds) {
+        staffMonthCounts[key] = (staffMonthCounts[key] ?? 0) + 1;
+      }
     });
 
     return {

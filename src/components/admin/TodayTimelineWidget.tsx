@@ -188,14 +188,21 @@ export default function TodayTimelineWidget() {
     return out;
   }, [data]);
 
-  // 予約をスタッフごとにグループ化
+  // 予約をスタッフごとにグループ化（メイン担当 + 追加担当 additional_staff すべての行に表示）
   const aptsByStaff = useMemo(() => {
     const map = new Map<string, TimelineAppointment[]>();
     if (!data) return map;
     for (const a of data.appointments) {
-      const key = a.staff_id ?? UNASSIGNED_KEY;
-      if (!map.has(key)) map.set(key, []);
-      map.get(key)!.push(a);
+      // この予約を表示すべき staff_id のセット（重複防止）
+      const targetIds = new Set<string>();
+      targetIds.add(a.staff_id ?? UNASSIGNED_KEY);
+      for (const add of a.additional_staff ?? []) {
+        if (add?.staff_id) targetIds.add(add.staff_id);
+      }
+      for (const key of targetIds) {
+        if (!map.has(key)) map.set(key, []);
+        map.get(key)!.push(a);
+      }
     }
     return map;
   }, [data]);

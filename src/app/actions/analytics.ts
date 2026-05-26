@@ -128,6 +128,89 @@ export type VisitorDemographicsComparison = {
   citiesDiff: Record<string, { a: number; b: number; diff: number; pct: number }>;
 };
 
+// スタッフごとの当月施術実績 / 目標 / 達成率
+export type StaffTargetProgress = {
+  staff_id: string;
+  staff_name: string;
+  monthly_visit_target: number | null;
+  monthly_count: number;
+  achievement_pct: number | null;  // 目標未設定なら null
+};
+
+export async function getStaffTargetsProgress(): Promise<{
+  success: boolean;
+  rows?: StaffTargetProgress[];
+  monthLabel?: string;
+  error?: string;
+}> {
+  try {
+    const { clinicId } = await checkAdminAuth();
+    const supabase = await createClient();
+
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = now.getMonth() + 1;
+    const monthStr = `${year}-${String(month).padStart(2, "0")}`;
+    const startTs = `${monthStr}-01T00:00:00+09:00`;
+    const lastDay = new Date(year, month, 0).getDate();
+    const endTs = `${monthStr}-${String(lastDay).padStart(2, "0")}T23:59:59+09:00`;
+
+    const [staffRes, aptRes] = await Promise.all([
+      supabase
+        .from("reservation_staff")
+        .select("id, name, monthly_visit_target, sort_order")
+        .eq("clinic_id", clinicId)
+        .eq("is_active", true)
+        .order("sort_order", { ascending: true })
+        .order("name", { ascending: true }),
+      supabase
+        .from("appointments")
+        .select("staff_id, additional_staff")
+        .eq("clinic_id", clinicId)
+        .neq("status", "cancelled")
+        .gte("start_time", startTs)
+        .lte("start_time", endTs),
+    ]);
+
+    if (staffRes.error) return { success: false, error: staffRes.error.message };
+    if (aptRes.error) return { success: false, error: aptRes.error.message };
+
+    // メイン担当 + 追加担当（additional_staff）で各スタッフに +1
+    const counts: Record<string, number> = {};
+    (aptRes.data ?? []).forEach((row: any) => {
+      const ids = new Set<string>();
+      if (row.staff_id) ids.add(row.staff_id);
+      const add = row.additional_staff;
+      if (Array.isArray(add)) {
+        for (const s of add) {
+          if (s?.staff_id) ids.add(s.staff_id);
+        }
+      }
+      for (const id of ids) {
+        counts[id] = (counts[id] ?? 0) + 1;
+      }
+    });
+
+    const rows: StaffTargetProgress[] = (staffRes.data ?? []).map((s: any) => {
+      const target = s.monthly_visit_target ?? null;
+      const count = counts[s.id] ?? 0;
+      const pct = target && target > 0 ? Math.round((count / target) * 100) : null;
+      return {
+        staff_id: s.id,
+        staff_name: s.name,
+        monthly_visit_target: target,
+        monthly_count: count,
+        achievement_pct: pct,
+      };
+    });
+
+    return { success: true, rows, monthLabel: `${month}月` };
+  } catch (error) {
+    console.error("getStaffTargetsProgress error:", error);
+    return { success: false, error: "取得に失敗しました" };
+  }
+}
+
 function pct(a: number, b: number) {
   if (b === 0) return a > 0 ? 100 : 0;
   return Math.round(((a - b) / b) * 100);
