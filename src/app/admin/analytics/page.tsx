@@ -338,7 +338,7 @@ export default function AnalyticsPage() {
               icon={<ChartBar className="w-4 h-4" />}
             />
             <KpiCard
-              label={`1日平均来院数（${a.daysCounted}日換算）`}
+              label={`1日平均来院数（営業${a.daysCounted}日換算）`}
               valueA={a.avgVisitsPerDay} valueB={b.avgVisitsPerDay}
               diff={d.avgVisitsPerDay} pct={d.avgVisitsPerDayPct}
               format={(n) => `${n.toFixed(1)}名`}

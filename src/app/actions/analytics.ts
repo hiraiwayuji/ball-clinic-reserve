@@ -3,6 +3,56 @@
 import { createClient } from "@/lib/supabase/server";
 import { checkAdminAuth } from "@/app/actions/auth";
 
+// 「営業日」を判定: closed_weekdays（NULL なら "0,3"）に含まれず、かつ
+// clinic_holidays に登録されていない日。1日平均来院数の分母に使う。
+async function countOpenDaysInMonth(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  clinicId: string,
+  year: number,
+  month: number,
+): Promise<{ openDays: number; isCurrentMonth: boolean; isFutureMonth: boolean }> {
+  const today = new Date();
+  const isCurrentMonth = today.getFullYear() === year && today.getMonth() + 1 === month;
+  const isFutureMonth =
+    year > today.getFullYear() ||
+    (year === today.getFullYear() && month > today.getMonth() + 1);
+
+  const daysInMonth = new Date(year, month, 0).getDate();
+  const monthStr = `${year}-${String(month).padStart(2, "0")}`;
+
+  const { data: settings } = await supabase
+    .from("clinic_settings")
+    .select("closed_weekdays")
+    .eq("id", clinicId)
+    .maybeSingle();
+  const closedWeekdays = ((settings?.closed_weekdays as string | null) ?? "0,3")
+    .split(",")
+    .map((s) => parseInt(s.trim(), 10))
+    .filter((n) => !isNaN(n));
+
+  const { data: holidays } = await supabase
+    .from("clinic_holidays")
+    .select("date")
+    .eq("clinic_id", clinicId)
+    .gte("date", `${monthStr}-01`)
+    .lte("date", `${monthStr}-${String(daysInMonth).padStart(2, "0")}`);
+  const holidaySet = new Set((holidays ?? []).map((h: any) => h.date as string));
+
+  // 現在月は「今日まで」、それ以外は月末日まで集計
+  const upperDay = isCurrentMonth ? today.getDate() : daysInMonth;
+
+  let openDays = 0;
+  for (let d = 1; d <= upperDay; d++) {
+    const dateObj = new Date(year, month - 1, d);
+    const weekday = dateObj.getDay();
+    const dateStr = `${monthStr}-${String(d).padStart(2, "0")}`;
+    if (closedWeekdays.includes(weekday)) continue;
+    if (holidaySet.has(dateStr)) continue;
+    openDays++;
+  }
+  return { openDays, isCurrentMonth, isFutureMonth };
+}
+
 export type MonthAnalytics = {
   year: number;
   month: number;
@@ -140,17 +190,11 @@ export async function getMonthAnalytics(year: number, month: number): Promise<Mo
   const totalVisits = visits.length;
   const cashVisits = (cashRows ?? []).length;
 
-  // 平均来院数の分母: 過去月は月末日まで、現在月は今日まで（途中月の "1日平均" を直感的に出すため）
-  const today = new Date();
-  const isCurrentMonth = today.getFullYear() === year && today.getMonth() + 1 === month;
-  const isFutureMonth =
-    year > today.getFullYear() ||
-    (year === today.getFullYear() && month > today.getMonth() + 1);
-  const daysCounted = isFutureMonth
-    ? daysInMonth
-    : isCurrentMonth
-      ? today.getDate()
-      : daysInMonth;
+  // 平均来院数の分母は「営業日数」: closed_weekdays に含まれず、
+  // clinic_holidays にも登録されていない日のみカウント。
+  // 現在月は今日まで、過去月は月末日まで（途中月でも直感的な "1日平均"）。
+  const { openDays } = await countOpenDaysInMonth(supabase, clinicId, year, month);
+  const daysCounted = openDays;
   const avgVisitsPerDay =
     daysCounted > 0 ? Math.round((totalVisits / daysCounted) * 10) / 10 : 0;
 
