@@ -169,13 +169,14 @@ export default function TodayTimelineWidget() {
     return rows;
   }, [data]);
 
-  // 時間軸の刻みリスト（9:00-20:00 など、slotMinutes 単位）
+  // 時間軸の刻みリスト（営業終了時刻のラベルも末尾に含める）
   const timeMarks = useMemo(() => {
     if (!data) return [] as { label: string; minute: number }[];
     const out: { label: string; minute: number }[] = [];
     const startMin = data.scheduleStartHour * 60;
     const endMin = data.scheduleEndHour * 60;
-    for (let m = startMin; m < endMin; m += data.slotMinutes) {
+    // <= で営業終了時刻のラベルも出す（例: close=20:00 なら 20:00 が最終マーク）
+    for (let m = startMin; m <= endMin; m += data.slotMinutes) {
       const h = Math.floor(m / 60);
       const mm = m % 60;
       out.push({
@@ -237,9 +238,14 @@ export default function TodayTimelineWidget() {
               {/* 時間軸ヘッダ */}
               <div
                 className="grid items-center text-[10px] text-slate-500 dark:text-slate-400 border-b border-slate-200 dark:border-slate-700"
-                style={{ gridTemplateColumns: `80px repeat(${timeMarks.length}, minmax(28px, 1fr))` }}
+                style={{ gridTemplateColumns: `120px repeat(${timeMarks.length}, minmax(28px, 1fr))` }}
               >
-                <div className="px-2 py-1 text-xs font-semibold text-slate-600 dark:text-slate-300">先生</div>
+                <div className="px-2 py-1 text-xs font-semibold text-slate-600 dark:text-slate-300 flex items-center justify-between gap-1">
+                  <span>先生</span>
+                  <span className="text-[9px] font-normal text-slate-400 normal-case">
+                    {data.monthLabel}合計
+                  </span>
+                </div>
                 {timeMarks.map((m, i) => (
                   <div
                     key={i}
@@ -253,17 +259,28 @@ export default function TodayTimelineWidget() {
               {/* スタッフ行 */}
               {staffWithUnassigned.map((s) => {
                 const apts = aptsByStaff.get(s.id) ?? [];
+                const monthCount = data.staffMonthCounts?.[s.id] ?? 0;
                 return (
                   <div
                     key={s.id}
                     className="grid relative border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50/50 dark:hover:bg-slate-800/30"
                     style={{
-                      gridTemplateColumns: `80px repeat(${timeMarks.length}, minmax(28px, 1fr))`,
+                      gridTemplateColumns: `120px repeat(${timeMarks.length}, minmax(28px, 1fr))`,
                       minHeight: "48px",
                     }}
                   >
-                    <div className="px-2 py-1 text-sm font-medium text-slate-800 dark:text-slate-100 flex items-center sticky left-0 bg-white dark:bg-slate-900 z-10 border-r border-slate-200 dark:border-slate-700">
-                      {s.name}
+                    <div className="px-2 py-1 text-sm font-medium text-slate-800 dark:text-slate-100 flex items-center justify-between gap-1 sticky left-0 bg-white dark:bg-slate-900 z-10 border-r border-slate-200 dark:border-slate-700">
+                      <span className="truncate">{s.name}</span>
+                      {monthCount > 0 ? (
+                        <span
+                          className="shrink-0 text-[10px] font-black px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300 tabular-nums"
+                          title={`${data.monthLabel}の予約件数（キャンセル除く）`}
+                        >
+                          {monthCount}
+                        </span>
+                      ) : (
+                        <span className="shrink-0 text-[10px] text-slate-300 dark:text-slate-600 tabular-nums">—</span>
+                      )}
                     </div>
                     {/* グリッドセル（クリックで新規予約） */}
                     {timeMarks.map((m, i) => (

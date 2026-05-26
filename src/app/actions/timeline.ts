@@ -41,10 +41,31 @@ export type TimelineData = {
   slotMinutes: number;
   scheduleStartHour: number;
   scheduleEndHour: number;
+  /** 当月の予約件数（status != cancelled）を staff_id 別に集計。未指定分は __unassigned__ キー */
+  staffMonthCounts: Record<string, number>;
+  monthLabel: string; // "5月" など
 };
 
 const DEFAULT_START_HOUR = 9;
 const DEFAULT_END_HOUR = 20;
+
+// "HH:MM" → 時間（端数は切り上げ）
+function parseHourCeil(timeStr: string | null | undefined, fallback: number): number {
+  if (!timeStr) return fallback;
+  const m = timeStr.match(/^(\d{1,2}):(\d{2})$/);
+  if (!m) return fallback;
+  const h = parseInt(m[1], 10);
+  const min = parseInt(m[2], 10);
+  return Math.min(24, h + (min > 0 ? 1 : 0));
+}
+
+// "HH:MM" → 時間（端数は切り捨て）
+function parseHourFloor(timeStr: string | null | undefined, fallback: number): number {
+  if (!timeStr) return fallback;
+  const m = timeStr.match(/^(\d{1,2}):(\d{2})$/);
+  if (!m) return fallback;
+  return parseInt(m[1], 10);
+}
 
 export async function getTimelineForDate(dateStr: string): Promise<{ success: boolean; data?: TimelineData; error?: string }> {
   try {
@@ -55,7 +76,17 @@ export async function getTimelineForDate(dateStr: string): Promise<{ success: bo
     const dayStart = `${dateStr}T00:00:00+09:00`;
     const dayEnd = `${dateStr}T23:59:59+09:00`;
 
-    const [staffRes, aptRes, settingsRes] = await Promise.all([
+    // 対象日の年月を計算（当月の合計件数取得用）
+    const [y, m] = dateStr.split("-").map((s) => parseInt(s, 10));
+    const monthStart = `${y}-${String(m).padStart(2, "0")}-01T00:00:00+09:00`;
+    const lastDay = new Date(y, m, 0).getDate();
+    const monthEnd = `${y}-${String(m).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}T23:59:59+09:00`;
+
+    // 曜日判定（土曜は別の営業時間設定を使う）
+    const targetDay = new Date(`${dateStr}T12:00:00+09:00`);
+    const isSaturday = targetDay.getDay() === 6;
+
+    const [staffRes, aptRes, monthAptRes, settingsRes] = await Promise.all([
       sb.from("reservation_staff")
         .select("id, name, sort_order")
         .eq("clinic_id", clinicId)
@@ -70,8 +101,15 @@ export async function getTimelineForDate(dateStr: string): Promise<{ success: bo
         .gte("start_time", dayStart)
         .lte("start_time", dayEnd)
         .order("start_time", { ascending: true }),
+      // 当月の予約（件数集計のため staff_id だけ取得して件数カウント）
+      sb.from("appointments")
+        .select("staff_id")
+        .eq("clinic_id", clinicId)
+        .neq("status", "cancelled")
+        .gte("start_time", monthStart)
+        .lte("start_time", monthEnd),
       sb.from("clinic_settings")
-        .select("slot_duration_minutes")
+        .select("slot_duration_minutes, business_open_weekday, business_close_weekday, business_open_saturday, business_close_saturday")
         .eq("id", clinicId)
         .maybeSingle(),
     ]);
@@ -110,14 +148,33 @@ export async function getTimelineForDate(dateStr: string): Promise<{ success: bo
     const slotV = settingsRes.data?.slot_duration_minutes;
     const slotMinutes = (slotV === 15 || slotV === 20 || slotV === 30) ? slotV : 30;
 
+    // 営業時間設定から表示範囲を決定（土曜は別設定、休診曜日は default に fallback）
+    const openStr = isSaturday
+      ? settingsRes.data?.business_open_saturday
+      : settingsRes.data?.business_open_weekday;
+    const closeStr = isSaturday
+      ? settingsRes.data?.business_close_saturday
+      : settingsRes.data?.business_close_weekday;
+    const scheduleStartHour = parseHourFloor(openStr, DEFAULT_START_HOUR);
+    const scheduleEndHour = parseHourCeil(closeStr, DEFAULT_END_HOUR);
+
+    // 当月件数を staff_id 別に集計
+    const staffMonthCounts: Record<string, number> = {};
+    (monthAptRes.data ?? []).forEach((row: any) => {
+      const key = row.staff_id ?? "__unassigned__";
+      staffMonthCounts[key] = (staffMonthCounts[key] ?? 0) + 1;
+    });
+
     return {
       success: true,
       data: {
         staff,
         appointments,
         slotMinutes,
-        scheduleStartHour: DEFAULT_START_HOUR,
-        scheduleEndHour: DEFAULT_END_HOUR,
+        scheduleStartHour,
+        scheduleEndHour,
+        staffMonthCounts,
+        monthLabel: `${m}月`,
       },
     };
   } catch (err: any) {
