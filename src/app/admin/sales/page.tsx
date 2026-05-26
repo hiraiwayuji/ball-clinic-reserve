@@ -118,7 +118,7 @@ function SalesPageInner() {
     originalMemo: string;
     hasJsonMemo: boolean;
     is_first_visit: boolean;
-    payment_type: CashSalePaymentType | "";
+    payment_types: string[];
     sale_date: string;
   }>({
     customer_name: "",
@@ -127,7 +127,7 @@ function SalesPageInner() {
     originalMemo: "",
     hasJsonMemo: false,
     is_first_visit: false,
-    payment_type: "",
+    payment_types: [],
     sale_date: "",
   });
   const [isUpdating, setIsUpdating] = useState(false);
@@ -274,6 +274,13 @@ function SalesPageInner() {
   const openEdit = (sale: any) => {
     const rawMemo = typeof sale.memo === "string" ? sale.memo : "";
     const hasJsonMemo = rawMemo.trim().startsWith("{");
+    // payment_types(配列) を優先、無ければ legacy payment_type を 1 要素として復元
+    const initialPaymentTypes: string[] =
+      Array.isArray(sale.payment_types) && sale.payment_types.length > 0
+        ? sale.payment_types.filter((v: unknown): v is string => typeof v === "string" && !!v)
+        : sale.payment_type
+          ? [String(sale.payment_type)]
+          : [];
     setEditTarget(sale);
     setEditForm({
       customer_name: sale.customer_name ?? "",
@@ -282,7 +289,7 @@ function SalesPageInner() {
       originalMemo: rawMemo,
       hasJsonMemo,
       is_first_visit: !!sale.is_first_visit,
-      payment_type: (sale.payment_type as CashSalePaymentType) ?? "",
+      payment_types: initialPaymentTypes,
       sale_date: sale.sale_date ?? "",
     });
   };
@@ -295,7 +302,10 @@ function SalesPageInner() {
       toast.error("お名前と金額（0以上の整数）を正しく入力してください");
       return;
     }
-    if (fee === 0 && !editForm.payment_type) {
+    // 0 円修正時は支払区分が必須（self_pay のみは新規入力同様に弾く）
+    const onlySelfPay =
+      editForm.payment_types.length === 1 && editForm.payment_types[0] === "self_pay";
+    if (fee === 0 && (editForm.payment_types.length === 0 || onlySelfPay)) {
       toast.error("0円に修正する場合は支払区分（自賠責・はぐくみ医療など）を選択してください");
       return;
     }
@@ -309,7 +319,10 @@ function SalesPageInner() {
       fd.set("treatment_fee", String(fee));
       fd.set("memo", memoToSave);
       fd.set("is_first_visit", editForm.is_first_visit ? "true" : "false");
-      if (editForm.payment_type) fd.set("payment_type", editForm.payment_type);
+      // legacy payment_type は配列の先頭要素を入れて後方互換を維持
+      const primary = editForm.payment_types[0] ?? "";
+      if (primary) fd.set("payment_type", primary);
+      fd.set("payment_types", JSON.stringify(editForm.payment_types));
       const res = await updateCashSale(fd);
       if (res.success) {
         toast.success("更新しました");
@@ -924,17 +937,22 @@ function SalesPageInner() {
               <div className="space-y-1.5">
                 <Label className="text-xs font-semibold text-slate-600 flex items-center gap-1">
                   <ShieldCheck className="w-3.5 h-3.5" />
-                  支払区分
+                  支払区分 <span className="text-slate-400 font-normal normal-case">（複数選択可）</span>
                 </Label>
                 <div className="grid grid-cols-2 gap-2">
                   {paymentCategories.map(opt => {
-                    const selected = editForm.payment_type === opt.key;
+                    const selected = editForm.payment_types.includes(opt.key);
                     const color = getPaymentCategoryColor(opt.key);
                     return (
                       <button
                         key={opt.key}
                         type="button"
-                        onClick={() => setEditForm(f => ({ ...f, payment_type: opt.key }))}
+                        onClick={() => setEditForm(f => ({
+                          ...f,
+                          payment_types: selected
+                            ? f.payment_types.filter(k => k !== opt.key)
+                            : [...f.payment_types, opt.key],
+                        }))}
                         className={`px-2 py-2 rounded-md text-xs font-bold border transition-all ${
                           selected ? color.selected : color.unselected
                         }`}

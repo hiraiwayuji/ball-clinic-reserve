@@ -647,6 +647,22 @@ export async function updateCashSale(formData: FormData) {
     const memo = (formData.get("memo") as string) ?? "";
     const isFirstVisit = formData.get("is_first_visit") === "true";
     const paymentType = normalizePaymentType(formData.get("payment_type"));
+    // 複数選択対応: payment_types 配列も受け取る。送信されなければ null（更新スキップ）
+    let paymentTypes: string[] | null | undefined = undefined;
+    const rawPaymentTypes = formData.get("payment_types");
+    if (typeof rawPaymentTypes === "string" && rawPaymentTypes.trim()) {
+      try {
+        const arr = JSON.parse(rawPaymentTypes);
+        if (Array.isArray(arr)) {
+          paymentTypes = arr
+            .map((v) => (typeof v === "string" ? v.trim() : ""))
+            .filter((v) => v && v.length <= 50);
+          if (paymentTypes.length === 0) paymentTypes = null;
+        }
+      } catch {
+        paymentTypes = null;
+      }
+    }
 
     if (!id) {
       return { success: false, error: "ID が指定されていません" };
@@ -657,21 +673,35 @@ export async function updateCashSale(formData: FormData) {
     if (!Number.isInteger(treatmentFee) || treatmentFee < 0) {
       return { success: false, error: "金額は0以上の整数で入力してください" };
     }
-    if (treatmentFee === 0 && (!paymentType || paymentType === "self_pay")) {
+    // 0 円バリデーション: payment_types が送られていればそちらを優先、無ければ legacy payment_type で判定
+    const effectiveTypes: string[] =
+      paymentTypes && paymentTypes.length > 0
+        ? paymentTypes
+        : paymentType
+          ? [paymentType]
+          : [];
+    const onlySelfPay = effectiveTypes.length === 1 && effectiveTypes[0] === "self_pay";
+    if (treatmentFee === 0 && (effectiveTypes.length === 0 || onlySelfPay)) {
       return { success: false, error: "0円に修正する場合は支払区分（自賠責・はぐくみ医療など）を選択してください" };
     }
 
     const supabase = await getSupabase();
+    const updatePayload: Record<string, unknown> = {
+      sale_date: saleDate,
+      customer_name: customerName,
+      treatment_fee: treatmentFee,
+      memo,
+      is_first_visit: isFirstVisit,
+      payment_type: paymentType,
+    };
+    // 配列を明示的に送ってきた場合だけ payment_types を更新（undefined のときは触らない）
+    if (paymentTypes !== undefined) {
+      updatePayload.payment_types = paymentTypes;
+    }
+
     const { error } = await supabase
       .from("cash_sales")
-      .update({
-        sale_date: saleDate,
-        customer_name: customerName,
-        treatment_fee: treatmentFee,
-        memo,
-        is_first_visit: isFirstVisit,
-        payment_type: paymentType,
-      })
+      .update(updatePayload)
       .eq("id", id)
       .eq("clinic_id", clinicId); // 他院のレコードを誤って書き換えない安全策
 
