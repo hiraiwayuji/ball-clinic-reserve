@@ -209,6 +209,10 @@ export async function updateClinicSettings(
     business_close_weekday:  settings.business_close_weekday ?? null,
     business_open_saturday:  settings.business_open_saturday ?? null,
     business_close_saturday: settings.business_close_saturday ?? null,
+    business_break_start_weekday:  settings.business_break_start_weekday ?? null,
+    business_break_end_weekday:    settings.business_break_end_weekday ?? null,
+    business_break_start_saturday: settings.business_break_start_saturday ?? null,
+    business_break_end_saturday:   settings.business_break_end_saturday ?? null,
     closed_weekdays:         settings.closed_weekdays ?? null,
     admin_timeline_open_weekday:   settings.admin_timeline_open_weekday ?? null,
     admin_timeline_close_weekday:  settings.admin_timeline_close_weekday ?? null,
@@ -223,6 +227,9 @@ export async function updateClinicSettings(
     lp_voice_author: settings.lp_voice_author ?? null,
     lp_cta_text: settings.lp_cta_text ?? null,
     theme_color: settings.theme_color ?? null,
+    default_appointments_view: settings.default_appointments_view ?? null,
+    public_reserve_flow: settings.public_reserve_flow ?? null,
+    expense_owner_only: settings.expense_owner_only ?? false,
   };
 
   const targetData = {
