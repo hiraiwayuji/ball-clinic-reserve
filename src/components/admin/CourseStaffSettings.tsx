@@ -103,7 +103,7 @@ function CourseRow({
           </div>
           <div>
             <Label className="text-xs text-slate-600 dark:text-slate-300">所要時間（分） *</Label>
-            <Input type="number" value={duration} onChange={e => setDuration(e.target.value)} className="h-9 mt-1" min={10} step={5} />
+            <Input type="number" value={duration} onChange={e => setDuration(e.target.value)} className="h-9 mt-1" min={20} max={120} step={20} />
           </div>
         </div>
         <div>
@@ -844,7 +844,7 @@ export default function CourseStaffSettings({ initialCourses, initialStaff, init
                 </div>
                 <div>
                   <Label className="text-xs text-slate-600 dark:text-slate-300">所要時間（分） *</Label>
-                  <Input type="number" value={newCourseDuration} onChange={e => setNewCourseDuration(e.target.value)} className="h-9 mt-1" min={10} step={5} />
+                  <Input type="number" value={newCourseDuration} onChange={e => setNewCourseDuration(e.target.value)} className="h-9 mt-1" min={20} max={120} step={20} />
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-2">

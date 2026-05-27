@@ -22,9 +22,11 @@ import AISecretaryBriefing from "@/components/admin/AISecretaryBriefing";
 type DashboardClientProps = {
   /** AI秘書 (ブリーフィングダイアログ) を表示するか。clinic_settings.ai_secretary_mode と role の組合せで決定 */
   aiSecretaryEnabled?: boolean;
+  /** 経費管理 UI（ショートカット等）を表示するか。clinic_settings.expense_owner_only と role の組合せで決定 */
+  canSeeExpenses?: boolean;
 };
 
-export default function DashboardClient({ aiSecretaryEnabled = true }: DashboardClientProps = {}) {
+export default function DashboardClient({ aiSecretaryEnabled = true, canSeeExpenses = true }: DashboardClientProps = {}) {
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
@@ -476,27 +478,29 @@ export default function DashboardClient({ aiSecretaryEnabled = true }: Dashboard
           <AIMemo />
         </div>
 
-        <Card className="lg:col-span-1 shadow-sm border-slate-200">
-          <CardHeader className="bg-emerald-50/30 border-b pb-4">
-            <CardTitle className="flex items-center text-lg text-emerald-800">
-              <Coins className="w-5 h-5 mr-2" /> 経費入力へのショートカット
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="pt-6">
-            <div className="flex flex-col items-center justify-center space-y-4 py-4 text-center">
-              <div className="w-20 h-20 bg-emerald-50 rounded-full flex items-center justify-center text-emerald-600">
-                <Coins className="w-10 h-10" />
+        {canSeeExpenses && (
+          <Card className="lg:col-span-1 shadow-sm border-slate-200">
+            <CardHeader className="bg-emerald-50/30 border-b pb-4">
+              <CardTitle className="flex items-center text-lg text-emerald-800">
+                <Coins className="w-5 h-5 mr-2" /> 経費入力へのショートカット
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="pt-6">
+              <div className="flex flex-col items-center justify-center space-y-4 py-4 text-center">
+                <div className="w-20 h-20 bg-emerald-50 rounded-full flex items-center justify-center text-emerald-600">
+                  <Coins className="w-10 h-10" />
+                </div>
+                <div className="space-y-1">
+                  <p className="text-sm font-bold text-slate-800">領収書・経費の登録</p>
+                  <p className="text-xs text-slate-500">OCR読取・人件費などの経費を<br />日付別に管理できます。</p>
+                </div>
+                <Link href="/admin/expenses" className="w-full">
+                  <Button className="w-full bg-emerald-600 hover:bg-emerald-700">経費入力画面へ</Button>
+                </Link>
               </div>
-              <div className="space-y-1">
-                <p className="text-sm font-bold text-slate-800">領収書・経費の登録</p>
-                <p className="text-xs text-slate-500">OCR読取・人件費などの経費を<br />日付別に管理できます。</p>
-              </div>
-              <Link href="/admin/expenses" className="w-full">
-                <Button className="w-full bg-emerald-600 hover:bg-emerald-700">経費入力画面へ</Button>
-              </Link>
-            </div>
-          </CardContent>
-        </Card>
+            </CardContent>
+          </Card>
+        )}
 
         {/* 4. お誕生日ウィジェット */}
         <Card className="lg:col-span-1 shadow-sm border-slate-200 bg-gradient-to-br from-rose-50/50 to-orange-50/50">

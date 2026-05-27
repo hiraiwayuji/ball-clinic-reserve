@@ -1,5 +1,5 @@
 import { getMyRole } from "@/app/actions/auth";
-import { getCurrentViewType, getCurrentAiSecretaryMode } from "@/app/actions/clinic-slot";
+import { getCurrentViewType, getCurrentAiSecretaryMode, getCurrentExpenseOwnerOnly } from "@/app/actions/clinic-slot";
 import OwnerSecretaryWidget from "@/components/admin/OwnerSecretaryWidget";
 import StaffSecretaryWidget from "@/components/admin/StaffSecretaryWidget";
 import TodayTimelineWidget from "@/components/admin/TodayTimelineWidget";
@@ -16,6 +16,8 @@ export default async function DashboardPage({
   const viewType = await getCurrentViewType();
   const aiSecretaryMode = await getCurrentAiSecretaryMode();
   const hideAiSecretary = aiSecretaryMode === "admin_only" && role === "staff";
+  const expenseOwnerOnly = await getCurrentExpenseOwnerOnly();
+  const canSeeExpenses = !expenseOwnerOnly || role === "owner";
 
   return (
     <div className="space-y-6">
@@ -34,7 +36,7 @@ export default async function DashboardPage({
       {/* Phase 3: AI 秘書（role 別 × ai_secretary_mode 判定） */}
       {!hideAiSecretary && (role === "owner" ? <OwnerSecretaryWidget /> : <StaffSecretaryWidget />)}
 
-      <DashboardClient aiSecretaryEnabled={!hideAiSecretary} />
+      <DashboardClient aiSecretaryEnabled={!hideAiSecretary} canSeeExpenses={canSeeExpenses} />
     </div>
   );
 }

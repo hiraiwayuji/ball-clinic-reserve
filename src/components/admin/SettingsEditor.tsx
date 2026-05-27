@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Save, Loader2, MessageSquare, Video, Settings, Target, MapPin, Hash } from "lucide-react";
+import { Save, Loader2, MessageSquare, Video, Settings, Target, MapPin, Hash, Coins } from "lucide-react";
 import { ClinicSettings, updateClinicSettings } from "@/app/actions/settings";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
@@ -210,6 +210,27 @@ export default function SettingsEditor({ initialSettings }: { initialSettings: C
                       onChange={(e) => updateField("admin_timeline_close_saturday", e.target.value || null)} />
                   </div>
                 </div>
+              </div>
+
+              {/* 経費管理の表示制限 */}
+              <div className="border-t pt-4 mt-2 space-y-3">
+                <Label className="font-bold flex items-center gap-2">
+                  <Coins className="w-4 h-4 text-emerald-600" /> 経費管理の表示制限
+                </Label>
+                <p className="text-xs text-slate-500 -mt-1">
+                  ON にすると、オーナー（role = owner）以外のスタッフからは<br />
+                  経費管理に関する画面・ショートカット・メニューが完全に見えなくなります。<br />
+                  ダッシュボードの「経費入力へのショートカット」も非表示になり、<code className="px-1 bg-slate-100 rounded">/admin/expenses</code> へ直接アクセスしてもダッシュボードに戻されます。
+                </p>
+                <label className="inline-flex items-center cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={settings?.expense_owner_only === true}
+                    onChange={(e) => updateField("expense_owner_only", e.target.checked)}
+                    className="w-5 h-5 accent-emerald-600"
+                  />
+                  <span className="ml-2 text-sm font-medium">経費管理をオーナー専用にする（スタッフから完全非表示）</span>
+                </label>
               </div>
             </CardContent>
           </Card>

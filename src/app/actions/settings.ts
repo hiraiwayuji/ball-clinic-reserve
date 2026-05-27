@@ -75,6 +75,8 @@ export type ClinicSettings = {
   // datetime_first: 日時 → コース → 担当（既存）
   // menu_first    : コース → 担当 → 空き日時（治療院系UX）
   public_reserve_flow?: "datetime_first" | "menu_first" | null;
+  // 経費管理をオーナー専用にする（true の院では role != 'owner' は経費 UI 不可視）
+  expense_owner_only?: boolean | null;
 };
 
 

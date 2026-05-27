@@ -125,3 +125,36 @@ export async function getCurrentAiSecretaryMode(): Promise<AiSecretaryMode> {
     return "global";
   }
 }
+
+/**
+ * 経費管理をオーナー専用にするかどうか（clinic_settings.expense_owner_only）。
+ * true の院では、role = 'owner' 以外のユーザーから経費関連 UI / ページを
+ * 一切表示しない（ダッシュボードショートカット、/admin/expenses 等）。
+ *
+ * Fail-safe: Supabase 取得失敗時は false を返す（既存運用維持）。
+ */
+export async function getCurrentExpenseOwnerOnly(): Promise<boolean> {
+  try {
+    if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
+      return false;
+    }
+    const sb = createSupabaseClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL,
+      process.env.SUPABASE_SERVICE_ROLE_KEY,
+      { auth: { persistSession: false } },
+    );
+    const { data, error } = await sb
+      .from("clinic_settings")
+      .select("expense_owner_only")
+      .eq("id", PUBLIC_CLINIC_ID)
+      .maybeSingle();
+    if (error) {
+      console.error("[getCurrentExpenseOwnerOnly] supabase error, fallback to false:", error.message);
+      return false;
+    }
+    return data?.expense_owner_only === true;
+  } catch (e: any) {
+    console.error("[getCurrentExpenseOwnerOnly] unexpected error, fallback to false:", e?.message ?? e);
+    return false;
+  }
+}
