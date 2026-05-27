@@ -1,9 +1,9 @@
+import { getStaffCategoryProgress } from "@/app/actions/analytics";
 import {
-  getStaffCategoryProgress,
   COURSE_CATEGORIES,
   CATEGORY_LABELS,
   type CourseCategory,
-} from "@/app/actions/analytics";
+} from "@/lib/course-categories";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Target, TrendingUp, TrendingDown } from "lucide-react";
 

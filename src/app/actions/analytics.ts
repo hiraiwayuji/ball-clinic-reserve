@@ -2,6 +2,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { checkAdminAuth } from "@/app/actions/auth";
+import { COURSE_CATEGORIES, type CourseCategory } from "@/lib/course-categories";
 
 // 「営業日」を判定: closed_weekdays（NULL なら "0,3"）に含まれず、かつ
 // clinic_holidays に登録されていない日。1日平均来院数の分母に使う。
@@ -135,14 +136,6 @@ export type StaffTargetProgress = {
   monthly_visit_target: number | null;
   monthly_count: number;
   achievement_pct: number | null;  // 目標未設定なら null
-};
-
-export type CourseCategory = "jusei" | "shinkyu" | "seitai";
-export const COURSE_CATEGORIES: CourseCategory[] = ["jusei", "shinkyu", "seitai"];
-export const CATEGORY_LABELS: Record<CourseCategory, string> = {
-  jusei: "柔整",
-  shinkyu: "鍼灸",
-  seitai: "整体",
 };
 
 // スタッフ × カテゴリ別の月間実績・目標・達成率
