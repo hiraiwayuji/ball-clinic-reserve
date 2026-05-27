@@ -56,7 +56,7 @@ export async function getCurrentSchedule(): Promise<Schedule> {
     );
     const { data } = await sb
       .from("clinic_settings")
-      .select("business_open_weekday, business_close_weekday, business_open_saturday, business_close_saturday, closed_weekdays")
+      .select("business_open_weekday, business_close_weekday, business_open_saturday, business_close_saturday, business_break_start_weekday, business_break_end_weekday, business_break_start_saturday, business_break_end_saturday, closed_weekdays")
       .eq("id", PUBLIC_CLINIC_ID)
       .maybeSingle();
     return buildSchedule(data);

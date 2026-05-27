@@ -15,10 +15,16 @@ export const DEFAULT_SCHEDULE = {
 export const SCHEDULE = DEFAULT_SCHEDULE;
 
 export type Schedule = {
-  weekday:  { start: string; end: string };
-  saturday: { start: string; end: string };
+  weekday:  { start: string; end: string; breakStart?: string | null; breakEnd?: string | null };
+  saturday: { start: string; end: string; breakStart?: string | null; breakEnd?: string | null };
   closedDays: number[]; // JS getDay(): 0=日, 3=水, ...
 };
+
+/** "HH:MM:SS" / "HH:MM" / null → "HH:MM" / null に正規化 */
+function normalizeHHMM(v: string | null | undefined): string | null {
+  if (!v) return null;
+  return v.length >= 5 ? v.slice(0, 5) : v;
+}
 
 /** clinic_settings からの値を Schedule に正規化。NULL は DEFAULT で補う。 */
 export function buildSchedule(settings: {
@@ -26,6 +32,10 @@ export function buildSchedule(settings: {
   business_close_weekday?: string | null;
   business_open_saturday?: string | null;
   business_close_saturday?: string | null;
+  business_break_start_weekday?: string | null;
+  business_break_end_weekday?: string | null;
+  business_break_start_saturday?: string | null;
+  business_break_end_saturday?: string | null;
   closed_weekdays?: string | null;
 } | null | undefined): Schedule {
   const s = settings ?? {};
@@ -38,10 +48,14 @@ export function buildSchedule(settings: {
     weekday: {
       start: s.business_open_weekday  || DEFAULT_SCHEDULE.weekday.start,
       end:   s.business_close_weekday || DEFAULT_SCHEDULE.weekday.end,
+      breakStart: normalizeHHMM(s.business_break_start_weekday),
+      breakEnd:   normalizeHHMM(s.business_break_end_weekday),
     },
     saturday: {
       start: s.business_open_saturday  || DEFAULT_SCHEDULE.saturday.start,
       end:   s.business_close_saturday || DEFAULT_SCHEDULE.saturday.end,
+      breakStart: normalizeHHMM(s.business_break_start_saturday),
+      breakEnd:   normalizeHHMM(s.business_break_end_saturday),
     },
     closedDays: closedDays.length > 0 ? closedDays : [0, 3],
   };
@@ -61,13 +75,27 @@ export type SlotMinutes = 15 | 20 | 30;
  *
  * 2026-05-23 ぼーるくん指摘で end inclusive → exclusive へ変更。
  */
-function generateSlots(start: string, end: string, minutes: number): string[] {
+function generateSlots(
+  start: string,
+  end: string,
+  minutes: number,
+  breakStart?: string | null,
+  breakEnd?: string | null,
+): string[] {
   const slots: string[] = [];
-  const [sh, sm] = start.split(":").map(Number);
-  const [eh, em] = end.split(":").map(Number);
-  const startMin = sh * 60 + sm;
-  const endMin = eh * 60 + em;
+  const toMin = (hm: string) => {
+    const [h, m] = hm.split(":").map(Number);
+    return h * 60 + m;
+  };
+  const startMin = toMin(start);
+  const endMin = toMin(end);
+  // breakStart <= slot < breakEnd の slot は除外（休憩中の枠は予約不可）
+  const breakStartMin = breakStart ? toMin(breakStart) : null;
+  const breakEndMin = breakEnd ? toMin(breakEnd) : null;
   for (let t = startMin; t + minutes <= endMin; t += minutes) {
+    if (breakStartMin !== null && breakEndMin !== null && t >= breakStartMin && t < breakEndMin) {
+      continue;
+    }
     const h = Math.floor(t / 60);
     const m = t % 60;
     slots.push(`${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`);
@@ -107,7 +135,14 @@ export function isWithinBusinessHours(date: Date, timeSlot: string, schedule: Sc
   const range = day === 6 ? schedule.saturday : schedule.weekday;
   const toMin = (hm: string) => { const [h, m] = hm.split(":").map(Number); return h * 60 + m; };
   const slotMin = toMin(timeSlot);
-  return slotMin >= toMin(range.start) && slotMin <= toMin(range.end);
+  if (slotMin < toMin(range.start) || slotMin > toMin(range.end)) return false;
+  // 院全体の休憩時間中は営業時間外として扱う（patient LP / 管理画面の灰色セル判定）
+  if (range.breakStart && range.breakEnd) {
+    const bs = toMin(range.breakStart);
+    const be = toMin(range.breakEnd);
+    if (slotMin >= bs && slotMin < be) return false;
+  }
+  return true;
 }
 
 export type GetTimeSlotsOptions = {
@@ -148,7 +183,7 @@ export function getTimeSlots(
   const day = date.getDay();
   if (sched.closedDays.includes(day)) return [];
   const range = day === 6 ? sched.saturday : sched.weekday;
-  return generateSlots(range.start, range.end, slotMinutes);
+  return generateSlots(range.start, range.end, slotMinutes, range.breakStart, range.breakEnd);
 }
 
 /**

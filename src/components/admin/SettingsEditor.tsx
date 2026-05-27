@@ -144,6 +144,38 @@ export default function SettingsEditor({ initialSettings }: { initialSettings: C
                       onChange={(e) => updateField("business_close_saturday", e.target.value || null)} />
                   </div>
                 </div>
+
+                {/* 院全体の休憩時間（昼休み等） */}
+                <div className="border-t pt-3 mt-2 space-y-2">
+                  <Label className="font-bold text-sm">休憩時間（昼休み等）</Label>
+                  <p className="text-[11px] text-slate-500 -mt-1">
+                    設定すると、その時間帯は患者向け予約サイトのスロットから除外されます（予約不可）。<br />
+                    使わない院は空欄のままで OK。
+                  </p>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">平日 休憩 開始</Label>
+                      <Input type="time" value={(settings?.business_break_start_weekday ?? "").slice(0, 5)} placeholder="12:00"
+                        onChange={(e) => updateField("business_break_start_weekday", e.target.value || null)} />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">平日 休憩 終了</Label>
+                      <Input type="time" value={(settings?.business_break_end_weekday ?? "").slice(0, 5)} placeholder="14:00"
+                        onChange={(e) => updateField("business_break_end_weekday", e.target.value || null)} />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">土曜 休憩 開始</Label>
+                      <Input type="time" value={(settings?.business_break_start_saturday ?? "").slice(0, 5)} placeholder=""
+                        onChange={(e) => updateField("business_break_start_saturday", e.target.value || null)} />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">土曜 休憩 終了</Label>
+                      <Input type="time" value={(settings?.business_break_end_saturday ?? "").slice(0, 5)} placeholder=""
+                        onChange={(e) => updateField("business_break_end_saturday", e.target.value || null)} />
+                    </div>
+                  </div>
+                </div>
+
                 <div className="space-y-1.5">
                   <Label className="text-xs">休診曜日</Label>
                   <div className="flex gap-1.5 flex-wrap">

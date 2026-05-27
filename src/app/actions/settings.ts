@@ -52,6 +52,11 @@ export type ClinicSettings = {
   business_open_saturday?: string | null;
   business_close_saturday?: string | null;
   closed_weekdays?: string | null;
+  // 院全体の休憩時間（昼休み等）。NULL なら休憩なし。患者LP のスロット計算で除外。
+  business_break_start_weekday?: string | null;
+  business_break_end_weekday?: string | null;
+  business_break_start_saturday?: string | null;
+  business_break_end_saturday?: string | null;
   // 管理画面タイムテーブル専用の表示時間（任意・NULL なら business_* にフォールバック）
   // 例：からだ＝公開は 10:00-20:00、管理画面では準備時間込みで 9:00-21:00
   admin_timeline_open_weekday?: string | null;
