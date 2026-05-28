@@ -144,7 +144,26 @@ export function AddAppointmentDialog({
       setAdditionalStaff([]);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, defaultDate, defaultTime]);
+  }, [open, defaultDate, defaultTime, defaultStaffId, defaultCourseId, defaultName, defaultPhone, defaultMedicalRecordNumber]);
+
+  // staffList ロード完了後に defaultStaffId を再適用
+  // （初回 setStaffId 時点で staffList が空だと <select> に対応 option がなく表示されないため）
+  useEffect(() => {
+    if (open && defaultStaffId && staffList.some((s) => s.id === defaultStaffId)) {
+      setStaffId(defaultStaffId);
+    }
+  }, [open, defaultStaffId, staffList]);
+
+  // courses ロード完了後に defaultCourseId を再適用（同じ理由）
+  useEffect(() => {
+    if (open && defaultCourseId) {
+      const c = courses.find((c) => c.id === defaultCourseId);
+      if (c) {
+        setCourseId(defaultCourseId);
+        setDuration(String(c.duration_minutes));
+      }
+    }
+  }, [open, defaultCourseId, courses]);
 
   // コース選択時に所要時間も連動して更新
   const handleCourseChange = (id: string) => {
