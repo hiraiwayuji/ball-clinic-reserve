@@ -23,6 +23,9 @@ export type ClinicSettings = {
   line_official_account_url?: string;
   line_channel_access_token?: string;
   line_channel_secret?: string;
+  // LINE ショップカード（来院スタンプ加算用 URL。LINE Manager の「ショップカード」設定画面で発行）
+  // 設定済みの場合、会計完了時の患者向け LINE 通知にこの URL を含めて自動でスタンプ加算を促す
+  line_stamp_card_url?: string | null;
   // Context
   area_name?: string;
   target_persona?: string;
@@ -191,6 +194,7 @@ export async function updateClinicSettings(
     line_official_account_url: settings.line_official_account_url,
     line_channel_access_token: settings.line_channel_access_token,
     line_channel_secret: settings.line_channel_secret,
+    line_stamp_card_url: settings.line_stamp_card_url ?? null,
     area_name: settings.area_name,
     target_persona: settings.target_persona,
     video_tone: settings.video_tone,
