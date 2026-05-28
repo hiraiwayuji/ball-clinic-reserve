@@ -194,8 +194,11 @@ export function AddAppointmentDialog({
 
         // 入力名と完全一致する候補が1件だけ → 自動で電話番号を反映
         // （サジェストをクリックする運用を覚えなくてもカルテ番号を見ずに済むように）
+        // 半角/全角スペースの揺れを吸収するため、空白を全部除いて比較する
+        const normalize = (s: string) => s.replace(/[\s　]+/g, "");
         const trimmed = value.trim();
-        const exact = results.filter((r) => r.name === trimmed);
+        const trimmedKey = normalize(trimmed);
+        const exact = results.filter((r) => normalize(r.name) === trimmedKey);
         if (exact.length === 1) {
           const p = exact[0];
           setSelectedPatient(p);
@@ -470,7 +473,10 @@ export function AddAppointmentDialog({
               {(() => {
                 const trimmed = nameValue.trim();
                 if (!trimmed) return null;
-                const same = suggestions.filter((s) => s.name === trimmed);
+                // 半角/全角スペースの揺れを吸収して比較
+                const norm = (s: string) => s.replace(/[\s　]+/g, "");
+                const key = norm(trimmed);
+                const same = suggestions.filter((s) => norm(s.name) === key);
                 if (same.length < 2) return null;
                 return (
                   <div className="bg-amber-50 border border-amber-300 rounded-lg px-3 py-2 mt-1">
