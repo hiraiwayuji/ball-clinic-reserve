@@ -17,7 +17,6 @@ import {
 } from "@/components/ui/dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { createManualReservation } from "@/app/actions/adminReserve";
-import { findSameDayAppointmentsByName } from "@/app/actions/duplicateCheck";
 import { searchPatientsForBooking, PatientSuggestion } from "@/app/actions/patientSearch";
 import { getCourses, getStaffList, getRooms, type ReservationCourse, type ReservationStaff, type ReservationRoom } from "@/app/actions/courses";
 import { toast } from "sonner";
@@ -224,27 +223,6 @@ export function AddAppointmentDialog({
     if (!date || !time) {
       toast.error("日付と時間を選択してください");
       return;
-    }
-
-    // 同日同名予約のチェック（兄弟・親子の重複 / 本人の二重予約検出）
-    try {
-      const dateStr = format(date, "yyyy-MM-dd");
-      const dup = await findSameDayAppointmentsByName(dateStr, nameValue);
-      if (dup.appointments.length > 0) {
-        const lines = dup.appointments
-          .map((a) => `・${a.time}〜${a.phone ? `（${a.phone}）` : ""}${a.medicalRecordNumber ? ` [カルテ:${a.medicalRecordNumber}]` : ""}`)
-          .join("\n");
-        const note =
-          dup.customerCount >= 2
-            ? `\n\n⚠ 同名の患者さんが ${dup.customerCount} 人登録されています。兄弟・親子の可能性があります。\nフルネームをもう一度ご確認ください。本人が違う場合はカルテ番号で識別してください。`
-            : "\n\n⚠ ご本人の二重予約の可能性があります。先に既存予約を削除するか、別人ならカルテ番号で識別してください。";
-        const ok = window.confirm(
-          `「${nameValue.trim()}」さんの予約が同日に既に ${dup.appointments.length} 件あります：\n${lines}${note}\n\nこのまま追加しますか？`,
-        );
-        if (!ok) return;
-      }
-    } catch {
-      // 重複チェックが失敗しても予約処理は続行（既存挙動を優先）
     }
 
     setIsSubmitting(true);
