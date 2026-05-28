@@ -295,20 +295,6 @@ export default function SettingsEditor({ initialSettings }: { initialSettings: C
                   placeholder="ターミナルで出した長い英数字を貼り付け"
                 />
               </div>
-              <div className="space-y-2 pt-4 border-t border-green-100">
-                <Label className="font-bold text-green-800">ショップカードURL（来院スタンプ加算用）</Label>
-                <Input
-                  className="border-green-300 focus:ring-green-500 text-xs"
-                  value={settings?.line_stamp_card_url || ""}
-                  onChange={(e) => updateField("line_stamp_card_url", e.target.value)}
-                  placeholder="https://shop.line.me/.../point"
-                />
-                <p className="text-[11px] text-green-700 leading-relaxed">
-                  LINE Manager の「ショップカード」設定画面で発行した「ポイント獲得用 URL」を貼り付け。<br />
-                  設定済みなら、会計完了時に患者へ LINE 通知が飛び、このURLをタップしてスタンプ自動加算できる。<br />
-                  空欄なら通常の御礼メッセージのみ送信。
-                </p>
-              </div>
               <div className="pt-6 border-t border-green-100 flex flex-col items-center gap-4 bg-green-50/50 p-4 rounded-b-lg">
                 <div className="text-center space-y-1">
                   <p className="font-bold text-green-700 text-lg underline underline-offset-4 decoration-green-300">ここを押してテスト！</p>

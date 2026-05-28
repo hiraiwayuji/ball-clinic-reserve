@@ -6,7 +6,7 @@ import { revalidatePath } from "next/cache";
 import { checkAdminAuth } from "./auth";
 import { writeAudit, notifyOwnerOfStaffAction } from "@/lib/audit";
 import { awardPoints } from "@/lib/gamification";
-import { getLineAccessToken, pushLineToCustomer } from "@/lib/admin-notify";
+import { getLineAccessToken } from "@/lib/admin-notify";
 
 async function getSupabase() {
   return await createClient();
@@ -556,39 +556,6 @@ export async function updateCheckinStatus(
       .eq("clinic_id", clinicId);
 
     if (error) return { success: false, error: error.message };
-
-    // 会計完了時の LINE ショップカード通知（ベストエフォート）
-    // status === "done" になった瞬間に、患者の LINE へ「来院御礼 + スタンプ加算 URL」を Push する
-    if (status === "done") {
-      try {
-        const { data: apt } = await supabase
-          .from("appointments")
-          .select("customer_id, customers(name, line_user_id)")
-          .eq("id", appointmentId)
-          .eq("clinic_id", clinicId)
-          .maybeSingle();
-        const cust = Array.isArray(apt?.customers) ? apt?.customers[0] : (apt?.customers as any);
-        const lineUserId = cust?.line_user_id;
-        if (lineUserId) {
-          const { data: setting } = await supabase
-            .from("clinic_settings")
-            .select("clinic_name, line_stamp_card_url")
-            .eq("id", clinicId)
-            .maybeSingle();
-          const stampUrl = setting?.line_stamp_card_url?.trim();
-          const clinicName = setting?.clinic_name ?? "当院";
-          const baseText = `本日は${clinicName}にご来院いただき、ありがとうございました。\n次回もお待ちしております🙏`;
-          const text = stampUrl
-            ? `${baseText}\n\n⭐ 本日のスタンプを獲得 → ${stampUrl}`
-            : baseText;
-          await pushLineToCustomer(lineUserId, text).catch((e) => {
-            console.warn("[updateCheckinStatus] LINE push (done) failed:", e);
-          });
-        }
-      } catch (e) {
-        console.warn("[updateCheckinStatus] post-done LINE notify skipped:", e);
-      }
-    }
 
     revalidatePath("/admin/counter");
     return { success: true };
