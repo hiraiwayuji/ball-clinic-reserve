@@ -16,7 +16,8 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { createManualReservation, findSameDayAppointmentsByName } from "@/app/actions/adminReserve";
+import { createManualReservation } from "@/app/actions/adminReserve";
+import { findSameDayAppointmentsByName } from "@/app/actions/duplicateCheck";
 import { searchPatientsForBooking, PatientSuggestion } from "@/app/actions/patientSearch";
 import { getCourses, getStaffList, getRooms, type ReservationCourse, type ReservationStaff, type ReservationRoom } from "@/app/actions/courses";
 import { toast } from "sonner";
