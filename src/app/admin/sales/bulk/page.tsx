@@ -425,31 +425,33 @@ function DraftRowItem({
         </div>
       </div>
 
-      {/* 0円のときだけ支払区分選択を表示（payment_categories マスタから動的取得） */}
-      {isZero && (
-        <div className="mt-2 ml-8 flex items-center gap-2 flex-wrap">
-          <span className="text-[11px] font-bold text-emerald-600 dark:text-emerald-400">0円の支払区分:</span>
-          {paymentCategories.map(opt => {
-            const selected = row.paymentType === opt.key;
-            const color = getPaymentCategoryColor(opt.key);
-            return (
-              <button
-                key={opt.key}
-                type="button"
-                onClick={() => onChange({ ...row, paymentType: opt.key })}
-                className={`px-2 py-0.5 rounded-md text-[11px] font-bold border transition-all ${
-                  selected ? color.selected : color.unselected
-                }`}
-              >
-                {opt.label}
-              </button>
-            );
-          })}
-          {!row.paymentType && (
-            <span className="text-[10px] text-rose-500 font-medium">※ 必須</span>
-          )}
-        </div>
-      )}
+      {/* 支払区分選択（payment_categories マスタから動的取得）
+          0円のときは必須、それ以外は任意。全件で振り分けたい時に使える */}
+      <div className="mt-2 ml-8 flex items-center gap-2 flex-wrap">
+        <span className="text-[11px] font-bold text-emerald-600 dark:text-emerald-400">
+          支払区分{isZero ? '（0円計上は必須）' : ''}:
+        </span>
+        {paymentCategories.map(opt => {
+          const selected = row.paymentType === opt.key;
+          const color = getPaymentCategoryColor(opt.key);
+          return (
+            <button
+              key={opt.key}
+              type="button"
+              // もう一度クリックで解除（再選択時は別の区分に切替）
+              onClick={() => onChange({ ...row, paymentType: selected ? "" : opt.key })}
+              className={`px-2 py-0.5 rounded-md text-[11px] font-bold border transition-all ${
+                selected ? color.selected : color.unselected
+              }`}
+            >
+              {opt.label}
+            </button>
+          );
+        })}
+        {isZero && !row.paymentType && (
+          <span className="text-[10px] text-rose-500 font-medium">※ 必須</span>
+        )}
+      </div>
     </div>
   );
 }
