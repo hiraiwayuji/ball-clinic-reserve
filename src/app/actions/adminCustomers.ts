@@ -230,7 +230,11 @@ export async function updateCustomerInfo(
 
 /**
  * 二つの顧客データを統合する（名寄せ）
- * sourceId の予約履歴を targetId へ移動し、sourceId を削除する
+ * - target に値が無いフィールド（カルテ番号・電話・LINE等）は source の値で埋める
+ * - source の予約履歴を target へ移動
+ * - source を削除
+ *
+ * name と clinic_id は target を正として維持。id/created_at 等のシステム列は触らない。
  */
 export async function mergeCustomers(sourceId: string, targetId: string) {
   if (sourceId === targetId) {
@@ -244,7 +248,80 @@ export async function mergeCustomers(sourceId: string, targetId: string) {
 
   const supabase = createAdminClient(url, key);
 
-  // 1. 予約データの移行
+  // 1. source と target のフルレコードを取得
+  const [{ data: sourceRow }, { data: targetRow }] = await Promise.all([
+    supabase
+      .from("customers")
+      .select("*")
+      .eq("id", sourceId)
+      .eq("clinic_id", clinicId)
+      .maybeSingle(),
+    supabase
+      .from("customers")
+      .select("*")
+      .eq("id", targetId)
+      .eq("clinic_id", clinicId)
+      .maybeSingle(),
+  ]);
+
+  if (!sourceRow || !targetRow) {
+    throw new Error("対象の顧客が見つかりません");
+  }
+
+  // 2. target に値が無いカラムについて source の値で埋める
+  //    name は target を維持（統合先＝正の名前）。システム列は対象外。
+  const SKIP = new Set(["id", "clinic_id", "name", "created_at", "updated_at"]);
+  const mergePatch: Record<string, unknown> = {};
+  for (const key of Object.keys(sourceRow as Record<string, unknown>)) {
+    if (SKIP.has(key)) continue;
+    const targetVal = (targetRow as Record<string, unknown>)[key];
+    const sourceVal = (sourceRow as Record<string, unknown>)[key];
+    const targetEmpty =
+      targetVal === null || targetVal === undefined || targetVal === "";
+    const sourceHas =
+      sourceVal !== null && sourceVal !== undefined && sourceVal !== "";
+    if (targetEmpty && sourceHas) {
+      mergePatch[key] = sourceVal;
+    }
+  }
+
+  // 3. unique 制約のあるカラム（medical_record_number 等）は source を先に null にして
+  //    target への UPDATE が unique 違反にならないようにする
+  const uniqueCandidates = ["medical_record_number", "line_user_id"] as const;
+  const sourceClearPatch: Record<string, null> = {};
+  for (const col of uniqueCandidates) {
+    if (mergePatch[col] !== undefined) {
+      sourceClearPatch[col] = null;
+    }
+  }
+  if (Object.keys(sourceClearPatch).length > 0) {
+    const { error: clearError } = await supabase
+      .from("customers")
+      .update(sourceClearPatch)
+      .eq("id", sourceId)
+      .eq("clinic_id", clinicId);
+    if (clearError) {
+      console.error("Failed to clear source unique fields:", clearError);
+      throw new Error("source 側の一意制約解除に失敗しました");
+    }
+  }
+
+  // 4. target をマージで更新
+  if (Object.keys(mergePatch).length > 0) {
+    const { error: mergeError } = await supabase
+      .from("customers")
+      .update(mergePatch)
+      .eq("id", targetId)
+      .eq("clinic_id", clinicId);
+    if (mergeError) {
+      console.error("Failed to merge customer fields:", mergeError);
+      throw new Error(
+        "顧客フィールドの統合に失敗しました（カルテ番号・電話番号等）",
+      );
+    }
+  }
+
+  // 5. 予約データの移行
   const { error: moveError } = await supabase
     .from("appointments")
     .update({ customer_id: targetId })
@@ -256,7 +333,7 @@ export async function mergeCustomers(sourceId: string, targetId: string) {
     throw new Error("予約データの移行に失敗しました");
   }
 
-  // 2. 元の顧客データを削除
+  // 6. 元の顧客データを削除
   const { error: deleteError } = await supabase
     .from("customers")
     .delete()
@@ -265,7 +342,7 @@ export async function mergeCustomers(sourceId: string, targetId: string) {
 
   if (deleteError) {
     console.error("Failed to delete source customer:", deleteError);
-    // 予約は既に移動済みなので、ここでのエラーは致命的ではないかもしれないが通知
+    // フィールド統合・予約移動は完了済みなのでここでは throw しない（手動削除で対応可能）
   }
 
   revalidatePath("/admin/customers");
