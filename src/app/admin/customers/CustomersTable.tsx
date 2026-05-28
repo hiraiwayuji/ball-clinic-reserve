@@ -50,14 +50,33 @@ type SortDir = "asc" | "desc";
 
 const GENDER_LABEL: Record<string, string> = { male: "男性", female: "女性", other: "その他" };
 
-/** 重複判定: 同名 or 同カルテNO（電話番号は除外 — 仮番号が多いため） */
+/**
+ * 名前の正規化キー：表記ゆれを吸収して同名判定に使う
+ * - 半角/全角スペースをすべて除去（「松浦拓登」と「松浦 拓登」を同一視）
+ * - ひらがなをカタカナに統一（「まつうら たくと」と「マツウラ タクト」を同一視）
+ * - 大文字小文字を統一（英字混在ケース対策）
+ *   ※ 漢字 ↔ ふりがな の同一視は対象外（読みデータが必要なため）
+ */
+function normalizeName(name: string | null | undefined): string {
+  if (!name) return "";
+  return name
+    // ひらがな(U+3041..U+3096) → カタカナ(U+30A1..U+30F6) へオフセット
+    .replace(/[ぁ-ゖ]/g, (ch) =>
+      String.fromCharCode(ch.charCodeAt(0) + 0x60),
+    )
+    // 半角空白 + 全角空白 をすべて除去
+    .replace(/[\s　]+/g, "")
+    .toLowerCase();
+}
+
+/** 重複判定: 同名（正規化後） or 同カルテNO（電話番号は除外 — 仮番号が多いため） */
 function buildDuplicateSet(customers: Customer[]): Set<string> {
   const dupIds = new Set<string>();
 
-  // 名前のみで判定
+  // 名前で判定（スペース・ひらがな/カタカナ揺れを吸収）
   const nameMap = new Map<string, string[]>();
   for (const c of customers) {
-    const key = c.name.trim();
+    const key = normalizeName(c.name);
     if (!key) continue;
     if (!nameMap.has(key)) nameMap.set(key, []);
     nameMap.get(key)!.push(c.id);
@@ -81,11 +100,13 @@ function buildDuplicateSet(customers: Customer[]): Set<string> {
   return dupIds;
 }
 
-/** 重複候補を探す（名前のみで判定 — 電話番号は除外） */
+/** 重複候補を探す（名前のみで判定・正規化後 — 電話番号は除外） */
 function findMergeCandidates(current: Customer, allCustomers: Customer[]): Customer[] {
+  const currentKey = normalizeName(current.name);
+  if (!currentKey) return [];
   return allCustomers.filter(c => {
     if (c.id === current.id) return false;
-    return c.name.trim() === current.name.trim();
+    return normalizeName(c.name) === currentKey;
   });
 }
 
