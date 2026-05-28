@@ -341,6 +341,7 @@ export type SalesPatientSuggestion = {
   lastSaleDate: string;      // "yyyy-MM-dd"
   daysSinceLastVisit: number;
   visitCount: number;
+  lastItems: string[];       // 直近の jippi 項目名（例: ["保険施術", "鍼灸1部位"]）
 };
 
 /**
@@ -449,6 +450,23 @@ export async function getLastSaleForCustomer(
   }
 }
 
+// memo (JSON) から jippi の name 一覧を抽出する。
+// 旧データ（"前回同様" がそのまま入った行）は除外して再ループを防ぐ。
+function extractJippiNames(memo: string | null | undefined): string[] {
+  if (!memo) return [];
+  try {
+    const parsed = JSON.parse(memo);
+    if (Array.isArray(parsed?.jippi)) {
+      return parsed.jippi
+        .map((i: any) => String(i?.name ?? "").trim())
+        .filter((n: string) => n && !n.startsWith("前回同様"));
+    }
+  } catch {
+    // プレーンテキストの memo は対象外
+  }
+  return [];
+}
+
 export async function searchSalesPatients(name: string): Promise<SalesPatientSuggestion[]> {
   const { clinicId } = await checkAdminAuth();
   if (!name.trim()) return [];
@@ -458,7 +476,7 @@ export async function searchSalesPatients(name: string): Promise<SalesPatientSug
   // 名前部分一致で過去の売上を取得（直近20件）
   const { data } = await supabase
     .from("cash_sales")
-    .select("customer_name, treatment_fee, sale_date")
+    .select("customer_name, treatment_fee, sale_date, memo")
     .eq("clinic_id", clinicId)
     .ilike("customer_name", `%${name.trim()}%`)
     .order("sale_date", { ascending: false })
@@ -466,12 +484,17 @@ export async function searchSalesPatients(name: string): Promise<SalesPatientSug
 
   if (!data || data.length === 0) return [];
 
-  // 名前ごとに集約
-  const byName: Record<string, { lastAmount: number; lastSaleDate: string; visitCount: number }> = {};
+  // 名前ごとに集約（最新行の memo から jippi 名を抽出）
+  const byName: Record<string, { lastAmount: number; lastSaleDate: string; visitCount: number; lastItems: string[] }> = {};
   for (const row of data) {
     const n = row.customer_name as string;
     if (!byName[n]) {
-      byName[n] = { lastAmount: row.treatment_fee, lastSaleDate: row.sale_date, visitCount: 1 };
+      byName[n] = {
+        lastAmount: row.treatment_fee,
+        lastSaleDate: row.sale_date,
+        visitCount: 1,
+        lastItems: extractJippiNames((row as any).memo),
+      };
     } else {
       byName[n].visitCount++;
       // sale_date 降順で取得しているので最初のレコードが最新
@@ -488,6 +511,7 @@ export async function searchSalesPatients(name: string): Promise<SalesPatientSug
         (today.getTime() - new Date(info.lastSaleDate).getTime()) / (1000 * 60 * 60 * 24)
       ),
       visitCount: info.visitCount,
+      lastItems: info.lastItems,
     }))
     .sort((a, b) => a.daysSinceLastVisit - b.daysSinceLastVisit)
     .slice(0, 8);

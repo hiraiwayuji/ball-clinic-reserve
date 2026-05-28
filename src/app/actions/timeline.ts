@@ -19,6 +19,7 @@ export type TimelineStaff = {
 
 export type TimelineAppointment = {
   id: string;
+  clinic_id: string;          // 編集ダイアログで「前回来院日取得」のテナント絞り込みに必要
   start_time: string;
   end_time: string | null;
   status: string;
@@ -29,7 +30,9 @@ export type TimelineAppointment = {
   course_name: string | null;
   staff_id: string | null;
   staff_name: string | null;
+  room_id: string | null;      // 編集ダイアログで個室選択に必要
   room_name: string | null;
+  series_id: string | null;    // 編集ダイアログで「以降の繰り返し含めて」操作に必要
   customer_id: string | null;
   customer_name: string | null;
   additional_courses: { course_id: string; course_name: string }[] | null;
@@ -96,7 +99,7 @@ export async function getTimelineForDate(dateStr: string): Promise<{ success: bo
         .order("sort_order", { ascending: true })
         .order("name", { ascending: true }),
       sb.from("appointments")
-        .select("id, start_time, end_time, status, checkin_status, is_first_visit, memo, course_id, course_name, staff_id, staff_name, room_name, customer_id, additional_courses, additional_staff, customers(name)")
+        .select("id, start_time, end_time, status, checkin_status, is_first_visit, memo, course_id, course_name, staff_id, staff_name, room_id, room_name, series_id, customer_id, additional_courses, additional_staff, customers(name)")
         .eq("clinic_id", clinicId)
         .neq("status", "cancelled")
         .gte("start_time", dayStart)
@@ -130,6 +133,7 @@ export async function getTimelineForDate(dateStr: string): Promise<{ success: bo
       const cust = Array.isArray(a.customers) ? a.customers[0] : (a.customers as any);
       return {
         id: a.id,
+        clinic_id: clinicId,
         start_time: a.start_time,
         end_time: a.end_time ?? null,
         status: a.status,
@@ -140,7 +144,9 @@ export async function getTimelineForDate(dateStr: string): Promise<{ success: bo
         course_name: a.course_name ?? null,
         staff_id: a.staff_id ?? null,
         staff_name: a.staff_name ?? null,
+        room_id: (a as any).room_id ?? null,
         room_name: a.room_name ?? null,
+        series_id: (a as any).series_id ?? null,
         customer_id: a.customer_id ?? null,
         customer_name: cust?.name ?? null,
         additional_courses: (a.additional_courses ?? null) as { course_id: string; course_name: string }[] | null,

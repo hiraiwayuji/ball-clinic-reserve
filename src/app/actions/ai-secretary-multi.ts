@@ -111,7 +111,7 @@ export async function generateOwnerBriefing(): Promise<{ success: boolean; brief
     // 同一電話で別名義の登録チェック用（軽いので最大 500 件）
     sb
       .from("customers")
-      .select("id, name, phone")
+      .select("id, name, phone, medical_record_number")
       .eq("clinic_id", auth.clinicId)
       .not("phone", "is", null)
       .limit(500),
@@ -196,7 +196,7 @@ export async function generateOwnerBriefing(): Promise<{ success: boolean; brief
   }
 
   // 2) 同一電話番号で別名義の顧客（家族予約 or 入力ミスの疑い）
-  const customers = (customersRes.data ?? []) as { id: string; name: string; phone: string | null }[];
+  const customers = (customersRes.data ?? []) as { id: string; name: string; phone: string | null; medical_record_number: string | null }[];
   const phoneToNames = new Map<string, Set<string>>();
   for (const c of customers) {
     if (!c.phone) continue;
@@ -218,6 +218,36 @@ export async function generateOwnerBriefing(): Promise<{ success: boolean; brief
       id: `phone-conflict-${firstPhone}`,
       actionUrl: `/admin/customers?phone=${encodeURIComponent(firstPhone)}`,
     });
+  }
+
+  // 2.5) 同名で複数の customer 登録（兄弟・親子の可能性 or 重複登録 → カルテ番号で識別を促す）
+  const nameToCustomers = new Map<string, { id: string; phone: string | null; mrn: string | null }[]>();
+  for (const c of customers) {
+    const trimmed = (c.name ?? "").trim();
+    if (!trimmed) continue;
+    const list = nameToCustomers.get(trimmed) ?? [];
+    list.push({ id: c.id, phone: c.phone, mrn: c.medical_record_number });
+    nameToCustomers.set(trimmed, list);
+  }
+  const sameNameGroups = [...nameToCustomers.entries()]
+    .filter(([, list]) => list.length >= 2)
+    // カルテ番号で全員識別済みなら違和感ではない（家族で別カルテとして運用OKの状態）
+    .filter(([, list]) => list.some((c) => !c.mrn));
+  if (sameNameGroups.length > 0) {
+    const head = sameNameGroups.slice(0, 3).map(([name, list]) => {
+      const samePhone = list.every((c) => c.phone && c.phone === list[0].phone);
+      return `${name}様（${list.length}件${samePhone ? "・同電話" : ""}）`;
+    });
+    const tail = sameNameGroups.length > 3 ? `（他 ${sameNameGroups.length - 3} 組）` : "";
+    const firstName = sameNameGroups[0][0];
+    pushAlert(
+      "urgent",
+      `同名で複数の顧客登録が ${sameNameGroups.length} 組あります: ${head.join(" / ")}${tail}。兄弟・親子で別人ならカルテ番号で識別、同一人物の重複登録なら片方を整理してください。`,
+      {
+        id: `same-name-customers-${sameNameGroups.length}`,
+        actionUrl: `/admin/customers?q=${encodeURIComponent(firstName)}`,
+      },
+    );
   }
 
   // 3) 直近 14 日に同じ顧客の連続キャンセルが 3 回以上（離脱兆候）

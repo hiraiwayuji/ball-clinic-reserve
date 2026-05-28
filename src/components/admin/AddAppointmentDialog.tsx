@@ -16,7 +16,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { createManualReservation } from "@/app/actions/adminReserve";
+import { createManualReservation, findSameDayAppointmentsByName } from "@/app/actions/adminReserve";
 import { searchPatientsForBooking, PatientSuggestion } from "@/app/actions/patientSearch";
 import { getCourses, getStaffList, getRooms, type ReservationCourse, type ReservationStaff, type ReservationRoom } from "@/app/actions/courses";
 import { toast } from "sonner";
@@ -60,8 +60,23 @@ export function AddAppointmentDialog({
   const [time, setTime] = useState<string>(defaultTime || "");
   const [visitType, setVisitType] = useState<string>("new");
   const [recurringWeeks, setRecurringWeeks] = useState<string>("1");
-  const [duration, setDuration] = useState<string>("30");
+  const [duration, setDuration] = useState<string>(String(slotMinutes));
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // slot サイズ刻みで 120分まで（slot=20 → 20/40/60/80/100/120）
+  // コース duration が slot 倍数でないケースも拾えるよう、現在値を含めてマージする
+  const durationOptions = (() => {
+    const base = Array.from(
+      { length: Math.floor(120 / slotMinutes) },
+      (_, i) => (i + 1) * slotMinutes,
+    );
+    const cur = Number(duration);
+    if (cur && !base.includes(cur)) {
+      base.push(cur);
+      base.sort((a, b) => a - b);
+    }
+    return base;
+  })();
 
   // コース・スタッフ・個室マスタ（ダイアログを開いたとき1回だけ取得）
   const [courses, setCourses] = useState<ReservationCourse[]>([]);
@@ -95,6 +110,8 @@ export function AddAppointmentDialog({
         // 既存コースの duration を反映
         const c = courses.find((c) => c.id === defaultCourseId);
         if (c) setDuration(String(c.duration_minutes));
+      } else {
+        setDuration(String(slotMinutes));
       }
       if (defaultName) setNameValue(defaultName);
       if (defaultPhone) setPhoneValue(defaultPhone);
@@ -119,7 +136,7 @@ export function AddAppointmentDialog({
       setSelectedPatient(null);
       setVisitType("new");
       setRecurringWeeks("1");
-      setDuration("30");
+      setDuration(String(slotMinutes));
       setCourseId("");
       setStaffId("");
       setRoomId("");
@@ -155,7 +172,24 @@ export function AddAppointmentDialog({
       try {
         const results = await searchPatientsForBooking(value);
         setSuggestions(results);
-        setShowSuggestions(results.length > 0);
+
+        // 入力名と完全一致する候補が1件だけ → 自動で電話番号を反映
+        // （サジェストをクリックする運用を覚えなくてもカルテ番号を見ずに済むように）
+        const trimmed = value.trim();
+        const exact = results.filter((r) => r.name === trimmed);
+        if (exact.length === 1) {
+          const p = exact[0];
+          setSelectedPatient(p);
+          setPhoneValue(p.phone);
+          // カルテ番号は DB 登録ありの時だけ反映（手入力中の番号を消さない）
+          if (p.medicalRecordNumber) {
+            setMedicalRecordNumberValue(p.medicalRecordNumber);
+          }
+          if (p.totalVisits > 0) setVisitType("return");
+          setShowSuggestions(false);
+        } else {
+          setShowSuggestions(results.length > 0);
+        }
       } finally {
         setIsSearching(false);
       }
@@ -190,6 +224,28 @@ export function AddAppointmentDialog({
       toast.error("日付と時間を選択してください");
       return;
     }
+
+    // 同日同名予約のチェック（兄弟・親子の重複 / 本人の二重予約検出）
+    try {
+      const dateStr = format(date, "yyyy-MM-dd");
+      const dup = await findSameDayAppointmentsByName(dateStr, nameValue);
+      if (dup.appointments.length > 0) {
+        const lines = dup.appointments
+          .map((a) => `・${a.time}〜${a.phone ? `（${a.phone}）` : ""}${a.medicalRecordNumber ? ` [カルテ:${a.medicalRecordNumber}]` : ""}`)
+          .join("\n");
+        const note =
+          dup.customerCount >= 2
+            ? `\n\n⚠ 同名の患者さんが ${dup.customerCount} 人登録されています。兄弟・親子の可能性があります。\nフルネームをもう一度ご確認ください。本人が違う場合はカルテ番号で識別してください。`
+            : "\n\n⚠ ご本人の二重予約の可能性があります。先に既存予約を削除するか、別人ならカルテ番号で識別してください。";
+        const ok = window.confirm(
+          `「${nameValue.trim()}」さんの予約が同日に既に ${dup.appointments.length} 件あります：\n${lines}${note}\n\nこのまま追加しますか？`,
+        );
+        if (!ok) return;
+      }
+    } catch {
+      // 重複チェックが失敗しても予約処理は続行（既存挙動を優先）
+    }
+
     setIsSubmitting(true);
     try {
       const formData = new FormData(e.currentTarget);
@@ -219,7 +275,7 @@ export function AddAppointmentDialog({
         setTime("");
         setVisitType("new");
         setRecurringWeeks("1");
-        setDuration("30");
+        setDuration(String(slotMinutes));
         setCourseId("");
         setStaffId("");
         setRoomId("");
@@ -317,12 +373,9 @@ export function AddAppointmentDialog({
                   所要時間
                 </Label>
                 <select value={duration} onChange={(e) => setDuration(e.target.value)} className={selectClass}>
-                  <option value="30">30分</option>
-                  <option value="60">60分</option>
-                  <option value="90">90分</option>
-                  <option value="120">120分</option>
-                  <option value="150">150分</option>
-                  <option value="180">180分</option>
+                  {durationOptions.map((m) => (
+                    <option key={m} value={m}>{m}分</option>
+                  ))}
                 </select>
               </div>
             </div>
@@ -414,6 +467,24 @@ export function AddAppointmentDialog({
                   )}
                 </div>
               )}
+
+              {/* 同名複数アラート（兄弟・親子の可能性） */}
+              {(() => {
+                const trimmed = nameValue.trim();
+                if (!trimmed) return null;
+                const same = suggestions.filter((s) => s.name === trimmed);
+                if (same.length < 2) return null;
+                return (
+                  <div className="bg-amber-50 border border-amber-300 rounded-lg px-3 py-2 mt-1">
+                    <p className="text-xs text-amber-900 font-bold">
+                      ⚠ 同名の患者さんが {same.length} 件登録されています
+                    </p>
+                    <p className="text-[11px] text-amber-800 mt-0.5 leading-snug">
+                      兄弟・親子で同姓同名の可能性があります。サジェストから本人を選ぶか、カルテ番号で別人として登録してください。
+                    </p>
+                  </div>
+                );
+              })()}
             </div>
 
             {/* 電話番号 */}

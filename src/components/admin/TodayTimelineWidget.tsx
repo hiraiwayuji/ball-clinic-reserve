@@ -8,13 +8,14 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
   ChevronLeft, ChevronRight, Loader2, RotateCcw,
-  UserCheck, CreditCard, XCircle, Plus, CalendarPlus,
+  UserCheck, CreditCard, XCircle, Plus, CalendarPlus, Pencil,
 } from "lucide-react";
 import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
 import { getTimelineForDate, type TimelineData, type TimelineAppointment } from "@/app/actions/timeline";
 import { updateCheckinStatus } from "@/app/actions/adminReserve";
 import { AddAppointmentDialog } from "@/components/admin/AddAppointmentDialog";
+import { EditAppointmentDialog } from "@/components/admin/EditAppointmentDialog";
 
 // スタッフ未指定の予約をまとめる仮想列
 const UNASSIGNED_KEY = "__unassigned__";
@@ -69,6 +70,12 @@ export default function TodayTimelineWidget() {
     staffId?: string;
     time?: string;
   }>({ open: false });
+
+  // 「予約変更」ダイアログ（既存予約の編集）
+  const [editDialog, setEditDialog] = useState<{
+    open: boolean;
+    appointment: TimelineAppointment | null;
+  }>({ open: false, appointment: null });
 
   // 受付・会計ボタンの非同期処理ロック
   const [actionLoading, setActionLoading] = useState(false);
@@ -473,6 +480,17 @@ export default function TodayTimelineWidget() {
                 <CalendarPlus className="w-4 h-4 mr-1.5" />
                 次回予約を入れる（同じコース・担当でプリセット）
               </Button>
+              <Button
+                onClick={() => {
+                  setEditDialog({ open: true, appointment: selectedApt });
+                  setSelectedApt(null);
+                }}
+                variant="outline"
+                className="w-full border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800"
+              >
+                <Pencil className="w-4 h-4 mr-1.5" />
+                予約変更（時刻・コース・担当・メモを編集）
+              </Button>
             </div>
           </div>
         </div>
@@ -506,6 +524,19 @@ export default function TodayTimelineWidget() {
           defaultStaffId={reserveDialog.staffId}
           hideTrigger
           onSuccess={() => date && fetchData(date)}
+        />
+      )}
+
+      {/* 予約変更ダイアログ */}
+      {editDialog.open && editDialog.appointment && (
+        <EditAppointmentDialog
+          open={editDialog.open}
+          onOpenChange={(o) => setEditDialog((s) => ({ ...s, open: o }))}
+          appointment={editDialog.appointment}
+          onSuccess={() => {
+            setEditDialog({ open: false, appointment: null });
+            if (date) fetchData(date);
+          }}
         />
       )}
     </Card>

@@ -66,6 +66,20 @@ export function EditAppointmentDialog({
   const [initialStaffId, setInitialStaffId] = useState<string>("");
   const [initialRoomId, setInitialRoomId] = useState<string>("");
 
+  // slot サイズ刻みで 120分まで（既存予約が slot 倍数でないケースも拾えるよう現在値もマージ）
+  const durationOptions = (() => {
+    const base = Array.from(
+      { length: Math.floor(120 / slotMinutes) },
+      (_, i) => (i + 1) * slotMinutes,
+    );
+    const cur = Number(duration);
+    if (cur && !base.includes(cur)) {
+      base.push(cur);
+      base.sort((a, b) => a - b);
+    }
+    return base;
+  })();
+
   useEffect(() => {
     if (open && appointment) {
       const startDateTime = parseISO(appointment.start_time);
@@ -393,12 +407,9 @@ export function EditAppointmentDialog({
                   onChange={(e) => setDuration(e.target.value)}
                   className={selectClass}
                 >
-                  <option value="30">30分</option>
-                  <option value="60">60分</option>
-                  <option value="90">90分</option>
-                  <option value="120">120分</option>
-                  <option value="150">150分</option>
-                  <option value="180">180分</option>
+                  {durationOptions.map((m) => (
+                    <option key={m} value={m}>{m}分</option>
+                  ))}
                 </select>
               </div>
             </div>

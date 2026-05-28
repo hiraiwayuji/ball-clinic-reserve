@@ -17,6 +17,12 @@ function parseMemo(memoStr: string | null) {
   }
   return memoStr;
 }
+
+// 「前回同様」を前回の項目名入りに展開する（例: 「前回同様（保険施術、鍼灸1部位）」）
+function formatPrevSimilarLabel(items: string[] | undefined | null): string {
+  if (!items || items.length === 0) return "前回同様";
+  return `前回同様（${items.join("、")}）`;
+}
 import { useSearchParams } from "next/navigation";
 import { format } from "date-fns";
 import { ja } from "date-fns/locale";
@@ -162,7 +168,7 @@ function SalesPageInner() {
         const exact = results.find((r) => r.customer_name === presetName);
         const best = exact ?? results[0];
         if (best) {
-          setJippiItems([{ name: "前回同様", amount: best.lastAmount }]);
+          setJippiItems([{ name: formatPrevSimilarLabel(best.lastItems), amount: best.lastAmount }]);
           toast.info(`${presetName}様の前回金額（${best.lastAmount.toLocaleString()}円）を入力しました`);
         }
       });
@@ -205,6 +211,21 @@ function SalesPageInner() {
     if (totalAmount === 0 && paymentTypes.length === 0) {
       toast.error("0円で登録する場合は支払区分（自賠責・はぐくみ医療など）を選択してください");
       return;
+    }
+
+    // 同日同名の売上が既にあれば確認（兄弟・親子の二重計上 / 同一人物の重複計上検出）
+    const trimmedName = nameValue.trim();
+    if (trimmedName) {
+      const sameNameToday = sales.filter((s) => s.customer_name === trimmedName);
+      if (sameNameToday.length > 0) {
+        const lines = sameNameToday
+          .map((s) => `・¥${Number(s.treatment_fee ?? 0).toLocaleString()}（${parseMemo(s.memo)}）`)
+          .join("\n");
+        const ok = window.confirm(
+          `「${trimmedName}」さんの売上が本日すでに ${sameNameToday.length} 件あります：\n${lines}\n\n⚠ 兄弟・親子の二重計上、または同一人物のダブり登録の可能性があります。\nこのまま追加しますか？（OK で追加 / キャンセルで中止）`,
+        );
+        if (!ok) return;
+      }
     }
 
     const formData = new FormData(e.currentTarget);
@@ -385,7 +406,7 @@ function SalesPageInner() {
   // 候補を選択したとき
   const handleSelectSuggestion = (p: SalesPatientSuggestion) => {
     setNameValue(p.customer_name);
-    setJippiItems([{ name: "前回同様", amount: p.lastAmount }]);
+    setJippiItems([{ name: formatPrevSimilarLabel(p.lastItems), amount: p.lastAmount }]);
     setShowSuggestions(false);
   };
 
@@ -915,6 +936,7 @@ function SalesPageInner() {
                   type="number"
                   inputMode="numeric"
                   min={0}
+                  step={100}
                   value={editForm.treatment_fee}
                   onChange={(e) => setEditForm(f => ({ ...f, treatment_fee: e.target.value }))}
                 />
@@ -1115,7 +1137,7 @@ function LineItemRow({
           <option value={CUSTOM_NAME}>＋ その他（自由入力）</option>
         </select>
       )}
-      <input type="number" inputMode="numeric" value={item.amount || ""}
+      <input type="number" inputMode="numeric" step={100} value={item.amount || ""}
         onChange={e => onChange({ ...item, amount: Number(e.target.value) })}
         placeholder="金額" className="w-28 sm:w-32 border border-slate-200 dark:border-slate-700 rounded px-2 py-1.5 text-sm text-right bg-transparent dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500" />
       {isFreeText && item.name.trim() !== "" && !savedItems.includes(item.name) && (
