@@ -53,6 +53,9 @@ export function EditAppointmentDialog({
   const [visitCount, setVisitCount] = useState<number | null>(null);
   const [deleteChoiceOpen, setDeleteChoiceOpen] = useState(false);
   const [seriesFutureCount, setSeriesFutureCount] = useState<number>(0);
+  // 予約確定の直後に「LINEを送りますか？」を確認するポップ
+  const [lineConfirmOpen, setLineConfirmOpen] = useState(false);
+  const [lineSending, setLineSending] = useState(false);
 
   // コース・スタッフ・個室マスタ
   const [courses, setCourses] = useState<ReservationCourse[]>([]);
@@ -278,8 +281,9 @@ export function EditAppointmentDialog({
       const result = await updateAppointmentStatus(appointment.id, "confirmed");
       if (result.success) {
         toast.success("予約を確定しました");
-        onOpenChange(false);
+        // 確定後すぐに「LINEを送りますか？」を確認（一覧は裏で更新）
         onSuccess?.();
+        setLineConfirmOpen(true);
       } else {
         toast.error(result.error || "エラーが発生しました");
       }
@@ -288,6 +292,32 @@ export function EditAppointmentDialog({
     } finally {
       setIsSubmitting(false);
     }
+  };
+
+  // 確定ポップ内「送る」: LINE確定通知を送ってから閉じる
+  const handleConfirmSendLine = async () => {
+    if (!appointment) return;
+    setLineSending(true);
+    try {
+      const result = await sendLineConfirmation(appointment.id);
+      if (result.success) {
+        toast.success("予約確定のLINEを送信しました");
+      } else {
+        toast.error(result.error || "LINE送信に失敗しました");
+      }
+    } catch {
+      toast.error("通信エラーが発生しました");
+    } finally {
+      setLineSending(false);
+      setLineConfirmOpen(false);
+      onOpenChange(false);
+    }
+  };
+
+  // 確定ポップ内「送らない」: 何もせず閉じる
+  const handleSkipLine = () => {
+    setLineConfirmOpen(false);
+    onOpenChange(false);
   };
 
   if (!appointment) return null;
@@ -560,6 +590,47 @@ export function EditAppointmentDialog({
           </div>
         </form>
       </DialogContent>
+
+      {/* 予約確定後のLINE送信確認ポップ */}
+      <Dialog open={lineConfirmOpen} onOpenChange={(o) => { if (!o) handleSkipLine(); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <MessageCircle className="w-5 h-5 text-green-600" />
+              予約確定のLINEを送りますか？
+            </DialogTitle>
+            <DialogDescription>
+              {appointment.customers?.name}
+              <span className="text-slate-400">様</span>
+              に、予約が確定したことをLINEでお知らせできます。
+              <br />
+              <span className="text-xs text-slate-400">
+                ※LINE未連携の方には送信できません（その場合はメッセージが表示されます）。
+              </span>
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="mt-4 flex gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={handleSkipLine}
+              disabled={lineSending}
+              className="flex-1"
+            >
+              送らない
+            </Button>
+            <Button
+              type="button"
+              onClick={handleConfirmSendLine}
+              disabled={lineSending}
+              className="flex-1 bg-green-600 hover:bg-green-700 text-white"
+            >
+              <MessageCircle className="w-4 h-4 mr-1" />
+              {lineSending ? "送信中..." : "LINEを送る"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* 連続予約の削除選択ダイアログ */}
       <Dialog open={deleteChoiceOpen} onOpenChange={setDeleteChoiceOpen}>
