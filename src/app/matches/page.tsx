@@ -38,6 +38,7 @@ async function getMatches(): Promise<Match[]> {
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
     );
+    // tenant-isolation-ignore: 公開試合日程の取得。calendar_id は固定トークン、member も「試合」固定で私的予定は出ない。
     const { data, error } = await supabase
       .from("calendar_events")
       .select("title,description,start_time")
