@@ -1,7 +1,8 @@
 import Link from "next/link";
 
-const ICAL_URL = "https://ball-clinic-reserve.vercel.app/api/ical/76p83beb?member=%E8%A9%A6%E5%90%88";
-const WEBCAL_URL = "webcal://ball-clinic-reserve.vercel.app/api/ical/76p83beb?member=%E8%A9%A6%E5%90%88";
+// 試合専用の公開エンドポイント（サーバー側で「試合」固定。URL改ざんでも私的予定は出ない）
+const ICAL_URL = "https://ball-clinic-reserve.vercel.app/api/ical/redold";
+const WEBCAL_URL = "webcal://ball-clinic-reserve.vercel.app/api/ical/redold";
 const GOOGLE_URL = `https://calendar.google.com/calendar/render?cid=${encodeURIComponent(WEBCAL_URL)}`;
 
 const matches = [
