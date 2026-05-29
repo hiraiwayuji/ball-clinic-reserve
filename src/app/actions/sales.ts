@@ -309,21 +309,45 @@ export async function bulkAddCashSales(rows: Array<{
   is_first_visit: boolean;
   sale_date: string;
   payment_type?: CashSalePaymentType | null;
+  // 区分ごとに金額を分けて登録したい場合は lines を渡す。
+  // lines があれば treatment_fee/payment_type は無視し、各 line を 1 行ずつ cash_sales に insert する。
+  lines?: Array<{ payment_type?: CashSalePaymentType | null; treatment_fee: number }>;
 }>) {
   const { clinicId } = await checkAdminAuth();
   try {
     const supabase = await getSupabase();
-    const { error } = await supabase.from("cash_sales").insert(
-      rows.map(r => ({
-        customer_name: r.customer_name,
-        treatment_fee: r.treatment_fee,
-        memo: r.memo,
-        is_first_visit: r.is_first_visit,
-        sale_date: r.sale_date,
-        payment_type: normalizePaymentType(r.payment_type),
-        clinic_id: clinicId,
-      }))
-    );
+
+    // 各患者行を cash_sales の insert 行に展開する。
+    // lines があれば区分ごとに複数行へ、無ければ従来どおり 1 行。
+    const insertRows = rows.flatMap((r) => {
+      const validLines = (r.lines ?? []).filter(
+        (l) => l && !Number.isNaN(l.treatment_fee),
+      );
+      if (validLines.length > 0) {
+        return validLines.map((l) => ({
+          customer_name: r.customer_name,
+          treatment_fee: l.treatment_fee,
+          memo: r.memo,
+          is_first_visit: r.is_first_visit,
+          sale_date: r.sale_date,
+          payment_type: normalizePaymentType(l.payment_type),
+          clinic_id: clinicId,
+        }));
+      }
+      return [
+        {
+          customer_name: r.customer_name,
+          treatment_fee: r.treatment_fee,
+          memo: r.memo,
+          is_first_visit: r.is_first_visit,
+          sale_date: r.sale_date,
+          payment_type: normalizePaymentType(r.payment_type),
+          clinic_id: clinicId,
+        },
+      ];
+    });
+
+    const { error } = await supabase.from("cash_sales").insert(insertRows);
     if (error) throw error;
     revalidatePath("/admin/sales");
     revalidatePath("/admin/dashboard");

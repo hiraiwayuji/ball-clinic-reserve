@@ -12,21 +12,30 @@ import {
 } from "@/app/actions/sales";
 import { usePaymentCategories } from "@/lib/use-payment-categories";
 import { getPaymentCategoryColor } from "@/lib/payment-category-color";
-import type { PaymentCategoryRow } from "@/app/actions/payment-categories";
+import { upsertPaymentCategory, type PaymentCategoryRow } from "@/app/actions/payment-categories";
 import { toast } from "sonner";
 import Link from "next/link";
 import {
   Bot, CheckSquare, Square, Loader2, Zap, AlertTriangle,
   ChevronLeft, Save, RefreshCw, User, Clock, Info, ClipboardList,
+  Plus, X, SplitSquareHorizontal,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+
+// 区分ごとの金額明細（複数区分で金額を分ける場合に使う）
+type PaymentLine = {
+  paymentType: CashSalePaymentType | "";
+  amount: string;
+};
 
 type DraftRow = PendingSalePatient & {
   checked: boolean;
   editAmount: string;
   editMemo: string;
   paymentType: CashSalePaymentType | "";
+  // 区分ごとに金額を分ける明細。空なら従来どおり editAmount + paymentType を使う。
+  lines: PaymentLine[];
 };
 
 const CONFIDENCE_ORDER = { certain: 0, likely: 1, unknown: 2 } as const;
@@ -37,7 +46,7 @@ function BulkSalesPageInner() {
   const targetDateStr = dateParam ?? new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" });
   const targetDate = new Date(targetDateStr + "T00:00:00+09:00");
 
-  const { categories: paymentCategories } = usePaymentCategories();
+  const { categories: paymentCategories, reload: reloadCategories } = usePaymentCategories();
   const [rows, setRows] = useState<DraftRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [isPending, startTransition] = useTransition();
@@ -55,6 +64,7 @@ function BulkSalesPageInner() {
             editAmount: p.initialAmount,
             editMemo: p.initialMemo,
             paymentType: "" as CashSalePaymentType | "",
+            lines: [] as PaymentLine[],
           }))
       );
     } else {
@@ -84,28 +94,52 @@ function BulkSalesPageInner() {
     )));
   };
 
+  // その行が「区分ごと金額分け」モードか（有効な明細が1件以上ある）
+  const hasLines = (r: DraftRow) => r.lines.some(l => l.amount !== "");
+  // その行の合計金額（明細モードなら明細合計、通常なら editAmount）
+  const rowTotal = (r: DraftRow) =>
+    hasLines(r)
+      ? r.lines.reduce((s, l) => s + (parseInt(l.amount || "0", 10) || 0), 0)
+      : (parseInt(r.editAmount || "0", 10) || 0);
+  // 保存対象か（通常: 金額入力あり / 明細: 明細が1件以上）
+  const isSavable = (r: DraftRow) => hasLines(r) || r.editAmount !== "";
+
   const handleSave = () => {
-    const targets = rows.filter(r => r.checked && r.editAmount !== "");
+    const targets = rows.filter(r => r.checked && isSavable(r));
     if (targets.length === 0) {
       toast.error("保存する項目がありません");
       return;
     }
-    // 0 円計上の行は支払区分を必須にする（自賠責・はぐくみ医療等）
-    const zeroWithoutPaymentType = targets.filter(r => parseInt(r.editAmount, 10) === 0 && !r.paymentType);
+    // 0 円計上の行は支払区分を必須にする（自賠責・はぐくみ医療等）。
+    // 明細モードの行は各明細で区分を持つので個別チェック。
+    const zeroWithoutPaymentType = targets.filter(r => {
+      if (hasLines(r)) {
+        return r.lines.some(l => l.amount !== "" && parseInt(l.amount, 10) === 0 && !l.paymentType);
+      }
+      return parseInt(r.editAmount, 10) === 0 && !r.paymentType;
+    });
     if (zeroWithoutPaymentType.length > 0) {
       toast.error(`${zeroWithoutPaymentType.map(r => r.customerName).join("・")}様：0円の場合は支払区分を選択してください`);
       return;
     }
     startTransition(async () => {
       const res = await bulkAddCashSales(
-        targets.map(r => ({
-          customer_name: r.customerName,
-          treatment_fee: parseInt(r.editAmount, 10),
-          memo: r.editMemo,
-          is_first_visit: r.isFirstVisit,
-          sale_date: targetDateStr,
-          payment_type: r.paymentType || null,
-        }))
+        targets.map(r => {
+          const lines = hasLines(r)
+            ? r.lines
+                .filter(l => l.amount !== "")
+                .map(l => ({ payment_type: l.paymentType || null, treatment_fee: parseInt(l.amount, 10) }))
+            : undefined;
+          return {
+            customer_name: r.customerName,
+            treatment_fee: parseInt(r.editAmount || "0", 10) || 0,
+            memo: r.editMemo,
+            is_first_visit: r.isFirstVisit,
+            sale_date: targetDateStr,
+            payment_type: r.paymentType || null,
+            lines,
+          };
+        })
       );
       if (res.success) {
         toast.success(`${targets.length}件を一括保存しました！`);
@@ -116,10 +150,10 @@ function BulkSalesPageInner() {
     });
   };
 
-  const checkedCount = rows.filter(r => r.checked && r.editAmount !== "").length;
+  const checkedCount = rows.filter(r => r.checked && isSavable(r)).length;
   const totalAmount = rows
-    .filter(r => r.checked && r.editAmount !== "")
-    .reduce((sum, r) => sum + parseInt(r.editAmount || "0", 10), 0);
+    .filter(r => r.checked && isSavable(r))
+    .reduce((sum, r) => sum + rowTotal(r), 0);
 
   const warningRows = rows.filter(r => r.prediction?.warning);
   const certainCount = rows.filter(r => r.confidence === "certain").length;
@@ -269,6 +303,7 @@ function BulkSalesPageInner() {
                 key={row.appointmentId}
                 row={row}
                 paymentCategories={paymentCategories}
+                onCategoryAdded={reloadCategories}
                 onChange={(updated) =>
                   setRows(prev => prev.map(r => r.appointmentId === row.appointmentId ? updated : r))
                 }
@@ -319,14 +354,68 @@ function DraftRowItem({
   row,
   onChange,
   paymentCategories,
+  onCategoryAdded,
 }: {
   row: DraftRow;
   onChange: (updated: DraftRow) => void;
   paymentCategories: PaymentCategoryRow[];
+  onCategoryAdded: () => Promise<void> | void;
 }) {
-  const hasAmount = row.editAmount !== "";
-  const isZero = hasAmount && parseInt(row.editAmount, 10) === 0;
+  // 区分ごと金額分けモードか
+  const splitMode = row.lines.length > 0;
+  const hasAmount = splitMode
+    ? row.lines.some(l => l.amount !== "")
+    : row.editAmount !== "";
+  const isZero = !splitMode && row.editAmount !== "" && parseInt(row.editAmount, 10) === 0;
   const time = format(parseISO(row.checkinTime), "HH:mm");
+
+  // 明細モードの合計（フッター以外でも行内に出す）
+  const splitTotal = row.lines.reduce((s, l) => s + (parseInt(l.amount || "0", 10) || 0), 0);
+
+  // その場で支払区分を追加
+  const [addingCategory, setAddingCategory] = useState(false);
+  const [newCategoryLabel, setNewCategoryLabel] = useState("");
+  const [savingCategory, setSavingCategory] = useState(false);
+  const handleAddCategory = async () => {
+    const label = newCategoryLabel.trim();
+    if (!label) return;
+    setSavingCategory(true);
+    try {
+      const res = await upsertPaymentCategory({ label });
+      if (res.success) {
+        toast.success(`支払区分「${label}」を追加しました`);
+        setNewCategoryLabel("");
+        setAddingCategory(false);
+        await onCategoryAdded();
+      } else {
+        toast.error(res.error ?? "区分の追加に失敗しました");
+      }
+    } finally {
+      setSavingCategory(false);
+    }
+  };
+
+  // 明細モードへ切り替え（現在の単一区分・金額を1行目に引き継ぐ）
+  const enableSplit = () => {
+    onChange({
+      ...row,
+      checked: true,
+      lines: [
+        { paymentType: row.paymentType, amount: row.editAmount || "" },
+        { paymentType: "", amount: "" },
+      ],
+    });
+  };
+  const disableSplit = () => onChange({ ...row, lines: [] });
+  const updateLine = (idx: number, patch: Partial<PaymentLine>) => {
+    const next = row.lines.map((l, i) => (i === idx ? { ...l, ...patch } : l));
+    onChange({ ...row, lines: next, checked: next.some(l => l.amount !== "") });
+  };
+  const addLine = () => onChange({ ...row, lines: [...row.lines, { paymentType: "", amount: "" }] });
+  const removeLine = (idx: number) => {
+    const next = row.lines.filter((_, i) => i !== idx);
+    onChange({ ...row, lines: next });
+  };
 
   return (
     <div className={[
@@ -401,16 +490,22 @@ function DraftRowItem({
           )}
         </div>
 
-        {/* 金額入力 */}
+        {/* 金額入力（通常モードのみ。明細モードは下に合計を表示） */}
         <div className="w-28 shrink-0">
-          <Input
-            type="number"
-            min={0}
-            placeholder="金額"
-            value={row.editAmount}
-            onChange={(e) => onChange({ ...row, editAmount: e.target.value, checked: e.target.value !== "" })}
-            className="text-right font-bold h-9 text-sm"
-          />
+          {splitMode ? (
+            <div className="h-9 flex items-center justify-end font-bold text-sm text-indigo-600 dark:text-indigo-400 tabular-nums">
+              ¥{splitTotal.toLocaleString()}
+            </div>
+          ) : (
+            <Input
+              type="number"
+              min={0}
+              placeholder="金額"
+              value={row.editAmount}
+              onChange={(e) => onChange({ ...row, editAmount: e.target.value, checked: e.target.value !== "" })}
+              className="text-right font-bold h-9 text-sm"
+            />
+          )}
         </div>
 
         {/* 備考入力 */}
@@ -425,31 +520,144 @@ function DraftRowItem({
         </div>
       </div>
 
-      {/* 支払区分選択（payment_categories マスタから動的取得）
-          0円のときは必須、それ以外は任意。全件で振り分けたい時に使える */}
-      <div className="mt-2 ml-8 flex items-center gap-2 flex-wrap">
-        <span className="text-[11px] font-bold text-emerald-600 dark:text-emerald-400">
-          支払区分{isZero ? '（0円計上は必須）' : ''}:
-        </span>
-        {paymentCategories.map(opt => {
-          const selected = row.paymentType === opt.key;
-          const color = getPaymentCategoryColor(opt.key);
-          return (
+      {/* 支払区分エリア。
+          通常モード: 区分を1つだけタグ選択（0円は必須）。
+          明細モード: 区分ごとに金額を分けて複数行入力。
+          どちらでも「＋区分を追加」でその場でマスタに新区分を作れる。 */}
+      <div className="mt-2 ml-8 space-y-2">
+        {!splitMode ? (
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-[11px] font-bold text-emerald-600 dark:text-emerald-400">
+              支払区分{isZero ? '（0円計上は必須）' : ''}:
+            </span>
+            {paymentCategories.map(opt => {
+              const selected = row.paymentType === opt.key;
+              const color = getPaymentCategoryColor(opt.key);
+              return (
+                <button
+                  key={opt.key}
+                  type="button"
+                  onClick={() => onChange({ ...row, paymentType: selected ? "" : opt.key })}
+                  className={`px-2 py-0.5 rounded-md text-[11px] font-bold border transition-all ${
+                    selected ? color.selected : color.unselected
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              );
+            })}
+            {isZero && !row.paymentType && (
+              <span className="text-[10px] text-rose-500 font-medium">※ 必須</span>
+            )}
+            {/* 区分ごとに金額を分けるモードへ */}
             <button
-              key={opt.key}
               type="button"
-              // もう一度クリックで解除（再選択時は別の区分に切替）
-              onClick={() => onChange({ ...row, paymentType: selected ? "" : opt.key })}
-              className={`px-2 py-0.5 rounded-md text-[11px] font-bold border transition-all ${
-                selected ? color.selected : color.unselected
-              }`}
+              onClick={enableSplit}
+              className="px-2 py-0.5 rounded-md text-[11px] font-bold border border-indigo-200 text-indigo-600 hover:bg-indigo-50 dark:border-indigo-800 dark:hover:bg-indigo-950/40 inline-flex items-center gap-1"
             >
-              {opt.label}
+              <SplitSquareHorizontal className="w-3 h-3" />
+              区分ごとに金額を分ける
             </button>
-          );
-        })}
-        {isZero && !row.paymentType && (
-          <span className="text-[10px] text-rose-500 font-medium">※ 必須</span>
+          </div>
+        ) : (
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-indigo-600 dark:text-indigo-400">
+                区分ごとの金額
+              </span>
+              <button
+                type="button"
+                onClick={disableSplit}
+                className="text-[10px] text-slate-400 hover:text-slate-600 underline"
+              >
+                分けるのをやめる
+              </button>
+            </div>
+            {row.lines.map((line, idx) => {
+              const lineZero = line.amount !== "" && parseInt(line.amount, 10) === 0;
+              return (
+                <div key={idx} className="flex items-center gap-2 flex-wrap">
+                  <select
+                    value={line.paymentType}
+                    onChange={(e) => updateLine(idx, { paymentType: e.target.value })}
+                    className="h-8 rounded-md border border-slate-200 dark:border-slate-700 bg-transparent px-2 text-[11px] font-bold"
+                  >
+                    <option value="">区分を選択</option>
+                    {paymentCategories.map(opt => (
+                      <option key={opt.key} value={opt.key}>{opt.label}</option>
+                    ))}
+                  </select>
+                  <Input
+                    type="number"
+                    min={0}
+                    placeholder="金額"
+                    value={line.amount}
+                    onChange={(e) => updateLine(idx, { amount: e.target.value })}
+                    className="w-24 text-right font-bold h-8 text-sm"
+                  />
+                  {lineZero && !line.paymentType && (
+                    <span className="text-[10px] text-rose-500 font-medium">※区分必須</span>
+                  )}
+                  {row.lines.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={() => removeLine(idx)}
+                      className="p-1 text-rose-400 hover:text-rose-600"
+                      aria-label="この明細を削除"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+            <button
+              type="button"
+              onClick={addLine}
+              className="text-[11px] text-indigo-600 hover:text-indigo-700 inline-flex items-center gap-1 font-medium"
+            >
+              <Plus className="w-3 h-3" /> 明細を追加
+            </button>
+          </div>
+        )}
+
+        {/* その場で支払区分マスタに新区分を追加 */}
+        {addingCategory ? (
+          <div className="flex items-center gap-2">
+            <Input
+              type="text"
+              autoFocus
+              placeholder="新しい区分名（例: 鍼灸）"
+              value={newCategoryLabel}
+              onChange={(e) => setNewCategoryLabel(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); handleAddCategory(); } }}
+              className="h-8 w-44 text-[12px]"
+            />
+            <Button
+              type="button"
+              size="sm"
+              onClick={handleAddCategory}
+              disabled={savingCategory || !newCategoryLabel.trim()}
+              className="h-8 bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] px-3"
+            >
+              {savingCategory ? "追加中..." : "追加"}
+            </Button>
+            <button
+              type="button"
+              onClick={() => { setAddingCategory(false); setNewCategoryLabel(""); }}
+              className="text-[11px] text-slate-400 hover:text-slate-600"
+            >
+              やめる
+            </button>
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setAddingCategory(true)}
+            className="text-[11px] text-slate-500 hover:text-emerald-600 inline-flex items-center gap-1"
+          >
+            <Plus className="w-3 h-3" /> 支払区分を追加
+          </button>
         )}
       </div>
     </div>

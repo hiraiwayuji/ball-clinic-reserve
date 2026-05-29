@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, Suspense } from "react";
+import { useState, useEffect, useRef, Suspense } from "react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -70,6 +70,12 @@ function ReserveContent() {
   const [isSuccess, setIsSuccess] = useState(false);
   const [isWaitingResult, setIsWaitingResult] = useState(false);
   const [requiresQuestionnaire, setRequiresQuestionnaire] = useState(false);
+  // 同じ日の重複（ブロック → LINE 誘導）
+  const [duplicateSameDay, setDuplicateSameDay] = useState(false);
+  // 別の日の重複（警告 → 本人が院に確認済みなら続行）。値は既存予約の日時表示
+  const [duplicateOtherDay, setDuplicateOtherDay] = useState<string | null>(null);
+  // 別日重複の確認後に再送信するための FormData 退避
+  const pendingFormData = useRef<FormData | null>(null);
   const [clinicHolidays, setClinicHolidays] = useState<ClinicHoliday[]>([]);
   // LINE 経由で選択された家族 customer（あれば name/phone をプリフィル + customerId を送信）
   const [selectedFamilyMember, setSelectedFamilyMember] = useState<LinkedCustomer | null>(null);
@@ -168,6 +174,11 @@ function ReserveContent() {
       return;
     }
 
+    // 再送信に備えて前回の警告表示はリセット
+    setRequiresQuestionnaire(false);
+    setDuplicateSameDay(false);
+    setDuplicateOtherDay(null);
+
     setIsSubmitting(true);
     try {
       const formData = new FormData(e.currentTarget);
@@ -202,18 +213,51 @@ function ReserveContent() {
         formData.append("customerId", selectedFamilyMember.customer_id);
       }
 
-      const result = await createReservation(formData);
-
-      if (result.success) {
-        localStorage.setItem("ballClinic_savedName", name);
-        if (phone) localStorage.setItem("ballClinic_savedPhone", phone);
-        setIsWaitingResult(result.isWaiting || false);
-        setIsSuccess(true);
-      } else {
-        if ((result as any).requiresQuestionnaire || (result as any).requiresQuestionnaire) setRequiresQuestionnaire(true);
-        toast.error(result.error || "エラーが発生しました");
-      }
+      await runReservation(formData);
     } catch (error) {
+      toast.error("送信エラーが発生しました。しばらく経ってから再度お試しください");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // createReservation を実行し、結果に応じて成功 / アンケート / 重複警告を振り分ける
+  const runReservation = async (formData: FormData) => {
+    const result = await createReservation(formData);
+
+    if (result.success) {
+      localStorage.setItem("ballClinic_savedName", name);
+      if (phone) localStorage.setItem("ballClinic_savedPhone", phone);
+      setIsWaitingResult(result.isWaiting || false);
+      setIsSuccess(true);
+      return;
+    }
+
+    const r = result as any;
+    if (r.requiresQuestionnaire) {
+      setRequiresQuestionnaire(true);
+    } else if (r.duplicate === "sameday") {
+      // 同じ日の重複 → ブロックして LINE へ誘導
+      setDuplicateSameDay(true);
+    } else if (r.duplicate === "otherday") {
+      // 別の日の重複 → 確認後に再送信できるよう FormData を退避
+      pendingFormData.current = formData;
+      setDuplicateOtherDay(r.existingInfo || "別の日");
+    } else {
+      toast.error(result.error || "エラーが発生しました");
+    }
+  };
+
+  // 「院に確認済み」として別日重複の予約を続行する
+  const handleConfirmOtherDay = async () => {
+    const fd = pendingFormData.current;
+    if (!fd) return;
+    fd.set("confirmedExisting", "true");
+    setDuplicateOtherDay(null);
+    setIsSubmitting(true);
+    try {
+      await runReservation(fd);
+    } catch {
       toast.error("送信エラーが発生しました。しばらく経ってから再度お試しください");
     } finally {
       setIsSubmitting(false);
@@ -504,6 +548,29 @@ function ReserveContent() {
                       <Input id="name" name="name" value={name} onChange={(e) => setName(e.target.value)} required placeholder="山田 太郎" className="h-14 bg-slate-900 border-white/10 rounded-2xl text-white placeholder:text-white/50" />
                     </div>
 
+                    {/* 再診：電話番号（任意）。同姓同名が複数いる場合のご本人特定に使用 */}
+                    {visitType === "return" && (
+                      <div className="space-y-2">
+                        <Label className="text-blue-100/85 font-bold text-xs uppercase" htmlFor="phone-return">
+                          電話番号 <span className="text-blue-100/60 font-normal normal-case">（任意）</span>
+                        </Label>
+                        <Input
+                          id="phone-return"
+                          name="phone"
+                          type="tel"
+                          value={phone}
+                          onChange={(e) => setPhone(e.target.value)}
+                          placeholder="090-0000-0000"
+                          className="h-14 bg-slate-900 border-white/10 rounded-2xl text-white placeholder:text-white/50"
+                        />
+                        <p className="text-xs text-blue-100/60 leading-relaxed">
+                          同じお名前の方が複数いらっしゃる場合、
+                          <br className="sm:hidden" />
+                          ご本人確認のため電話番号のご入力をお願いします。
+                        </p>
+                      </div>
+                    )}
+
                     {/* 初診のみ：電話番号・LINE */}
                     {visitType === "new" && (
                       <div className="space-y-4 p-6 bg-blue-500/10 border border-blue-500/20 rounded-2xl">
@@ -571,6 +638,62 @@ function ReserveContent() {
                     >
                       📋 アンケートに回答して予約に進む
                     </Link>
+                  </div>
+                )}
+
+                {/* 同じ日の重複予約 → ブロックして LINE へ誘導 */}
+                {duplicateSameDay && (
+                  <div className="order-8 p-5 bg-amber-500/10 border border-amber-500/40 rounded-2xl space-y-3">
+                    <p className="text-amber-200 font-bold text-sm">
+                      ⚠️ 選択された日には、すでにご予約をいただいております
+                    </p>
+                    <p className="text-amber-100/85 text-xs leading-relaxed">
+                      お時間の変更や追加のご相談は、
+                      <br />
+                      LINEのメッセージよりお問い合わせください。
+                    </p>
+                    <a
+                      href={LINE_URL}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex w-full items-center justify-center bg-[#06C755] hover:bg-[#05b34c] text-white font-bold py-4 px-4 rounded-2xl transition-all gap-2 text-sm"
+                    >
+                      <MessageCircle className="w-4 h-4" />
+                      LINEでお問い合わせする
+                    </a>
+                  </div>
+                )}
+
+                {/* 別の日の重複予約 → 院に確認済みなら続行 */}
+                {duplicateOtherDay && (
+                  <div className="order-8 p-5 bg-amber-500/10 border border-amber-500/40 rounded-2xl space-y-3">
+                    <p className="text-amber-200 font-bold text-sm">
+                      ⚠️ すでに別の日にご予約があります
+                    </p>
+                    <p className="text-amber-100/85 text-xs leading-relaxed">
+                      既存のご予約：<span className="font-bold text-white">{duplicateOtherDay}</span>
+                      <br />
+                      お間違いでなければ、院に確認の上でこのままお進みください。
+                      <br />
+                      変更・キャンセルのご相談はLINEからもお問い合わせいただけます。
+                    </p>
+                    <button
+                      type="button"
+                      onClick={handleConfirmOtherDay}
+                      disabled={isSubmitting}
+                      className="inline-flex w-full items-center justify-center bg-blue-600 hover:bg-blue-500 text-white font-bold py-4 px-4 rounded-2xl transition-all gap-2 text-sm disabled:opacity-40"
+                    >
+                      {isSubmitting ? "送信中..." : "院に確認済み・このまま予約する"}
+                    </button>
+                    <a
+                      href={LINE_URL}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex w-full items-center justify-center bg-[#06C755] hover:bg-[#05b34c] text-white font-bold py-3 px-4 rounded-2xl transition-all gap-2 text-sm"
+                    >
+                      <MessageCircle className="w-4 h-4" />
+                      LINEで相談する
+                    </a>
                   </div>
                 )}
               </form>

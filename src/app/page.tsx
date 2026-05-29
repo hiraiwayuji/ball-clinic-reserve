@@ -44,6 +44,7 @@ export default async function Home() {
           <nav className="hidden md:flex gap-6 text-sm font-medium text-slate-400">
             <Link href="#about" className="hover:text-white transition">当院について</Link>
             <Link href="#services" className="hover:text-white transition">施術メニュー</Link>
+            <Link href="/reserve/guide" className="hover:text-white transition">予約のやり方</Link>
             <a href={CLINIC_CONFIG.mapsUrl} target="_blank" rel="noopener noreferrer" className="hover:text-white transition">アクセス</a>
           </nav>
           <Button asChild className="bg-blue-600 hover:bg-blue-700 text-white">
@@ -87,6 +88,9 @@ export default async function Home() {
               </Link>
               <Link href="/cancel" className="flex items-center justify-center gap-2 border border-white/20 text-white/70 text-sm h-10 px-6 rounded-md hover:bg-white/10 transition">
                 予約のキャンセルはこちら
+              </Link>
+              <Link href="/reserve/guide" className="flex items-center justify-center gap-2 border border-white/20 text-white/70 text-sm h-10 px-6 rounded-md hover:bg-white/10 transition">
+                予約のやり方・LINEの送り方
               </Link>
             </div>
           </div>

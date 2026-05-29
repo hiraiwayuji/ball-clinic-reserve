@@ -57,6 +57,23 @@ function getAdminSupabase() {
 const DEFAULT_CLINIC_ID = PUBLIC_CLINIC_ID;
 const MAX_CAPACITY = 1; // 1枠あたりの最大受け入れ人数（1名入れば予約済みにする）
 
+/**
+ * 氏名照合用の正規化。
+ * 完全一致だけだと「山内 颯人」と「山内颯人」、全角/半角スペースの違いで
+ * 既存患者を見つけられず「初めての方は…」になる事故が起きる（2026-05 山内family 実例）。
+ * - NFKC で全角英数/記号を半角化
+ * - 全角・半角スペースをすべて除去
+ * - 小文字化（romaji 表記ゆれの軽減）
+ * ※ 別漢字（楓人/颯人）や romaji↔漢字（fuuta↔颯人）は正規化では吸収不可。
+ *   そのケースは顧客マスタ側の名寄せ（統合）で対応する。
+ */
+function normalizeNameForMatch(value: string): string {
+  return (value ?? "")
+    .normalize("NFKC")
+    .replace(/[\s　]/g, "")
+    .toLowerCase();
+}
+
 // キャンセル待ちを時間帯範囲で登録するアクション（例: 15:00 〜 20:00）
 export async function createWaitlistReservation(formData: FormData) {
   try {
@@ -366,12 +383,26 @@ export async function createReservation(formData: FormData) {
         }
       } else if (!customerId) {
         // 電話番号なし（再診・名前のみ）→ 名前 + clinic_id で照合
-        const { data: existingList } = await adminDb
+        // まず完全一致。見つからなければスペース/全角半角の揺れを吸収して再照合する
+        // （「山内 颯人」と「山内颯人」で別人扱いになる事故を防ぐ）。
+        let { data: existingList } = await adminDb
           .from("customers")
-          .select("id, booking_suspended, line_user_id")
+          .select("id, name, booking_suspended, line_user_id")
           .eq("name", name)
           .eq("clinic_id", PUBLIC_CLINIC_ID)
           .order("created_at", { ascending: false });
+
+        if (!existingList || existingList.length === 0) {
+          // 完全一致なし → 院内の顧客を正規化名で突き合わせる
+          const target = normalizeNameForMatch(name);
+          const { data: clinicCustomers } = await adminDb
+            .from("customers")
+            .select("id, name, booking_suspended, line_user_id")
+            .eq("clinic_id", PUBLIC_CLINIC_ID);
+          existingList = (clinicCustomers ?? []).filter(
+            (c) => normalizeNameForMatch(c.name as string) === target,
+          );
+        }
 
         if (!existingList || existingList.length === 0) {
           // 名前でも見つからない → アンケートへ誘導
@@ -404,8 +435,12 @@ export async function createReservation(formData: FormData) {
       }
 
       const startDateTimeStr = `${rawDate}T${time}:00+09:00`;
+      // ご本人が「院に確認済み」として別日重複の予約を続行したか
+      const confirmedExisting = formData.get("confirmedExisting") === "true";
 
-      // 1人1予約制限: 既に有効な予約がある場合はブロック
+      // ── 重複予約チェック ──
+      // 同じ日に予約がある    → ブロックして LINE へ誘導（二重予約防止）
+      // 別の日に予約がある    → 警告し、ご本人が「院に確認済み」とした場合のみ通す（+オーナー通知）
       const nowIso = new Date().toISOString();
       const { data: existingAppts } = await adminDb
         .from("appointments")
@@ -414,13 +449,38 @@ export async function createReservation(formData: FormData) {
         .eq("customer_id", customerId)
         .in("status", ["pending", "confirmed", "waiting"])
         .gte("start_time", nowIso)
-        .limit(1);
+        .order("start_time", { ascending: true });
+
+      const toJstDate = (iso: string) =>
+        new Date(iso).toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" }); // YYYY-MM-DD
+      const toJstTime = (iso: string) =>
+        new Date(iso).toLocaleTimeString("ja-JP", { timeZone: "Asia/Tokyo", hour: "2-digit", minute: "2-digit", hour12: false });
+
+      let hasOtherDayDuplicate = false;
+      let otherDayInfo = "";
       if (existingAppts && existingAppts.length > 0) {
-        const existing = existingAppts[0];
-        if (existing.status === "waiting") {
-          return { success: false, error: "キャンセル待ちの登録があります。キャンセル待ちをキャンセルしてから新しい予約をお取りください。" };
+        const sameDay = existingAppts.find((a) => toJstDate(a.start_time) === rawDate);
+        if (sameDay) {
+          // 同じ日の重複 → ブロックして LINE へ誘導
+          return {
+            success: false,
+            duplicate: "sameday",
+            error: "選択された日には、すでにご予約をいただいております。お時間の変更・ご相談はLINEのメッセージよりお問い合わせください。",
+          };
         }
-        return { success: false, error: "すでに予約が入っています。既存の予約をキャンセルしてから新しい予約をお取りください。" };
+        // 別の日にのみ予約がある場合
+        const other = existingAppts[0];
+        hasOtherDayDuplicate = true;
+        otherDayInfo = `${toJstDate(other.start_time)} ${toJstTime(other.start_time)}`;
+        if (!confirmedExisting) {
+          return {
+            success: false,
+            duplicate: "otherday",
+            existingInfo: otherDayInfo,
+            error: "すでに別の日にご予約があります。",
+          };
+        }
+        // confirmedExisting === true → 院に確認済みとして続行（予約成立後にオーナーへ通知）
       }
 
       // 予約枠の定員チェック（必ず自院のみで判定）
@@ -509,6 +569,13 @@ export async function createReservation(formData: FormData) {
       
       const reservationNumber = appointmentData.id.split('-')[0].toUpperCase();
         await notifyOwner(name, phone, rawDate, time, visitType, symptoms, reservationNumber, isCapacityFull, courseName, staffName);
+        // 別日の既存予約がある状態で、ご本人が「院に確認済み」として追加予約した場合はオーナーに注意喚起
+        if (hasOtherDayDuplicate && confirmedExisting) {
+          await pushLineToOwners(
+            PUBLIC_CLINIC_ID,
+            `⚠️【複数予約の確認】${name}様は既存のご予約（${otherDayInfo}）がある状態で、ご本人が「院に確認済み」として追加予約を取られました。\n新規: ${rawDate} ${time}\n予約番号: ${reservationNumber}`,
+          );
+        }
   return { success: true, isWaiting: isCapacityFull, reservationNumber };
     } else {
       // SupabaseのURLが設定されていない場合の動作保証（デモ用）

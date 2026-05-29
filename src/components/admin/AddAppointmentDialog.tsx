@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { createManualReservation } from "@/app/actions/adminReserve";
+import { findSameDayAppointmentsByName } from "@/app/actions/duplicateCheck";
 import { searchPatientsForBooking, PatientSuggestion } from "@/app/actions/patientSearch";
 import { getCourses, getStaffList, getRooms, type ReservationCourse, type ReservationStaff, type ReservationRoom } from "@/app/actions/courses";
 import { toast } from "sonner";
@@ -62,6 +63,12 @@ export function AddAppointmentDialog({
   const [recurringWeeks, setRecurringWeeks] = useState<string>("1");
   const [duration, setDuration] = useState<string>(String(slotMinutes));
   const [isSubmitting, setIsSubmitting] = useState(false);
+  // 同じ日に同名患者の予約がある場合の確認（それでも登録するか）
+  const [dupWarning, setDupWarning] = useState<{
+    appointments: { id: string; time: string; medicalRecordNumber: string | null }[];
+    customerCount: number;
+    formData: FormData;
+  } | null>(null);
 
   // slot サイズ刻みで 120分まで（slot=20 → 20/40/60/80/100/120）
   // コース duration が slot 倍数でないケースも拾えるよう、現在値を含めてマージする
@@ -247,23 +254,50 @@ export function AddAppointmentDialog({
       return;
     }
 
+    const formData = new FormData(e.currentTarget);
+    formData.set("name", nameValue);
+    formData.set("phone", phoneValue);
+    formData.set("medicalRecordNumber", medicalRecordNumberValue.trim());
+    formData.set("additionalCourseIds", JSON.stringify(additionalCourses.filter(Boolean)));
+    formData.set("additionalStaffIds", JSON.stringify(additionalStaff.filter(Boolean)));
+    formData.append("date", format(date, "yyyy-MM-dd"));
+    formData.append("time", time);
+    formData.append("visitType", visitType);
+    formData.append("recurringWeeks", recurringWeeks);
+    formData.set("duration", duration);
+    if (courseId) formData.append("courseId", courseId);
+    if (staffId) formData.append("staffId", staffId);
+    if (roomId) formData.append("roomId", roomId);
+
+    // ── 同日重複チェック ──
+    // 同じ日に同名の患者さんの予約があれば、誤登録防止のため確認をはさむ
     setIsSubmitting(true);
     try {
-      const formData = new FormData(e.currentTarget);
-      formData.set("name", nameValue);
-      formData.set("phone", phoneValue);
-      formData.set("medicalRecordNumber", medicalRecordNumberValue.trim());
-      formData.set("additionalCourseIds", JSON.stringify(additionalCourses.filter(Boolean)));
-      formData.set("additionalStaffIds", JSON.stringify(additionalStaff.filter(Boolean)));
-      formData.append("date", format(date, "yyyy-MM-dd"));
-      formData.append("time", time);
-      formData.append("visitType", visitType);
-      formData.append("recurringWeeks", recurringWeeks);
-      formData.set("duration", duration);
-      if (courseId) formData.append("courseId", courseId);
-      if (staffId) formData.append("staffId", staffId);
-      if (roomId) formData.append("roomId", roomId);
+      const dup = await findSameDayAppointmentsByName(format(date, "yyyy-MM-dd"), nameValue);
+      if (dup.appointments.length > 0) {
+        setDupWarning({
+          appointments: dup.appointments.map((a) => ({
+            id: a.id,
+            time: a.time,
+            medicalRecordNumber: a.medicalRecordNumber,
+          })),
+          customerCount: dup.customerCount,
+          formData,
+        });
+        setIsSubmitting(false);
+        return; // 確認待ち
+      }
+    } catch {
+      // 重複チェックに失敗しても登録自体は止めない
+    }
 
+    await performSubmit(formData);
+  };
+
+  // 実際の予約登録処理（重複チェックを通過 or 確認後に呼ぶ）
+  const performSubmit = async (formData: FormData) => {
+    setIsSubmitting(true);
+    try {
       const result = await createManualReservation(formData);
       if (result.success) {
         toast.success(
@@ -271,6 +305,7 @@ export function AddAppointmentDialog({
             ? `${recurringWeeks}週分の予約を追加しました`
             : "予約を追加しました"
         );
+        setDupWarning(null);
         setOpen(false);
         setDate(undefined);
         setTime("");
@@ -320,6 +355,57 @@ export function AddAppointmentDialog({
             </button>
           </div>
         </DialogHeader>
+
+        {/* 同日重複の確認オーバーレイ */}
+        {dupWarning && (
+          <div className="fixed inset-0 z-[300] flex items-center justify-center bg-black/50 p-4">
+            <div className="w-full max-w-sm bg-white rounded-2xl shadow-2xl border border-amber-300 p-5 space-y-4">
+              <div>
+                <p className="text-base font-bold text-amber-900">
+                  ⚠ 同じ日にこの患者さんの予約があります
+                </p>
+                <p className="text-sm text-slate-600 mt-1">
+                  {nameValue.trim()}様は、選択された日にすでに予約が入っています。
+                </p>
+              </div>
+              <ul className="space-y-1 text-sm text-amber-900 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                {dupWarning.appointments.map((a) => (
+                  <li key={a.id}>
+                    ・{a.time}
+                    {a.medicalRecordNumber ? `（カルテ ${a.medicalRecordNumber}）` : ""}
+                  </li>
+                ))}
+              </ul>
+              {dupWarning.customerCount > 1 && (
+                <p className="text-[11px] text-amber-700 leading-snug">
+                  ※ 同名の患者さんが {dupWarning.customerCount} 件登録されています。別人（兄弟・親子）の可能性もご確認ください。
+                </p>
+              )}
+              <p className="text-sm font-semibold text-slate-700">
+                それでもこの内容で登録しますか？
+              </p>
+              <div className="flex gap-2">
+                <Button
+                  type="button"
+                  onClick={() => performSubmit(dupWarning.formData)}
+                  disabled={isSubmitting}
+                  className="flex-1 h-11 bg-amber-600 hover:bg-amber-700 rounded-xl font-bold text-white"
+                >
+                  {isSubmitting ? "登録中..." : "それでも登録する"}
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setDupWarning(null)}
+                  disabled={isSubmitting}
+                  className="flex-1 h-11 rounded-xl"
+                >
+                  やめる
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
 
         <form onSubmit={handleSubmit}>
           <div className="px-5 py-4 space-y-4">
