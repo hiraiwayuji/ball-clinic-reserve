@@ -22,6 +22,9 @@ export async function GET() {
   if (error || !events) return new NextResponse("Error", { status: 500 });
 
   const fmt = (d: Date) => d.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "");
+  // iCal TEXT 値のエスケープ（改行・, ; \ を処理しないとVEVENTが壊れGoogleに無視される）
+  const esc = (s: string) =>
+    String(s).replace(/\\/g, "\\\\").replace(/;/g, "\\;").replace(/,/g, "\\,").replace(/\r?\n/g, "\\n");
   const lines = [
     "BEGIN:VCALENDAR",
     "VERSION:2.0",
@@ -37,8 +40,8 @@ export async function GET() {
     lines.push("DTSTAMP:" + fmt(new Date()));
     lines.push("DTSTART:" + fmt(new Date(event.start_time)));
     lines.push("DTEND:" + fmt(new Date(event.end_time)));
-    lines.push("SUMMARY:" + event.title);
-    if (event.description) lines.push("DESCRIPTION:" + event.description);
+    lines.push("SUMMARY:" + esc(event.title));
+    if (event.description) lines.push("DESCRIPTION:" + esc(event.description));
     lines.push("END:VEVENT");
   }
   lines.push("END:VCALENDAR");
