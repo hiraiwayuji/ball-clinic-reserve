@@ -6,6 +6,7 @@ import { CalendarDays, Clock, MapPin, Phone } from "lucide-react";
 import Image from "next/image";
 import { CLINIC_CONFIG } from "@/lib/clinic-config";
 import { getPublicClinicHours } from "@/app/actions/settings";
+import { getPublicClinicSettings } from "@/app/actions/publicSettings";
 
 // NEXT_PUBLIC_CLINIC_NAME が未設定 = ボール接骨院（デフォルト）
 const isDefaultClinic = !process.env.NEXT_PUBLIC_CLINIC_NAME;
@@ -17,6 +18,10 @@ export default async function Home() {
   if (isDemo) redirect("/admin-login");
 
   const dbHours = await getPublicClinicHours();
+  // ヒーローのコピーは DB(clinic_settings) 優先 → env(CLINIC_CONFIG) フォールバック
+  const settings = await getPublicClinicSettings();
+  const heroCatch = settings?.hero_title || CLINIC_CONFIG.catchcopy;
+  const heroDesc = settings?.hero_subtitle || CLINIC_CONFIG.description;
   // DBに値があればDB優先、なければenv varのデフォルト値を配列に変換して使用
   const hoursLines: string[] = (dbHours.hours_lines && dbHours.hours_lines.length > 0)
     ? dbHours.hours_lines
@@ -66,32 +71,38 @@ export default async function Home() {
                   <span className="text-blue-400">パフォーマンス向上</span>をサポート
                 </>
               ) : (
-                CLINIC_CONFIG.catchcopy
+                heroCatch
               )}
             </h1>
             <p className="text-lg md:text-xl text-slate-300 mb-10 max-w-2xl mx-auto leading-relaxed">
-              {CLINIC_CONFIG.description}
+              {heroDesc}
             </p>
-            <div className="flex flex-col sm:flex-row gap-4 justify-center">
-              <Button asChild size="lg" className="bg-blue-600 hover:bg-blue-700 text-white text-lg h-14 px-8 shadow-lg">
-                <Link href="/reserve/calendar">
-                  <CalendarDays className="mr-2 h-5 w-5" />
-                  今すぐWeb予約する
+            <div className="flex flex-col items-center gap-4">
+              {/* 主導線：予約 + 電話（同じ高さで2つ） */}
+              <div className="flex flex-col sm:flex-row gap-3 w-full max-w-md sm:max-w-none sm:w-auto justify-center">
+                <Button asChild size="lg" className="bg-blue-600 hover:bg-blue-700 text-white text-lg h-14 px-8 shadow-lg">
+                  <Link href="/reserve/calendar">
+                    <CalendarDays className="mr-2 h-5 w-5" />
+                    今すぐWeb予約する
+                  </Link>
+                </Button>
+                <a href={`tel:${CLINIC_CONFIG.phone}`} className="flex items-center justify-center gap-2 border-2 border-white/30 text-white text-lg h-14 px-8 rounded-md hover:bg-white/10 transition whitespace-nowrap">
+                  <Phone className="h-5 w-5 shrink-0" />
+                  {CLINIC_CONFIG.phone}
+                </a>
+              </div>
+              {/* 補助リンク：3つを下段にまとめて折返し */}
+              <div className="flex flex-wrap gap-2 justify-center">
+                <Link href="/check" className="flex items-center justify-center gap-2 border border-white/20 text-white/70 text-sm h-10 px-5 rounded-md hover:bg-white/10 transition whitespace-nowrap">
+                  予約を確認する
                 </Link>
-              </Button>
-              <a href={`tel:${CLINIC_CONFIG.phone}`} className="flex items-center justify-center gap-2 border-2 border-white/30 text-white text-lg h-14 px-8 rounded-md hover:bg-white/10 transition">
-                <Phone className="h-5 w-5" />
-                {CLINIC_CONFIG.phone}
-              </a>
-              <Link href="/check" className="flex items-center justify-center gap-2 border border-white/20 text-white/70 text-sm h-10 px-6 rounded-md hover:bg-white/10 transition">
-                予約を確認する
-              </Link>
-              <Link href="/cancel" className="flex items-center justify-center gap-2 border border-white/20 text-white/70 text-sm h-10 px-6 rounded-md hover:bg-white/10 transition">
-                予約のキャンセルはこちら
-              </Link>
-              <Link href="/reserve/guide" className="flex items-center justify-center gap-2 border border-white/20 text-white/70 text-sm h-10 px-6 rounded-md hover:bg-white/10 transition">
-                予約のやり方・LINEの送り方
-              </Link>
+                <Link href="/cancel" className="flex items-center justify-center gap-2 border border-white/20 text-white/70 text-sm h-10 px-5 rounded-md hover:bg-white/10 transition whitespace-nowrap">
+                  予約のキャンセル
+                </Link>
+                <Link href="/reserve/guide" className="flex items-center justify-center gap-2 border border-white/20 text-white/70 text-sm h-10 px-5 rounded-md hover:bg-white/10 transition whitespace-nowrap">
+                  予約のやり方・LINE
+                </Link>
+              </div>
             </div>
           </div>
         </section>
