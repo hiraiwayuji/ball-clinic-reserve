@@ -65,13 +65,28 @@ export async function createManualReservation(formData: FormData) {
     }
 
     // 1. 既存顧客の特定（同一院内）
-    //    親子で同じ電話番号を共有しているケースに対応するため、カルテ番号 → (phone+name) → phone単独 の順でフォールバック
+    //    customer_id 明示 → カルテ番号 → (phone+name) → phone単独 の順でフォールバック。
+    //    親子で同じ電話番号を共有しているケースや、電話番号が未整備（例: "080" だけ）の患者でも
+    //    customer_id が分かっていれば確実に同一患者へひもづけられる（次回予約などで使用）。
     const medicalRecordNumber = ((formData.get("medicalRecordNumber") as string) || "").trim() || null;
+    const explicitCustomerId = ((formData.get("customerId") as string) || "").trim() || null;
 
     let existing: { id: string } | null = null;
 
-    // 1-a. カルテ番号があれば最優先で一意特定
-    if (medicalRecordNumber) {
+    // 1-0. customer_id が明示されていれば最優先。
+    //      自院（clinicId）に属する場合のみ採用し、他院IDの混入を防ぐ（テナント分離）。
+    if (explicitCustomerId) {
+      const { data } = await supabase
+        .from("customers")
+        .select("id")
+        .eq("id", explicitCustomerId)
+        .eq("clinic_id", clinicId)
+        .maybeSingle();
+      if (data) existing = data;
+    }
+
+    // 1-a. カルテ番号があれば一意特定
+    if (!existing && medicalRecordNumber) {
       const { data } = await supabase
         .from("customers")
         .select("id")

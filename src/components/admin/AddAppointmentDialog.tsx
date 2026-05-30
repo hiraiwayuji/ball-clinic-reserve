@@ -35,6 +35,8 @@ export function AddAppointmentDialog({
   defaultName,
   defaultPhone,
   defaultMedicalRecordNumber,
+  defaultVisitType,
+  defaultCustomerId,
   hideTrigger = false,
 }: {
   onSuccess?: () => void;
@@ -47,6 +49,9 @@ export function AddAppointmentDialog({
   defaultName?: string;
   defaultPhone?: string;
   defaultMedicalRecordNumber?: string;
+  defaultVisitType?: string;
+  /** この患者の予約と確定している場合の customer_id。氏名・電話を変更せず登録すれば、電話/氏名照合をバイパスして確実に同一患者へひもづく。 */
+  defaultCustomerId?: string;
   hideTrigger?: boolean;
 }) {
   const slotMinutes = useClinicSlotDuration();
@@ -123,6 +128,7 @@ export function AddAppointmentDialog({
       if (defaultName) setNameValue(defaultName);
       if (defaultPhone) setPhoneValue(defaultPhone);
       if (defaultMedicalRecordNumber) setMedicalRecordNumberValue(defaultMedicalRecordNumber);
+      if (defaultVisitType) setVisitType(defaultVisitType);
       // マスタ取得（既に取得済みなら再取得しない）
       if (courses.length === 0) {
         getCourses().then(setCourses).catch(() => {});
@@ -151,7 +157,7 @@ export function AddAppointmentDialog({
       setAdditionalStaff([]);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, defaultDate, defaultTime, defaultStaffId, defaultCourseId, defaultName, defaultPhone, defaultMedicalRecordNumber]);
+  }, [open, defaultDate, defaultTime, defaultStaffId, defaultCourseId, defaultName, defaultPhone, defaultMedicalRecordNumber, defaultVisitType]);
 
   // staffList ロード完了後に defaultStaffId を再適用
   // （初回 setStaffId 時点で staffList が空だと <select> に対応 option がなく表示されないため）
@@ -258,6 +264,19 @@ export function AddAppointmentDialog({
     formData.set("name", nameValue);
     formData.set("phone", phoneValue);
     formData.set("medicalRecordNumber", medicalRecordNumberValue.trim());
+
+    // 既存患者が確定している場合は customer_id を直接渡し、電話/氏名照合をバイパスして確実にひもづける。
+    // ・サジェストから選んだ患者 → その id を優先
+    // ・氏名と電話をプリフィルのまま変更していない → defaultCustomerId（次回予約など）
+    // ・氏名/電話を書き換えた → customer_id を送らず通常の照合（新規 or 別人）に委ねる
+    const resolvedCustomerId =
+      selectedPatient?.id ??
+      (defaultCustomerId &&
+      nameValue.trim() === (defaultName ?? "").trim() &&
+      phoneValue.trim() === (defaultPhone ?? "").trim()
+        ? defaultCustomerId
+        : null);
+    if (resolvedCustomerId) formData.set("customerId", resolvedCustomerId);
     formData.set("additionalCourseIds", JSON.stringify(additionalCourses.filter(Boolean)));
     formData.set("additionalStaffIds", JSON.stringify(additionalStaff.filter(Boolean)));
     formData.append("date", format(date, "yyyy-MM-dd"));

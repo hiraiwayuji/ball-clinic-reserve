@@ -1,9 +1,9 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { format, parseISO } from "date-fns";
+import { format, parseISO, addDays } from "date-fns";
 import { ja } from "date-fns/locale";
-import { CalendarIcon, Trash2, MessageCircle, CheckCircle, X, Clock, CalendarRange } from "lucide-react";
+import { CalendarIcon, Trash2, MessageCircle, CheckCircle, X, Clock, CalendarRange, CalendarPlus } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
@@ -25,6 +25,7 @@ import {
   sendLineConfirmation,
 } from "@/app/actions/adminReserve";
 import { getCourses, getStaffList, getRooms, type ReservationCourse, type ReservationStaff, type ReservationRoom } from "@/app/actions/courses";
+import { AddAppointmentDialog } from "./AddAppointmentDialog";
 import { toast } from "sonner";
 import { getTimeSlots } from "@/lib/time-slots";
 import { useClinicSlotDuration } from "@/lib/use-clinic-slot-duration";
@@ -56,6 +57,13 @@ export function EditAppointmentDialog({
   // 予約確定の直後に「LINEを送りますか？」を確認するポップ
   const [lineConfirmOpen, setLineConfirmOpen] = useState(false);
   const [lineSending, setLineSending] = useState(false);
+  // 次回予約（この患者の新規予約をプリフィルして開く）
+  const [nextOpen, setNextOpen] = useState(false);
+  const [custPhone, setCustPhone] = useState<string>("");
+  const [custMrn, setCustMrn] = useState<string>("");
+  // 次回予約フォームの初期日時（1週間後の同じ曜日・同じ時刻）
+  const [nextDefaultDate, setNextDefaultDate] = useState<Date | undefined>();
+  const [nextDefaultTime, setNextDefaultTime] = useState<string>("");
 
   // コース・スタッフ・個室マスタ
   const [courses, setCourses] = useState<ReservationCourse[]>([]);
@@ -117,9 +125,22 @@ export function EditAppointmentDialog({
           .then(({ count }) => {
             setVisitCount(count ?? 0);
           });
+        // 次回予約のプリフィル用に電話番号・カルテ番号を取得（本人を確実に特定するため）
+        supabase
+          .from("customers")
+          .select("phone, medical_record_number")
+          .eq("clinic_id", aptClinicId)
+          .eq("id", appointment.customer_id)
+          .maybeSingle()
+          .then(({ data }) => {
+            setCustPhone(data?.phone ?? appointment.customers?.phone ?? "");
+            setCustMrn(data?.medical_record_number ?? "");
+          });
       } else {
         setLastVisitDate(null);
         setVisitCount(null);
+        setCustPhone(appointment.customers?.phone ?? "");
+        setCustMrn("");
       }
 
       let diffMinutes = 30;
@@ -318,6 +339,16 @@ export function EditAppointmentDialog({
   const handleSkipLine = () => {
     setLineConfirmOpen(false);
     onOpenChange(false);
+  };
+
+  // 次回予約: この患者をプリフィルした新規予約フォームを開く（編集は閉じる）
+  // 初期日時は「いま表示中の予約日時」を基準に1週間後の同じ曜日・同じ時刻にする。
+  const handleNextAppointment = () => {
+    const base = date ?? parseISO(appointment.start_time);
+    setNextDefaultDate(addDays(base, 7));
+    setNextDefaultTime(time || format(parseISO(appointment.start_time), "HH:mm"));
+    onOpenChange(false);
+    setNextOpen(true);
   };
 
   if (!appointment) return null;
@@ -553,6 +584,18 @@ export function EditAppointmentDialog({
               {isSubmitting ? "保存中..." : "変更を保存"}
             </Button>
 
+            {/* 次回予約（この患者の新規予約をプリフィルして開く） */}
+            <Button
+              type="button"
+              variant="outline"
+              onClick={handleNextAppointment}
+              disabled={isSubmitting}
+              className="w-full h-11 border-blue-300 text-blue-700 hover:bg-blue-50 rounded-xl font-bold"
+            >
+              <CalendarPlus className="w-4 h-4 mr-1.5" />
+              次回予約を入れる
+            </Button>
+
             {/* Secondary actions */}
             <div className="flex gap-2">
               {appointment.status === "pending" && (
@@ -590,6 +633,23 @@ export function EditAppointmentDialog({
           </div>
         </form>
       </DialogContent>
+
+      {/* 次回予約フォーム（この患者をプリフィル） */}
+      <AddAppointmentDialog
+        open={nextOpen}
+        onOpenChange={setNextOpen}
+        hideTrigger
+        defaultDate={nextDefaultDate}
+        defaultTime={nextDefaultTime}
+        defaultCustomerId={appointment.customer_id ?? undefined}
+        defaultName={appointment.customers?.name ?? ""}
+        defaultPhone={custPhone}
+        defaultMedicalRecordNumber={custMrn || undefined}
+        defaultCourseId={appointment.course_id ?? undefined}
+        defaultStaffId={appointment.staff_id ?? undefined}
+        defaultVisitType="return"
+        onSuccess={onSuccess}
+      />
 
       {/* 予約確定後のLINE送信確認ポップ */}
       <Dialog open={lineConfirmOpen} onOpenChange={(o) => { if (!o) handleSkipLine(); }}>
