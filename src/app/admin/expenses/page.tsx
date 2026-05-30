@@ -10,7 +10,7 @@ import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Calendar as CalendarIcon, Plus, Trash2, Loader2, Receipt, AlertCircle, Save, Camera, Sparkles, Pencil, Check, X, Banknote, Download, FileSpreadsheet, Settings2 } from "lucide-react";
 import { addExpense, getExpenses, deleteExpense, addPendingExpense, updateExpense, getMonthDetailedExpenses } from "@/app/actions/sales";
-import { getCustomExpenseCategories, addCustomExpenseCategory, deleteCustomExpenseCategory } from "@/app/actions/settings";
+import { getCustomExpenseCategories, addCustomExpenseCategory, deleteCustomExpenseCategory, getClinicSettings } from "@/app/actions/settings";
 import { BASE_EXPENSE_CATEGORIES } from "@/lib/expense-categories";
 import { createClient } from "@/lib/supabase/client";
 import { toast } from "sonner";
@@ -55,8 +55,12 @@ export default function ExpensesPage() {
   const [isSavingCategory, setIsSavingCategory] = useState(false);
   // 新規入力フォームのカテゴリ（controlled）
   const [formCategory, setFormCategory] = useState<string>("");
+  // 部門（サロン/カフェ等）。clinic_settings.expense_departments が空の院では部門UIを出さない。
+  const [departments, setDepartments] = useState<string[]>([]);
+  const [formDepartment, setFormDepartment] = useState<string>("");
 
   const allCategories = [...BASE_EXPENSE_CATEGORIES, ...customCategories];
+  const useDepartments = departments.length > 0;
 
   useEffect(() => {
     const today = new Date();
@@ -64,6 +68,8 @@ export default function ExpensesPage() {
     setFormExpenseDate(format(today, "yyyy-MM-dd"));
     // カスタムカテゴリ読み込み
     getCustomExpenseCategories().then(setCustomCategories);
+    // 部門設定の読み込み（空なら部門UIは出さない）
+    getClinicSettings().then((s) => setDepartments(s?.departments ?? []));
   }, []);
 
   const handleAddCategory = async () => {
@@ -115,6 +121,7 @@ export default function ExpensesPage() {
     const formData = new FormData(e.currentTarget);
     formData.set("expense_date", formExpenseDate || format(date, "yyyy-MM-dd"));
     formData.set("category", formCategory);
+    formData.set("department", formDepartment);
 
     startTransition(async () => {
       const res = await addExpense(formData);
@@ -123,6 +130,7 @@ export default function ExpensesPage() {
         (e.target as HTMLFormElement).reset();
         setFormExpenseDate(format(date, "yyyy-MM-dd"));
         setFormCategory("");
+        setFormDepartment("");
         setCurrentImageUrl(null);
         setPreviewUrl(null);
         fetchExpenses(date);
@@ -354,6 +362,27 @@ export default function ExpensesPage() {
 
   const totalAmount = expenses.reduce((sum, e) => sum + e.amount, 0);
 
+  // 部門×費目の集計（部門が設定されている院のみ）。「未分類」も1グループとして集計。
+  const departmentSummary = (() => {
+    if (!useDepartments) return [];
+    const groups = [...departments, "未分類"];
+    return groups
+      .map((dep) => {
+        const rows = expenses.filter((e) =>
+          dep === "未分類" ? !e.department : e.department === dep
+        );
+        const total = rows.reduce((s, e) => s + e.amount, 0);
+        const byCategory: Record<string, number> = {};
+        for (const r of rows) {
+          const key = r.category || "未分類";
+          byCategory[key] = (byCategory[key] || 0) + r.amount;
+        }
+        const categories = Object.entries(byCategory).sort((a, b) => b[1] - a[1]);
+        return { dep, total, count: rows.length, categories };
+      })
+      .filter((g) => g.count > 0);
+  })();
+
   if (!date) {
     return <div className="p-8 text-center text-slate-500">読み込み中...</div>;
   }
@@ -474,6 +503,34 @@ export default function ExpensesPage() {
         </Card>
       )}
 
+      {/* 部門×費目サマリー（部門が設定された院のみ） */}
+      {useDepartments && departmentSummary.length > 0 && (
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+          {departmentSummary.map((g) => (
+            <Card key={g.dep} className="shadow-sm border-slate-200 dark:border-white/10 dark:bg-slate-900/50">
+              <CardHeader className="pb-2 flex flex-row items-center justify-between">
+                <CardTitle className="text-base flex items-center gap-2">
+                  <span className={`inline-block w-2 h-2 rounded-full ${g.dep === "未分類" ? "bg-slate-300" : "bg-emerald-500"}`} />
+                  {g.dep}
+                </CardTitle>
+                <span className="text-lg font-bold text-emerald-600 dark:text-emerald-400">¥{g.total.toLocaleString()}</span>
+              </CardHeader>
+              <CardContent className="pt-0">
+                <div className="space-y-1">
+                  {g.categories.map(([cat, amt]) => (
+                    <div key={cat} className="flex items-center justify-between text-xs">
+                      <span className="text-slate-500 dark:text-slate-400">{cat}</span>
+                      <span className="text-slate-700 dark:text-slate-200 font-medium">¥{amt.toLocaleString()}</span>
+                    </div>
+                  ))}
+                </div>
+                <p className="text-[10px] text-slate-400 mt-2">{g.count} 件</p>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
+
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* 入力フォーム */}
         <Card className="lg:col-span-1 shadow-sm border-slate-200 dark:border-white/10 dark:bg-slate-900/50">
@@ -568,6 +625,22 @@ export default function ExpensesPage() {
                 />
                 <p className="text-xs text-slate-400">レシート読み取り時に自動入力。手動でも変更できます</p>
               </div>
+              {useDepartments && (
+                <div className="space-y-2">
+                  <Label htmlFor="department">部門</Label>
+                  <select
+                    id="department"
+                    value={formDepartment}
+                    onChange={(e) => setFormDepartment(e.target.value)}
+                    className="w-full border border-slate-200 dark:border-slate-800 rounded-md px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 outline-none bg-white dark:bg-slate-950 text-slate-900 dark:text-slate-100"
+                  >
+                    <option value="">（未分類）</option>
+                    {departments.map((d) => (
+                      <option key={d} value={d}>{d}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
               <div className="space-y-2">
                 <Label htmlFor="category">カテゴリ</Label>
                 <CategorySelect
@@ -741,9 +814,16 @@ export default function ExpensesPage() {
                                 {expense.expense_date}
                               </TableCell>
                               <TableCell>
-                                <span className="text-xs bg-emerald-50 text-emerald-700 px-2 py-1 rounded-full font-medium">
-                                  {expense.category || "未分類"}
-                                </span>
+                                <div className="flex items-center gap-1 flex-wrap">
+                                  {useDepartments && expense.department && (
+                                    <span className="text-xs bg-slate-100 text-slate-600 px-2 py-1 rounded-full font-medium">
+                                      {expense.department}
+                                    </span>
+                                  )}
+                                  <span className="text-xs bg-emerald-50 text-emerald-700 px-2 py-1 rounded-full font-medium">
+                                    {expense.category || "未分類"}
+                                  </span>
+                                </div>
                               </TableCell>
                               <TableCell>
                                 <div className="flex items-center gap-3">

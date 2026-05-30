@@ -48,6 +48,9 @@ export default function AdminWeeklyGridPage() {
   // 複数roomを持つ院（マッスル等）でフィルタするための state
   const [rooms, setRooms] = useState<Array<{ id: string; name: string }>>([]);
   const [roomFilter, setRoomFilter] = useState<string>(""); // "" = 全て表示
+  // 部門（サロン/カフェ）フィルタ。clinic_settings.departments が空の院はタブを出さない。
+  const [departments, setDepartments] = useState<string[]>([]);
+  const [departmentFilter, setDepartmentFilter] = useState<string>(""); // "" = 全部門
 
   // 月ビュー用: 月の全日付（前月末・翌月頭の空白セルも含めて週単位で並べる）
   const monthGrid = useMemo(() => {
@@ -74,6 +77,8 @@ export default function AdminWeeklyGridPage() {
     setCurrentDate(today);
     setSelectedDay(today);
     getMyClinicId().then(setClinicId);
+    // 部門（サロン/カフェ）を取得。空の院ではタブを出さない。
+    getClinicSettings().then((s) => setDepartments(s?.departments ?? [])).catch(() => {});
 
     // 院ごとのデフォルト表示モードを取得。ユーザーが過去に切り替えていれば
     // localStorage を優先（個人の好みを優先）。
@@ -130,7 +135,7 @@ export default function AdminWeeklyGridPage() {
         const supabase = createClient();
         const { data: aptData } = await supabase
           .from("appointments")
-          .select(`id, start_time, end_time, memo, is_first_visit, status, customer_id, series_id, clinic_id, course_id, course_name, staff_id, staff_name, room_id, room_name, customers(name, phone)`)
+          .select(`id, start_time, end_time, memo, is_first_visit, status, customer_id, series_id, clinic_id, course_id, course_name, staff_id, staff_name, room_id, room_name, department, party_size, customers(name, phone)`)
           .eq("clinic_id", clinicId)
           .gte("start_time", weekStart.toISOString())
           .lt("start_time", weekEnd.toISOString())
@@ -203,11 +208,13 @@ export default function AdminWeeklyGridPage() {
     return schedule.closedDays.includes(day);
   };
 
-  // room フィルタ適用後の appointments（カレンダー描画はこちらを使う）
+  // 部門・room フィルタ適用後の appointments（カレンダー描画はこちらを使う）
   const displayedAppointments = useMemo(() => {
-    if (!roomFilter) return appointments;
-    return appointments.filter(a => a.room_id === roomFilter);
-  }, [appointments, roomFilter]);
+    let list = appointments;
+    if (departmentFilter) list = list.filter(a => a.department === departmentFilter);
+    if (roomFilter) list = list.filter(a => a.room_id === roomFilter);
+    return list;
+  }, [appointments, roomFilter, departmentFilter]);
 
   const selectedDayAppointments = useMemo(() => {
     if (!selectedDay) return [];
@@ -604,6 +611,34 @@ export default function AdminWeeklyGridPage() {
                   <User className="w-3.5 h-3.5" /> スタッフ別
                 </button>
               </div>
+              {/* 部門タブ（サロン/カフェ等。departments 設定院のみ表示） */}
+              {departments.length > 0 && (
+                <div className="flex bg-indigo-50 dark:bg-indigo-900/30 rounded-lg p-0.5 gap-0.5 border border-indigo-200 dark:border-indigo-800">
+                  <button
+                    onClick={() => setDepartmentFilter("")}
+                    className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-all ${
+                      departmentFilter === ""
+                        ? "bg-indigo-600 text-white shadow-sm"
+                        : "text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-800/40"
+                    }`}
+                  >
+                    全部門
+                  </button>
+                  {departments.map((d) => (
+                    <button
+                      key={d}
+                      onClick={() => setDepartmentFilter(d)}
+                      className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-all ${
+                        departmentFilter === d
+                          ? "bg-indigo-600 text-white shadow-sm"
+                          : "text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-800/40"
+                      }`}
+                    >
+                      {d}
+                    </button>
+                  ))}
+                </div>
+              )}
               {/* room フィルタ（複数room保有院のみ表示） */}
               {rooms.length > 1 && (
                 <div className="flex bg-emerald-50 dark:bg-emerald-900/30 rounded-lg p-0.5 gap-0.5 border border-emerald-200 dark:border-emerald-800">

@@ -85,6 +85,8 @@ export type ClinicSettings = {
   public_reserve_flow?: "datetime_first" | "menu_first" | null;
   // 経費管理をオーナー専用にする（true の院では role != 'owner' は経費 UI 不可視）
   expense_owner_only?: boolean | null;
+  // 店舗の部門（例: ["サロン","カフェ"]）。経費・予約で共通利用。空配列なら部門UIを出さない＝従来通り。
+  departments?: string[] | null;
 };
 
 
@@ -234,6 +236,7 @@ export async function updateClinicSettings(
     default_appointments_view: settings.default_appointments_view ?? null,
     public_reserve_flow: settings.public_reserve_flow ?? null,
     expense_owner_only: settings.expense_owner_only ?? false,
+    departments: settings.departments ?? [],
   };
 
   const targetData = {

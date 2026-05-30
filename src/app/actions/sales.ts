@@ -991,6 +991,7 @@ export async function addExpense(formData: FormData) {
     const amount = parseInt(formData.get("amount") as string, 10);
     const memo = formData.get("memo") as string || "";
     const imageUrl = formData.get("image_url") as string || "";
+    const department = (formData.get("department") as string) || null; // 部門（サロン/カフェ等）。未設定院は null
 
     if (!expenseDate || !category || isNaN(amount)) {
       return { success: false, error: "必須項目を入力してください" };
@@ -999,13 +1000,14 @@ export async function addExpense(formData: FormData) {
     const supabase = await getSupabase();
     const { error } = await supabase
       .from("clinic_expenses")
-      .insert([{ 
-        expense_date: expenseDate, 
-        category, 
-        description, 
-        amount, 
+      .insert([{
+        expense_date: expenseDate,
+        category,
+        description,
+        amount,
         memo,
         image_url: imageUrl,
+        department,
         clinic_id: clinicId
       }]);
 
@@ -1070,6 +1072,7 @@ export async function updateExpense(id: string, data: {
   description?: string;
   amount?: number;
   memo?: string;
+  department?: string | null;
 }) {
   await requireRole(["owner", "admin"]);
   const { clinicId } = await checkAdminAuth();
