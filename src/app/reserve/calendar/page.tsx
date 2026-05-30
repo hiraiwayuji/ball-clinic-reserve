@@ -946,9 +946,17 @@ function ReserveCalendarContent() {
           </div>
         )}
 
-        {/* フッター注記 */}
+        {/* フッター注記（休診曜日は clinic_settings の closed_weekdays から動的に表示） */}
         <div className="mt-6 space-y-1 text-center">
-          <p className="text-[11px] text-zinc-300 font-bold">※ 水曜・日曜は休診日です</p>
+          {schedule.closedDays.length > 0 && (
+            <p className="text-[11px] text-zinc-300 font-bold">
+              ※ {[...schedule.closedDays]
+                .sort((a, b) => a - b)
+                .map((d) => ["日", "月", "火", "水", "木", "金", "土"][d] + "曜")
+                .join("・")}
+              は休診日です
+            </p>
+          )}
           <p className="text-[11px] text-zinc-300 font-bold">※ 空き状況はリアルタイムで変わります</p>
         </div>
       </div>
