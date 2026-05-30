@@ -23,6 +23,19 @@ export type ReservationCourse = {
   badge_label: string | null;
   /** 集計用カテゴリ: jusei (柔整) / shinkyu (鍼灸) / seitai (整体) / null (未分類) */
   category?: "jusei" | "shinkyu" | "seitai" | null;
+  // ── 部門・席予約（カフェ等）。部門なし院では全て NULL/既定値で従来通り動く ──
+  /** どの部門のメニューか（'サロン' | 'カフェ' 等）。NULL=部門なし院 */
+  department?: string | null;
+  /** 'service'=施術(1対1) / 'seating'=席(人数制) */
+  capacity_type?: "service" | "seating";
+  /** 席予約: 1予約あたり最大人数（NULL=制限なし） */
+  max_party_size?: number | null;
+  /** 席予約: 席種の在庫（同時に取れる卓/席数）。NULL=制限なし */
+  inventory_count?: number | null;
+  /** 席予約: 最低人数（個室=5）。NULL=制限なし */
+  min_party_size?: number | null;
+  /** 席予約: 子連れなら最低人数を免除（個室=true） */
+  allow_children_exception?: boolean;
 };
 
 export type ReservationStaff = {
@@ -222,6 +235,25 @@ export async function saveCourse(course: Partial<ReservationCourse> & { name: st
     if (error) return { success: false, error: error.message };
   }
 
+  revalidatePath("/admin/settings");
+  return { success: true };
+}
+
+// ── コース並び替え（sort_order を一括更新） ──
+// orderedIds を「表示したい順」で受け取り、sort_order = 0,1,2... を振り直す。
+// 他カラムには触れないので編集内容を壊さない。自院（clinic_id）のみ更新。
+export async function reorderCourses(orderedIds: string[]) {
+  const { clinicId } = await checkAdminAuth();
+  const { createClient } = await import("@/lib/supabase/server");
+  const supabase = await createClient();
+  for (let i = 0; i < orderedIds.length; i++) {
+    const { error } = await supabase
+      .from("reservation_courses")
+      .update({ sort_order: i })
+      .eq("id", orderedIds[i])
+      .eq("clinic_id", clinicId);
+    if (error) return { success: false, error: error.message };
+  }
   revalidatePath("/admin/settings");
   return { success: true };
 }

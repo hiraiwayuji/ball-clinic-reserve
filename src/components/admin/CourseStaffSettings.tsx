@@ -6,12 +6,12 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import {
-  saveCourse, deleteCourse,
+  saveCourse, deleteCourse, reorderCourses,
   saveStaff, deleteStaff,
   saveRoom, deleteRoom,
   type ReservationCourse, type ReservationStaff, type ReservationRoom,
 } from "@/app/actions/courses";
-import { Plus, Trash2, GripVertical, Clock, Pencil, Check, X, User, DoorOpen, Sparkles, Tag, Star } from "lucide-react";
+import { Plus, Trash2, GripVertical, Clock, Pencil, Check, X, User, DoorOpen, Sparkles, Tag, Star, ChevronUp, ChevronDown } from "lucide-react";
 
 interface Props {
   initialCourses: ReservationCourse[];
@@ -688,6 +688,25 @@ export default function CourseStaffSettings({ initialCourses, initialStaff, init
     else window.location.reload();
   };
 
+  // 上下ボタンでの並べ替え（sort_order を振り直して保存）
+  const [reordering, setReordering] = useState(false);
+  const handleMoveCourse = async (index: number, dir: -1 | 1) => {
+    const target = index + dir;
+    if (target < 0 || target >= courses.length || reordering) return;
+    const next = [...courses];
+    [next[index], next[target]] = [next[target], next[index]];
+    setCourses(next); // 楽観的に即反映
+    setReordering(true);
+    const res = await reorderCourses(next.map((c) => c.id));
+    setReordering(false);
+    if (res.success) {
+      toast.success("並び順を保存しました");
+    } else {
+      toast.error(res.error ?? "並び替えに失敗しました");
+      refreshCourses(); // 失敗時はサーバ状態に戻す
+    }
+  };
+
   const refreshStaff = async () => {
     const res = await fetch("/api/admin/staff");
     if (res.ok) setStaff(await res.json());
@@ -825,13 +844,37 @@ export default function CourseStaffSettings({ initialCourses, initialStaff, init
               コースが登録されていません。追加してください。
             </p>
           )}
-          {courses.map(course => (
-            <CourseRow
-              key={course.id}
-              course={course}
-              onSaved={() => window.location.reload()}
-              onDeleted={() => window.location.reload()}
-            />
+          {courses.map((course, index) => (
+            <div key={course.id} className="flex items-stretch gap-1.5">
+              {/* 並べ替え（上下） */}
+              <div className="flex flex-col justify-center gap-1 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => handleMoveCourse(index, -1)}
+                  disabled={index === 0 || reordering}
+                  aria-label="上へ移動"
+                  className="w-7 h-7 flex items-center justify-center rounded-md border border-slate-200 dark:border-slate-700 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-30 disabled:cursor-not-allowed"
+                >
+                  <ChevronUp className="w-4 h-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleMoveCourse(index, 1)}
+                  disabled={index === courses.length - 1 || reordering}
+                  aria-label="下へ移動"
+                  className="w-7 h-7 flex items-center justify-center rounded-md border border-slate-200 dark:border-slate-700 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-30 disabled:cursor-not-allowed"
+                >
+                  <ChevronDown className="w-4 h-4" />
+                </button>
+              </div>
+              <div className="flex-1 min-w-0">
+                <CourseRow
+                  course={course}
+                  onSaved={() => window.location.reload()}
+                  onDeleted={() => window.location.reload()}
+                />
+              </div>
+            </div>
           ))}
 
           {addingCourse && (
