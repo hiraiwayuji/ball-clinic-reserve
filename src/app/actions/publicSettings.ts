@@ -37,6 +37,24 @@ export type PublicClinicSettings = {
 
   /** 患者LP /reserve の予約フロー（datetime_first|menu_first） */
   public_reserve_flow: "datetime_first" | "menu_first";
+
+  /** 予約の部門（'サロン' | 'カフェ' 等）。2件以上なら入口で部門選択を出す。空=部門なし院 */
+  departments: string[];
+  /** カフェの同時受入席数（席予約の総枠上限）。NULL=未設定 */
+  cafe_seat_capacity: number | null;
+  /** カフェ部門の営業時間（サロンと別営業）。NULL=カフェ予約フロー未使用 */
+  cafe_business_hours: CafeBusinessHours | null;
+};
+
+export type CafeBusinessHoursWindow = {
+  start: string; // "HH:MM"
+  end: string;   // "HH:MM"
+  days: number[]; // JS getDay(): 0=日 ... 6=土
+};
+
+export type CafeBusinessHours = {
+  lunch?: CafeBusinessHoursWindow;
+  dinner?: CafeBusinessHoursWindow;
 };
 
 export type LPFeature = {
@@ -95,7 +113,8 @@ export async function getPublicClinicSettings(): Promise<PublicClinicSettings | 
       lp_features, lp_target_problems, lp_voice_quote, lp_voice_author, lp_cta_text,
       theme_color, primary_color,
       phone_number, address, area_name, hp_url, instagram_url, line_official_account_url,
-      slot_duration_minutes, public_reserve_flow
+      slot_duration_minutes, public_reserve_flow,
+      departments, cafe_seat_capacity, cafe_business_hours
     `)
     .eq("id", PUBLIC_CLINIC_ID)
     .maybeSingle();
@@ -124,7 +143,28 @@ export async function getPublicClinicSettings(): Promise<PublicClinicSettings | 
     line_official_account_url: data.line_official_account_url ?? null,
     slot_duration_minutes: normalizeSlotDuration(data.slot_duration_minutes),
     public_reserve_flow: (data.public_reserve_flow === "menu_first" ? "menu_first" : "datetime_first") as "datetime_first" | "menu_first",
+    departments: parseStringArray(data.departments) ?? [],
+    cafe_seat_capacity: typeof data.cafe_seat_capacity === "number" ? data.cafe_seat_capacity : null,
+    cafe_business_hours: parseCafeBusinessHours(data.cafe_business_hours),
   };
+}
+
+function parseCafeBusinessHours(raw: unknown): CafeBusinessHours | null {
+  if (!raw || typeof raw !== "object") return null;
+  const obj = raw as Record<string, unknown>;
+  const parseWindow = (w: unknown): CafeBusinessHoursWindow | undefined => {
+    if (!w || typeof w !== "object") return undefined;
+    const o = w as Record<string, unknown>;
+    if (typeof o.start !== "string" || typeof o.end !== "string") return undefined;
+    const days = Array.isArray(o.days)
+      ? o.days.filter((d): d is number => typeof d === "number" && d >= 0 && d <= 6)
+      : [];
+    return { start: o.start, end: o.end, days };
+  };
+  const lunch = parseWindow(obj.lunch);
+  const dinner = parseWindow(obj.dinner);
+  if (!lunch && !dinner) return null;
+  return { ...(lunch ? { lunch } : {}), ...(dinner ? { dinner } : {}) };
 }
 
 function normalizeSlotDuration(raw: unknown): 15 | 20 | 30 {

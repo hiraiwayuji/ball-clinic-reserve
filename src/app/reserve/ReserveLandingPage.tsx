@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useSearchParams, useRouter } from "next/navigation";
-import { Sparkles, CalendarDays, ClipboardList, Users } from "lucide-react";
+import { Sparkles, CalendarDays, ClipboardList, Users, Coffee, Flower2 } from "lucide-react";
 import LPHero from "@/components/reserve/LPHero";
 import LPFeatures from "@/components/reserve/LPFeatures";
 import { getPublicClinicSettings, type PublicClinicSettings } from "@/app/actions/publicSettings";
@@ -77,6 +77,12 @@ export default function ReserveLandingPage() {
   const themeColor = settings?.theme_color ?? "blue";
   const theme = getThemeClasses(themeColor);
 
+  // 部門（サロン/カフェ）が2件以上ある院は、入口で部門選択を出す。
+  // dept=salon のとき従来のサロン導線を表示。dept 未指定なら部門チューザー。
+  const departments = settings?.departments ?? [];
+  const hasMultiDepartments = departments.length >= 2 && departments.includes("カフェ");
+  const dept = searchParams.get("dept");
+
   if (!loaded) {
     return (
       <div className="min-h-screen bg-slate-900 flex items-center justify-center">
@@ -86,6 +92,65 @@ export default function ReserveLandingPage() {
   }
 
   const selectedMember = family.find((c) => c.customer_id === selectedCustomerId) ?? null;
+
+  // ── 部門チューザー（サロン / カフェ の切替） ──
+  if (hasMultiDepartments && dept !== "salon") {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-stone-900 via-stone-950 to-black text-white flex flex-col" data-dark-page>
+        <div className="flex-1 max-w-2xl mx-auto w-full px-5 py-10 flex flex-col justify-center">
+          <div className="text-center mb-10">
+            <p className="text-amber-200/60 text-[11px] tracking-[0.3em] uppercase mb-3">Reservation</p>
+            <h1 className="text-2xl font-black text-white mb-2">
+              ご予約の種類を
+              <br />
+              お選びください
+            </h1>
+            <p className="text-white/40 text-sm">サロンとカフェで予約ページが分かれています。</p>
+          </div>
+
+          <div className="grid gap-4">
+            {/* サロン */}
+            <button
+              type="button"
+              onClick={() => router.push("/reserve?dept=salon")}
+              className="group text-left p-6 rounded-3xl bg-gradient-to-br from-amber-500/15 to-amber-900/10 border border-amber-400/30 hover:border-amber-300/60 transition active:scale-[0.99]"
+            >
+              <div className="flex items-center gap-4">
+                <div className="w-14 h-14 rounded-2xl bg-amber-400/20 flex items-center justify-center shrink-0">
+                  <Flower2 className="w-7 h-7 text-amber-300" />
+                </div>
+                <div className="flex-1">
+                  <div className="text-lg font-black text-white">サロンを予約</div>
+                  <div className="text-amber-100/60 text-xs mt-0.5">PRIVATE SALON AILUS</div>
+                  <div className="text-white/40 text-xs mt-1">リンパ・エステ・腸活・講座</div>
+                </div>
+                <span className="text-amber-300/70 text-2xl font-black group-hover:translate-x-1 transition">→</span>
+              </div>
+            </button>
+
+            {/* カフェ */}
+            <button
+              type="button"
+              onClick={() => router.push("/reserve/cafe")}
+              className="group text-left p-6 rounded-3xl bg-gradient-to-br from-orange-500/15 to-orange-900/10 border border-orange-400/30 hover:border-orange-300/60 transition active:scale-[0.99]"
+            >
+              <div className="flex items-center gap-4">
+                <div className="w-14 h-14 rounded-2xl bg-orange-400/20 flex items-center justify-center shrink-0">
+                  <Coffee className="w-7 h-7 text-orange-300" />
+                </div>
+                <div className="flex-1">
+                  <div className="text-lg font-black text-white">カフェを予約</div>
+                  <div className="text-orange-100/60 text-xs mt-0.5">KUKUNA CAFE</div>
+                  <div className="text-white/40 text-xs mt-1">グルテンフリーのお食事・席のご予約</div>
+                </div>
+                <span className="text-orange-300/70 text-2xl font-black group-hover:translate-x-1 transition">→</span>
+              </div>
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-slate-900 text-white" data-dark-page>

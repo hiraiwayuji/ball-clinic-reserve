@@ -838,6 +838,55 @@ export default function CourseStaffSettings({ initialCourses, initialStaff, init
           </Button>
         </div>
 
+        {/* ── 操作の説明（並び順・編集・クーポン公開） ── */}
+        <div className="mb-3 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 dark:border-blue-900/50 dark:bg-blue-950/30">
+          <p className="flex items-center gap-1.5 text-xs font-bold text-blue-800 dark:text-blue-200">
+            <Sparkles className="w-3.5 h-3.5" />
+            並び順・編集・クーポン公開の使い方
+          </p>
+          <ul className="mt-2 space-y-1.5 text-xs leading-relaxed text-slate-600 dark:text-slate-300">
+            <li className="flex items-start gap-1.5">
+              <span className="flex shrink-0 items-center gap-0.5 rounded border border-slate-300 bg-white px-1 py-0.5 dark:border-slate-600 dark:bg-slate-800">
+                <ChevronUp className="w-3 h-3" />
+                <ChevronDown className="w-3 h-3" />
+              </span>
+              <span>
+                左の上下ボタンで<strong>並び順を変更</strong>できます。
+                ここで並べた順番が、そのまま患者さんのメニュー画面
+                （コースタブ・クーポンタブ）に反映されます。
+              </span>
+            </li>
+            <li className="flex items-start gap-1.5">
+              <Pencil className="mt-0.5 w-3.5 h-3.5 shrink-0 text-blue-600 dark:text-blue-300" />
+              <span>
+                鉛筆アイコンで<strong>編集</strong>します。
+                コース名・所要時間・料金（割引前料金）・写真・バッジ・
+                新規/再来限定などをまとめて設定できます。
+              </span>
+            </li>
+            <li className="flex items-start gap-1.5">
+              <span className="flex shrink-0 items-center gap-0.5 rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">
+                <Tag className="w-2.5 h-2.5" />クーポン
+              </span>
+              <span>
+                編集画面で「クーポンとして公開する」にチェックすると、
+                メニュー画面の<strong>クーポンタブ</strong>に表示されます。
+                クーポンの並び順も、この上下ボタンで決めた順番どおりです。
+              </span>
+            </li>
+            <li className="flex items-start gap-1.5">
+              <span className="mt-0.5 shrink-0 rounded-md bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300">
+                有効/無効
+              </span>
+              <span>
+                「無効」にすると患者さんの画面から一時的に隠せます
+                （削除せず残せるので、季節メニューの停止などに便利です）。
+                完全に消すときはゴミ箱アイコンで削除します。
+              </span>
+            </li>
+          </ul>
+        </div>
+
         <div className="space-y-2">
           {courses.length === 0 && !addingCourse && (
             <p className="text-sm text-slate-400 text-center py-6 border rounded-xl border-dashed">
