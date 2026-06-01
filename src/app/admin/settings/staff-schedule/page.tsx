@@ -20,8 +20,8 @@ function getWeekStart(d: Date): Date {
 }
 
 export default async function StaffSchedulePage() {
-  // owner/admin のみアクセス可
-  await requireRole(["owner", "admin"]);
+  // オーナーのみアクセス可
+  await requireRole(["owner"]);
 
   // 既存タブ（スポット/タスク等）は今日〜28日後を範囲とする
   const today = new Date();

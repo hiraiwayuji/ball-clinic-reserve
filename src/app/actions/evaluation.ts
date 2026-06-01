@@ -1,7 +1,7 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
-import { checkAdminAuth } from "@/app/actions/auth";
+import { requireRole } from "@/app/actions/auth";
 import { revalidatePath } from "next/cache";
 import { getMonthlyTotalRevenue } from "./sales";
 
@@ -15,7 +15,7 @@ async function getSupabase() {
  * Returns both records and the calculated actuals.
  */
 export async function getMonthlyEvaluation(year: number, month: number) {
-  const { clinicId } = await checkAdminAuth();
+  const { clinicId } = await requireRole(["owner"]);
   try {
     const supabase = await getSupabase();
     const monthStr = `${year}-${month.toString().padStart(2, '0')}`;
@@ -130,7 +130,7 @@ export async function getMonthlyEvaluation(year: number, month: number) {
 }
 
 export async function saveEvaluationTargets(formData: FormData) {
-  const { clinicId } = await checkAdminAuth();
+  const { clinicId } = await requireRole(["owner"]);
   try {
     const month = formData.get("month") as string; // "YYYY-MM-01"
     const targetPatients = parseInt(formData.get("target_patients") as string, 10);
@@ -220,7 +220,7 @@ export type MonthDetailedBreakdown = {
 };
 
 export async function getMonthDetailedBreakdown(year: number, month: number): Promise<{ success: boolean; data?: MonthDetailedBreakdown; error?: string }> {
-  const { clinicId } = await checkAdminAuth();
+  const { clinicId } = await requireRole(["owner"]);
   try {
     const supabase = await getSupabase();
     const monthStr = `${year}-${String(month).padStart(2, "0")}`;
@@ -294,7 +294,7 @@ export async function getMonthDetailedBreakdown(year: number, month: number): Pr
 }
 
 export async function updateCashSale(id: string, patch: { customer_name?: string; treatment_fee?: number; memo?: string; is_first_visit?: boolean }) {
-  const { clinicId } = await checkAdminAuth();
+  const { clinicId } = await requireRole(["owner"]);
   const supabase = await getSupabase();
   const { error } = await supabase.from("cash_sales").update(patch).eq("id", id).eq("clinic_id", clinicId);
   if (error) return { success: false, error: error.message };
@@ -305,7 +305,7 @@ export async function updateCashSale(id: string, patch: { customer_name?: string
 }
 
 export async function deleteCashSaleRecord(id: string) {
-  const { clinicId } = await checkAdminAuth();
+  const { clinicId } = await requireRole(["owner"]);
   const supabase = await getSupabase();
   const { error } = await supabase.from("cash_sales").delete().eq("id", id).eq("clinic_id", clinicId);
   if (error) return { success: false, error: error.message };
@@ -323,7 +323,7 @@ export async function getMonthlyReportData(
   year: number,
   month: number,
 ): Promise<{ success: boolean; data?: MonthlyReportData; error?: string }> {
-  const { clinicId } = await checkAdminAuth();
+  const { clinicId } = await requireRole(["owner"]);
   try {
     const supabase = await getSupabase();
     const monthStr = `${year}-${String(month).padStart(2, "0")}`;
@@ -398,7 +398,7 @@ export async function getMonthlyReportData(
 }
 
 export async function toggleFirstVisit(id: string, isFirstVisit: boolean) {
-  const { clinicId } = await checkAdminAuth();
+  const { clinicId } = await requireRole(["owner"]);
   const supabase = await getSupabase();
   const { error } = await supabase.from("appointments").update({ is_first_visit: isFirstVisit }).eq("id", id).eq("clinic_id", clinicId);
   if (error) return { success: false, error: error.message };
@@ -407,7 +407,7 @@ export async function toggleFirstVisit(id: string, isFirstVisit: boolean) {
 }
 
 export async function updateCustomerName(customerId: string, name: string) {
-  const { clinicId } = await checkAdminAuth();
+  const { clinicId } = await requireRole(["owner"]);
   const supabase = await getSupabase();
   const { error } = await supabase.from("customers").update({ name }).eq("id", customerId).eq("clinic_id", clinicId);
   if (error) return { success: false, error: error.message };
@@ -419,7 +419,7 @@ export async function updateCustomerName(customerId: string, name: string) {
 // We call the generic /api/chat or Gemini API inside the client or a separate utility, 
 // then save the text via this action.
 export async function saveAiSuggestion(month: string, suggestionText: string) {
-  const { clinicId } = await checkAdminAuth();
+  const { clinicId } = await requireRole(["owner"]);
   try {
     const supabase = await getSupabase();
     const { error } = await supabase

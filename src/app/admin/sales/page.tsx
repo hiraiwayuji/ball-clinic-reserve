@@ -43,6 +43,7 @@ import Link from "next/link";
 import CashSalesImportDialog from "@/components/admin/CashSalesImportDialog";
 import { AddAppointmentDialog } from "@/components/admin/AddAppointmentDialog";
 import { exportToExcel } from "@/lib/excel";
+import { getMyRole } from "@/app/actions/auth";
 
 function SalesPageInner() {
   const searchParams = useSearchParams();
@@ -54,6 +55,8 @@ function SalesPageInner() {
   const [isFirstVisit, setIsFirstVisit] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const formRef = useRef<HTMLFormElement>(null);
+  // 受付スタッフは「受付の売上記帳（入力のみ）」。帳簿一覧・修正/削除・他日閲覧・エクスポート等はオーナー専用。
+  const [isOwner, setIsOwner] = useState(false);
 
   // 「次回予約」モーダル（会計成功直後に開く）
   const [nextReserveOpen, setNextReserveOpen] = useState(false);
@@ -180,6 +183,10 @@ function SalesPageInner() {
     setDate(new Date());
   }, []);
 
+  useEffect(() => {
+    getMyRole().then((r) => setIsOwner(r === "owner"));
+  }, []);
+
   const fetchSales = async (d: Date) => {
     setLoading(true);
     const dateStr = format(d, "yyyy-MM-dd");
@@ -191,10 +198,11 @@ function SalesPageInner() {
   };
 
   useEffect(() => {
-    if (date) {
+    // 帳簿一覧の取得はオーナーのみ（getCashSales はオーナー専用）。
+    if (date && isOwner) {
       fetchSales(date);
     }
-  }, [date]);
+  }, [date, isOwner]);
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -457,6 +465,7 @@ function SalesPageInner() {
           <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-100">売上登録（受付）</h1>
           <p className="text-slate-500 dark:text-slate-400">窓口での自費・物販等の売上を記録します</p>
         </div>
+        {isOwner ? (
         <div className="flex items-center gap-3 flex-wrap justify-end">
           <Link href={bulkSalesHref}>
             <Button variant="outline" size="sm" className="border-amber-300 text-amber-600 hover:bg-amber-50 dark:border-amber-700 dark:text-amber-400 dark:hover:bg-amber-950/50 font-bold">
@@ -494,11 +503,16 @@ function SalesPageInner() {
             />
           </div>
         </div>
+        ) : (
+          <span className="text-sm font-medium text-slate-500 dark:text-slate-400">
+            本日 {format(date, "M月d日 (E)", { locale: ja })} の受付売上を入力
+          </span>
+        )}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* 入力フォーム */}
-        <Card className="lg:col-span-1 shadow-sm border-slate-200 dark:border-white/10 dark:bg-slate-900/50">
+        <Card className={`${isOwner ? "lg:col-span-1" : "lg:col-span-2 lg:col-start-1"} shadow-sm border-slate-200 dark:border-white/10 dark:bg-slate-900/50`}>
           <CardHeader>
             <CardTitle className="text-lg flex items-center gap-2">
               <Plus className="w-5 h-5 text-blue-600" />
@@ -754,7 +768,8 @@ function SalesPageInner() {
           </CardContent>
         </Card>
 
-        {/* 売上リスト */}
+        {/* 売上リスト（オーナー専用：受付スタッフには非表示） */}
+        {isOwner && (
         <Card className="lg:col-span-2 shadow-sm border-slate-200 dark:border-white/10 dark:bg-slate-900/50">
           <CardHeader className="flex flex-row items-center justify-between">
             <div>
@@ -895,6 +910,7 @@ function SalesPageInner() {
             </div>
           </CardContent>
         </Card>
+        )}
       </div>
 
       <CashSalesImportDialog

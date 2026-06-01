@@ -618,7 +618,8 @@ export async function addCashSale(formData: FormData) {
 }
 
 export async function getCashSales(dateStr: string) {
-  const { clinicId } = await checkAdminAuth();
+  // 売上帳簿の閲覧はオーナー専用（受付スタッフは入力のみ）
+  const { clinicId } = await requireRole(["owner"]);
   try {
     const supabase = await getSupabase();
     // Migration完了につき clinic_id フィルタを有効化
@@ -687,7 +688,7 @@ export async function getCashSales(dateStr: string) {
 }
 
 export async function updateCashSale(formData: FormData) {
-  await requireRole(["owner", "admin"]);
+  await requireRole(["owner"]);
   const { clinicId } = await checkAdminAuth();
   try {
     const id = formData.get("id") as string;
@@ -769,7 +770,7 @@ export async function updateCashSale(formData: FormData) {
 }
 
 export async function deleteCashSale(id: string) {
-  await requireRole(["owner", "admin"]);
+  await requireRole(["owner"]);
   const { clinicId } = await checkAdminAuth();
   try {
     const supabase = await getSupabase();
@@ -793,7 +794,8 @@ export async function deleteCashSale(id: string) {
 // --- Insurance Payment Actions ---
 
 export async function addInsurancePayment(formData: FormData) {
-  const { clinicId } = await checkAdminAuth();
+  // 保険入金はオーナー専用
+  const { clinicId } = await requireRole(["owner"]);
   try {
     const paymentMonth = formData.get("payment_month") as string; // "YYYY-MM-01"
     const insuranceName = formData.get("insurance_name") as string;
@@ -831,7 +833,8 @@ export async function addInsurancePayment(formData: FormData) {
 }
 
 export async function getInsurancePayments(monthStr: string) {
-  const { clinicId } = await checkAdminAuth();
+  // 保険入金の閲覧はオーナー専用
+  const { clinicId } = await requireRole(["owner"]);
   try {
     const supabase = await getSupabase();
     const { data, error } = await supabase
@@ -855,7 +858,7 @@ export async function updateInsurancePayment(id: string, data: {
   payment_date: string | null;
   notes: string | null;
 }) {
-  await requireRole(["owner", "admin"]);
+  await requireRole(["owner"]);
   const { clinicId } = await checkAdminAuth();
   try {
     const supabase = await getSupabase();
@@ -880,7 +883,7 @@ export async function updateInsurancePayment(id: string, data: {
 }
 
 export async function updateInsurancePassbookCheck(id: string, checked: boolean) {
-  const { clinicId } = await checkAdminAuth();
+  const { clinicId } = await requireRole(["owner"]);
   try {
     const supabase = await getSupabase();
     const { error } = await supabase
@@ -899,7 +902,7 @@ export async function updateInsurancePassbookCheck(id: string, checked: boolean)
 }
 
 export async function deleteInsurancePayment(id: string) {
-  await requireRole(["owner", "admin"]);
+  await requireRole(["owner"]);
   const { clinicId } = await checkAdminAuth();
   try {
     const supabase = await getSupabase();

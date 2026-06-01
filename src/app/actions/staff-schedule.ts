@@ -270,7 +270,7 @@ export async function cancelMyLeaveRequest(
 export async function approveLeaveRequest(
   id: string,
 ): Promise<{ success: boolean; error?: string }> {
-  const auth = await requireRole(["owner", "admin"]);
+  const auth = await requireRole(["owner"]);
   const sb = getServiceClient();
   if (!sb) return { success: false, error: "サーバー設定エラー" };
 
@@ -292,7 +292,7 @@ export async function approveLeaveRequest(
 export async function rejectLeaveRequest(
   id: string,
 ): Promise<{ success: boolean; error?: string }> {
-  const auth = await requireRole(["owner", "admin"]);
+  const auth = await requireRole(["owner"]);
   const sb = getServiceClient();
   if (!sb) return { success: false, error: "サーバー設定エラー" };
 
@@ -316,7 +316,7 @@ export async function listPendingLeaveRequests(): Promise<{
   rows?: StaffOverrideRow[];
   error?: string;
 }> {
-  const auth = await requireRole(["owner", "admin"]);
+  const auth = await requireRole(["owner"]);
   const sb = getServiceClient();
   if (!sb) return { success: false, error: "サーバー設定エラー" };
 
@@ -362,7 +362,7 @@ export async function createOverride(
   input: CreateOverrideInput
 ): Promise<{ success: boolean; id?: string; error?: string }> {
   // owner/admin のみ
-  const auth = await requireRole(["owner", "admin"]);
+  const auth = await requireRole(["owner"]);
   const sb = getServiceClient();
   if (!sb) return { success: false, error: "サーバー設定エラー" };
 
@@ -399,7 +399,7 @@ export async function createOverride(
 }
 
 export async function deleteOverride(id: string): Promise<{ success: boolean; error?: string }> {
-  const auth = await requireRole(["owner", "admin"]);
+  const auth = await requireRole(["owner"]);
   const sb = getServiceClient();
   if (!sb) return { success: false, error: "サーバー設定エラー" };
 
@@ -541,7 +541,7 @@ export type UpsertWorkingHourInput = {
 export async function upsertWorkingHours(
   input: UpsertWorkingHourInput
 ): Promise<{ success: boolean; error?: string }> {
-  const auth = await requireRole(["owner", "admin"]);
+  const auth = await requireRole(["owner"]);
   const sb = getServiceClient();
   if (!sb) return { success: false, error: "サーバー設定エラー" };
 
@@ -583,7 +583,7 @@ export async function deleteWorkingHour(
   staff_id: string,
   day_of_week: number
 ): Promise<{ success: boolean; error?: string }> {
-  const auth = await requireRole(["owner", "admin"]);
+  const auth = await requireRole(["owner"]);
   const sb = getServiceClient();
   if (!sb) return { success: false, error: "サーバー設定エラー" };
 
@@ -827,7 +827,7 @@ export async function reopenTask(id: string): Promise<{ success: boolean; error?
 }
 
 export async function deleteTask(id: string): Promise<{ success: boolean; error?: string }> {
-  const auth = await requireRole(["owner", "admin"]);
+  const auth = await requireRole(["owner"]);
   const sb = getServiceClient();
   if (!sb) return { success: false, error: "サーバー設定エラー" };
 
@@ -953,7 +953,7 @@ function parseCsv(text: string): string[][] {
 export async function importWorkingHoursFromCsv(
   csvText: string
 ): Promise<{ success: boolean; result?: CsvImportResult; error?: string }> {
-  const auth = await requireRole(["owner", "admin"]);
+  const auth = await requireRole(["owner"]);
   const sb = getServiceClient();
   if (!sb) return { success: false, error: "サーバー設定エラー" };
 
@@ -1042,7 +1042,7 @@ export async function importWorkingHoursFromCsv(
 export async function importTasksFromCsv(
   csvText: string
 ): Promise<{ success: boolean; result?: CsvImportResult; error?: string }> {
-  const auth = await requireRole(["owner", "admin"]);
+  const auth = await requireRole(["owner"]);
   const sb = getServiceClient();
   if (!sb) return { success: false, error: "サーバー設定エラー" };
 
