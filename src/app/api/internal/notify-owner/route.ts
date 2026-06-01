@@ -16,8 +16,10 @@ import { PUBLIC_CLINIC_ID } from "@/lib/default-clinic-id";
 export async function POST(req: NextRequest) {
   const { secret, text } = await req.json().catch(() => ({ secret: "", text: "" }));
 
-  const expected = process.env.REMIND_SECRET || "";
-  if (!expected || secret !== expected) {
+  // REMIND_SECRET は Vercel env 由来で末尾に改行が混入することがあるため
+  // 両辺を trim して比較する（過去の「env 末尾改行」事故対策）。
+  const expected = (process.env.REMIND_SECRET || "").trim();
+  if (!expected || String(secret ?? "").trim() !== expected) {
     return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
   }
   if (!text || typeof text !== "string") {
