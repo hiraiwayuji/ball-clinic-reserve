@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -325,6 +325,56 @@ function CourseRow({
         </Button>
       </div>
     </div>
+  );
+}
+
+// ── 並び順の番号入力（数字を書き換えてEnterで位置変更） ──
+function PositionInput({
+  position,
+  max,
+  disabled,
+  onCommit,
+}: {
+  position: number; // 1始まりの現在位置
+  max: number;
+  disabled?: boolean;
+  onCommit: (newPosition: number) => void;
+}) {
+  const [draft, setDraft] = useState(String(position));
+  // 並び替え後にサーバ位置が変わったら表示を同期
+  useEffect(() => {
+    setDraft(String(position));
+  }, [position]);
+
+  const commit = () => {
+    const n = parseInt(draft, 10);
+    if (!Number.isNaN(n) && n >= 1 && n <= max && n !== position) {
+      onCommit(n);
+    } else {
+      setDraft(String(position)); // 不正・変化なしなら元に戻す
+    }
+  };
+
+  return (
+    <input
+      type="number"
+      inputMode="numeric"
+      min={1}
+      max={max}
+      value={draft}
+      disabled={disabled}
+      aria-label="並び順の番号"
+      title="番号を書き換えてEnter（並び順を変更）"
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          (e.target as HTMLInputElement).blur();
+        }
+      }}
+      className="w-7 h-7 text-center text-xs font-bold rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 disabled:opacity-30 disabled:cursor-not-allowed [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+    />
   );
 }
 
@@ -707,6 +757,25 @@ export default function CourseStaffSettings({ initialCourses, initialStaff, init
     }
   };
 
+  // 番号入力での並べ替え（指定位置へ移動して sort_order を振り直す）
+  const handleSetPosition = async (index: number, newPosition: number) => {
+    const target = newPosition - 1; // 1始まり → 0始まり
+    if (target < 0 || target >= courses.length || target === index || reordering) return;
+    const next = [...courses];
+    const [moved] = next.splice(index, 1); // 元の位置から抜き
+    next.splice(target, 0, moved); // 新しい位置へ挿入
+    setCourses(next); // 楽観的に即反映
+    setReordering(true);
+    const res = await reorderCourses(next.map((c) => c.id));
+    setReordering(false);
+    if (res.success) {
+      toast.success("並び順を保存しました");
+    } else {
+      toast.error(res.error ?? "並び替えに失敗しました");
+      refreshCourses(); // 失敗時はサーバ状態に戻す
+    }
+  };
+
   const refreshStaff = async () => {
     const res = await fetch("/api/admin/staff");
     if (res.ok) setStaff(await res.json());
@@ -852,6 +921,8 @@ export default function CourseStaffSettings({ initialCourses, initialStaff, init
               </span>
               <span>
                 左の上下ボタンで<strong>並び順を変更</strong>できます。
+                上下の間にある<strong>番号を書き換えてEnter</strong>を押すと、
+                その順番へ一気に移動できます（例: 「5」と入れて Enter で5番目へ）。
                 ここで並べた順番が、そのまま患者さんのメニュー画面
                 （コースタブ・クーポンタブ）に反映されます。
               </span>
@@ -895,8 +966,8 @@ export default function CourseStaffSettings({ initialCourses, initialStaff, init
           )}
           {courses.map((course, index) => (
             <div key={course.id} className="flex items-stretch gap-1.5">
-              {/* 並べ替え（上下） */}
-              <div className="flex flex-col justify-center gap-1 shrink-0">
+              {/* 並べ替え（番号入力＋上下ボタン） */}
+              <div className="flex flex-col items-center justify-center gap-1 shrink-0">
                 <button
                   type="button"
                   onClick={() => handleMoveCourse(index, -1)}
@@ -906,6 +977,12 @@ export default function CourseStaffSettings({ initialCourses, initialStaff, init
                 >
                   <ChevronUp className="w-4 h-4" />
                 </button>
+                <PositionInput
+                  position={index + 1}
+                  max={courses.length}
+                  disabled={reordering}
+                  onCommit={(pos) => handleSetPosition(index, pos)}
+                />
                 <button
                   type="button"
                   onClick={() => handleMoveCourse(index, 1)}
