@@ -917,7 +917,122 @@ export async function deleteAppointment(
 
     revalidatePath("/admin/appointments");
     revalidatePath("/admin");
-    return { success: true, deletedCount };
+
+    // キャンセルで枠が空いたので、同日のキャンセル待ち（status="waiting"）がいれば候補を返す。
+    // → UI 側で「この方に空きをお知らせしましょう」ポップアップを出し、ワンタップ LINE 通知へ。
+    let waitlistCandidates: WaitlistCandidate[] = [];
+    try {
+      if (before?.start_time) {
+        const freed = new Date(before.start_time);
+        // JST の当日範囲（UTC 換算）を作る
+        const jst = new Date(freed.getTime() + 9 * 3600 * 1000);
+        const y = jst.getUTCFullYear(), mo = jst.getUTCMonth(), da = jst.getUTCDate();
+        const dayStartUtc = new Date(Date.UTC(y, mo, da, 0, 0, 0) - 9 * 3600 * 1000);
+        const dayEndUtc = new Date(Date.UTC(y, mo, da + 1, 0, 0, 0) - 9 * 3600 * 1000);
+        const { data: waiting } = await supabase
+          .from("appointments")
+          .select("id, start_time, is_first_visit, customers(name, line_user_id)")
+          .eq("clinic_id", auth.clinicId)
+          .eq("status", "waiting")
+          .gte("start_time", dayStartUtc.toISOString())
+          .lt("start_time", dayEndUtc.toISOString())
+          .order("start_time");
+        waitlistCandidates = (waiting ?? []).map((w: any) => {
+          const c = Array.isArray(w.customers) ? w.customers[0] : w.customers;
+          return {
+            appointmentId: w.id as string,
+            customerName: (c?.name as string) ?? "(お名前未登録)",
+            hasLine: !!c?.line_user_id,
+            startTime: w.start_time as string,
+            isFirstVisit: !!w.is_first_visit,
+          };
+        });
+      }
+    } catch (e) {
+      console.error("waitlist lookup after cancel failed:", e);
+    }
+
+    return { success: true, deletedCount, waitlistCandidates };
+  } catch (err) {
+    console.error(err);
+    return { success: false, error: "予期せぬエラーが発生しました" };
+  }
+}
+
+export type WaitlistCandidate = {
+  appointmentId: string;
+  customerName: string;
+  hasLine: boolean;
+  startTime: string;
+  isFirstVisit: boolean;
+};
+
+/**
+ * キャンセル待ちの方へ「空きが出ました」を LINE で通知する。
+ * deleteAppointment が返した waitlistCandidates の appointmentId を渡す。
+ */
+export async function notifyWaitlistOpening(waitingAppointmentId: string) {
+  const { clinicId } = await checkAdminAuth();
+  try {
+    const supabase = await getSupabase();
+    if (!supabase) return { success: false, error: "DB接続エラー" };
+
+    const { data: apt, error } = await supabase
+      .from("appointments")
+      .select("id, customers(name, line_user_id)")
+      .eq("clinic_id", clinicId)
+      .eq("id", waitingAppointmentId)
+      .single();
+    if (error || !apt) return { success: false, error: "キャンセル待ち情報の取得に失敗しました" };
+
+    const customer = Array.isArray(apt.customers) ? apt.customers[0] : apt.customers;
+    const lineUserId = customer?.line_user_id;
+    if (!lineUserId) {
+      return { success: false, error: "この方のLINE IDが未登録のため自動送信できません。お電話でご連絡ください。" };
+    }
+
+    // 院名（メッセージ見出し用）
+    let clinicName = "当院";
+    try {
+      const { data: cs } = await supabase
+        .from("clinic_settings")
+        .select("clinic_name")
+        .eq("id", clinicId)
+        .maybeSingle();
+      if (cs?.clinic_name) clinicName = cs.clinic_name as string;
+    } catch {}
+
+    const token = await getLineAccessToken();
+    if (!token) {
+      return { success: false, error: "LINE トークンが取得できません。設定の LINE_CHANNEL_ID/SECRET をご確認ください。" };
+    }
+
+    const name = customer?.name ? `${customer.name}様` : "お客様";
+    const messageText =
+      `【${clinicName}】\n\n` +
+      `${name}\n\n` +
+      `お待たせいたしました。キャンセルが出て、ご予約をお取りできる空きが出ました！\n\n` +
+      `ご希望の場合は、お早めにこのLINEにてご連絡ください。\n` +
+      `先着順でのご案内となりますので、あらかじめご了承ください。\n\n` +
+      `スタッフ一同、ご来院を心よりお待ちしております。`;
+
+    const res = await fetch("https://api.line.me/v2/bot/message/push", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ to: lineUserId, messages: [{ type: "text", text: messageText }] }),
+    });
+
+    if (!res.ok) {
+      const errBody = await res.json().catch(() => ({}));
+      console.error(`[キャンセル待ちLINE送信失敗] status=${res.status}`, errBody);
+      if (res.status === 403) {
+        return { success: false, error: "この方はLINE公式アカウントの友だち登録がないため送信できません。お電話でご連絡ください。" };
+      }
+      const detail = errBody?.message ? `（${errBody.message}）` : "";
+      return { success: false, error: `LINE送信に失敗しました (HTTP ${res.status})${detail}` };
+    }
+
+    return { success: true };
   } catch (err) {
     console.error(err);
     return { success: false, error: "予期せぬエラーが発生しました" };

@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { format, parseISO, addDays } from "date-fns";
 import { ja } from "date-fns/locale";
-import { CalendarIcon, Trash2, MessageCircle, CheckCircle, X, Clock, CalendarRange, CalendarPlus } from "lucide-react";
+import { CalendarIcon, Trash2, MessageCircle, CheckCircle, X, Clock, CalendarRange, CalendarPlus, Bell } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
@@ -23,6 +23,8 @@ import {
   deleteAppointment,
   updateAppointmentStatus,
   sendLineConfirmation,
+  notifyWaitlistOpening,
+  type WaitlistCandidate,
 } from "@/app/actions/adminReserve";
 import { getCourses, getStaffList, getRooms, type ReservationCourse, type ReservationStaff, type ReservationRoom } from "@/app/actions/courses";
 import { AddAppointmentDialog } from "./AddAppointmentDialog";
@@ -54,6 +56,11 @@ export function EditAppointmentDialog({
   const [visitCount, setVisitCount] = useState<number | null>(null);
   const [deleteChoiceOpen, setDeleteChoiceOpen] = useState(false);
   const [seriesFutureCount, setSeriesFutureCount] = useState<number>(0);
+  // キャンセル待ち：削除で空きが出たとき候補を出して LINE で空きを知らせる
+  const [waitlistOpen, setWaitlistOpen] = useState(false);
+  const [waitlistCandidates, setWaitlistCandidates] = useState<WaitlistCandidate[]>([]);
+  const [notifyingId, setNotifyingId] = useState<string | null>(null);
+  const [notifiedIds, setNotifiedIds] = useState<string[]>([]);
   // 予約確定の直後に「LINEを送りますか？」を確認するポップ
   const [lineConfirmOpen, setLineConfirmOpen] = useState(false);
   const [lineSending, setLineSending] = useState(false);
@@ -266,8 +273,16 @@ export function EditAppointmentDialog({
         toast.success(scope === "future" && n > 1
           ? `連続予約 ${n} 件を削除しました`
           : "予約を削除しました");
-        onOpenChange(false);
+        const cands = ((result as any).waitlistCandidates ?? []) as WaitlistCandidate[];
         onSuccess?.();
+        if (cands.length > 0) {
+          // 空きが出た → キャンセル待ちの方へ知らせるポップアップを出す（本体はそのまま）
+          setWaitlistCandidates(cands);
+          setNotifiedIds([]);
+          setWaitlistOpen(true);
+        } else {
+          onOpenChange(false);
+        }
       } else {
         toast.error(result.error || "エラーが発生しました");
       }
@@ -275,6 +290,28 @@ export function EditAppointmentDialog({
       toast.error("通信エラーが発生しました");
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const closeWaitlist = () => {
+    setWaitlistOpen(false);
+    onOpenChange(false);
+  };
+
+  const handleNotifyWaitlist = async (id: string) => {
+    setNotifyingId(id);
+    try {
+      const r = await notifyWaitlistOpening(id);
+      if (r.success) {
+        toast.success("キャンセル待ちの方へ、LINEで空きをお知らせしました");
+        setNotifiedIds((prev) => [...prev, id]);
+      } else {
+        toast.error(r.error || "送信に失敗しました");
+      }
+    } catch {
+      toast.error("通信エラーが発生しました");
+    } finally {
+      setNotifyingId(null);
     }
   };
 
@@ -744,6 +781,58 @@ export function EditAppointmentDialog({
               disabled={isSubmitting}
             >
               キャンセル
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* キャンセル待ち：空きが出た方へのお知らせ */}
+      <Dialog open={waitlistOpen} onOpenChange={(o) => { if (!o) closeWaitlist(); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Bell className="w-5 h-5 text-amber-500" />
+              この方に予約できるようになりました
+            </DialogTitle>
+            <DialogDescription>
+              キャンセルで枠が空きました。キャンセル待ちの方へ、LINEで空きをお知らせしましょう（先着順でのご案内です）。
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2 py-2 max-h-72 overflow-y-auto">
+            {waitlistCandidates.map((c) => {
+              const notified = notifiedIds.includes(c.appointmentId);
+              return (
+                <div
+                  key={c.appointmentId}
+                  className="flex items-center justify-between gap-2 rounded-xl border border-slate-200 dark:border-white/10 px-3 py-2.5"
+                >
+                  <div className="min-w-0">
+                    <p className="font-bold text-sm text-slate-800 dark:text-slate-100 truncate">
+                      {c.customerName}
+                      {c.isFirstVisit && <span className="ml-1.5 text-[10px] text-amber-600">初診</span>}
+                    </p>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                      希望 {format(parseISO(c.startTime), "M/d HH:mm", { locale: ja })}
+                      {!c.hasLine && "・LINE未登録"}
+                    </p>
+                  </div>
+                  <Button
+                    type="button"
+                    size="sm"
+                    disabled={!c.hasLine || notifyingId === c.appointmentId || notified}
+                    onClick={() => handleNotifyWaitlist(c.appointmentId)}
+                    className="bg-green-600 hover:bg-green-700 text-white shrink-0 disabled:opacity-50"
+                  >
+                    <MessageCircle className="w-4 h-4 mr-1" />
+                    {notified ? "送信済み" : notifyingId === c.appointmentId ? "送信中..." : "LINEで知らせる"}
+                  </Button>
+                </div>
+              );
+            })}
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={closeWaitlist}>
+              閉じる
             </Button>
           </DialogFooter>
         </DialogContent>
