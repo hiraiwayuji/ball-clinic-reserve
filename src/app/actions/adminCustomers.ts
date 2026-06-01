@@ -645,7 +645,7 @@ export async function getRecentUnlinkedLineLogs(): Promise<{ user_id: string; me
       seen.add(log.user_id);
       result.push({ user_id: log.user_id, message: log.message, created_at: log.created_at, display_name: null });
     }
-    if (result.length >= 20) break;
+    if (result.length >= 50) break;
   }
 
   // 各 user_id の LINE 表示名を取得（誰を紐づけるか判別しやすくする）。

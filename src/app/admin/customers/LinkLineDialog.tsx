@@ -31,6 +31,7 @@ type LinkRow = { line_user_id: string; is_primary: boolean; display_label: strin
 export function LinkLineDialog({ customerId, customerName, lineUserId, lineDisplayName }: Props) {
   const [open, setOpen] = useState(false);
   const [manualId, setManualId] = useState("");
+  const [logSearch, setLogSearch] = useState("");
   const [logs, setLogs] = useState<{ user_id: string; message: string | null; created_at: string; display_name: string | null }[]>([]);
   const [logsLoaded, setLogsLoaded] = useState(false);
   const [links, setLinks] = useState<LinkRow[]>([]);
@@ -117,6 +118,14 @@ export function LinkLineDialog({ customerId, customerName, lineUserId, lineDispl
       }
     });
   };
+
+  const logQuery = logSearch.trim().toLowerCase();
+  const filteredLogs = logQuery
+    ? logs.filter(l =>
+        (l.display_name ?? "").toLowerCase().includes(logQuery) ||
+        (l.message ?? "").toLowerCase().includes(logQuery) ||
+        l.user_id.toLowerCase().includes(logQuery))
+    : logs;
 
   return (
     <>
@@ -241,6 +250,20 @@ export function LinkLineDialog({ customerId, customerName, lineUserId, lineDispl
                 患者さんにLINEでボットへ何か1件送ってもらうと下に表示されます
               </p>
 
+              {/* LINE表示名で絞り込み検索 */}
+              {logs.length > 0 && (
+                <div className="relative">
+                  <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400 pointer-events-none" />
+                  <input
+                    type="text"
+                    value={logSearch}
+                    onChange={(e) => setLogSearch(e.target.value)}
+                    placeholder="LINE表示名・メッセージで絞り込み..."
+                    className="w-full h-9 pl-8 pr-3 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400"
+                  />
+                </div>
+              )}
+
               {isPending && !logsLoaded ? (
                 <div className="flex justify-center py-3">
                   <Loader2 className="w-4 h-4 animate-spin text-slate-400" />
@@ -249,9 +272,13 @@ export function LinkLineDialog({ customerId, customerName, lineUserId, lineDispl
                 <div className="text-center py-3 text-[11px] text-slate-400 bg-slate-50 rounded-lg border border-dashed border-slate-200">
                   未紐づけのメッセージが見つかりません
                 </div>
+              ) : filteredLogs.length === 0 ? (
+                <div className="text-center py-3 text-[11px] text-slate-400 bg-slate-50 rounded-lg border border-dashed border-slate-200">
+                  「{logSearch}」に一致する候補がありません
+                </div>
               ) : (
                 <div className="space-y-2 max-h-48 overflow-y-auto">
-                {logs.map((log) => (
+                {filteredLogs.map((log) => (
                   <div
                     key={log.user_id}
                     className="p-2 bg-slate-50 rounded-lg border border-slate-100"
