@@ -23,14 +23,15 @@ interface Props {
   customerId: string;
   customerName: string;
   lineUserId: string | null;
+  lineDisplayName?: string | null;
 }
 
 type LinkRow = { line_user_id: string; is_primary: boolean; display_label: string | null; linked_via: string | null; linked_at: string };
 
-export function LinkLineDialog({ customerId, customerName, lineUserId }: Props) {
+export function LinkLineDialog({ customerId, customerName, lineUserId, lineDisplayName }: Props) {
   const [open, setOpen] = useState(false);
   const [manualId, setManualId] = useState("");
-  const [logs, setLogs] = useState<{ user_id: string; message: string | null; created_at: string }[]>([]);
+  const [logs, setLogs] = useState<{ user_id: string; message: string | null; created_at: string; display_name: string | null }[]>([]);
   const [logsLoaded, setLogsLoaded] = useState(false);
   const [links, setLinks] = useState<LinkRow[]>([]);
   const [isPending, startTransition] = useTransition();
@@ -123,6 +124,7 @@ export function LinkLineDialog({ customerId, customerName, lineUserId }: Props) 
         <button
           type="button"
           onClick={handleOpen}
+          title={lineDisplayName ? `LINE: ${lineDisplayName}` : "LINE紐づけ済"}
           className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 transition-colors"
         >
           <CheckCircle2 className="w-3 h-3" />
@@ -254,6 +256,13 @@ export function LinkLineDialog({ customerId, customerName, lineUserId }: Props) 
                     key={log.user_id}
                     className="p-2 bg-slate-50 rounded-lg border border-slate-100"
                   >
+                    {log.display_name ? (
+                      <p className="text-sm font-bold text-emerald-700 mb-0.5 flex items-center gap-1">
+                        <MessageCircle className="w-3.5 h-3.5" />{log.display_name}
+                      </p>
+                    ) : (
+                      <p className="text-[11px] text-slate-400 mb-0.5">（LINE表示名 取得不可）</p>
+                    )}
                     <p className="font-mono text-[10px] text-slate-400 truncate mb-0.5">{log.user_id}</p>
                     <p className="text-xs text-slate-700 mb-1">「{log.message || "（メッセージなし）"}」</p>
                     <p className="text-[9px] text-slate-400 mb-2">{new Date(log.created_at).toLocaleDateString("ja-JP")}</p>

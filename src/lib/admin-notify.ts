@@ -21,6 +21,27 @@ export async function getLineAccessToken(): Promise<string | null> {
   }
 }
 
+/**
+ * LINE user_id から表示名(displayName)を取得する。
+ * 友だち（公式アカウントを追加済み）でないと 404 になるため、その場合は null。
+ * 大量に呼ぶ場合は token を渡して使い回すこと（毎回発行しない）。
+ */
+export async function getLineProfileName(userId: string, token?: string): Promise<string | null> {
+  const t = token ?? (await getLineAccessToken());
+  if (!t || !userId) return null;
+  try {
+    const res = await fetch(`https://api.line.me/v2/bot/profile/${encodeURIComponent(userId)}`, {
+      headers: { Authorization: `Bearer ${t}` },
+      cache: "no-store",
+    });
+    if (!res.ok) return null;
+    const json = await res.json();
+    return typeof json.displayName === "string" ? json.displayName : null;
+  } catch {
+    return null;
+  }
+}
+
 function getServiceClient() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;

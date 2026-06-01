@@ -13,7 +13,7 @@ import {
 } from "@/components/ui/dialog";
 import { SuspendToggle } from "./SuspendToggle";
 import { LinkLineDialog } from "./LinkLineDialog";
-import { updateCustomerInfo, mergeCustomers, sendDormantLinePush, getMonthlyVisitStats, type MonthlyVisitStat } from "@/app/actions/adminCustomers";
+import { updateCustomerInfo, mergeCustomers, sendDormantLinePush, getMonthlyVisitStats, refreshLineDisplayNames, type MonthlyVisitStat } from "@/app/actions/adminCustomers";
 import { QuestionnaireDialog } from "./QuestionnaireDialog";
 import {
   Search, Pencil, Check, X, Loader2, ClipboardList,
@@ -34,6 +34,7 @@ export type Customer = {
   lastVisit: string | null;
   booking_suspended: boolean;
   line_user_id: string | null;
+  line_display_name: string | null;
   birth_month: number | null;
   gender: string | null;
   age_group: string | null;
@@ -493,7 +494,14 @@ function EditableRow({
         </TableCell>
 
         <TableCell className="text-center">
-          <LinkLineDialog customerId={customer.id} customerName={name} lineUserId={customer.line_user_id} />
+          <div className="flex flex-col items-center gap-0.5">
+            <LinkLineDialog customerId={customer.id} customerName={name} lineUserId={customer.line_user_id} lineDisplayName={customer.line_display_name} />
+            {customer.line_user_id && customer.line_display_name && (
+              <span className="text-[10px] text-slate-500 truncate max-w-[110px]" title={customer.line_display_name}>
+                LINE: {customer.line_display_name}
+              </span>
+            )}
+          </div>
         </TableCell>
 
         <TableCell>
@@ -1098,7 +1106,46 @@ export function CustomersTable({ customers }: { customers: Customer[] }) {
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [showDuplicatesOnly, setShowDuplicatesOnly] = useState(false);
   const [showImport, setShowImport] = useState(false);
+  const [refreshingLine, setRefreshingLine] = useState(false);
   const router = useRouter();
+
+  // 連携済みだが LINE 表示名が未取得の顧客がいれば、初回に1度だけ自動取得
+  const missingLineNameCount = useMemo(
+    () => customers.filter(c => c.line_user_id && !c.line_display_name).length,
+    [customers]
+  );
+  useEffect(() => {
+    if (missingLineNameCount === 0) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await refreshLineDisplayNames(true);
+        if (!cancelled && res.ok && res.updated > 0) router.refresh();
+      } catch { /* 失敗は無視（手動ボタンで再取得可能） */ }
+    })();
+    return () => { cancelled = true; };
+    // 初回マウント時のみ
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const handleRefreshLineNames = () => {
+    setRefreshingLine(true);
+    (async () => {
+      try {
+        const res = await refreshLineDisplayNames(false);
+        if (res.ok) {
+          toast.success(`LINE表示名を更新しました（${res.updated}/${res.total}名）`);
+          router.refresh();
+        } else {
+          toast.error(res.error ?? "LINE表示名の取得に失敗しました");
+        }
+      } catch {
+        toast.error("LINE表示名の取得に失敗しました");
+      } finally {
+        setRefreshingLine(false);
+      }
+    })();
+  };
 
   // 休眠患者数（30日以上）をバッジ用に計算
   const dormantCount = useMemo(() => {
@@ -1233,6 +1280,18 @@ export function CustomersTable({ customers }: { customers: Customer[] }) {
             )}
 
             <span className="text-sm text-slate-400 ml-auto">{processed.length} / {customers.length} 件</span>
+
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleRefreshLineNames}
+              disabled={refreshingLine}
+              title="連携済みの患者さんのLINE表示名を取得・更新します"
+              className="border-emerald-200 text-emerald-600 hover:bg-emerald-50 dark:border-emerald-800 dark:text-emerald-400 font-bold"
+            >
+              {refreshingLine ? <Loader2 className="w-4 h-4 mr-1.5 animate-spin" /> : <MessageCircle className="w-4 h-4 mr-1.5" />}
+              LINE表示名を更新
+            </Button>
 
             <Button
               variant="outline"

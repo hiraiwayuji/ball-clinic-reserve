@@ -16,6 +16,7 @@ type CustomerWithStats = {
   lastVisit: string | null;
   booking_suspended: boolean;
   line_user_id: string | null;
+  line_display_name: string | null;
   birth_month: number | null;
   gender: string | null;
   age_group: string | null;
@@ -62,6 +63,7 @@ export async function getCustomers(): Promise<CustomerWithStats[]> {
         created_at,
         booking_suspended,
         line_user_id,
+        line_display_name,
         birth_month,
         gender,
         age_group,
@@ -96,6 +98,7 @@ export async function getCustomers(): Promise<CustomerWithStats[]> {
           created_at,
           booking_suspended,
           line_user_id,
+          line_display_name,
           birth_month,
           gender,
           age_group,
@@ -147,6 +150,7 @@ export async function getCustomers(): Promise<CustomerWithStats[]> {
         lastVisit,
         booking_suspended: c.booking_suspended ?? false,
         line_user_id: c.line_user_id ?? null,
+        line_display_name: c.line_display_name ?? null,
         birth_month: c.birth_month ?? null,
         gender: c.gender ?? null,
         age_group: c.age_group ?? null,
@@ -601,7 +605,7 @@ export async function setPrimaryLinkForCustomer(customerId: string, lineUserId: 
 }
 
 // 最近LINEからメッセージを送ってきた未紐づけのユーザーIDを取得
-export async function getRecentUnlinkedLineLogs(): Promise<{ user_id: string; message: string | null; created_at: string }[]> {
+export async function getRecentUnlinkedLineLogs(): Promise<{ user_id: string; message: string | null; created_at: string; display_name: string | null }[]> {
   const { clinicId } = await checkAdminAuth();
 
   // RLSをバイパスするためにservice roleキーで接続
@@ -635,15 +639,82 @@ export async function getRecentUnlinkedLineLogs(): Promise<{ user_id: string; me
 
   // ユニーク化（最新のメッセージのみ）& 未紐づけのみ
   const seen = new Set<string>();
-  const result: { user_id: string; message: string | null; created_at: string }[] = [];
+  const result: { user_id: string; message: string | null; created_at: string; display_name: string | null }[] = [];
   for (const log of logs) {
     if (!seen.has(log.user_id) && !linkedIds.has(log.user_id)) {
       seen.add(log.user_id);
-      result.push({ user_id: log.user_id, message: log.message, created_at: log.created_at });
+      result.push({ user_id: log.user_id, message: log.message, created_at: log.created_at, display_name: null });
     }
     if (result.length >= 20) break;
   }
+
+  // 各 user_id の LINE 表示名を取得（誰を紐づけるか判別しやすくする）。
+  // トークンは1回だけ発行して使い回す。
+  try {
+    const { getLineAccessToken, getLineProfileName } = await import("@/lib/admin-notify");
+    const token = await getLineAccessToken();
+    if (token) {
+      await Promise.all(
+        result.map(async (r) => {
+          r.display_name = await getLineProfileName(r.user_id, token);
+        }),
+      );
+    }
+  } catch (err) {
+    console.error("getRecentUnlinkedLineLogs: display name fetch error:", err);
+  }
+
   return result;
+}
+
+/**
+ * 連携済み顧客（line_user_id あり）の LINE 表示名を bot/profile から取得し、
+ * customers.line_display_name にキャッシュ保存する。
+ * onlyMissing=true なら未取得のものだけ更新（軽量）。false なら全件リフレッシュ。
+ */
+export async function refreshLineDisplayNames(
+  onlyMissing: boolean = true,
+): Promise<{ ok: boolean; updated: number; total: number; error?: string }> {
+  const { clinicId } = await checkAdminAuth();
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) return { ok: false, updated: 0, total: 0, error: "Supabase env missing" };
+  const supabase = createAdminClient(url, key);
+
+  let query = supabase
+    .from("customers")
+    .select("id, line_user_id, line_display_name")
+    .eq("clinic_id", clinicId)
+    .not("line_user_id", "is", null);
+  if (onlyMissing) query = query.is("line_display_name", null);
+
+  const { data: rows, error } = await query;
+  if (error) return { ok: false, updated: 0, total: 0, error: error.message };
+
+  const targets = (rows ?? []) as { id: string; line_user_id: string; line_display_name: string | null }[];
+  if (targets.length === 0) return { ok: true, updated: 0, total: 0 };
+
+  const { getLineAccessToken, getLineProfileName } = await import("@/lib/admin-notify");
+  const token = await getLineAccessToken();
+  if (!token) return { ok: false, updated: 0, total: targets.length, error: "LINE トークンが取得できません" };
+
+  let updated = 0;
+  await Promise.all(
+    targets.map(async (c) => {
+      const name = await getLineProfileName(c.line_user_id, token);
+      if (name && name !== c.line_display_name) {
+        const { error: upErr } = await supabase
+          .from("customers")
+          .update({ line_display_name: name })
+          .eq("id", c.id)
+          .eq("clinic_id", clinicId);
+        if (!upErr) updated++;
+      }
+    }),
+  );
+
+  if (updated > 0) revalidatePath("/admin/customers");
+  return { ok: true, updated, total: targets.length };
 }
 
 export async function toggleBookingSuspension(customerId: string, suspend: boolean) {
