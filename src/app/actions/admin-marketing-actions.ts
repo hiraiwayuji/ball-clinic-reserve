@@ -17,7 +17,7 @@ export async function getUpcomingBirthdays() {
   // 1. まず全顧客を取得（フィルタリングはJSで行う。個数が膨大な場合はSQLを工夫する必要があるが、現状はこれで十分）
   const { data: customers, error } = await supabase
     .from("customers")
-    .select("id, name, birth_date, birth_month, city_name, line_user_id")
+    .select("id, name, birth_date, birth_month, city_name, line_user_id, medical_record_number")
     .eq("clinic_id", clinicId);
 
   if (error) throw new Error("誕生日データの取得に失敗しました");

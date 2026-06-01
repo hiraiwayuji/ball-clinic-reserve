@@ -527,7 +527,12 @@ export default function DashboardClient({ aiSecretaryEnabled = true, canSeeExpen
                     </p>
                     {birthdays.today.map((c: any) => (
                       <div key={c.id} className="flex justify-between items-center">
-                        <span className="font-bold text-slate-900">{c.name} 様</span>
+                        <span className="font-bold text-slate-900">
+                          {c.name} 様
+                          {c.medical_record_number && (
+                            <span className="ml-1.5 text-[10px] font-bold text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded-full border border-slate-200 tabular-nums align-middle">No.{c.medical_record_number}</span>
+                          )}
+                        </span>
                         <Link href="/admin/marketing">
                           <Button size="sm" className="h-7 bg-rose-500 hover:bg-rose-600 text-[10px]">LINE送信</Button>
                         </Link>
@@ -539,7 +544,12 @@ export default function DashboardClient({ aiSecretaryEnabled = true, canSeeExpen
                   <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">今週中 ({birthdays.thisWeek.length})</p>
                   {birthdays.thisWeek.slice(0, 3).map((c: any) => (
                     <div key={c.id} className="flex justify-between items-center bg-white/50 p-2 rounded-lg border border-slate-100">
-                      <span className="text-sm text-slate-700 font-medium">{c.name} 様</span>
+                      <span className="text-sm text-slate-700 font-medium">
+                        {c.name} 様
+                        {c.medical_record_number && (
+                          <span className="ml-1.5 text-[10px] font-bold text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded-full border border-slate-200 tabular-nums align-middle">No.{c.medical_record_number}</span>
+                        )}
+                      </span>
                       <span className="text-xs text-rose-500 font-bold">{c.month}/{c.day}</span>
                     </div>
                   ))}
