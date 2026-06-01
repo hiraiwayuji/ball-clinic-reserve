@@ -367,6 +367,11 @@ export function EditAppointmentDialog({
               <p className="text-sm text-slate-500 mt-0.5">
                 {appointment.customers?.name}
                 <span className="text-slate-400">様</span>
+                {custMrn && (
+                  <span className="ml-2 text-[10px] font-bold text-slate-600 bg-slate-100 px-1.5 py-0.5 rounded-full border border-slate-200 tabular-nums">
+                    No.{custMrn}
+                  </span>
+                )}
                 {appointment.is_first_visit && (
                   <span className="ml-2 text-[10px] font-black bg-amber-500 text-white px-1.5 py-0.5 rounded-full">
                     初診

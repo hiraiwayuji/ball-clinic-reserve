@@ -14,7 +14,7 @@ interface WaitlistEntry {
   start_time: string;
   is_first_visit: boolean;
   created_at: string;
-  customers: { name: string; phone: string | null } | null;
+  customers: { name: string; phone: string | null; medical_record_number: string | null } | null;
   position: number;
 }
 
@@ -38,7 +38,7 @@ export default function WaitlistPage() {
       if (!clinicId) { toast.error("clinic_id が解決できませんでした"); return; }
       const { data, error } = await supabase
         .from("appointments")
-        .select("id, start_time, is_first_visit, created_at, customers(name, phone)")
+        .select("id, start_time, is_first_visit, created_at, customers(name, phone, medical_record_number)")
         .eq("clinic_id", clinicId)
         .eq("status", "waiting")
         .order("start_time", { ascending: true })
@@ -146,7 +146,12 @@ export default function WaitlistPage() {
                         {entry.position}
                       </div>
                       <div className="flex-1 min-w-0">
-                        <p className="font-semibold text-slate-800 truncate">{entry.customers?.name || "名前なし"} 様</p>
+                        <p className="font-semibold text-slate-800 truncate">
+                          {entry.customers?.name || "名前なし"} 様
+                          {entry.customers?.medical_record_number && (
+                            <span className="ml-1.5 text-[10px] font-bold text-slate-600 bg-slate-100 px-1.5 py-0.5 rounded-full border border-slate-200 tabular-nums align-middle">No.{entry.customers.medical_record_number}</span>
+                          )}
+                        </p>
                         <p className="text-xs text-slate-500">
                           {entry.is_first_visit ? "初診" : "再診"} ・ 登録: {new Date(entry.created_at).toLocaleDateString("ja-JP", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Tokyo" })}
                           {entry.customers?.phone && ` ・ ${entry.customers.phone}`}

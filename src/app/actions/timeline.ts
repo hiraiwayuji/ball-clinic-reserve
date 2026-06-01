@@ -35,8 +35,13 @@ export type TimelineAppointment = {
   series_id: string | null;    // 編集ダイアログで「以降の繰り返し含めて」操作に必要
   customer_id: string | null;
   customer_name: string | null;
+  medical_record_number: string | null;
   additional_courses: { course_id: string; course_name: string }[] | null;
   additional_staff: { staff_id: string; staff_name: string }[] | null;
+  /** 部門（'サロン' | 'カフェ' 等）。部門なし院は null */
+  department: string | null;
+  /** 席予約（カフェ）の人数。施術予約は null */
+  party_size: number | null;
 };
 
 export type TimelineData = {
@@ -99,7 +104,7 @@ export async function getTimelineForDate(dateStr: string): Promise<{ success: bo
         .order("sort_order", { ascending: true })
         .order("name", { ascending: true }),
       sb.from("appointments")
-        .select("id, start_time, end_time, status, checkin_status, is_first_visit, memo, course_id, course_name, staff_id, staff_name, room_id, room_name, series_id, customer_id, additional_courses, additional_staff, customers(name)")
+        .select("id, start_time, end_time, status, checkin_status, is_first_visit, memo, course_id, course_name, staff_id, staff_name, room_id, room_name, series_id, customer_id, additional_courses, additional_staff, department, party_size, customers(name, medical_record_number)")
         .eq("clinic_id", clinicId)
         .neq("status", "cancelled")
         .gte("start_time", dayStart)
@@ -149,8 +154,11 @@ export async function getTimelineForDate(dateStr: string): Promise<{ success: bo
         series_id: (a as any).series_id ?? null,
         customer_id: a.customer_id ?? null,
         customer_name: cust?.name ?? null,
+        medical_record_number: cust?.medical_record_number ?? null,
         additional_courses: (a.additional_courses ?? null) as { course_id: string; course_name: string }[] | null,
         additional_staff:   (a.additional_staff   ?? null) as { staff_id:  string; staff_name:  string }[] | null,
+        department: (a as any).department ?? null,
+        party_size: (a as any).party_size ?? null,
       };
     });
 

@@ -351,18 +351,24 @@ export default function TodayTimelineWidget() {
                             gridRow: 1,
                             alignSelf: "stretch",
                           }}
-                          title={`${fmtTime(a.start_time)} ${a.customer_name ?? ""} ${a.course_name ?? ""}`}
+                          title={`${fmtTime(a.start_time)} ${a.customer_name ?? ""}${a.medical_record_number ? ` (No.${a.medical_record_number})` : ""} ${a.course_name ?? ""}`}
                         >
                           <div className="truncate font-semibold">
                             {a.customer_name ?? "(顧客名なし)"}
+                            {a.medical_record_number && (
+                              <span className="ml-1 text-[9px] font-bold opacity-70 tabular-nums">No.{a.medical_record_number}</span>
+                            )}
                             {a.is_first_visit ? " ⓢ" : ""}
+                            {a.party_size != null && (
+                              <span className="ml-1 text-[9px] font-bold text-orange-600">{a.party_size}名</span>
+                            )}
                             {((a.additional_staff?.length ?? 0) > 0) && (
                               <span className="ml-1 text-[9px] font-normal opacity-70">×{(a.additional_staff?.length ?? 0) + 1}人</span>
                             )}
                           </div>
                           {a.course_name && (
                             <div className="truncate opacity-80">
-                              {a.course_name}
+                              {a.department === "カフェ" ? "☕ " : ""}{a.course_name}
                               {((a.additional_courses?.length ?? 0) > 0) && ` ＋${a.additional_courses?.length}`}
                             </div>
                           )}
@@ -389,8 +395,13 @@ export default function TodayTimelineWidget() {
           >
             <div className="flex items-start justify-between">
               <div>
-                <div className="text-lg font-bold text-slate-900 dark:text-slate-100">
+                <div className="text-lg font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2 flex-wrap">
                   {selectedApt.customer_name ?? "(顧客名なし)"}
+                  {selectedApt.medical_record_number && (
+                    <span className="text-xs font-bold text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-slate-700/60 px-2 py-0.5 rounded-full border border-slate-200 dark:border-slate-600 tabular-nums">
+                      No.{selectedApt.medical_record_number}
+                    </span>
+                  )}
                 </div>
                 <div className="text-sm text-slate-500">
                   {fmtTime(selectedApt.start_time)}
@@ -404,9 +415,17 @@ export default function TodayTimelineWidget() {
               >×</button>
             </div>
             <div className="space-y-1.5 text-sm">
+              {selectedApt.department === "カフェ" && (
+                <div className="inline-flex items-center gap-2">
+                  <span className="text-[11px] font-bold bg-orange-100 text-orange-700 px-2 py-0.5 rounded-full">☕ カフェ</span>
+                  {selectedApt.party_size != null && (
+                    <span className="text-sm font-bold text-orange-700">{selectedApt.party_size}名</span>
+                  )}
+                </div>
+              )}
               {(selectedApt.course_name || (selectedApt.additional_courses?.length ?? 0) > 0) && (
                 <div>
-                  <span className="text-slate-500">メニュー:</span>{" "}
+                  <span className="text-slate-500">{selectedApt.department === "カフェ" ? "席種:" : "メニュー:"}</span>{" "}
                   {[
                     selectedApt.course_name,
                     ...(selectedApt.additional_courses ?? []).map((c) => c.course_name),

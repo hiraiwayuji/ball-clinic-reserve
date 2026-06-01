@@ -135,7 +135,7 @@ export default function AdminWeeklyGridPage() {
         const supabase = createClient();
         const { data: aptData } = await supabase
           .from("appointments")
-          .select(`id, start_time, end_time, memo, is_first_visit, status, customer_id, series_id, clinic_id, course_id, course_name, staff_id, staff_name, room_id, room_name, department, party_size, customers(name, phone)`)
+          .select(`id, start_time, end_time, memo, is_first_visit, status, customer_id, series_id, clinic_id, course_id, course_name, staff_id, staff_name, room_id, room_name, department, party_size, customers(name, phone, medical_record_number)`)
           .eq("clinic_id", clinicId)
           .gte("start_time", weekStart.toISOString())
           .lt("start_time", weekEnd.toISOString())
@@ -417,6 +417,7 @@ export default function AdminWeeklyGridPage() {
               const cust = Array.isArray(apt.customers) ? apt.customers[0] : apt.customers;
               const name = cust?.name || "名前なし";
               const phone = cust?.phone || "";
+              const mrn = cust?.medical_record_number || "";
               const startTime = new Date(apt.start_time);
               const endTime = apt.end_time
                 ? new Date(apt.end_time)
@@ -456,6 +457,11 @@ export default function AdminWeeklyGridPage() {
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-1.5 flex-wrap">
                             <span className="font-bold text-slate-900 text-[15px]">{name}</span>
+                            {mrn && (
+                              <span className="text-[10px] font-bold text-slate-600 bg-slate-100 px-1.5 py-0.5 rounded-full border border-slate-200 leading-none tabular-nums">
+                                No.{mrn}
+                              </span>
+                            )}
                             {apt.is_first_visit && (
                               <span className="text-[9px] font-black bg-amber-500 text-white px-1.5 py-0.5 rounded-full leading-none">
                                 初診
@@ -476,6 +482,13 @@ export default function AdminWeeklyGridPage() {
                               </span>
                             )}
                           </div>
+                          {(apt.department === "カフェ" || apt.course_name) && (
+                            <p className="text-[11px] mt-1 truncate font-bold">
+                              {apt.department === "カフェ" && <span className="text-orange-600">☕ </span>}
+                              <span className={apt.department === "カフェ" ? "text-orange-700" : "text-slate-600"}>{apt.course_name}</span>
+                              {apt.party_size != null && <span className="text-orange-700"> ・{apt.party_size}名</span>}
+                            </p>
+                          )}
                           {apt.memo && apt.memo.trim() && (
                             <p className="text-[11px] text-slate-500 mt-1 truncate">{apt.memo}</p>
                           )}
@@ -885,6 +898,7 @@ export default function AdminWeeklyGridPage() {
                           {slotAppts.map((apt, index) => {
                             const cust = Array.isArray(apt.customers) ? apt.customers[0] : apt.customers;
                             const name = cust?.name || "名前なし";
+                            const mrn = cust?.medical_record_number || "";
                             const isFirst = apt.is_first_visit;
                             const startTime = new Date(apt.start_time);
                             const endTime = apt.end_time
@@ -923,8 +937,9 @@ export default function AdminWeeklyGridPage() {
                                     <span className="bg-amber-500 text-white text-[9px] px-1 rounded">初</span>
                                   )}
                                 </div>
-                                <div className="text-[10px] opacity-80 mt-0.5">
+                                <div className="text-[10px] opacity-80 mt-0.5 flex items-center gap-1">
                                   <span>{getStatusText(apt.status)}</span>
+                                  {mrn && <span className="tabular-nums font-semibold">No.{mrn}</span>}
                                 </div>
                               </div>
                             );
@@ -993,6 +1008,7 @@ export default function AdminWeeklyGridPage() {
                       const cust = Array.isArray(apt.customers) ? apt.customers[0] : apt.customers;
                       const name = cust?.name || "名前なし";
                       const phone = cust?.phone || "";
+                      const mrn = cust?.medical_record_number || "";
                       const startTime = new Date(apt.start_time);
                       const endTime = apt.end_time ? new Date(apt.end_time) : new Date(startTime.getTime() + 30 * 60000);
                       const accentColor = apt.status === "confirmed" ? "bg-blue-500" : apt.status === "pending" ? "bg-amber-400" : "bg-orange-400";
@@ -1018,6 +1034,9 @@ export default function AdminWeeklyGridPage() {
                                 <div className="flex-1 min-w-0">
                                   <div className="flex items-center gap-2 flex-wrap">
                                     <span className="font-bold text-slate-900 text-base">{name}</span>
+                                    {mrn && (
+                                      <span className="text-[10px] font-bold text-slate-600 bg-slate-100 px-2 py-0.5 rounded-full border border-slate-200 tabular-nums">No.{mrn}</span>
+                                    )}
                                     {apt.is_first_visit && (
                                       <span className="text-[10px] font-black bg-amber-500 text-white px-2 py-0.5 rounded-full">初診</span>
                                     )}
@@ -1026,6 +1045,13 @@ export default function AdminWeeklyGridPage() {
                                     </Badge>
                                   </div>
                                   <div className="flex items-center gap-3 mt-1 text-sm text-slate-500">
+                                    {(apt.department === "カフェ" || apt.course_name) && (
+                                      <span className="font-bold flex items-center gap-1">
+                                        {apt.department === "カフェ" && <span className="text-orange-600">☕</span>}
+                                        <span className={apt.department === "カフェ" ? "text-orange-700" : "text-slate-600"}>{apt.course_name}</span>
+                                        {apt.party_size != null && <span className="text-orange-700">・{apt.party_size}名</span>}
+                                      </span>
+                                    )}
                                     {phone && <span className="flex items-center gap-1"><User className="w-3 h-3" />{phone}</span>}
                                     {apt.memo && <span className="truncate">{apt.memo}</span>}
                                   </div>

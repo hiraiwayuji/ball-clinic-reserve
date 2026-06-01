@@ -401,6 +401,9 @@ export default function DashboardClient({ aiSecretaryEnabled = true, canSeeExpen
                           className="flex-1 text-left truncate font-semibold text-slate-800 dark:text-slate-100 hover:text-blue-600 text-sm"
                         >
                           {res.name} 様
+                          {res.medical_record_number && (
+                            <span className="ml-1.5 text-[10px] font-bold text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-700/60 px-1.5 py-0.5 rounded-full border border-slate-200 dark:border-slate-600 tabular-nums align-middle">No.{res.medical_record_number}</span>
+                          )}
                         </button>
                         {/* 初診バッジ */}
                         {res.type === "初診" && (

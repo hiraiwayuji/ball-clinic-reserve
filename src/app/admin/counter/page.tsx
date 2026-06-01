@@ -47,7 +47,7 @@ type Appointment = {
   staff_id: string | null;
   staff_name: string | null;
   room_name: string | null;
-  customers: { id: string; name: string; phone: string; line_user_id: string | null } | null;
+  customers: { id: string; name: string; phone: string; line_user_id: string | null; medical_record_number: string | null } | null;
 };
 
 // ステータス定義
@@ -261,6 +261,11 @@ function AppointmentCard({
             <span className="text-lg font-bold text-slate-900 dark:text-slate-100 truncate">
               {apt.customers?.name ?? "—"}
             </span>
+            {apt.customers?.medical_record_number && (
+              <span className="text-xs font-bold text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-slate-700/60 px-2 py-0.5 rounded-full border border-slate-200 dark:border-slate-600 tabular-nums">
+                No.{apt.customers.medical_record_number}
+              </span>
+            )}
             {apt.is_first_visit && (
               <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-rose-500 text-white uppercase tracking-wide">初診</span>
             )}

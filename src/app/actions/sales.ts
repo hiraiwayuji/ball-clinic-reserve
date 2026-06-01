@@ -81,6 +81,7 @@ export async function getSalesPrediction(customerName: string): Promise<SalesPre
 export type PendingSalePatient = {
   appointmentId: string;
   customerName: string;
+  medicalRecordNumber: string | null;
   isFirstVisit: boolean;
   checkinTime: string;
   checkinStatus: string | null;
@@ -132,7 +133,7 @@ export async function getTodayPendingSales(dateStr?: string): Promise<{ success:
     // 指定日の「会計完了」予約を取得（コース情報も snapshot として一緒に取る）
     const { data: appointments, error: aptError } = await supabase
       .from("appointments")
-      .select("id, is_first_visit, start_time, checkin_status, status, course_id, course_name, customers(name)")
+      .select("id, is_first_visit, start_time, checkin_status, status, course_id, course_name, customers(name, medical_record_number)")
       .eq("clinic_id", clinicId)
       .neq("status", "cancelled")
       .gte("start_time", dayStart)
@@ -183,10 +184,12 @@ export async function getTodayPendingSales(dateStr?: string): Promise<{ success:
       status: string;
       course_id: string | null;
       course_name: string | null;
-      customers: { name?: string } | { name?: string }[] | null;
+      customers: { name?: string; medical_record_number?: string | null } | { name?: string; medical_record_number?: string | null }[] | null;
     }>) {
       const customerName = getAppointmentCustomerName(apt.customers);
       if (!customerName) continue;
+      const custObj = Array.isArray(apt.customers) ? apt.customers[0] : apt.customers;
+      const medicalRecordNumber = custObj?.medical_record_number ?? null;
       const currentEnteredCount = enteredCounts.get(customerName) ?? 0;
       if (currentEnteredCount > 0) {
         enteredCounts.set(customerName, currentEnteredCount - 1);
@@ -267,6 +270,7 @@ export async function getTodayPendingSales(dateStr?: string): Promise<{ success:
       pending.push({
         appointmentId: apt.id,
         customerName,
+        medicalRecordNumber,
         isFirstVisit,
         checkinTime: apt.start_time,
         checkinStatus: apt.checkin_status ?? null,
@@ -1318,7 +1322,8 @@ export async function getTodayDashboardData() {
           customer_id,
           customers (
             name,
-            phone
+            phone,
+            medical_record_number
           )
         `)
         .eq("clinic_id", clinicId)
@@ -1415,6 +1420,7 @@ export async function getTodayDashboardData() {
           time: new Date(a.start_time).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Tokyo' }),
           name: (a.customers as any)?.name || "不明",
           phone: (a.customers as any)?.phone || "",
+          medical_record_number: (a.customers as any)?.medical_record_number || null,
           customer_id: a.customer_id || null,
           type: a.is_first_visit ? "初診" : "再診",
           status: a.status,
