@@ -44,7 +44,7 @@ const STAFF_OVERRIDE_TOOL: FunctionDeclaration = {
     properties: {
       staff_name: {
         type: SchemaType.STRING,
-        description: "対象スタッフ名（部分一致で検索。例: '藤川'、'森川先生'）",
+        description: "対象スタッフ名（部分一致で検索。例: '藤川'、'森川'）",
       },
       date: {
         type: SchemaType.STRING,
