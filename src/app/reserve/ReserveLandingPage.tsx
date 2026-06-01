@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useSearchParams, useRouter } from "next/navigation";
-import { Sparkles, CalendarDays, ClipboardList, Users, Coffee, Flower2 } from "lucide-react";
+import { Sparkles, CalendarDays, ClipboardList, Users, Coffee, Flower2, AlertTriangle, X } from "lucide-react";
 import LPHero from "@/components/reserve/LPHero";
 import LPFeatures from "@/components/reserve/LPFeatures";
 import { getPublicClinicSettings, type PublicClinicSettings } from "@/app/actions/publicSettings";
@@ -20,6 +20,8 @@ export default function ReserveLandingPage() {
   const [loaded, setLoaded] = useState(false);
   const [family, setFamily] = useState<LinkedCustomer[]>([]);
   const [selectedCustomerId, setSelectedCustomerId] = useState<string>("");
+  const [familyResolved, setFamilyResolved] = useState(false);
+  const [showFirstTimePopup, setShowFirstTimePopup] = useState(false);
   const searchParams = useSearchParams();
   const router = useRouter();
 
@@ -51,6 +53,7 @@ export default function ReserveLandingPage() {
       }
       if (cancelled) return;
       setFamily(list);
+      setFamilyResolved(true);
       if (list.length > 0) {
         try {
           localStorage.setItem(FAMILY_LIST_KEY, JSON.stringify(list));
@@ -68,6 +71,22 @@ export default function ReserveLandingPage() {
     })();
     return () => { cancelled = true; };
   }, [searchParams, router]);
+
+  // 初めての方向けポップアップ：LINE紐付け患者がいない（＝新規の可能性が高い）来訪者に、
+  // 「アンケート未記入だと仮予約にならない」ことを最初に必ず気づいてもらう。
+  // 既存患者（家族紐付けあり）には出さない。1セッション内では一度閉じたら再表示しない。
+  const FIRST_TIME_POPUP_KEY = "ballClinic_firstTimePopupDismissed";
+  useEffect(() => {
+    if (!familyResolved || family.length > 0) return;
+    let dismissed = false;
+    try { dismissed = sessionStorage.getItem(FIRST_TIME_POPUP_KEY) === "1"; } catch {}
+    if (!dismissed) setShowFirstTimePopup(true);
+  }, [familyResolved, family.length]);
+
+  function dismissFirstTimePopup() {
+    setShowFirstTimePopup(false);
+    try { sessionStorage.setItem(FIRST_TIME_POPUP_KEY, "1"); } catch {}
+  }
 
   function selectFamilyMember(customerId: string) {
     setSelectedCustomerId(customerId);
@@ -154,6 +173,65 @@ export default function ReserveLandingPage() {
 
   return (
     <div className="min-h-screen bg-slate-900 text-white" data-dark-page>
+      {/* 初めての方向け 注意ポップアップ（新規来訪者のみ・1セッション1回） */}
+      {showFirstTimePopup && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="first-time-popup-title"
+          onClick={dismissFirstTimePopup}
+        >
+          <div
+            className="relative w-full max-w-sm bg-white text-slate-800 rounded-3xl shadow-2xl overflow-hidden animate-[fadeIn_.2s_ease-out]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              type="button"
+              onClick={dismissFirstTimePopup}
+              aria-label="閉じる"
+              className="absolute top-3 right-3 w-8 h-8 flex items-center justify-center rounded-full text-slate-400 hover:bg-slate-100"
+            >
+              <X className="w-5 h-5" />
+            </button>
+            <div className="bg-amber-400 px-6 pt-6 pb-5 text-center">
+              <div className="mx-auto w-14 h-14 rounded-full bg-white/90 flex items-center justify-center mb-3">
+                <AlertTriangle className="w-7 h-7 text-amber-500" />
+              </div>
+              <h2 id="first-time-popup-title" className="text-lg font-black text-amber-950 leading-snug">
+                初めての方へ
+                <br />
+                大切なお願いです
+              </h2>
+            </div>
+            <div className="px-6 py-5 space-y-4">
+              <p className="text-sm leading-relaxed">
+                初めてオンライン予約をされる方は、
+                <strong className="text-amber-700">アンケートのご記入がないと「仮予約」のお申し込みができません。</strong>
+              </p>
+              <p className="text-xs leading-relaxed text-slate-500">
+                先にアンケート（1〜2分）にお答えいただくと、そのままご予約に進めます。ご予約は院からの「ご予約確定」のLINEが届いて完了となります。
+              </p>
+              <Link
+                href="/questionnaire"
+                onClick={dismissFirstTimePopup}
+                className="flex items-center justify-center gap-2 w-full bg-amber-500 hover:bg-amber-600 text-white font-black py-3.5 px-4 rounded-2xl transition shadow-lg shadow-amber-500/30"
+              >
+                <ClipboardList className="w-5 h-5" />
+                アンケートに回答して予約へ進む
+              </Link>
+              <button
+                type="button"
+                onClick={dismissFirstTimePopup}
+                className="block w-full text-center text-xs text-slate-400 hover:text-slate-600 py-1"
+              >
+                すでに登録済みの方・あとで回答する方はこちら
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <LPHero settings={settings} fallbackName={CLINIC_CONFIG.name} />
 
       <LPFeatures
@@ -214,6 +292,23 @@ export default function ReserveLandingPage() {
         </div>
       )}
 
+      {/* 初めての方向け 注意アラート（常時表示） */}
+      {family.length === 0 && (
+        <div className="max-w-3xl mx-auto px-5 pt-6">
+          <div className="flex items-start gap-3 bg-amber-400/15 border border-amber-400/40 rounded-2xl p-4">
+            <AlertTriangle className="w-5 h-5 text-amber-300 shrink-0 mt-0.5" />
+            <div className="space-y-1.5">
+              <p className="text-amber-100 font-bold text-sm leading-snug">
+                初めての方は、アンケート未記入だと「仮予約」になりません
+              </p>
+              <p className="text-amber-100/70 text-xs leading-relaxed">
+                ご予約の前に、まず下の「アンケートに回答して登録する」からご記入をお願いします（1〜2分）。ご予約は院からの確定LINEが届いて完了です。
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* メイン導線セクション */}
       <div className="max-w-3xl mx-auto px-5 py-8 space-y-3">
         <h2 className="text-[11px] font-bold uppercase tracking-[0.25em] text-white/40 mb-3">
@@ -259,10 +354,10 @@ export default function ReserveLandingPage() {
             </p>
           </div>
           <p className="text-white font-bold text-sm">
-            アンケートにご協力ください
+            アンケートのご記入をお願いします（未記入だと仮予約になりません）
           </p>
           <p className="text-white/50 text-xs leading-relaxed">
-            お名前・電話番号・誕生月などをご登録いただくと、LINE登録後にオンライン予約が可能になります。誕生月クーポンなどの特典もご利用いただけます。
+            お名前・電話番号・誕生月などをご登録いただくと、オンライン予約が可能になります。アンケートがないと「仮予約」のお申し込みができませんので、初めての方は先にご回答ください。誕生月クーポンなどの特典もご利用いただけます。
           </p>
           <Link
             href="/questionnaire"
