@@ -3,6 +3,7 @@
 import { PUBLIC_CLINIC_ID } from "@/lib/default-clinic-id";
 import { pushLineToOwners, sendEmailToOwners } from "@/lib/admin-notify";
 import { getLineUidFromCookie } from "@/app/actions/family-line";
+import { resolveBookingCustomer } from "@/lib/booking-customer";
 
 async function notifyOwner(
   name: string,
@@ -101,19 +102,28 @@ export async function createWaitlistReservation(formData: FormData) {
 
     const supabase = await getSupabase();
     if (supabase) {
-      // 顧客作成
-      const { data: customer, error: customerErr } = await supabase
-        .from("customers")
-        .insert([{ 
-          name, 
-          phone,
-          clinic_id: DEFAULT_CLINIC_ID
-        }])
-        .select()
-        .single();
-      if (customerErr) {
-        return { success: false, error: "顧客情報の登録に失敗しました" };
+      const adminDb = getAdminSupabase() || supabase;
+
+      // ── 顧客照合（通常予約と同じゲート。未登録ならアンケート誘導＝bypass禁止） ──
+      // ※ これまでキャンセル待ちは無条件に customer を新規作成しており、初めての方が
+      //   アンケート未記入のまま登録される bypass になっていた（2026-06-02 修正）。
+      const normalizedPhone = (phone ?? "").replace(/[-\s]/g, "");
+      const lineUid = await getLineUidFromCookie();
+      const resolved = await resolveBookingCustomer(adminDb, {
+        clinicId: DEFAULT_CLINIC_ID,
+        name,
+        phone: normalizedPhone,
+        requestedCustomerId: (formData.get("customerId") as string) || null,
+        lineUid,
+      });
+      if (!resolved.ok) {
+        return {
+          success: false,
+          error: resolved.error,
+          requiresQuestionnaire: resolved.requiresQuestionnaire ?? false,
+        };
       }
+      const customerId = resolved.customerId;
 
       // キャンセル待ち予約を作成
       // start_time = 希望範囲の開始、end_time = 希望範囲の終了、status = "waiting"
@@ -121,10 +131,10 @@ export async function createWaitlistReservation(formData: FormData) {
       const endDateTime = `${dateStr}T${endTime}:00+09:00`;
       const memo = `【キャンセル待ち希望時間帯: ${startTime}〜${endTime}】${symptoms ? ` ${symptoms}` : ""}`;
 
-      const { data: appointment, error: aptErr } = await supabase
+      const { data: appointment, error: aptErr } = await adminDb
         .from("appointments")
         .insert([{
-          customer_id: customer.id,
+          customer_id: customerId,
           start_time: startDateTime,
           end_time: endDateTime,
           memo,
@@ -434,6 +444,31 @@ export async function createReservation(formData: FormData) {
         return { success: false, error: "ご予約者の情報が確認できませんでした。お手数ですがお名前と電話番号を再度ご入力ください。" };
       }
 
+      // ── LINE 連携状況と電話下4桁を取得（完了画面の「LINE連携のお願い」ポップアップ用） ──
+      // 連携済みなら出さない。未連携なら下4桁を送ってもらって紐付けを促す。
+      let lineLinked = false;
+      let phoneLast4: string | null = null;
+      {
+        const { data: cust } = await adminDb
+          .from("customers")
+          .select("phone, line_user_id")
+          .eq("id", customerId)
+          .eq("clinic_id", PUBLIC_CLINIC_ID)
+          .maybeSingle();
+        const digits = (cust?.phone ?? "").replace(/\D/g, "");
+        phoneLast4 = digits.length >= 4 ? digits.slice(-4) : null;
+        if (cust?.line_user_id) {
+          lineLinked = true;
+        } else {
+          const { count } = await adminDb
+            .from("customer_line_links")
+            .select("id", { count: "exact", head: true })
+            .eq("customer_id", customerId)
+            .eq("clinic_id", PUBLIC_CLINIC_ID);
+          lineLinked = (count ?? 0) > 0;
+        }
+      }
+
       const startDateTimeStr = `${rawDate}T${time}:00+09:00`;
       // ご本人が「院に確認済み」として別日重複の予約を続行したか
       const confirmedExisting = formData.get("confirmedExisting") === "true";
@@ -576,7 +611,7 @@ export async function createReservation(formData: FormData) {
             `⚠️【複数予約の確認】${name}様は既存のご予約（${otherDayInfo}）がある状態で、ご本人が「院に確認済み」として追加予約を取られました。\n新規: ${rawDate} ${time}\n予約番号: ${reservationNumber}`,
           );
         }
-  return { success: true, isWaiting: isCapacityFull, reservationNumber };
+  return { success: true, isWaiting: isCapacityFull, reservationNumber, lineLinked, phoneLast4 };
     } else {
       // SupabaseのURLが設定されていない場合の動作保証（デモ用）
       console.log("Supabase URL not configured. Simulating successful reservation.");

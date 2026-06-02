@@ -103,7 +103,7 @@ const levelConfig = {
   },
 };
 
-type WaitlistState = "idle" | "form" | "submitting" | "success";
+type WaitlistState = "idle" | "form" | "submitting" | "success" | "needsQuestionnaire";
 
 export default function ReserveCalendarPage() {
   return (
@@ -386,6 +386,9 @@ function ReserveCalendarContent() {
     if (result.success) {
       setWaitlistNumber(result.reservationNumber || "");
       setWaitlistState("success");
+    } else if ((result as any).requiresQuestionnaire) {
+      // 初めての方（顧客未登録）→ アンケート誘導（通常予約と同じゲート）
+      setWaitlistState("needsQuestionnaire");
     } else {
       setWaitlistError(result.error || "エラーが発生しました。");
       setWaitlistState("form");
@@ -941,6 +944,33 @@ function ReserveCalendarContent() {
                   <a href="/reserve" className="text-blue-400 underline underline-offset-2">予約フォーム</a>{" "}
                   よりご連絡ください。
                 </p>
+              </div>
+            )}
+
+            {/* ─── 初めての方 → アンケート誘導（未登録は bypass させない） ─── */}
+            {waitlistState === "needsQuestionnaire" && (
+              <div className="border-t border-zinc-800 bg-slate-900 px-5 py-10 text-center">
+                <div className="w-16 h-16 bg-blue-950 border border-blue-800 rounded-full flex items-center justify-center mx-auto mb-5">
+                  <span className="text-3xl">📋</span>
+                </div>
+                <h4 className="font-black text-white text-xl mb-2">はじめての方へ</h4>
+                <p className="text-zinc-400 text-sm mb-6 leading-relaxed">
+                  オンラインのご利用が初めての方は、<br />
+                  先にアンケート（1分程度）へのご回答をお願いします。<br />
+                  ご回答後、キャンセル待ちのご登録ができます。
+                </p>
+                <Link
+                  href="/questionnaire"
+                  className="inline-flex w-full max-w-xs mx-auto items-center justify-center bg-blue-600 hover:bg-blue-500 text-white font-bold py-4 px-4 rounded-2xl transition-all gap-2 text-sm"
+                >
+                  📋 アンケートに回答する
+                </Link>
+                <button
+                  onClick={() => setWaitlistState("form")}
+                  className="block mx-auto mt-4 text-xs text-zinc-400 underline underline-offset-2"
+                >
+                  入力内容に戻る
+                </button>
               </div>
             )}
           </div>

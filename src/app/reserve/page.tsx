@@ -10,7 +10,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { format, parse, isValid } from "date-fns";
 import { ja } from "date-fns/locale";
-import { CalendarIcon, ArrowLeft, CheckCircle2, Phone, MapPin, MessageCircle } from "lucide-react";
+import { CalendarIcon, ArrowLeft, CheckCircle2, Phone, MapPin, MessageCircle, X } from "lucide-react";
 
 import Image from "next/image";
 import { createClient } from "@/lib/supabase/client";
@@ -70,6 +70,9 @@ function ReserveContent() {
   const [isSuccess, setIsSuccess] = useState(false);
   const [isWaitingResult, setIsWaitingResult] = useState(false);
   const [requiresQuestionnaire, setRequiresQuestionnaire] = useState(false);
+  // 予約完了後の「LINE連携のお願い」ポップアップ（アンケート済み・LINE未連携の人向け）
+  const [showLineLinkPopup, setShowLineLinkPopup] = useState(false);
+  const [lineLinkPhone4, setLineLinkPhone4] = useState<string | null>(null);
   // 同じ日の重複（ブロック → LINE 誘導）
   const [duplicateSameDay, setDuplicateSameDay] = useState(false);
   // 別の日の重複（警告 → 本人が院に確認済みなら続行）。値は既存予約の日時表示
@@ -230,6 +233,14 @@ function ReserveContent() {
       if (phone) localStorage.setItem("ballClinic_savedPhone", phone);
       setIsWaitingResult(result.isWaiting || false);
       setIsSuccess(true);
+      // LINE未連携の人には、完了後に「下4桁を送って連携してください」ポップアップを出す
+      const r2 = result as any;
+      if (r2.lineLinked === false) {
+        // 登録電話の下4桁（無ければ今回入力の下4桁でフォールバック）
+        const digits = (phone || "").replace(/\D/g, "");
+        setLineLinkPhone4(r2.phoneLast4 || (digits.length >= 4 ? digits.slice(-4) : null));
+        setShowLineLinkPopup(true);
+      }
       return;
     }
 
@@ -306,6 +317,66 @@ function ReserveContent() {
             トップページへ戻る
           </Link>
         </div>
+
+        {/* LINE未連携の方へ：下4桁送信で紐付けをお願いするポップアップ */}
+        {showLineLinkPopup && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+            onClick={() => setShowLineLinkPopup(false)}
+          >
+            <div
+              className="relative w-full max-w-sm bg-white rounded-3xl shadow-2xl p-6 text-center"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <button
+                onClick={() => setShowLineLinkPopup(false)}
+                className="absolute top-3 right-3 w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-500"
+                aria-label="閉じる"
+              >
+                <X className="w-4 h-4" />
+              </button>
+              <div className="w-14 h-14 bg-[#06C755] rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg shadow-[#06C755]/30">
+                <MessageCircle className="w-8 h-8 text-white" />
+              </div>
+              <h2 className="text-lg font-extrabold text-slate-800 mb-2">
+                LINE連携のお願い
+              </h2>
+              <p className="text-sm text-slate-600 leading-relaxed mb-4">
+                LINEと連携すると、次回からアンケート不要で<br />
+                かんたんに予約できます。<br />
+                {CLINIC_CONFIG.nameShort}のLINEを友だち追加し、<br />
+                トークで<strong>電話番号の下4桁</strong>を送ってください。
+              </p>
+
+              {lineLinkPhone4 ? (
+                <div className="bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 mb-4">
+                  <p className="text-[11px] text-slate-500 mb-1">LINEに送る番号</p>
+                  <p className="text-3xl font-mono font-black tracking-[0.3em] text-slate-800">{lineLinkPhone4}</p>
+                </div>
+              ) : (
+                <div className="bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 mb-4">
+                  <p className="text-xs text-slate-600">ご登録のお電話番号の<strong>下4桁</strong>をトークで送ってください。</p>
+                </div>
+              )}
+
+              <a
+                href={LINE_URL}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex w-full items-center justify-center bg-[#06C755] hover:bg-[#05b34c] text-white font-bold py-4 px-4 rounded-2xl transition-all shadow-lg shadow-[#06C755]/20 gap-2"
+              >
+                <MessageCircle className="w-5 h-5" />
+                LINEを開いて下4桁を送る
+              </a>
+              <button
+                onClick={() => setShowLineLinkPopup(false)}
+                className="mt-3 text-xs text-slate-400 hover:text-slate-600"
+              >
+                あとで連携する
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
