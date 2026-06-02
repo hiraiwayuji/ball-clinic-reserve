@@ -209,10 +209,12 @@ export async function saveTallySheet(
 
     let firstLine = true;
     for (const col of columns) {
-      const raw = row.amounts?.[col.key];
-      const amount = Math.round(Number(raw));
-      if (!Number.isFinite(amount) || amount === 0) continue;
       if (!colKeys.has(col.key)) continue;
+      const raw = row.amounts?.[col.key];
+      // 未入力(undefined/null)はスキップ。明示的に入力された 0（自賠責など窓口0円）は計上する。
+      if (raw == null) continue;
+      const amount = Math.round(Number(raw));
+      if (!Number.isFinite(amount)) continue;
       insertRows.push({
         sale_date: dateStr,
         customer_name: name,

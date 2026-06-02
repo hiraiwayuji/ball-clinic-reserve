@@ -28,7 +28,8 @@ let ROW_SEQ = 1;
 function toUIRow(r: TallyRow): UIRow {
   const amounts: Record<string, string> = {};
   Object.entries(r.amounts ?? {}).forEach(([k, v]) => {
-    amounts[k] = v ? String(v) : "";
+    // 0 も「入力済み」として保持する（自賠責など窓口0円を欠落させない）
+    amounts[k] = v == null ? "" : String(v);
   });
   return {
     _id: ROW_SEQ++,
@@ -109,6 +110,8 @@ export default function TallySheet({ initialDate }: { initialDate?: string }) {
 
   // 行合計
   const rowTotal = (r: UIRow) => columns.reduce((s, c) => s + num(r.amounts[c.key] ?? ""), 0);
+  // 金額欄に何か入力されているか（"0" も入力済みとして扱う＝自賠責など窓口0円を計上対象に）
+  const rowEntered = (r: UIRow) => columns.some((c) => (r.amounts[c.key] ?? "").trim() !== "");
 
   // 列ごとの小計
   const colSubtotals = useMemo(() => {
@@ -128,8 +131,7 @@ export default function TallySheet({ initialDate }: { initialDate?: string }) {
     let newPatients = 0;
     for (const r of rows) {
       const hasName = r.customer_name.trim().length > 0;
-      const hasAmount = rowTotal(r) !== 0;
-      if (hasName && hasAmount) {
+      if (hasName && rowEntered(r)) {
         people++;
         if (r.is_first_visit) newPatients++;
       }
@@ -139,14 +141,15 @@ export default function TallySheet({ initialDate }: { initialDate?: string }) {
   }, [rows, columns]);
 
   const handleSave = () => {
-    // 名前があり金額が入っている行だけ送る（空行は無視）
+    // 名前があり、いずれかの金額欄が入力済みの行だけ送る（"0" も計上対象。完全な空行は無視）
     const payload: TallyRow[] = rows
-      .filter((r) => r.customer_name.trim() && rowTotal(r) !== 0)
+      .filter((r) => r.customer_name.trim() && rowEntered(r))
       .map((r) => {
         const amounts: Record<string, number> = {};
         for (const c of columns) {
-          const v = num(r.amounts[c.key] ?? "");
-          if (v !== 0) amounts[c.key] = v;
+          const cell = (r.amounts[c.key] ?? "").trim();
+          if (cell === "") continue; // 未入力はスキップ／"0" は 0 円として登録
+          amounts[c.key] = num(cell);
         }
         return {
           customer_name: r.customer_name.trim(),
