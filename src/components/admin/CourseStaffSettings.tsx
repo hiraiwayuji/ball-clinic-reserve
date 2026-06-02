@@ -254,23 +254,76 @@ function CourseRow({
 
   return (
     <div className={`border rounded-xl overflow-hidden transition-colors ${course.is_active ? "bg-white dark:bg-slate-800" : "bg-slate-50 dark:bg-slate-800/50"}`}>
-      {/* 一覧表示（題名がメイン）。タップで詳細・操作を開く */}
+      {/* 一覧表示：タップしなくても主要項目（種別・時間・価格・クーポン/限定）が全部見える。
+          文字は小さめでも一目で分かるよう、ホットペッパー風に情報を詰めて2行で表示。 */}
       <button
         type="button"
         onClick={() => setExpanded((v) => !v)}
         aria-expanded={expanded}
-        className="w-full flex items-center gap-2 px-3 py-2.5 text-left"
+        className="w-full flex items-start gap-2 px-3 py-2 text-left"
       >
-        <span className={`flex-1 min-w-0 truncate font-semibold text-sm ${course.is_active ? "text-slate-800 dark:text-slate-100" : "text-slate-400 dark:text-slate-500"}`}>
-          {course.name}
-        </span>
-        {course.is_coupon && (
-          <Tag className="w-3.5 h-3.5 text-amber-500 shrink-0" aria-label="クーポン" />
+        {/* 写真サムネ（一覧で一目で分かるように） */}
+        {course.image_url ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={course.image_url} alt="" className="w-10 h-10 rounded-lg object-cover shrink-0 bg-slate-100 dark:bg-slate-700" />
+        ) : (
+          <div className="w-10 h-10 rounded-lg shrink-0 bg-slate-100 dark:bg-slate-700 flex items-center justify-center text-slate-300">
+            <Tag className="w-4 h-4" />
+          </div>
         )}
-        {!course.is_active && (
-          <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-slate-200 text-slate-500 dark:bg-slate-700 dark:text-slate-400 shrink-0">無効</span>
-        )}
-        <ChevronDown className={`w-4 h-4 text-slate-400 shrink-0 transition-transform ${expanded ? "rotate-180" : ""}`} />
+        <div className="flex-1 min-w-0">
+          {/* 1行目：クーポン印＋名前＋無効 */}
+          <div className="flex items-center gap-1.5">
+            {course.is_coupon && <Tag className="w-3.5 h-3.5 text-amber-500 shrink-0" aria-label="クーポン" />}
+            <span className={`min-w-0 truncate font-semibold text-sm ${course.is_active ? "text-slate-800 dark:text-slate-100" : "text-slate-400 dark:text-slate-500"}`}>
+              {course.name}
+            </span>
+            {!course.is_active && (
+              <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-slate-200 text-slate-500 dark:bg-slate-700 dark:text-slate-400 shrink-0">無効</span>
+            )}
+          </div>
+          {/* 2行目：種別・時間・価格・公開区分（小さくても全部見える） */}
+          <div className="mt-1 flex items-center gap-1 flex-wrap">
+            {course.category === "jusei" && (
+              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">柔整</span>
+            )}
+            {course.category === "shinkyu" && (
+              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-300">鍼灸</span>
+            )}
+            {course.category === "seitai" && (
+              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300">整体</span>
+            )}
+            {!course.category && (
+              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400">未分類</span>
+            )}
+            <span className="inline-flex items-center gap-0.5 text-[10px] text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-700 px-1.5 py-0.5 rounded-full">
+              <Clock className="w-2.5 h-2.5" />{course.duration_minutes}分
+            </span>
+            {course.price != null && (
+              <span className="text-[10px] text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-slate-700 px-1.5 py-0.5 rounded-full">
+                {course.regular_price != null && course.regular_price > course.price && (
+                  <span className="line-through text-slate-400 mr-0.5">¥{course.regular_price.toLocaleString()}</span>
+                )}
+                ¥{course.price.toLocaleString()}
+              </span>
+            )}
+            {course.is_coupon && (
+              <span className="inline-flex items-center gap-0.5 text-[10px] font-bold text-amber-700 dark:text-amber-300 bg-amber-100 dark:bg-amber-900/40 px-1.5 py-0.5 rounded-full">
+                <Tag className="w-2.5 h-2.5" />クーポン
+              </span>
+            )}
+            {course.is_first_visit_only && (
+              <span className="text-[10px] font-bold text-rose-700 dark:text-rose-300 bg-rose-100 dark:bg-rose-900/40 px-1.5 py-0.5 rounded-full">新規限定</span>
+            )}
+            {course.is_repeat_only && (
+              <span className="text-[10px] font-bold text-purple-700 dark:text-purple-300 bg-purple-100 dark:bg-purple-900/40 px-1.5 py-0.5 rounded-full">再来限定</span>
+            )}
+            {course.badge_label && (
+              <span className="text-[10px] font-bold text-blue-700 dark:text-blue-300 bg-blue-100 dark:bg-blue-900/40 px-1.5 py-0.5 rounded-full">{course.badge_label}</span>
+            )}
+          </div>
+        </div>
+        <ChevronDown className={`w-4 h-4 text-slate-400 shrink-0 mt-0.5 transition-transform ${expanded ? "rotate-180" : ""}`} />
       </button>
 
       {/* 詳細＋操作（タップで開く） */}
