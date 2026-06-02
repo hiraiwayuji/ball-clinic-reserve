@@ -4,6 +4,7 @@ import { PUBLIC_CLINIC_ID } from "@/lib/default-clinic-id";
 import { pushLineToOwners, sendEmailToOwners } from "@/lib/admin-notify";
 import { getLineUidFromCookie } from "@/app/actions/family-line";
 import { resolveBookingCustomer } from "@/lib/booking-customer";
+import { detectClinicMisconfig, CLINIC_MISCONFIG_USER_MESSAGE } from "@/lib/clinic-guard";
 
 async function notifyOwner(
   name: string,
@@ -78,6 +79,17 @@ function normalizeNameForMatch(value: string): string {
 // キャンセル待ちを時間帯範囲で登録するアクション（例: 15:00 〜 20:00）
 export async function createWaitlistReservation(formData: FormData) {
   try {
+    // ── クリニック識別ガード（他院ドメインのボール・フォールバック時は書き込みを止める） ──
+    const guard = await detectClinicMisconfig();
+    if (guard.misconfigured) {
+      console.error("[clinic-guard] waitlist blocked:", guard.reason);
+      void pushLineToOwners(
+        PUBLIC_CLINIC_ID,
+        `🚨【キャンセル待ちブロック】クリニック設定の不整合を検知し、書き込みを停止しました。\n理由: ${guard.reason}`,
+      );
+      return { success: false, error: CLINIC_MISCONFIG_USER_MESSAGE };
+    }
+
     const dateStr = formData.get("date") as string;
     const startTime = formData.get("startTime") as string;
     const endTime = formData.get("endTime") as string;
@@ -289,6 +301,17 @@ export async function getDailyAvailability(dateStr: string) {
 
 export async function createReservation(formData: FormData) {
   try {
+    // ── クリニック識別ガード（他院ドメインのボール・フォールバック時は書き込みを止める） ──
+    const guard = await detectClinicMisconfig();
+    if (guard.misconfigured) {
+      console.error("[clinic-guard] reservation blocked:", guard.reason);
+      void pushLineToOwners(
+        PUBLIC_CLINIC_ID,
+        `🚨【予約ブロック】クリニック設定の不整合を検知し、Web予約の書き込みを停止しました。\n理由: ${guard.reason}\n→ env(NEXT_PUBLIC_CLINIC_ID/NAME)を確認し、Build Cache OFF で再デプロイしてください。`,
+      );
+      return { success: false, error: CLINIC_MISCONFIG_USER_MESSAGE };
+    }
+
     const rawDate = formData.get("date") as string;
     const time = formData.get("time") as string;
     const name = formData.get("name") as string;
