@@ -46,6 +46,8 @@ function CourseRow({
     (course.category as any) ?? "",
   );
   const [saving, setSaving] = useState(false);
+  // 一覧では題名のみ表示し、タップで詳細・操作を開く（スマホで一覧しやすく）
+  const [expanded, setExpanded] = useState(false);
 
   const handleSave = async () => {
     if (!name.trim() || !duration) return;
@@ -251,79 +253,101 @@ function CourseRow({
   }
 
   return (
-    <div className={`flex items-center gap-3 border rounded-xl px-3 py-2.5 transition-colors ${course.is_active ? "bg-white dark:bg-slate-800" : "bg-slate-50 dark:bg-slate-800/50 opacity-60"}`}>
-      <GripVertical className="w-4 h-4 text-slate-300 shrink-0" />
-      {course.image_url ? (
-        <div className="w-10 h-10 rounded-lg overflow-hidden bg-slate-100 dark:bg-slate-700 shrink-0">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={course.image_url} alt="" className="w-full h-full object-cover" />
-        </div>
-      ) : null}
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="font-semibold text-slate-800 dark:text-slate-100">{course.name}</span>
-          {course.category === "jusei" && (
-            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">柔整</span>
-          )}
-          {course.category === "shinkyu" && (
-            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-300">鍼灸</span>
-          )}
-          {course.category === "seitai" && (
-            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300">整体</span>
-          )}
-          {!course.category && (
-            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400" title="集計カテゴリ未分類">未分類</span>
-          )}
-          <span className="flex items-center gap-1 text-xs text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-700 px-2 py-0.5 rounded-full">
-            <Clock className="w-3 h-3" />{course.duration_minutes}分
-          </span>
-          {course.price != null && (
-            <span className="text-xs text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-700 px-2 py-0.5 rounded-full">
-              {course.regular_price != null && course.regular_price > course.price && (
-                <span className="line-through text-slate-400 mr-1">¥{course.regular_price.toLocaleString()}</span>
-              )}
-              ¥{course.price.toLocaleString()}
-            </span>
-          )}
-          {course.is_coupon && (
-            <span className="flex items-center gap-1 text-[10px] font-bold text-amber-700 dark:text-amber-300 bg-amber-100 dark:bg-amber-900/40 px-2 py-0.5 rounded-full">
-              <Tag className="w-2.5 h-2.5" />クーポン
-            </span>
-          )}
-          {course.is_first_visit_only && (
-            <span className="text-[10px] font-bold text-rose-700 dark:text-rose-300 bg-rose-100 dark:bg-rose-900/40 px-2 py-0.5 rounded-full">
-              新規限定
-            </span>
-          )}
-          {course.is_repeat_only && (
-            <span className="text-[10px] font-bold text-purple-700 dark:text-purple-300 bg-purple-100 dark:bg-purple-900/40 px-2 py-0.5 rounded-full">
-              再来限定
-            </span>
-          )}
-          {course.badge_label && (
-            <span className="text-[10px] font-bold text-blue-700 dark:text-blue-300 bg-blue-100 dark:bg-blue-900/40 px-2 py-0.5 rounded-full">
-              {course.badge_label}
-            </span>
-          )}
-        </div>
-        {course.description && (
-          <p className="text-xs text-slate-400 mt-0.5 truncate">{course.description}</p>
+    <div className={`border rounded-xl overflow-hidden transition-colors ${course.is_active ? "bg-white dark:bg-slate-800" : "bg-slate-50 dark:bg-slate-800/50"}`}>
+      {/* 一覧表示（題名がメイン）。タップで詳細・操作を開く */}
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        aria-expanded={expanded}
+        className="w-full flex items-center gap-2 px-3 py-2.5 text-left"
+      >
+        <span className={`flex-1 min-w-0 truncate font-semibold text-sm ${course.is_active ? "text-slate-800 dark:text-slate-100" : "text-slate-400 dark:text-slate-500"}`}>
+          {course.name}
+        </span>
+        {course.is_coupon && (
+          <Tag className="w-3.5 h-3.5 text-amber-500 shrink-0" aria-label="クーポン" />
         )}
-      </div>
-      <div className="flex items-center gap-1 shrink-0">
-        <button
-          onClick={handleToggleActive}
-          className={`text-xs px-2 py-1 rounded-md font-semibold transition-colors ${course.is_active ? "bg-emerald-100 text-emerald-700 hover:bg-emerald-200" : "bg-slate-200 text-slate-500 hover:bg-slate-300"}`}
-        >
-          {course.is_active ? "有効" : "無効"}
-        </button>
-        <Button size="icon" variant="ghost" className="h-7 w-7 text-slate-400 hover:text-blue-600" onClick={() => setEditing(true)}>
-          <Pencil className="w-3.5 h-3.5" />
-        </Button>
-        <Button size="icon" variant="ghost" className="h-7 w-7 text-slate-400 hover:text-red-500" onClick={handleDelete}>
-          <Trash2 className="w-3.5 h-3.5" />
-        </Button>
-      </div>
+        {!course.is_active && (
+          <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-slate-200 text-slate-500 dark:bg-slate-700 dark:text-slate-400 shrink-0">無効</span>
+        )}
+        <ChevronDown className={`w-4 h-4 text-slate-400 shrink-0 transition-transform ${expanded ? "rotate-180" : ""}`} />
+      </button>
+
+      {/* 詳細＋操作（タップで開く） */}
+      {expanded && (
+        <div className="px-3 pb-3 pt-1 border-t border-slate-100 dark:border-slate-700 space-y-3">
+          <div className="flex items-start gap-3 pt-2.5">
+            {course.image_url ? (
+              <div className="w-14 h-14 rounded-lg overflow-hidden bg-slate-100 dark:bg-slate-700 shrink-0">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={course.image_url} alt="" className="w-full h-full object-cover" />
+              </div>
+            ) : null}
+            <div className="flex-1 min-w-0 flex items-center gap-1.5 flex-wrap">
+              {course.category === "jusei" && (
+                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">柔整</span>
+              )}
+              {course.category === "shinkyu" && (
+                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-300">鍼灸</span>
+              )}
+              {course.category === "seitai" && (
+                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300">整体</span>
+              )}
+              {!course.category && (
+                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400" title="集計カテゴリ未分類">未分類</span>
+              )}
+              <span className="flex items-center gap-1 text-xs text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-700 px-2 py-0.5 rounded-full">
+                <Clock className="w-3 h-3" />{course.duration_minutes}分
+              </span>
+              {course.price != null && (
+                <span className="text-xs text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-700 px-2 py-0.5 rounded-full">
+                  {course.regular_price != null && course.regular_price > course.price && (
+                    <span className="line-through text-slate-400 mr-1">¥{course.regular_price.toLocaleString()}</span>
+                  )}
+                  ¥{course.price.toLocaleString()}
+                </span>
+              )}
+              {course.is_coupon && (
+                <span className="flex items-center gap-1 text-[10px] font-bold text-amber-700 dark:text-amber-300 bg-amber-100 dark:bg-amber-900/40 px-2 py-0.5 rounded-full">
+                  <Tag className="w-2.5 h-2.5" />クーポン
+                </span>
+              )}
+              {course.is_first_visit_only && (
+                <span className="text-[10px] font-bold text-rose-700 dark:text-rose-300 bg-rose-100 dark:bg-rose-900/40 px-2 py-0.5 rounded-full">
+                  新規限定
+                </span>
+              )}
+              {course.is_repeat_only && (
+                <span className="text-[10px] font-bold text-purple-700 dark:text-purple-300 bg-purple-100 dark:bg-purple-900/40 px-2 py-0.5 rounded-full">
+                  再来限定
+                </span>
+              )}
+              {course.badge_label && (
+                <span className="text-[10px] font-bold text-blue-700 dark:text-blue-300 bg-blue-100 dark:bg-blue-900/40 px-2 py-0.5 rounded-full">
+                  {course.badge_label}
+                </span>
+              )}
+            </div>
+          </div>
+          {course.description && (
+            <p className="text-xs text-slate-500 dark:text-slate-400">{course.description}</p>
+          )}
+          <div className="flex items-center justify-end gap-1.5 pt-2 border-t border-slate-100 dark:border-slate-700">
+            <button
+              onClick={handleToggleActive}
+              className={`text-xs px-2.5 py-1 rounded-md font-semibold transition-colors ${course.is_active ? "bg-emerald-100 text-emerald-700 hover:bg-emerald-200" : "bg-slate-200 text-slate-500 hover:bg-slate-300"}`}
+            >
+              {course.is_active ? "有効" : "無効"}
+            </button>
+            <Button size="sm" variant="outline" className="h-8 text-slate-600 hover:text-blue-600" onClick={() => setEditing(true)}>
+              <Pencil className="w-3.5 h-3.5 mr-1" /> 編集
+            </Button>
+            <Button size="sm" variant="outline" className="h-8 text-slate-600 hover:text-red-500" onClick={handleDelete}>
+              <Trash2 className="w-3.5 h-3.5 mr-1" /> 削除
+            </Button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -373,7 +397,7 @@ function PositionInput({
           (e.target as HTMLInputElement).blur();
         }
       }}
-      className="w-7 h-7 text-center text-xs font-bold rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 disabled:opacity-30 disabled:cursor-not-allowed [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+      className="w-7 h-6 text-center text-xs font-bold rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 disabled:opacity-30 disabled:cursor-not-allowed [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
     />
   );
 }
@@ -965,15 +989,15 @@ export default function CourseStaffSettings({ initialCourses, initialStaff, init
             </p>
           )}
           {courses.map((course, index) => (
-            <div key={course.id} className="flex items-stretch gap-1.5">
+            <div key={course.id} className="flex items-center gap-1.5">
               {/* 並べ替え（番号入力＋上下ボタン） */}
-              <div className="flex flex-col items-center justify-center gap-1 shrink-0">
+              <div className="flex flex-col items-center justify-center gap-0.5 shrink-0">
                 <button
                   type="button"
                   onClick={() => handleMoveCourse(index, -1)}
                   disabled={index === 0 || reordering}
                   aria-label="上へ移動"
-                  className="w-7 h-7 flex items-center justify-center rounded-md border border-slate-200 dark:border-slate-700 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-30 disabled:cursor-not-allowed"
+                  className="w-6 h-6 flex items-center justify-center rounded-md border border-slate-200 dark:border-slate-700 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-30 disabled:cursor-not-allowed"
                 >
                   <ChevronUp className="w-4 h-4" />
                 </button>
@@ -988,7 +1012,7 @@ export default function CourseStaffSettings({ initialCourses, initialStaff, init
                   onClick={() => handleMoveCourse(index, 1)}
                   disabled={index === courses.length - 1 || reordering}
                   aria-label="下へ移動"
-                  className="w-7 h-7 flex items-center justify-center rounded-md border border-slate-200 dark:border-slate-700 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-30 disabled:cursor-not-allowed"
+                  className="w-6 h-6 flex items-center justify-center rounded-md border border-slate-200 dark:border-slate-700 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-30 disabled:cursor-not-allowed"
                 >
                   <ChevronDown className="w-4 h-4" />
                 </button>
