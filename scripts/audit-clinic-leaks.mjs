@@ -63,6 +63,14 @@ const RULES = [
     needsEnv: /process\.env\.NEXT_PUBLIC_CLINIC_ID/,
     msg: "ボールの clinic_id がハードコードされています（他院データがボールに入る恐れ）。PUBLIC_CLINIC_ID を import してください。",
   },
+  {
+    // 患者向けページでロゴを直接描画＝他院にボールのロゴが漏れる。必ず <ClinicWordmark /> を使う。
+    id: "direct-logo-render",
+    re: /src=\{?\s*CLINIC_CONFIG\.(logoSmallUrl|logoUrl)/,
+    needsEnv: null,
+    onlyUnder: ["src/app/reserve/", "src/app/questionnaire/"],
+    msg: "ロゴを直接描画しています（他院にボールのロゴが漏れる恐れ）。<ClinicWordmark /> を使ってください。",
+  },
 ];
 
 function walk(dir) {
@@ -102,6 +110,8 @@ for (const file of files) {
     const envWindow = (i >= 2 ? lines[i - 2] : "") + "\n" + prev + "\n" + line;
     for (const rule of RULES) {
       if (!rule.re.test(line)) continue;
+      // 対象ディレクトリ限定のルール
+      if (rule.onlyUnder && !rule.onlyUnder.some((p) => rel.startsWith(p))) continue;
       // env フォールバック（`process.env... ?? "ボール既定値"`）は許容
       if (rule.needsEnv && rule.needsEnv.test(envWindow)) continue;
       violations.push({ file: rel, line: i + 1, rule, snippet: line.trim().slice(0, 120) });

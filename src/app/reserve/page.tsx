@@ -12,7 +12,6 @@ import { format, parse, isValid } from "date-fns";
 import { ja } from "date-fns/locale";
 import { CalendarIcon, ArrowLeft, CheckCircle2, Phone, MapPin, MessageCircle, X } from "lucide-react";
 
-import Image from "next/image";
 import { createClient } from "@/lib/supabase/client";
 import { createReservation, getDailyAvailability } from "@/app/actions/reserve";
 import { getClinicHolidays, type ClinicHoliday } from "@/app/actions/holidays";
@@ -25,12 +24,13 @@ import { toast } from "sonner";
 import { CLINIC_CONFIG } from "@/lib/clinic-config";
 import ReserveLandingPage from "./ReserveLandingPage";
 import { getPublicClinicSettings } from "@/app/actions/publicSettings";
+import { getPublicClinicHours } from "@/app/actions/settings";
+import ClinicWordmark from "@/components/ClinicWordmark";
 import type { LinkedCustomer } from "@/lib/line-links";
 
 const SELECTED_CUSTOMER_KEY = "ballClinic_selectedCustomerId";
 const FAMILY_LIST_KEY = "ballClinic_familyList";
 
-const isExternalLogo = CLINIC_CONFIG.logoSmallUrl.startsWith("http");
 // 「友だち追加」用 URL は /R/ti/p/ 形式。/ti/p/ だけだと既に友だちでないと開けず
 // 「LINEの友だちではないユーザー」エラーになる
 const LINE_URL = process.env.NEXT_PUBLIC_LINE_OFFICIAL_ACCOUNT_URL ?? "https://line.me/R/ti/p/%40shc8761q";
@@ -85,10 +85,21 @@ function ReserveContent() {
   // 予約フロー：datetime_first (既存) / menu_first (からだ等の治療院系UX)
   const [reserveFlow, setReserveFlow] = useState<"datetime_first" | "menu_first">("datetime_first");
 
+  // 営業時間・休診日（DB＝院ごと。ハードコード禁止）
+  const [hoursLines, setHoursLines] = useState<string[]>([]);
+  const [hoursClosed, setHoursClosed] = useState<string>("");
+
   useEffect(() => {
     getPublicClinicSettings().then(s => {
       if (s?.public_reserve_flow === "menu_first") setReserveFlow("menu_first");
     });
+    getPublicClinicHours().then(h => {
+      const lines = (h?.hours_lines && h.hours_lines.length > 0)
+        ? h.hours_lines
+        : [CLINIC_CONFIG.hoursLine1, ...(CLINIC_CONFIG.hoursLine2 ? [CLINIC_CONFIG.hoursLine2] : [])];
+      setHoursLines(lines);
+      setHoursClosed(h?.hours_closed || CLINIC_CONFIG.hoursClosed || "");
+    }).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -280,13 +291,7 @@ function ReserveContent() {
       <div className="min-h-screen bg-gradient-to-br from-indigo-900 via-blue-900 to-slate-900 flex flex-col items-center justify-center p-4">
         <div className="max-w-lg w-full bg-white/10 backdrop-blur-xl p-8 md:p-10 rounded-[2.5rem] shadow-2xl border border-white/20 text-center">
           <div className="mb-6 flex flex-col items-center gap-4">
-            <div className="relative w-40 h-16">
-              {isExternalLogo ? (
-                <img src={CLINIC_CONFIG.logoSmallUrl} alt={CLINIC_CONFIG.name} className={`h-full w-auto object-contain mx-auto ${CLINIC_CONFIG.usesWordmarkLogo ? "bg-white rounded-lg px-3 py-2" : ""}`} />
-              ) : (
-                <Image src={CLINIC_CONFIG.logoSmallUrl} alt={CLINIC_CONFIG.name} fill className="object-contain" />
-              )}
-            </div>
+            <ClinicWordmark sizeClassName="w-40 h-16" />
             <div className="w-20 h-20 bg-emerald-500 rounded-full flex items-center justify-center shadow-lg shadow-emerald-500/40">
               <CheckCircle2 className="w-12 h-12 text-white" />
             </div>
@@ -389,14 +394,11 @@ function ReserveContent() {
     <div className="min-h-screen bg-slate-900 text-slate-200" data-dark-page>
       <div className="relative max-w-4xl mx-auto py-12 px-4 md:px-8">
         <div className="flex flex-col items-center mb-12">
-          <div className="relative w-56 h-24 mb-4 flex items-center justify-center">
-            {isExternalLogo ? (
-              <img src={CLINIC_CONFIG.logoSmallUrl} alt={CLINIC_CONFIG.name} className={`max-h-24 w-auto object-contain ${CLINIC_CONFIG.usesWordmarkLogo ? "bg-white rounded-lg px-3 py-2" : ""}`} />
-            ) : (
-              <Image src={CLINIC_CONFIG.logoSmallUrl} alt={CLINIC_CONFIG.name} fill className="object-contain" />
-            )}
-          </div>
-          <p className="text-blue-200/50 text-xs tracking-widest uppercase">Body ALL care.</p>
+          <ClinicWordmark sizeClassName="w-56 h-24 mb-4" textClassName="text-2xl font-extrabold text-white text-center leading-tight" />
+          {/* ボールのタグライン。他院に出さない（混入防止） */}
+          {CLINIC_CONFIG.isDefaultClinic && (
+            <p className="text-blue-200/50 text-xs tracking-widest uppercase">Body ALL care.</p>
+          )}
         </div>
 
         <div className="grid lg:grid-cols-12 gap-8 items-start">
@@ -774,21 +776,20 @@ function ReserveContent() {
           {/* サイドバー */}
           <div className="lg:col-span-4 space-y-6">
             <div className="bg-white/5 backdrop-blur-xl rounded-[2.5rem] border border-white/10 p-8 shadow-2xl space-y-8">
-              <div className="relative w-full h-16 flex items-center justify-center">
-                {isExternalLogo ? (
-                  <img src={CLINIC_CONFIG.logoSmallUrl} alt={CLINIC_CONFIG.name} className={`max-h-16 w-auto object-contain ${CLINIC_CONFIG.usesWordmarkLogo ? "bg-white rounded-lg px-3 py-2" : ""}`} />
-                ) : (
-                  <Image src={CLINIC_CONFIG.logoSmallUrl} alt={CLINIC_CONFIG.name} fill className="object-contain" />
-                )}
-              </div>
+              <ClinicWordmark sizeClassName="w-full h-16" />
               <div>
                 <h3 className="text-white font-bold mb-4 flex items-center gap-2">
                   <MapPin className="w-4 h-4 text-emerald-400" />
                   アクセス / 営業日
                 </h3>
                 <div className="space-y-3 text-sm text-blue-100/85">
-                  <p className="flex justify-between border-b border-white/5 pb-2"><span>日曜日 / 水曜日</span><span className="text-rose-400 font-bold">休診</span></p>
-                  <p className="flex justify-between border-b border-white/5 pb-2"><span>祝日</span><span className="text-rose-400 font-bold">休診</span></p>
+                  {/* 営業時間・休診日は院ごと（DB clinic_settings 由来。ハードコード禁止） */}
+                  {hoursLines.map((line, i) => (
+                    <p key={i} className="border-b border-white/5 pb-2">{line}</p>
+                  ))}
+                  {hoursClosed && (
+                    <p className="flex justify-between border-b border-white/5 pb-2"><span>休診</span><span className="text-rose-400 font-bold">{hoursClosed}</span></p>
+                  )}
                   <p className="flex justify-between"><span>{CLINIC_CONFIG.nameShort}</span><span className="text-white">{CLINIC_CONFIG.address}</span></p>
                 </div>
               </div>

@@ -1,14 +1,13 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import Image from "next/image";
+import ClinicWordmark from "@/components/ClinicWordmark";
 import Link from "next/link";
 import { CheckCircle2, MessageCircle, ArrowLeft, ChevronRight } from "lucide-react";
 import { submitQuestionnaire } from "@/app/actions/questionnaire";
 import { getPublicClinicSettings } from "@/app/actions/publicSettings";
 import { toast } from "sonner";
 import { CLINIC_CONFIG } from "@/lib/clinic-config";
-const _isExternalLogo = CLINIC_CONFIG.logoSmallUrl.startsWith("http");
 
 // LINE 公式アカウント URL のフォールバック（env も DB も無いときのみ）
 const LINE_URL_FALLBACK =
@@ -129,15 +128,9 @@ export default function QuestionnairePage() {
 
           {/* ヘッダー */}
           <div className="text-center space-y-3">
-            {(CLINIC_CONFIG.hasCustomLogo || CLINIC_CONFIG.isDefaultClinic) && (
-              <div className="relative w-40 h-14 mx-auto">
-                {CLINIC_CONFIG.hasCustomLogo ? (
-                  <img src={CLINIC_CONFIG.logoSmallUrl} alt={CLINIC_CONFIG.nameShort} className="max-h-full w-auto object-contain mx-auto" />
-                ) : (
-                  <Image src={CLINIC_CONFIG.logoSmallUrl} alt={CLINIC_CONFIG.nameShort} fill className="object-contain" />
-                )}
-              </div>
-            )}
+            <div className="mx-auto w-fit">
+              <ClinicWordmark sizeClassName="w-40 h-14" />
+            </div>
             <div className="w-16 h-16 bg-emerald-500 rounded-full flex items-center justify-center mx-auto shadow-lg shadow-emerald-500/40">
               <CheckCircle2 className="w-10 h-10 text-white" />
             </div>
@@ -211,14 +204,11 @@ export default function QuestionnairePage() {
       <div className="max-w-lg mx-auto py-12 px-4">
         {/* ロゴ */}
         <div className="flex flex-col items-center mb-10">
-          <div className="relative w-48 h-16 mb-3">
-            {_isExternalLogo ? (
-                <img src={CLINIC_CONFIG.logoSmallUrl} alt={CLINIC_CONFIG.nameShort} className={`max-h-full w-auto object-contain mx-auto ${CLINIC_CONFIG.usesWordmarkLogo ? "bg-white rounded-lg px-3 py-2" : ""}`} />
-              ) : (
-                <Image src={CLINIC_CONFIG.logoSmallUrl} alt={CLINIC_CONFIG.nameShort} fill className="object-contain" />
-              )}
-          </div>
-          <p className="text-blue-200/50 text-xs tracking-widest uppercase">Body ALL care.</p>
+          <ClinicWordmark sizeClassName="w-48 h-16 mb-3" textClassName="text-2xl font-extrabold text-white text-center leading-tight" />
+          {/* ボールのタグライン。他院に出さない（混入防止） */}
+          {CLINIC_CONFIG.isDefaultClinic && (
+            <p className="text-blue-200/50 text-xs tracking-widest uppercase">Body ALL care.</p>
+          )}
         </div>
 
         <div className="bg-white/5 backdrop-blur-xl rounded-[2.5rem] border border-white/10 p-8 shadow-2xl">
