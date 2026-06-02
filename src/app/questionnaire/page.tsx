@@ -1,23 +1,54 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { CheckCircle2, MessageCircle, ArrowLeft, ChevronRight } from "lucide-react";
 import { submitQuestionnaire } from "@/app/actions/questionnaire";
+import { getPublicClinicSettings } from "@/app/actions/publicSettings";
 import { toast } from "sonner";
 import { CLINIC_CONFIG } from "@/lib/clinic-config";
 const _isExternalLogo = CLINIC_CONFIG.logoSmallUrl.startsWith("http");
 
+// LINE 公式アカウント URL のフォールバック（env も DB も無いときのみ）
+const LINE_URL_FALLBACK =
+  process.env.NEXT_PUBLIC_LINE_OFFICIAL_ACCOUNT_URL ?? "https://line.me/R/ti/p/%40shc8761q";
+
 const MONTHS = Array.from({ length: 12 }, (_, i) => i + 1);
 const AGE_GROUPS = ["19歳以下", "20代", "30代", "40代", "50代", "60代以上"];
-// 近隣市町村（徳島）。子ども医療費助成の判定・エリア分析に使う。該当が無ければ「その他」で自由入力。
-const NEARBY_CITIES = ["藍住町", "北島町", "板野町", "松茂町", "上板町", "徳島市", "鳴門市", "石井町", "吉野川市", "阿波市"];
+
+// 47都道府県（「他県も選択できるように」）
+const PREFECTURES = [
+  "北海道","青森県","岩手県","宮城県","秋田県","山形県","福島県","茨城県","栃木県","群馬県",
+  "埼玉県","千葉県","東京都","神奈川県","新潟県","富山県","石川県","福井県","山梨県","長野県",
+  "岐阜県","静岡県","愛知県","三重県","滋賀県","京都府","大阪府","兵庫県","奈良県","和歌山県",
+  "鳥取県","島根県","岡山県","広島県","山口県","徳島県","香川県","愛媛県","高知県","福岡県",
+  "佐賀県","長崎県","熊本県","大分県","宮崎県","鹿児島県","沖縄県",
+];
+
+// 県ごとの近隣市町村クイック選択（子ども医療費助成の判定・エリア分析に使う）。
+// 該当が無ければ「その他」で自由入力。院の住所から県を判定して切り替える。
+const CITIES_BY_PREFECTURE: Record<string, string[]> = {
+  徳島県: ["藍住町", "北島町", "板野町", "松茂町", "上板町", "徳島市", "鳴門市", "石井町", "吉野川市", "阿波市"],
+  香川県: ["高松市", "丸亀市", "坂出市", "さぬき市", "三木町", "綾川町", "宇多津町", "善通寺市", "観音寺市", "東かがわ市"],
+};
+
+/** 院の住所文字列から都道府県を推定（"〒... 香川県高松市..." → "香川県"）。無ければ徳島県。 */
+function detectPrefecture(address: string | null | undefined): string {
+  const a = address ?? "";
+  const hit = PREFECTURES.find((p) => a.includes(p));
+  return hit ?? "徳島県";
+}
 
 export default function QuestionnairePage() {
   const [step, setStep] = useState<"form" | "done">("form");
   const [submitting, setSubmitting] = useState(false);
   const [normalizedPhone, setNormalizedPhone] = useState("");
+
+  // 院の公開設定（LINE URL・住所＝県判定）。マウント時に取得。
+  const [lineUrl, setLineUrl] = useState<string>(LINE_URL_FALLBACK);
+  const [homePrefecture, setHomePrefecture] = useState<string>("徳島県");
+  const [prefectureTouched, setPrefectureTouched] = useState(false);
 
   const [name, setName] = useState("");
   const [guardianName, setGuardianName] = useState("");
@@ -25,10 +56,27 @@ export default function QuestionnairePage() {
   const [birthMonth, setBirthMonth] = useState<number | null>(null);
   const [gender, setGender] = useState<"male" | "female" | "other" | null>(null);
   const [ageGroup, setAgeGroup] = useState<string | null>(null);
+  const [prefecture, setPrefecture] = useState<string>("徳島県"); // 選択中の都道府県
   const [city, setCity] = useState<string>("");        // 選択中の市町村（"__other__" で自由入力）
   const [cityOther, setCityOther] = useState<string>(""); // 「その他」自由入力
   const [schoolClub, setSchoolClub] = useState<string>("");
   const [birthDate, setBirthDate] = useState<string>("");
+
+  // 院の公開設定を取得 → LINE URL（DB優先）と、住所から県のデフォルトを決める
+  useEffect(() => {
+    getPublicClinicSettings()
+      .then((s) => {
+        if (s?.line_official_account_url) setLineUrl(s.line_official_account_url);
+        const pref = detectPrefecture(s?.address);
+        setHomePrefecture(pref);
+        if (!prefectureTouched) setPrefecture(pref); // ユーザー未操作なら院の県をデフォルトに
+      })
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // 選択中の県のクイック市町村ボタン
+  const cityChoices = useMemo(() => CITIES_BY_PREFECTURE[prefecture] ?? [], [prefecture]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -43,7 +91,11 @@ export default function QuestionnairePage() {
       return;
     }
 
-    const resolvedCity = (city === "__other__" ? cityOther.trim() : city) || null;
+    const cityValue = (city === "__other__" || cityChoices.length === 0) ? cityOther.trim() : city;
+    // 院の県と違う県を選んだ場合は「都道府県＋市町村」で保存（県内なら市町村だけ＝医療費助成の照合用）
+    const resolvedCity = cityValue
+      ? (prefecture !== homePrefecture ? `${prefecture}${cityValue}` : cityValue)
+      : (prefecture !== homePrefecture ? prefecture : null);
 
     setSubmitting(true);
     try {
@@ -102,7 +154,7 @@ export default function QuestionnairePage() {
               <p className="text-white font-bold text-sm">LINEを友だち追加する</p>
             </div>
             <a
-              href="https://line.me/ti/p/%40shc8761q"
+              href={lineUrl}
               target="_blank"
               rel="noreferrer"
               className="flex w-full items-center justify-center bg-[#06C755] hover:bg-[#05b34c] text-white font-bold py-4 px-4 rounded-xl transition-all gap-2 text-base shadow-lg"
@@ -296,44 +348,67 @@ export default function QuestionnairePage() {
               </div>
             </div>
 
-            {/* お住まいの市町村 */}
+            {/* お住まい（都道府県＋市町村） */}
             <div className="space-y-2">
               <label className="text-blue-100/85 font-bold text-xs uppercase tracking-wide">
-                お住まいの市町村 <span className="text-blue-400/50 font-normal normal-case text-[11px]">（任意）</span>
+                お住まい <span className="text-blue-400/50 font-normal normal-case text-[11px]">（任意・都道府県＋市町村）</span>
               </label>
-              <div className="grid grid-cols-3 gap-2">
-                {NEARBY_CITIES.map((c) => (
+              {/* 都道府県（院の県をデフォルト・他県も選択可） */}
+              <select
+                value={prefecture}
+                onChange={(e) => {
+                  const newPref = e.target.value;
+                  setPrefectureTouched(true);
+                  setPrefecture(newPref);
+                  const hasChoices = (CITIES_BY_PREFECTURE[newPref] ?? []).length > 0;
+                  setCity(hasChoices ? "" : "__other__");
+                  setCityOther("");
+                }}
+                className="w-full h-12 bg-white/5 border border-white/10 rounded-2xl px-4 text-white focus:outline-none focus:border-blue-500/50 focus:bg-white/10 transition-all [color-scheme:dark]"
+              >
+                {PREFECTURES.map((p) => (
+                  <option key={p} value={p} className="bg-slate-800 text-white">{p}</option>
+                ))}
+              </select>
+
+              {/* 市町村クイック選択（県に候補があるときだけボタン表示） */}
+              {cityChoices.length > 0 && (
+                <div className="grid grid-cols-3 gap-2">
+                  {cityChoices.map((c) => (
+                    <button
+                      key={c}
+                      type="button"
+                      onClick={() => { setCity(city === c ? "" : c); }}
+                      className={`h-11 rounded-2xl font-bold text-sm transition-all border ${
+                        city === c
+                          ? "bg-blue-600 border-blue-500 text-white"
+                          : "bg-white/5 border-white/10 text-blue-100/85 hover:bg-white/10"
+                      }`}
+                    >
+                      {c}
+                    </button>
+                  ))}
                   <button
-                    key={c}
                     type="button"
-                    onClick={() => { setCity(city === c ? "" : c); }}
+                    onClick={() => setCity(city === "__other__" ? "" : "__other__")}
                     className={`h-11 rounded-2xl font-bold text-sm transition-all border ${
-                      city === c
+                      city === "__other__"
                         ? "bg-blue-600 border-blue-500 text-white"
                         : "bg-white/5 border-white/10 text-blue-100/85 hover:bg-white/10"
                     }`}
                   >
-                    {c}
+                    その他
                   </button>
-                ))}
-                <button
-                  type="button"
-                  onClick={() => setCity(city === "__other__" ? "" : "__other__")}
-                  className={`h-11 rounded-2xl font-bold text-sm transition-all border ${
-                    city === "__other__"
-                      ? "bg-blue-600 border-blue-500 text-white"
-                      : "bg-white/5 border-white/10 text-blue-100/85 hover:bg-white/10"
-                  }`}
-                >
-                  その他
-                </button>
-              </div>
-              {city === "__other__" && (
+                </div>
+              )}
+
+              {/* 市区町村の自由入力（候補なしの県、または「その他」選択時） */}
+              {(cityChoices.length === 0 || city === "__other__") && (
                 <input
                   type="text"
                   value={cityOther}
                   onChange={(e) => setCityOther(e.target.value)}
-                  placeholder="例：石井町、徳島市〇〇 など"
+                  placeholder="市区町村を入力（例：高松市〇〇、徳島市〇〇）"
                   className="w-full h-12 bg-white/5 border border-white/10 rounded-2xl px-4 text-white placeholder:text-white/50 focus:outline-none focus:border-blue-500/50 focus:bg-white/10 transition-all"
                 />
               )}
