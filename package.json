@@ -10,7 +10,9 @@
     "lint": "eslint",
     "migrate": "node scripts/migrate-on-build.mjs",
     "audit:tenant": "node scripts/audit-tenant-isolation.mjs",
-    "audit:tenant:verbose": "node scripts/audit-tenant-isolation.mjs --verbose"
+    "audit:tenant:verbose": "node scripts/audit-tenant-isolation.mjs --verbose",
+    "smoke": "node scripts/post-deploy-smoke.mjs",
+    "verify:clinic": "node scripts/verify-clinic-identity.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.82.0",

@@ -13,11 +13,14 @@
  *   node scripts/post-deploy-smoke.mjs
  */
 
+// expectClinic = /api/clinic-info の clinicName に必ず含まれるべき文字列。
+// expectDefault = true ならボール接骨院（デフォルト）であるべきドメイン。
+// これで「他院ドメインがボールにフォールバックしている」事故を即検知する。
 const TARGETS = [
-  { name: "ball-clinic-reserve", url: "https://ball-clinic-reserve.vercel.app" },
-  { name: "karada-clinic",       url: "https://karada-clinic.vercel.app" },
-  { name: "muscleseitai",        url: "https://muscleseitai.vercel.app" },
-  { name: "relaq-clinic",        url: "https://relaq-clinic.vercel.app" },
+  { name: "ball-clinic-reserve", url: "https://ball-clinic-reserve.vercel.app", expectClinic: "ボール",   expectDefault: true  },
+  { name: "karada-clinic",       url: "https://karada-clinic.vercel.app",       expectClinic: "からだ",   expectDefault: false },
+  { name: "muscleseitai",        url: "https://muscleseitai.vercel.app",         expectClinic: "マッスル", expectDefault: false },
+  { name: "relaq-clinic",        url: "https://relaq-clinic.vercel.app",         expectClinic: "RELAQ",    expectDefault: false },
 ];
 
 const PATHS = [
@@ -43,6 +46,29 @@ async function probe(url) {
   }
 }
 
+// /api/clinic-info を読んで、このドメインが期待どおりのクリニックとして焼き込まれているか検証。
+// 「他院ドメインがボールにフォールバックしている」事故をここで止める。
+async function probeClinicIdentity(t) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
+  try {
+    const res = await fetch(t.url + "/api/clinic-info", { signal: ctrl.signal, cache: "no-store" });
+    if (!res.ok) return { passed: false, detail: `status=${res.status}` };
+    const info = await res.json();
+    const nameOk = (info.clinicName || "").includes(t.expectClinic);
+    const defaultOk = !!info.isDefault === !!t.expectDefault;
+    const passed = nameOk && defaultOk;
+    return {
+      passed,
+      detail: `clinic="${info.clinicName}" isDefault=${info.isDefault} (期待: 含む"${t.expectClinic}", default=${t.expectDefault})`,
+    };
+  } catch (e) {
+    return { passed: false, detail: `err=${e.message}` };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 let failures = 0;
 
 for (const t of TARGETS) {
@@ -55,6 +81,10 @@ for (const t of TARGETS) {
     console.log(`  ${mark} ${p.path.padEnd(20)} status=${r.status} (${r.ms}ms)${r.error ? ` err=${r.error}` : ""}`);
     if (!passed && p.critical) failures++;
   }
+  // クリニック識別（フォールバック検知）— critical
+  const id = await probeClinicIdentity(t);
+  console.log(`  ${id.passed ? "✅" : "❌"} ${"/api/clinic-info".padEnd(20)} ${id.detail}`);
+  if (!id.passed) failures++;
 }
 
 console.log(`\n${failures === 0 ? "✅" : "❌"} smoke test ${failures === 0 ? "passed" : `failed (${failures} critical)`}`);
