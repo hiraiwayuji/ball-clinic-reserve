@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
-import { ClipboardList, Plus, Trash2, Loader2, Save, ArrowUp, ArrowDown } from "lucide-react";
+import { ClipboardList, Plus, Trash2, Loader2, Save, ArrowUp, ArrowDown, BookOpen, ChevronDown, ChevronUp } from "lucide-react";
 import {
   getTallyColumns,
   updateTallyColumns,
@@ -27,6 +27,7 @@ export default function SalesInputModeEditor({
   const [columns, setColumns] = useState<TallyColumn[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);
 
   useEffect(() => {
     getTallyColumns()
@@ -114,6 +115,83 @@ export default function SalesInputModeEditor({
 
         {mode === "tally" && (
           <div className="border-t pt-4 space-y-3">
+            {/* 使い方マニュアル */}
+            <div className="rounded-xl border border-indigo-200 bg-indigo-50/50 overflow-hidden">
+              <button
+                type="button"
+                onClick={() => setShowHelp((v) => !v)}
+                className="w-full flex items-center justify-between px-4 py-3 text-left"
+              >
+                <span className="flex items-center gap-2 text-sm font-bold text-indigo-800">
+                  <BookOpen className="w-4 h-4" /> 窓口日計表の使い方ガイド
+                </span>
+                {showHelp ? <ChevronUp className="w-4 h-4 text-indigo-500" /> : <ChevronDown className="w-4 h-4 text-indigo-500" />}
+              </button>
+              {showHelp && (
+                <div className="px-4 pb-4 space-y-4 text-sm text-slate-700">
+                  <div>
+                    <p className="font-bold text-slate-800 mb-1">📋 日計表とは</p>
+                    <p className="text-[13px] leading-relaxed text-slate-600">
+                      紙の窓口日計表と同じように、1日の患者さんを一覧で並べて、<br />
+                      施術の区分ごとに金額を入力していく記帳スタイルです。<br />
+                      入力すると、区分ごとの小計と本日合計が自動で計算されます。
+                    </p>
+                  </div>
+
+                  <div>
+                    <p className="font-bold text-slate-800 mb-1">🗂 「カラム（列）」とは</p>
+                    <p className="text-[13px] leading-relaxed text-slate-600">
+                      日計表の<strong>金額を入力する縦の列</strong>のことです。<br />
+                      たとえば「保険柔整」「鍼灸」「揉み」「物販」のように、<br />
+                      院で分けて集計したい施術区分を列として設定します。<br />
+                      ここで設定した列が、そのまま記帳画面と分析画面に反映されます。
+                    </p>
+                  </div>
+
+                  <div>
+                    <p className="font-bold text-slate-800 mb-1">✍️ 記帳のながれ（毎日の入力）</p>
+                    <ol className="text-[13px] leading-relaxed text-slate-600 list-decimal pl-5 space-y-0.5">
+                      <li>左メニューの「売上記帳」を開く（その日の予約・受付の患者さんが自動で並びます）</li>
+                      <li>各患者さんの行で、施術区分の列に金額を入力</li>
+                      <li>担当のスタッフをプルダウンで選択（任意）</li>
+                      <li>飛び込みの患者さんは「行を追加」で増やせます</li>
+                      <li>最後に「日計表を保存」を押して完了</li>
+                    </ol>
+                  </div>
+
+                  <div>
+                    <p className="font-bold text-slate-800 mb-1">🛠 列（カラム）の編集方法</p>
+                    <ul className="text-[13px] leading-relaxed text-slate-600 list-disc pl-5 space-y-0.5">
+                      <li><strong>名前を変える</strong>：欄に直接入力して書き換え</li>
+                      <li><strong>並び順を変える</strong>：右の ▲▼ ボタンで上下に移動</li>
+                      <li><strong>増やす</strong>：「追加」ボタンで新しい列を作成</li>
+                      <li><strong>消す</strong>：ゴミ箱ボタンで列を削除</li>
+                      <li>編集したら下の「<strong>カラムを保存</strong>」を押してください</li>
+                    </ul>
+                  </div>
+
+                  <div>
+                    <p className="font-bold text-slate-800 mb-1">📊 集計・分析</p>
+                    <p className="text-[13px] leading-relaxed text-slate-600">
+                      記帳画面の下に区分ごとの小計と本日合計、来院人数・新患数が出ます。<br />
+                      記帳画面 右上の「データ分析」から、<br />
+                      カテゴリ別の構成・日別/月別の売上推移・担当別の売上もグラフで見られます。
+                    </p>
+                  </div>
+
+                  <div className="rounded-lg bg-amber-50 border border-amber-200 px-3 py-2">
+                    <p className="font-bold text-amber-800 text-[13px] mb-1">⚠️ 注意点</p>
+                    <ul className="text-[12px] leading-relaxed text-amber-700 list-disc pl-4 space-y-0.5">
+                      <li>「日計表を保存」すると、その日の内容は入力したもので上書きされます</li>
+                      <li>金額が入っていない行は登録されません（空行はそのままでOK）</li>
+                      <li>過去・未来の日付の記帳はオーナーのみ可能です（当日入力はスタッフも可）</li>
+                      <li>列の設定を変えても、これまでに記帳したデータは消えません</li>
+                    </ul>
+                  </div>
+                </div>
+              )}
+            </div>
+
             <div className="flex items-center justify-between">
               <Label className="font-bold text-slate-700">日計表の金額カラム</Label>
               <Button type="button" size="sm" variant="outline" onClick={add} className="gap-1">
