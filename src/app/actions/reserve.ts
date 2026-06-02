@@ -171,7 +171,7 @@ export async function createWaitlistReservation(formData: FormData) {
     }
   } catch (err) {
     console.error(err);
-    return { success: false, error: "エラーが発生しました。お手数ですが、お電話（088-635-5344）またはLINEにてご予約ください。" };
+    return { success: false, error: "エラーが発生しました。お手数ですが、お電話またはLINEにてご予約ください。" };
   }
 }
 
@@ -622,7 +622,7 @@ export async function createReservation(formData: FormData) {
 
       if (appointmentErr || !appointmentData) {
         console.error("Appointment insertion error:", appointmentErr);
-        return { success: false, error: "予約の登録に失敗しました。時間をおいて再度お試しいただくか、お電話（088-635-5344）にてご予約ください。" };
+        return { success: false, error: "予約の登録に失敗しました。時間をおいて再度お試しいただくか、お電話・LINEにてご予約ください。" };
       }
       
       const reservationNumber = appointmentData.id.split('-')[0].toUpperCase();
@@ -645,7 +645,7 @@ export async function createReservation(formData: FormData) {
     }
   } catch (err) {
     console.error(err);
-    return { success: false, error: "エラーが発生しました。お手数ですが、お電話（088-635-5344）またはLINEにてご予約ください。" };
+    return { success: false, error: "エラーが発生しました。お手数ですが、お電話またはLINEにてご予約ください。" };
   }
 }
 

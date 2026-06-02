@@ -4,13 +4,15 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "npm run audit:tenant && node scripts/migrate-on-build.mjs && next build",
+    "build": "node scripts/check-clinic-env.mjs && npm run audit:tenant && npm run audit:clinic-leaks && node scripts/migrate-on-build.mjs && next build",
     "build:no-migrate": "next build",
     "start": "next start",
     "lint": "eslint",
     "migrate": "node scripts/migrate-on-build.mjs",
     "audit:tenant": "node scripts/audit-tenant-isolation.mjs",
     "audit:tenant:verbose": "node scripts/audit-tenant-isolation.mjs --verbose",
+    "audit:clinic-leaks": "node scripts/audit-clinic-leaks.mjs",
+    "audit": "node scripts/check-clinic-env.mjs && npm run audit:tenant && npm run audit:clinic-leaks",
     "smoke": "node scripts/post-deploy-smoke.mjs",
     "verify:clinic": "node scripts/verify-clinic-identity.mjs"
   },

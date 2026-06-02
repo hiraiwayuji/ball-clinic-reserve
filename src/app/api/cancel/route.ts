@@ -146,7 +146,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(
       {
         error:
-          "予約開始 2 時間前を切っているため Web からはキャンセルできません。お電話（088-635-5344）または LINE にてご連絡ください。",
+          "予約開始 2 時間前を切っているため Web からはキャンセルできません。お電話または LINE にてご連絡ください。",
       },
       { status: 400 },
     );
