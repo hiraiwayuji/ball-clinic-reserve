@@ -48,7 +48,7 @@ type Appointment = {
   staff_id: string | null;
   staff_name: string | null;
   room_name: string | null;
-  customers: { id: string; name: string; phone: string; line_user_id: string | null; medical_record_number: string | null } | null;
+  customers: { id: string; name: string; phone: string; line_user_id: string | null; medical_record_number: string | null; birth_date: string | null; city_name: string | null } | null;
 };
 
 // ステータス定義
@@ -466,6 +466,8 @@ function AppointmentCard({
         onOpenChange={setCheckoutOpen}
         appointmentId={apt.id}
         customerName={apt.customers?.name ?? ""}
+        customerBirthDate={apt.customers?.birth_date ?? null}
+        customerCity={apt.customers?.city_name ?? null}
         isFirstVisit={apt.is_first_visit}
         courseName={apt.course_name}
         saleDate={parseISO(apt.start_time)}

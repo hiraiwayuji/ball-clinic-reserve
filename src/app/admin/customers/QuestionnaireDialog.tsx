@@ -45,6 +45,7 @@ interface Props {
     birth_date: string | null;
     referral_source: string | null;
     address: string | null;
+    school_club: string | null;
   };
 }
 
@@ -57,6 +58,7 @@ export function QuestionnaireDialog({ open, onOpenChange, customerId, customerNa
   const [birthDate, setBirthDate] = useState(initialData.birth_date ?? "");
   const [referralSource, setReferralSource] = useState(initialData.referral_source ?? "");
   const [address, setAddress] = useState(initialData.address ?? "");
+  const [schoolClub, setSchoolClub] = useState(initialData.school_club ?? "");
   const [isPending, startTransition] = useTransition();
 
   const handleSave = () => {
@@ -71,6 +73,7 @@ export function QuestionnaireDialog({ open, onOpenChange, customerId, customerNa
           birth_date: birthDate || null,
           referral_source: referralSource || null,
           address: address.trim() || null,
+          school_club: schoolClub.trim() || null,
         });
         toast.success("アンケート情報を保存しました");
         onOpenChange(false);
@@ -178,9 +181,21 @@ export function QuestionnaireDialog({ open, onOpenChange, customerId, customerNa
             />
           </div>
 
+          {/* 学校名・クラブ名 */}
+          <div className="space-y-1.5">
+            <label className="text-xs font-bold text-slate-600">学校名・所属クラブ（任意）</label>
+            <input
+              type="text"
+              value={schoolClub}
+              onChange={e => setSchoolClub(e.target.value)}
+              placeholder="例：藍住中学校／〇〇サッカークラブ"
+              className="w-full h-9 border border-slate-200 rounded-lg px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+            />
+          </div>
+
           {/* 生年月日 */}
           <div className="space-y-1.5">
-            <label className="text-xs font-bold text-slate-600">生年月日（正確な年齢分析用）</label>
+            <label className="text-xs font-bold text-slate-600">生年月日（医療費助成の判定・年齢分析用）</label>
             <input
               type="date"
               value={birthDate}

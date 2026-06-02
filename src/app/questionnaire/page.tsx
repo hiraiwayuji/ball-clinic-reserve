@@ -11,6 +11,8 @@ const _isExternalLogo = CLINIC_CONFIG.logoSmallUrl.startsWith("http");
 
 const MONTHS = Array.from({ length: 12 }, (_, i) => i + 1);
 const AGE_GROUPS = ["19歳以下", "20代", "30代", "40代", "50代", "60代以上"];
+// 近隣市町村（徳島）。子ども医療費助成の判定・エリア分析に使う。該当が無ければ「その他」で自由入力。
+const NEARBY_CITIES = ["藍住町", "北島町", "板野町", "松茂町", "上板町", "徳島市", "鳴門市", "石井町", "吉野川市", "阿波市"];
 
 export default function QuestionnairePage() {
   const [step, setStep] = useState<"form" | "done">("form");
@@ -23,6 +25,10 @@ export default function QuestionnairePage() {
   const [birthMonth, setBirthMonth] = useState<number | null>(null);
   const [gender, setGender] = useState<"male" | "female" | "other" | null>(null);
   const [ageGroup, setAgeGroup] = useState<string | null>(null);
+  const [city, setCity] = useState<string>("");        // 選択中の市町村（"__other__" で自由入力）
+  const [cityOther, setCityOther] = useState<string>(""); // 「その他」自由入力
+  const [schoolClub, setSchoolClub] = useState<string>("");
+  const [birthDate, setBirthDate] = useState<string>("");
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -37,6 +43,8 @@ export default function QuestionnairePage() {
       return;
     }
 
+    const resolvedCity = (city === "__other__" ? cityOther.trim() : city) || null;
+
     setSubmitting(true);
     try {
       const result = await submitQuestionnaire({
@@ -46,6 +54,9 @@ export default function QuestionnairePage() {
         birth_month: birthMonth,
         gender,
         age_group: ageGroup,
+        city_name: resolvedCity,
+        school_club: schoolClub.trim() || null,
+        birth_date: birthDate || null,
       });
 
       if (result.success) {
@@ -283,6 +294,76 @@ export default function QuestionnairePage() {
                   </button>
                 ))}
               </div>
+            </div>
+
+            {/* お住まいの市町村 */}
+            <div className="space-y-2">
+              <label className="text-blue-100/85 font-bold text-xs uppercase tracking-wide">
+                お住まいの市町村 <span className="text-blue-400/50 font-normal normal-case text-[11px]">（任意）</span>
+              </label>
+              <div className="grid grid-cols-3 gap-2">
+                {NEARBY_CITIES.map((c) => (
+                  <button
+                    key={c}
+                    type="button"
+                    onClick={() => { setCity(city === c ? "" : c); }}
+                    className={`h-11 rounded-2xl font-bold text-sm transition-all border ${
+                      city === c
+                        ? "bg-blue-600 border-blue-500 text-white"
+                        : "bg-white/5 border-white/10 text-blue-100/85 hover:bg-white/10"
+                    }`}
+                  >
+                    {c}
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  onClick={() => setCity(city === "__other__" ? "" : "__other__")}
+                  className={`h-11 rounded-2xl font-bold text-sm transition-all border ${
+                    city === "__other__"
+                      ? "bg-blue-600 border-blue-500 text-white"
+                      : "bg-white/5 border-white/10 text-blue-100/85 hover:bg-white/10"
+                  }`}
+                >
+                  その他
+                </button>
+              </div>
+              {city === "__other__" && (
+                <input
+                  type="text"
+                  value={cityOther}
+                  onChange={(e) => setCityOther(e.target.value)}
+                  placeholder="例：石井町、徳島市〇〇 など"
+                  className="w-full h-12 bg-white/5 border border-white/10 rounded-2xl px-4 text-white placeholder:text-white/50 focus:outline-none focus:border-blue-500/50 focus:bg-white/10 transition-all"
+                />
+              )}
+            </div>
+
+            {/* 学校名・クラブ名 */}
+            <div className="space-y-2">
+              <label className="text-blue-100/85 font-bold text-xs uppercase tracking-wide">
+                学校名・所属クラブ <span className="text-blue-400/50 font-normal normal-case text-[11px]">（任意・お子様・学生の方）</span>
+              </label>
+              <input
+                type="text"
+                value={schoolClub}
+                onChange={(e) => setSchoolClub(e.target.value)}
+                placeholder="例：藍住中学校／〇〇サッカークラブ"
+                className="w-full h-14 bg-white/5 border border-white/10 rounded-2xl px-4 text-white placeholder:text-white/50 focus:outline-none focus:border-blue-500/50 focus:bg-white/10 transition-all"
+              />
+            </div>
+
+            {/* 生年月日（任意・医療費助成の方） */}
+            <div className="space-y-2">
+              <label className="text-blue-100/85 font-bold text-xs uppercase tracking-wide">
+                生年月日 <span className="text-blue-400/50 font-normal normal-case text-[11px]">（任意・子ども医療費助成をご利用の方はご記入ください）</span>
+              </label>
+              <input
+                type="date"
+                value={birthDate}
+                onChange={(e) => setBirthDate(e.target.value)}
+                className="w-full h-14 bg-white/5 border border-white/10 rounded-2xl px-4 text-white placeholder:text-white/50 focus:outline-none focus:border-blue-500/50 focus:bg-white/10 transition-all [color-scheme:dark]"
+              />
             </div>
 
             <div className="pt-2">

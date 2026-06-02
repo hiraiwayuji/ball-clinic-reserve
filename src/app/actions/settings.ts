@@ -87,6 +87,11 @@ export type ClinicSettings = {
   expense_owner_only?: boolean | null;
   // 店舗の部門（例: ["サロン","カフェ"]）。経費・予約で共通利用。空配列なら部門UIを出さない＝従来通り。
   departments?: string[] | null;
+  // 子ども医療費助成の市町村×学年ステージ別ルール（JSONB）。専用の getter/setter で更新するため
+  // settingsData には載せない（updateClinicSettings 経由では更新しない）。NULL なら徳島デフォルト。
+  medical_aid_rules?: import("@/lib/medical-aid").MedicalAidRules | null;
+  // 医療費助成ルールの最終見直し日（年度替わりリマインド用）。
+  medical_aid_reviewed_at?: string | null;
 };
 
 
@@ -403,4 +408,122 @@ export async function deleteCustomExpenseCategory(name: string): Promise<{ succe
   revalidatePath("/admin/expenses");
   revalidatePath("/admin/expenses/triage");
   return { success: true };
+}
+
+// --- 子ども医療費助成ルール ---
+// custom_expense_categories と同じく、専用カラムを直接 update する。
+// （updateClinicSettings の settingsData 列挙には載せない＝二重列挙バグを回避）
+
+import {
+  DEFAULT_MEDICAL_AID_RULES,
+  type MedicalAidRules,
+} from "@/lib/medical-aid";
+
+export type MedicalAidRulesState = {
+  rules: MedicalAidRules;
+  isDefault: boolean;       // まだ院独自設定が無く、徳島デフォルトを表示しているか
+  reviewedAt: string | null; // 最終見直し日（YYYY-MM-DD）
+};
+
+export async function getMedicalAidRules(): Promise<MedicalAidRulesState> {
+  const { clinicId } = await checkAdminAuth();
+  noStore();
+  const { createClient } = await import("@/lib/supabase/server");
+  const supabase = await createClient();
+
+  const { data } = await supabase
+    .from("clinic_settings")
+    .select("medical_aid_rules, medical_aid_reviewed_at")
+    .eq("id", clinicId)
+    .maybeSingle();
+
+  const stored = data?.medical_aid_rules as MedicalAidRules | null | undefined;
+  const hasCities = !!stored && Array.isArray(stored.cities) && stored.cities.length > 0;
+  return {
+    rules: hasCities ? (stored as MedicalAidRules) : DEFAULT_MEDICAL_AID_RULES,
+    isDefault: !hasCities,
+    reviewedAt: (data?.medical_aid_reviewed_at as string | null) ?? null,
+  };
+}
+
+export async function updateMedicalAidRules(
+  rules: MedicalAidRules,
+): Promise<{ success: boolean; error?: string }> {
+  // 売上・会計に直結する設定のため owner 専用。
+  const auth = await checkAdminAuth();
+  const { clinicId } = auth;
+  if (auth.role !== "owner") {
+    return { success: false, error: "この設定はオーナーのみ変更できます" };
+  }
+
+  // 軽いバリデーション（自己負担は 0 以上の整数のみ）
+  if (!rules || !Array.isArray(rules.cities)) {
+    return { success: false, error: "ルール形式が不正です" };
+  }
+  for (const c of rules.cities) {
+    if (!c.city?.trim()) return { success: false, error: "市町村名が空の行があります" };
+    for (const v of Object.values(c.burdens ?? {})) {
+      if (typeof v === "number" && (v < 0 || !Number.isFinite(v))) {
+        return { success: false, error: `${c.city} の自己負担額が不正です` };
+      }
+    }
+  }
+
+  const { createClient } = await import("@/lib/supabase/server");
+  const supabase = await createClient();
+
+  const today = new Date();
+  const reviewedAt = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+
+  const { error } = await supabase
+    .from("clinic_settings")
+    .update({ medical_aid_rules: rules, medical_aid_reviewed_at: reviewedAt })
+    .eq("id", clinicId);
+
+  if (error) return { success: false, error: "保存に失敗しました: " + error.message };
+
+  await writeAudit({
+    clinicId,
+    actorUserId: auth.userId,
+    actorEmail: auth.email,
+    actorRole: auth.role,
+    actionType: "settings.update",
+    targetTable: "clinic_settings",
+    targetId: clinicId,
+    after: { medical_aid_rules: rules },
+  });
+
+  revalidatePath("/admin/settings");
+  return { success: true };
+}
+
+// 年度替わりに「医療費助成の見直し」を促すべきか判定する（AI秘書用）。
+// 現在の年度（4月始まり）に一度も見直していなければ true。
+export async function getMedicalAidReviewReminder(): Promise<{
+  needsReview: boolean;
+  fiscalYear: number;
+  reviewedAt: string | null;
+}> {
+  const { reviewedAt } = await getMedicalAidRules();
+  const now = new Date();
+  const fiscalYear = now.getMonth() + 1 >= 4 ? now.getFullYear() : now.getFullYear() - 1;
+  const fyStart = new Date(fiscalYear, 3, 1); // 当年度の4/1
+  const reviewed = reviewedAt ? new Date(reviewedAt) : null;
+  const needsReview = !reviewed || reviewed.getTime() < fyStart.getTime();
+  return { needsReview, fiscalYear, reviewedAt };
+}
+
+// AI秘書のリマインドから「確認した」を押したときに見直し日だけ更新する。
+export async function markMedicalAidReviewed(): Promise<{ success: boolean }> {
+  const { clinicId } = await checkAdminAuth();
+  const { createClient } = await import("@/lib/supabase/server");
+  const supabase = await createClient();
+  const today = new Date();
+  const reviewedAt = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+  const { error } = await supabase
+    .from("clinic_settings")
+    .update({ medical_aid_reviewed_at: reviewedAt })
+    .eq("id", clinicId);
+  revalidatePath("/admin/dashboard");
+  return { success: !error };
 }

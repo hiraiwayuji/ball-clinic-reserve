@@ -26,6 +26,7 @@ type CustomerWithStats = {
   referral_source: string | null;
   medical_record_number: string | null;
   address: string | null;
+  school_club: string | null;
 };
 
 type AppointmentRow = {
@@ -73,6 +74,7 @@ export async function getCustomers(): Promise<CustomerWithStats[]> {
         referral_source,
         medical_record_number,
         address,
+        school_club,
         appointments (
           id,
           start_time,
@@ -107,6 +109,7 @@ export async function getCustomers(): Promise<CustomerWithStats[]> {
           birth_date,
           referral_source,
           address,
+          school_club,
           appointments (
             id,
             start_time,
@@ -160,6 +163,7 @@ export async function getCustomers(): Promise<CustomerWithStats[]> {
         referral_source: c.referral_source ?? null,
         address: c.address ?? null,
         medical_record_number: c.medical_record_number ?? null,
+        school_club: c.school_club ?? null,
       };
     });
 
@@ -181,6 +185,7 @@ export async function updateCustomerQuestionnaire(
     birth_date?: string | null;
     referral_source?: string | null;
     address?: string | null;
+    school_club?: string | null;
   }
 ) {
   const { clinicId } = await checkAdminAuth();

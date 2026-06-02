@@ -12,6 +12,7 @@ import { useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import LPSettingsEditor from "./LPSettingsEditor";
 import PaymentCategoriesEditor from "./PaymentCategoriesEditor";
+import MedicalAidRulesEditor from "./MedicalAidRulesEditor";
 
 export default function SettingsEditor({ initialSettings }: { initialSettings: ClinicSettings | null }) {
   const router = useRouter();
@@ -281,6 +282,9 @@ export default function SettingsEditor({ initialSettings }: { initialSettings: C
 
           {/* 支払区分マスタ */}
           <PaymentCategoriesEditor />
+
+          {/* 子ども医療費助成ルール（市町村×学年で窓口0円/600円を会計画面に反映） */}
+          <MedicalAidRulesEditor />
 
           {/* LINE連携設定（ここを一番目立つようにしました！） */}
           <Card className="border-green-400 shadow-md ring-2 ring-green-100">

@@ -44,6 +44,7 @@ export type Customer = {
   referral_source: string | null;
   address: string | null;
   medical_record_number: string | null;
+  school_club: string | null;
 };
 
 type SortKey = "name" | "appointmentCount" | "lastVisit" | "created_at" | "medical_record_number";
@@ -524,6 +525,7 @@ function EditableRow({
               birth_date: customer.birth_date,
               referral_source: customer.referral_source,
               address: customer.address,
+              school_club: customer.school_club,
             }}
           />
         </TableCell>

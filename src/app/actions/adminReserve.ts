@@ -688,7 +688,7 @@ export async function getTodayAppointments() {
       .select(`
         id, start_time, end_time, status, checkin_status,
         is_first_visit, memo, course_id, course_name, staff_id, staff_name, room_name,
-        customers(id, name, phone, line_user_id, medical_record_number)
+        customers(id, name, phone, line_user_id, medical_record_number, birth_date, city_name)
       `)
       .eq("clinic_id", clinicId)
       .neq("status", "cancelled")
@@ -718,7 +718,7 @@ export async function getAppointmentsByDate(dateStr: string) {
       .select(`
         id, start_time, end_time, status, checkin_status,
         is_first_visit, memo, course_id, course_name, staff_id, staff_name, room_name,
-        customers(id, name, phone, line_user_id, medical_record_number)
+        customers(id, name, phone, line_user_id, medical_record_number, birth_date, city_name)
       `)
       .eq("clinic_id", clinicId)
       .neq("status", "cancelled")

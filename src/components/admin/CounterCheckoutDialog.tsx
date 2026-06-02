@@ -14,23 +14,31 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { addCashSale, getSalesPrediction } from "@/app/actions/sales";
 import { updateCheckinStatus } from "@/app/actions/adminReserve";
+import { getMedicalAidRules } from "@/app/actions/settings";
 import { usePaymentCategories } from "@/lib/use-payment-categories";
 import { getPaymentCategoryColor } from "@/lib/payment-category-color";
+import { evaluateMedicalAid, type MedicalAidRules, type MedicalAidStatus } from "@/lib/medical-aid";
 import { toast } from "sonner";
 import { format } from "date-fns";
-import { CreditCard, Loader2, UserPlus, ShieldCheck, Bot } from "lucide-react";
+import { CreditCard, Loader2, UserPlus, ShieldCheck, Bot, HeartHandshake } from "lucide-react";
 
 type Props = {
   open: boolean;
   onOpenChange: (o: boolean) => void;
   appointmentId: string;
   customerName: string;
+  /** 子ども医療費助成の判定に使う（市町村＋年齢で窓口0円/600円を色分け） */
+  customerBirthDate?: string | null;
+  customerCity?: string | null;
   isFirstVisit: boolean;
   courseName?: string | null;
   saleDate: Date;
   /** 会計登録＆会計完了が済んだら呼ぶ（受付一覧の状態を done に更新する用） */
   onCompleted: (id: string) => void;
 };
+
+// 医療費助成ルールはモジュール内でキャッシュ（会計のたびに取り直さない）
+let cachedMedicalAidRules: MedicalAidRules | null = null;
 
 /**
  * 受付ページ上で会計（売上入力）まで完結させるダイアログ。
@@ -42,6 +50,8 @@ export default function CounterCheckoutDialog({
   onOpenChange,
   appointmentId,
   customerName,
+  customerBirthDate,
+  customerCity,
   isFirstVisit: initialFirstVisit,
   courseName,
   saleDate,
@@ -54,6 +64,7 @@ export default function CounterCheckoutDialog({
   const [isFirstVisit, setIsFirstVisit] = useState(initialFirstVisit);
   const [submitting, setSubmitting] = useState(false);
   const [aiNote, setAiNote] = useState<string | null>(null);
+  const [medicalAid, setMedicalAid] = useState<MedicalAidStatus | null>(null);
 
   // 開くたびに初期化。再診は過去履歴から金額を自動入力（AI秘書）。
   useEffect(() => {
@@ -63,6 +74,22 @@ export default function CounterCheckoutDialog({
     setPaymentTypes(["jihi"]);
     setIsFirstVisit(initialFirstVisit);
     setAiNote(null);
+    // 子ども医療費助成の判定（市町村＋生年月日）。ルールはキャッシュ。
+    setMedicalAid(null);
+    (async () => {
+      if (!cachedMedicalAidRules) {
+        try {
+          const res = await getMedicalAidRules();
+          cachedMedicalAidRules = res.rules;
+        } catch { /* デフォルトにフォールバック */ }
+      }
+      const status = evaluateMedicalAid({
+        birthDate: customerBirthDate,
+        cityName: customerCity,
+        rules: cachedMedicalAidRules,
+      });
+      if (status.applicable || status.needsMoreInfo) setMedicalAid(status);
+    })();
     if (!initialFirstVisit && customerName) {
       getSalesPrediction(customerName)
         .then((p) => {
@@ -74,7 +101,7 @@ export default function CounterCheckoutDialog({
         })
         .catch(() => {});
     }
-  }, [open, customerName, initialFirstVisit]);
+  }, [open, customerName, initialFirstVisit, customerBirthDate, customerCity]);
 
   const togglePay = (key: string) =>
     setPaymentTypes((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]));
@@ -167,6 +194,31 @@ export default function CounterCheckoutDialog({
             {isFirstVisit ? "✓ 新患（タップで解除）" : "新患の場合はタップ"}
           </button>
 
+          {/* 子ども医療費助成バナー（市町村＋年齢で対象なら表示） */}
+          {medicalAid && (medicalAid.applicable || medicalAid.needsMoreInfo) && (
+            <div
+              className={`flex items-start gap-2 text-xs rounded-lg px-3 py-2 border ${
+                medicalAid.needsMoreInfo
+                  ? "bg-slate-50 border-slate-200 text-slate-600"
+                  : medicalAid.monthlyBurdenYen === 0
+                    ? "bg-emerald-50 border-emerald-300 text-emerald-800"
+                    : "bg-amber-50 border-amber-300 text-amber-800"
+              }`}
+            >
+              <HeartHandshake className="w-4 h-4 shrink-0 mt-0.5" />
+              <div className="space-y-0.5">
+                <p className="font-bold">
+                  {medicalAid.needsMoreInfo
+                    ? "子ども医療費助成の確認"
+                    : medicalAid.monthlyBurdenYen === 0
+                      ? "👶 子ども医療費助成：窓口0円の対象"
+                      : `👶 子ども医療費助成：窓口上限 月${medicalAid.monthlyBurdenYen?.toLocaleString()}円`}
+                </p>
+                <p className="leading-snug">{medicalAid.message}</p>
+              </div>
+            </div>
+          )}
+
           <div className="space-y-1.5">
             <Label className="text-xs font-semibold text-slate-600 flex items-center gap-1">
               <ShieldCheck className="w-3.5 h-3.5" />
@@ -176,6 +228,8 @@ export default function CounterCheckoutDialog({
               {categories.map((opt) => {
                 const selected = paymentTypes.includes(opt.key);
                 const color = getPaymentCategoryColor(opt.key);
+                // 医療助成(hagukumi)ボタンは、この患者が子ども医療費助成の対象なら強調。
+                const aidHighlight = opt.key === "hagukumi" && medicalAid?.applicable;
                 return (
                   <button
                     key={opt.key}
@@ -183,10 +237,21 @@ export default function CounterCheckoutDialog({
                     onClick={() => togglePay(opt.key)}
                     className={`relative px-2 py-2 rounded-md text-xs font-bold border transition-all ${
                       selected ? color.selected : color.unselected
+                    } ${
+                      aidHighlight && !selected
+                        ? medicalAid?.monthlyBurdenYen === 0
+                          ? "ring-2 ring-emerald-400 border-emerald-400 animate-pulse"
+                          : "ring-2 ring-amber-400 border-amber-400"
+                        : ""
                     }`}
                   >
                     {selected && <span className="absolute top-0.5 right-1 text-[10px]">✓</span>}
                     {opt.label}
+                    {aidHighlight && (
+                      <span className="block text-[9px] font-bold mt-0.5 opacity-80">
+                        {medicalAid?.monthlyBurdenYen === 0 ? "窓口0円" : `上限 月${medicalAid?.monthlyBurdenYen}円`}
+                      </span>
+                    )}
                   </button>
                 );
               })}

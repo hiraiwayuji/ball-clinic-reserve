@@ -97,6 +97,9 @@ export type PendingSalePatient = {
   initialAmount: string;
   /** bulk画面で初期表示するメモ（コース名 > AI予測メモ > "" の優先順位） */
   initialMemo: string;
+  /** 子ども医療費助成の判定用（市町村＋生年月日）。bulk画面で医療助成ボタンを色分けする。 */
+  birthDate: string | null;
+  cityName: string | null;
 };
 
 function getJstDateString(date = new Date()) {
@@ -133,7 +136,7 @@ export async function getTodayPendingSales(dateStr?: string): Promise<{ success:
     // 指定日の「会計完了」予約を取得（コース情報も snapshot として一緒に取る）
     const { data: appointments, error: aptError } = await supabase
       .from("appointments")
-      .select("id, is_first_visit, start_time, checkin_status, status, course_id, course_name, customers(name, medical_record_number)")
+      .select("id, is_first_visit, start_time, checkin_status, status, course_id, course_name, customers(name, medical_record_number, birth_date, city_name)")
       .eq("clinic_id", clinicId)
       .neq("status", "cancelled")
       .gte("start_time", dayStart)
@@ -184,12 +187,14 @@ export async function getTodayPendingSales(dateStr?: string): Promise<{ success:
       status: string;
       course_id: string | null;
       course_name: string | null;
-      customers: { name?: string; medical_record_number?: string | null } | { name?: string; medical_record_number?: string | null }[] | null;
+      customers: { name?: string; medical_record_number?: string | null; birth_date?: string | null; city_name?: string | null } | { name?: string; medical_record_number?: string | null; birth_date?: string | null; city_name?: string | null }[] | null;
     }>) {
       const customerName = getAppointmentCustomerName(apt.customers);
       if (!customerName) continue;
       const custObj = Array.isArray(apt.customers) ? apt.customers[0] : apt.customers;
       const medicalRecordNumber = custObj?.medical_record_number ?? null;
+      const custBirthDate = custObj?.birth_date ?? null;
+      const custCityName = custObj?.city_name ?? null;
       const currentEnteredCount = enteredCounts.get(customerName) ?? 0;
       if (currentEnteredCount > 0) {
         enteredCounts.set(customerName, currentEnteredCount - 1);
@@ -281,6 +286,8 @@ export async function getTodayPendingSales(dateStr?: string): Promise<{ success:
         amountSource,
         initialAmount,
         initialMemo,
+        birthDate: custBirthDate,
+        cityName: custCityName,
       });
     }
 
@@ -306,6 +313,19 @@ function normalizePaymentType(value: unknown): CashSalePaymentType | null {
   return v;
 }
 
+// 複数支払区分の配列を正規化（空・重複・50文字超を除去）。1件も残らなければ null。
+function normalizePaymentTypes(value: unknown): CashSalePaymentType[] | null {
+  if (!Array.isArray(value)) return null;
+  const cleaned = Array.from(
+    new Set(
+      value
+        .map((v) => normalizePaymentType(v))
+        .filter((v): v is CashSalePaymentType => !!v),
+    ),
+  );
+  return cleaned.length > 0 ? cleaned : null;
+}
+
 export async function bulkAddCashSales(rows: Array<{
   customer_name: string;
   treatment_fee: number;
@@ -313,6 +333,8 @@ export async function bulkAddCashSales(rows: Array<{
   is_first_visit: boolean;
   sale_date: string;
   payment_type?: CashSalePaymentType | null;
+  // 複数支払区分（保険＋水素=その他 など）。通常モードで使う。配列で渡すと payment_types に保存。
+  payment_types?: CashSalePaymentType[] | null;
   // 区分ごとに金額を分けて登録したい場合は lines を渡す。
   // lines があれば treatment_fee/payment_type は無視し、各 line を 1 行ずつ cash_sales に insert する。
   lines?: Array<{ payment_type?: CashSalePaymentType | null; treatment_fee: number }>;
@@ -328,16 +350,23 @@ export async function bulkAddCashSales(rows: Array<{
         (l) => l && !Number.isNaN(l.treatment_fee),
       );
       if (validLines.length > 0) {
-        return validLines.map((l) => ({
-          customer_name: r.customer_name,
-          treatment_fee: l.treatment_fee,
-          memo: r.memo,
-          is_first_visit: r.is_first_visit,
-          sale_date: r.sale_date,
-          payment_type: normalizePaymentType(l.payment_type),
-          clinic_id: clinicId,
-        }));
+        return validLines.map((l) => {
+          const pt = normalizePaymentType(l.payment_type);
+          return {
+            customer_name: r.customer_name,
+            treatment_fee: l.treatment_fee,
+            memo: r.memo,
+            is_first_visit: r.is_first_visit,
+            sale_date: r.sale_date,
+            payment_type: pt,
+            payment_types: pt ? [pt] : null,
+            clinic_id: clinicId,
+          };
+        });
       }
+      // 通常モード: 複数区分対応。payment_types 配列を優先、legacy payment_type は先頭要素で後方互換。
+      const paymentTypes = normalizePaymentTypes(r.payment_types) ??
+        (normalizePaymentType(r.payment_type) ? [normalizePaymentType(r.payment_type)!] : null);
       return [
         {
           customer_name: r.customer_name,
@@ -345,7 +374,8 @@ export async function bulkAddCashSales(rows: Array<{
           memo: r.memo,
           is_first_visit: r.is_first_visit,
           sale_date: r.sale_date,
-          payment_type: normalizePaymentType(r.payment_type),
+          payment_type: paymentTypes?.[0] ?? null,
+          payment_types: paymentTypes,
           clinic_id: clinicId,
         },
       ];
@@ -640,26 +670,30 @@ export async function getCashSales(dateStr: string) {
       new Set(sales.map((s: any) => s.customer_name).filter(Boolean)),
     );
     const nameToMrn = new Map<string, string | null>();
+    // 売上一覧（余裕のある画面）で住所＝市町村も出すため、名前→市町村もマップする。
+    const nameToCity = new Map<string, string | null>();
     if (uniqueNames.length > 0) {
       const { data: customers } = await supabase
         .from("customers")
-        .select("name, medical_record_number")
+        .select("name, medical_record_number, city_name")
         .eq("clinic_id", clinicId)
         .in("name", uniqueNames);
-      const tally = new Map<string, { mrn: string | null; count: number }>();
+      const tally = new Map<string, { mrn: string | null; city: string | null; count: number }>();
       (customers ?? []).forEach((c: any) => {
         const name = c.name as string;
         const mrn = c.medical_record_number ?? null;
+        const city = c.city_name ?? null;
         const prev = tally.get(name);
         if (prev) {
-          tally.set(name, { mrn: prev.mrn, count: prev.count + 1 });
+          tally.set(name, { mrn: prev.mrn, city: prev.city, count: prev.count + 1 });
         } else {
-          tally.set(name, { mrn, count: 1 });
+          tally.set(name, { mrn, city, count: 1 });
         }
       });
       tally.forEach((v, name) => {
         // 同名複数が居る場合は曖昧なので null
         nameToMrn.set(name, v.count === 1 ? v.mrn : null);
+        nameToCity.set(name, v.count === 1 ? v.city : null);
       });
     }
 
@@ -675,6 +709,7 @@ export async function getCashSales(dateStr: string) {
       } catch {}
       return {
         ...s,
+        city_name: nameToCity.get(s.customer_name) ?? null,
         medical_record_number:
           mrnFromMemo ?? nameToMrn.get(s.customer_name) ?? null,
       };

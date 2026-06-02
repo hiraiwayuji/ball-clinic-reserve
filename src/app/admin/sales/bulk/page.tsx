@@ -12,6 +12,8 @@ import {
 } from "@/app/actions/sales";
 import { usePaymentCategories } from "@/lib/use-payment-categories";
 import { getPaymentCategoryColor } from "@/lib/payment-category-color";
+import { evaluateMedicalAid, type MedicalAidRules } from "@/lib/medical-aid";
+import { getMedicalAidRules } from "@/app/actions/settings";
 import { upsertPaymentCategory, type PaymentCategoryRow } from "@/app/actions/payment-categories";
 import { toast } from "sonner";
 import Link from "next/link";
@@ -33,8 +35,9 @@ type DraftRow = PendingSalePatient & {
   checked: boolean;
   editAmount: string;
   editMemo: string;
-  paymentType: CashSalePaymentType | "";
-  // 区分ごとに金額を分ける明細。空なら従来どおり editAmount + paymentType を使う。
+  // 複数選択対応（保険＋水素=その他 など）。空配列なら未選択。
+  paymentTypes: CashSalePaymentType[];
+  // 区分ごとに金額を分ける明細。空なら従来どおり editAmount + paymentTypes を使う。
   lines: PaymentLine[];
 };
 
@@ -50,6 +53,12 @@ function BulkSalesPageInner() {
   const [rows, setRows] = useState<DraftRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [isPending, startTransition] = useTransition();
+  const [medicalAidRules, setMedicalAidRules] = useState<MedicalAidRules | null>(null);
+
+  // 医療費助成ルールを一度だけ読み込む（各行で 0円/600円 判定に使う）
+  useEffect(() => {
+    getMedicalAidRules().then((r) => setMedicalAidRules(r.rules)).catch(() => {});
+  }, []);
 
   const fetchPending = async () => {
     setLoading(true);
@@ -63,7 +72,7 @@ function BulkSalesPageInner() {
             checked: p.confidence === "certain" || p.confidence === "likely",
             editAmount: p.initialAmount,
             editMemo: p.initialMemo,
-            paymentType: "" as CashSalePaymentType | "",
+            paymentTypes: [] as CashSalePaymentType[],
             lines: [] as PaymentLine[],
           }))
       );
@@ -116,7 +125,7 @@ function BulkSalesPageInner() {
       if (hasLines(r)) {
         return r.lines.some(l => l.amount !== "" && parseInt(l.amount, 10) === 0 && !l.paymentType);
       }
-      return parseInt(r.editAmount, 10) === 0 && !r.paymentType;
+      return parseInt(r.editAmount, 10) === 0 && r.paymentTypes.length === 0;
     });
     if (zeroWithoutPaymentType.length > 0) {
       toast.error(`${zeroWithoutPaymentType.map(r => r.customerName).join("・")}様：0円の場合は支払区分を選択してください`);
@@ -136,7 +145,8 @@ function BulkSalesPageInner() {
             memo: r.editMemo,
             is_first_visit: r.isFirstVisit,
             sale_date: targetDateStr,
-            payment_type: r.paymentType || null,
+            payment_type: r.paymentTypes[0] || null,
+            payment_types: r.paymentTypes.length > 0 ? r.paymentTypes : null,
             lines,
           };
         })
@@ -303,6 +313,7 @@ function BulkSalesPageInner() {
                 key={row.appointmentId}
                 row={row}
                 paymentCategories={paymentCategories}
+                medicalAidRules={medicalAidRules}
                 onCategoryAdded={reloadCategories}
                 onChange={(updated) =>
                   setRows(prev => prev.map(r => r.appointmentId === row.appointmentId ? updated : r))
@@ -354,13 +365,21 @@ function DraftRowItem({
   row,
   onChange,
   paymentCategories,
+  medicalAidRules,
   onCategoryAdded,
 }: {
   row: DraftRow;
   onChange: (updated: DraftRow) => void;
   paymentCategories: PaymentCategoryRow[];
+  medicalAidRules: MedicalAidRules | null;
   onCategoryAdded: () => Promise<void> | void;
 }) {
+  // 子ども医療費助成の判定（市町村＋生年月日）。対象なら医療助成ボタンを色分け。
+  const medicalAid = evaluateMedicalAid({
+    birthDate: row.birthDate,
+    cityName: row.cityName,
+    rules: medicalAidRules,
+  });
   // 区分ごと金額分けモードか
   const splitMode = row.lines.length > 0;
   const hasAmount = splitMode
@@ -395,13 +414,13 @@ function DraftRowItem({
     }
   };
 
-  // 明細モードへ切り替え（現在の単一区分・金額を1行目に引き継ぐ）
+  // 明細モードへ切り替え（現在選択中の区分・金額を1行目に引き継ぐ）
   const enableSplit = () => {
     onChange({
       ...row,
       checked: true,
       lines: [
-        { paymentType: row.paymentType, amount: row.editAmount || "" },
+        { paymentType: row.paymentTypes[0] ?? "", amount: row.editAmount || "" },
         { paymentType: "", amount: "" },
       ],
     });
@@ -531,25 +550,48 @@ function DraftRowItem({
         {!splitMode ? (
           <div className="flex items-center gap-2 flex-wrap">
             <span className="text-[11px] font-bold text-emerald-600 dark:text-emerald-400">
-              支払区分{isZero ? '（0円計上は必須）' : ''}:
+              支払区分（複数選択可）{isZero ? '（0円計上は必須）' : ''}:
             </span>
             {paymentCategories.map(opt => {
-              const selected = row.paymentType === opt.key;
+              const selected = row.paymentTypes.includes(opt.key);
               const color = getPaymentCategoryColor(opt.key);
+              const aidHighlight = opt.key === "hagukumi" && medicalAid.applicable;
               return (
                 <button
                   key={opt.key}
                   type="button"
-                  onClick={() => onChange({ ...row, paymentType: selected ? "" : opt.key })}
-                  className={`px-2 py-0.5 rounded-md text-[11px] font-bold border transition-all ${
+                  onClick={() => onChange({
+                    ...row,
+                    paymentTypes: selected
+                      ? row.paymentTypes.filter(k => k !== opt.key)
+                      : [...row.paymentTypes, opt.key],
+                  })}
+                  className={`relative px-2 py-0.5 rounded-md text-[11px] font-bold border transition-all ${
                     selected ? color.selected : color.unselected
+                  } ${
+                    aidHighlight && !selected
+                      ? medicalAid.monthlyBurdenYen === 0
+                        ? "ring-2 ring-emerald-400 border-emerald-400"
+                        : "ring-2 ring-amber-400 border-amber-400"
+                      : ""
                   }`}
                 >
+                  {selected && <span className="mr-0.5">✓</span>}
                   {opt.label}
+                  {aidHighlight && (
+                    <span className="ml-1 opacity-80">
+                      {medicalAid.monthlyBurdenYen === 0 ? "(0円)" : `(月${medicalAid.monthlyBurdenYen}円)`}
+                    </span>
+                  )}
                 </button>
               );
             })}
-            {isZero && !row.paymentType && (
+            {medicalAid.applicable && (
+              <span className={`text-[10px] font-bold ${medicalAid.monthlyBurdenYen === 0 ? "text-emerald-600" : "text-amber-600"}`}>
+                👶 {medicalAid.city}・{medicalAid.stageLabel}（受給者証確認）
+              </span>
+            )}
+            {isZero && row.paymentTypes.length === 0 && (
               <span className="text-[10px] text-rose-500 font-medium">※ 必須</span>
             )}
             {/* 区分ごとに金額を分けるモードへ */}

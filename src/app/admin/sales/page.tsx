@@ -31,7 +31,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Calendar as CalendarIcon, Plus, Trash2, Loader2, Coins, User, UserPlus, Landmark, Receipt, Upload, Download, Clock, Bot, X, AlertTriangle, Zap, Pencil, ShieldCheck, CalendarPlus } from "lucide-react";
+import { Calendar as CalendarIcon, Plus, Trash2, Loader2, Coins, User, UserPlus, Landmark, Receipt, Upload, Download, Clock, Bot, X, AlertTriangle, Zap, Pencil, ShieldCheck, CalendarPlus, MapPin } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { addCashSale, getCashSales, deleteCashSale, updateCashSale, searchSalesPatients, getCustomerByMedicalRecord, getLastSaleForCustomer, SalesPatientSuggestion, type CashSalePaymentType } from "@/app/actions/sales";
 import { updateCheckinStatus, getLastAppointmentByCustomerName } from "@/app/actions/adminReserve";
@@ -828,6 +828,12 @@ function SalesPageInner() {
                               <span className="text-xs bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 font-bold px-1.5 py-0.5 rounded">新患</span>
                             )}
                           </div>
+                          {sale.city_name && (
+                            <div className="flex items-center gap-1 mt-0.5 text-[11px] text-slate-400 dark:text-slate-500">
+                              <MapPin className="w-3 h-3" />
+                              {sale.city_name}
+                            </div>
+                          )}
                         </TableCell>
                         <TableCell className="text-slate-600 dark:text-slate-300 text-sm font-mono">
                           {sale.medical_record_number ? (

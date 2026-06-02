@@ -11,8 +11,10 @@ import {
   type OwnerAlert,
   type AlertCategory,
 } from "@/app/actions/ai-secretary-multi";
+import { getMedicalAidReviewReminder, markMedicalAidReviewed } from "@/app/actions/settings";
 import TeamTaskLoadPanel from "./TeamTaskLoadPanel";
 import { toast } from "sonner";
+import { HeartHandshake } from "lucide-react";
 
 const CATEGORY_META: Record<AlertCategory, { label: string; icon: typeof AlertTriangle; tone: string; toneBg: string }> = {
   urgent:    { label: "緊急",       icon: AlertTriangle, tone: "text-rose-700 dark:text-rose-300",     toneBg: "bg-rose-100 dark:bg-rose-900/40 border-rose-300" },
@@ -35,6 +37,20 @@ export default function OwnerSecretaryWidget() {
   });
   const [selectedAlert, setSelectedAlert] = useState<OwnerAlert | null>(null);
   const [dismissing, setDismissing] = useState(false);
+  // 年度替わりの「医療費助成 見直し」リマインド
+  const [aidReminder, setAidReminder] = useState<{ needsReview: boolean; fiscalYear: number } | null>(null);
+
+  useEffect(() => {
+    getMedicalAidReviewReminder()
+      .then((r) => setAidReminder({ needsReview: r.needsReview, fiscalYear: r.fiscalYear }))
+      .catch(() => {});
+  }, []);
+
+  async function handleAidReviewed() {
+    setAidReminder((prev) => (prev ? { ...prev, needsReview: false } : prev));
+    await markMedicalAidReviewed().catch(() => {});
+    toast.success("医療費助成の確認を記録しました");
+  }
 
   async function handleDismissToTask() {
     if (!selectedAlert?.id) {
@@ -117,6 +133,36 @@ export default function OwnerSecretaryWidget() {
       </header>
 
       {error && <p className="text-sm text-rose-600">{error}</p>}
+
+      {/* 年度替わりの医療費助成 見直しリマインド（4月以降・当年度未確認のとき） */}
+      {aidReminder?.needsReview && (
+        <div className="mb-4 flex items-start gap-3 rounded-xl border border-emerald-300 bg-emerald-50 dark:bg-emerald-900/20 dark:border-emerald-800 px-4 py-3">
+          <HeartHandshake className="w-5 h-5 text-emerald-600 dark:text-emerald-300 shrink-0 mt-0.5" />
+          <div className="flex-1">
+            <p className="text-sm font-bold text-emerald-800 dark:text-emerald-200">
+              新年度です。子ども医療費助成の制度変更はありませんか？
+            </p>
+            <p className="text-xs text-emerald-700/90 dark:text-emerald-300/80 mt-0.5">
+              市町村ごとの窓口負担（0円／月600円など）は年度替わりで変わることがあります。設定を確認してください。
+            </p>
+            <div className="flex items-center gap-2 mt-2 flex-wrap">
+              <Link
+                href="/admin/settings"
+                className="inline-flex items-center gap-1 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 px-3 py-1.5 rounded-lg transition-colors"
+              >
+                設定で確認する <ArrowRight className="w-3 h-3" />
+              </Link>
+              <button
+                type="button"
+                onClick={handleAidReviewed}
+                className="text-xs font-bold text-emerald-700 dark:text-emerald-300 hover:underline"
+              >
+                変更なし・確認した
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {briefing && (
         <>
