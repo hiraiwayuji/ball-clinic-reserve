@@ -1,13 +1,12 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="675" viewBox="0 0 1200 675" font-family="'Noto Sans JP','Hiragino Sans','Yu Gothic',sans-serif">
-  <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#e8f3fb"/><stop offset="1" stop-color="#ffffff"/></linearGradient></defs>
-  <rect width="1200" height="675" fill="url(#g)"/>
-  <rect width="1200" height="16" fill="#3aa0e0"/>
-  <text x="1150" y="200" font-size="220" font-weight="900" fill="#3aa0e0" opacity="0.12" text-anchor="end">03</text>
-  <circle cx="210" cy="320" r="110" fill="#e8f3fb" stroke="#3aa0e0" stroke-width="4"/>
-  <text x="210" y="360" font-size="110" text-anchor="middle">💪</text>
-  <text x="380" y="265" font-size="32" font-weight="700" fill="#3aa0e0">全身の不調が気になる方へ</text>
-  <text x="378" y="370" font-size="92" font-weight="900" fill="#2a2320">B-ALL <tspan font-size="44" fill="#6f655e">ボディオール</tspan></text>
-  <text x="380" y="430" font-size="34" font-weight="600" fill="#6f655e">全身メンテナンス＆パーソナルトレーニング</text>
-  <text x="380" y="560" font-size="30" font-weight="700" fill="#6f655e">料金</text>
-  <text x="500" y="570" font-size="64" font-weight="800" fill="#3aa0e0">¥5,500〜</text>
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="1200" viewBox="0 0 900 1200" font-family="'Noto Sans JP','Hiragino Sans','Yu Gothic',sans-serif">
+  <defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#d6ebf9"/><stop offset="1" stop-color="#ffffff"/></linearGradient></defs>
+  <rect width="900" height="1200" fill="url(#g)"/>
+  <rect width="900" height="20" fill="#3aa0e0"/>
+  <circle cx="450" cy="350" r="190" fill="#e8f3fb" stroke="#3aa0e0" stroke-width="8"/>
+  <text x="450" y="430" font-size="200" text-anchor="middle">💪</text>
+  <text x="450" y="690" font-size="150" font-weight="900" fill="#2a2320" text-anchor="middle">B-ALL</text>
+  <text x="450" y="770" font-size="56" font-weight="800" fill="#2486c7" text-anchor="middle">ボディオール</text>
+  <text x="450" y="840" font-size="40" font-weight="700" fill="#6f655e" text-anchor="middle">全身メンテ＆パーソナル</text>
+  <rect x="200" y="900" width="500" height="140" rx="28" fill="#3aa0e0"/>
+  <text x="450" y="990" font-size="72" font-weight="900" fill="#ffffff" text-anchor="middle">¥5,500〜</text>
 </svg>
