@@ -4,6 +4,7 @@ import { unstable_noStore as noStore, revalidatePath } from "next/cache";
 import { checkAdminAuth } from "./auth";
 import { writeAudit, notifyOwnerOfStaffAction } from "@/lib/audit";
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
+import { DEFAULT_TALLY_COLUMNS, type TallyColumn } from "@/lib/tally-columns";
 
 export type ClinicSettings = {
   id: string;
@@ -92,6 +93,12 @@ export type ClinicSettings = {
   medical_aid_rules?: import("@/lib/medical-aid").MedicalAidRules | null;
   // 医療費助成ルールの最終見直し日（年度替わりリマインド用）。
   medical_aid_reviewed_at?: string | null;
+  // 売上記帳のタイプ（オーナーが選択）。
+  // per_patient: 患者ごとの個別入力（既存）/ tally: 窓口日計表グリッド（からだ等）
+  sales_input_mode?: "per_patient" | "tally" | null;
+  // 窓口日計表モードの金額カラム定義（JSONB）。専用 getter/setter で更新するため
+  // settingsData には載せない（updateClinicSettings 経由では更新しない）。NULL ならデフォルト6列。
+  tally_columns?: TallyColumn[] | null;
 };
 
 
@@ -242,6 +249,7 @@ export async function updateClinicSettings(
     public_reserve_flow: settings.public_reserve_flow ?? null,
     expense_owner_only: settings.expense_owner_only ?? false,
     departments: settings.departments ?? [],
+    sales_input_mode: settings.sales_input_mode ?? "per_patient",
   };
 
   const targetData = {
@@ -494,6 +502,80 @@ export async function updateMedicalAidRules(
   });
 
   revalidatePath("/admin/settings");
+  return { success: true };
+}
+
+// ── 窓口日計表のカラム定義 getter/setter（売上に直結＝owner専用） ──
+export async function getTallyColumns(): Promise<TallyColumn[]> {
+  const { clinicId } = await checkAdminAuth();
+  noStore();
+  const { createClient } = await import("@/lib/supabase/server");
+  const supabase = await createClient();
+
+  const { data } = await supabase
+    .from("clinic_settings")
+    .select("tally_columns")
+    .eq("id", clinicId)
+    .maybeSingle();
+
+  const stored = data?.tally_columns as TallyColumn[] | null | undefined;
+  if (Array.isArray(stored) && stored.length > 0) {
+    return [...stored].sort((a, b) => a.sort_order - b.sort_order);
+  }
+  return DEFAULT_TALLY_COLUMNS;
+}
+
+export async function updateTallyColumns(
+  columns: TallyColumn[],
+): Promise<{ success: boolean; error?: string }> {
+  // 売上記帳に直結する設定のため owner 専用。
+  const auth = await checkAdminAuth();
+  const { clinicId } = auth;
+  if (auth.role !== "owner") {
+    return { success: false, error: "この設定はオーナーのみ変更できます" };
+  }
+
+  if (!Array.isArray(columns) || columns.length === 0) {
+    return { success: false, error: "カラムを1つ以上設定してください" };
+  }
+  const seen = new Set<string>();
+  const cleaned: TallyColumn[] = [];
+  columns.forEach((c, i) => {
+    const label = c.label?.trim();
+    if (!label) return;
+    // key は英数字スラグ化。空や衝突時はインデックスで一意化。
+    let key = (c.key ?? "").toLowerCase().replace(/[^a-z0-9_]+/g, "_").replace(/^_+|_+$/g, "");
+    if (!key || seen.has(key)) key = `col_${i + 1}`;
+    seen.add(key);
+    cleaned.push({ key, label, sort_order: i + 1 });
+  });
+  if (cleaned.length === 0) {
+    return { success: false, error: "有効なカラムがありません" };
+  }
+
+  const { createClient } = await import("@/lib/supabase/server");
+  const supabase = await createClient();
+
+  const { error } = await supabase
+    .from("clinic_settings")
+    .update({ tally_columns: cleaned })
+    .eq("id", clinicId);
+
+  if (error) return { success: false, error: "保存に失敗しました: " + error.message };
+
+  await writeAudit({
+    clinicId,
+    actorUserId: auth.userId,
+    actorEmail: auth.email,
+    actorRole: auth.role,
+    actionType: "settings.update",
+    targetTable: "clinic_settings",
+    targetId: clinicId,
+    after: { tally_columns: cleaned },
+  });
+
+  revalidatePath("/admin/settings");
+  revalidatePath("/admin/sales");
   return { success: true };
 }
 

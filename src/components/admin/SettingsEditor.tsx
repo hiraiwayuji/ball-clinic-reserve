@@ -13,6 +13,7 @@ import { Badge } from "@/components/ui/badge";
 import LPSettingsEditor from "./LPSettingsEditor";
 import PaymentCategoriesEditor from "./PaymentCategoriesEditor";
 import MedicalAidRulesEditor from "./MedicalAidRulesEditor";
+import SalesInputModeEditor from "./SalesInputModeEditor";
 
 export default function SettingsEditor({ initialSettings }: { initialSettings: ClinicSettings | null }) {
   const router = useRouter();
@@ -279,6 +280,9 @@ export default function SettingsEditor({ initialSettings }: { initialSettings: C
 
           {/* 患者向けLP設定 */}
           <LPSettingsEditor settings={settings} updateField={updateField} />
+
+          {/* 売上記帳のタイプ（個別入力 / 窓口日計表） */}
+          <SalesInputModeEditor settings={settings} updateField={updateField} />
 
           {/* 支払区分マスタ */}
           <PaymentCategoriesEditor />

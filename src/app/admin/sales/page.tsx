@@ -44,6 +44,8 @@ import CashSalesImportDialog from "@/components/admin/CashSalesImportDialog";
 import { AddAppointmentDialog } from "@/components/admin/AddAppointmentDialog";
 import { exportToExcel } from "@/lib/excel";
 import { getMyRole } from "@/app/actions/auth";
+import { getSalesInputMode } from "@/app/actions/tally";
+import TallySheet from "@/components/admin/TallySheet";
 
 function SalesPageInner() {
   const searchParams = useSearchParams();
@@ -1177,10 +1179,27 @@ function LineItemRow({
   );
 }
 
+function SalesModeRouter() {
+  const [mode, setMode] = useState<"per_patient" | "tally" | null>(null);
+  useEffect(() => {
+    getSalesInputMode()
+      .then(setMode)
+      .catch(() => setMode("per_patient"));
+  }, []);
+
+  if (mode === null) {
+    return <div className="p-8 text-center text-slate-500">読み込み中...</div>;
+  }
+  if (mode === "tally") {
+    return <TallySheet />;
+  }
+  return <SalesPageInner />;
+}
+
 export default function SalesPage() {
   return (
     <Suspense fallback={<div className="p-8 text-center text-slate-500">読み込み中...</div>}>
-      <SalesPageInner />
+      <SalesModeRouter />
     </Suspense>
   );
 }
