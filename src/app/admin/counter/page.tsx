@@ -33,7 +33,6 @@ import { useRouter } from "next/navigation";
 import { recordAction, COUNTER_DONE_KEY, SALES_PAGE_KEY } from "@/lib/next-action";
 import DailyCompletionCelebration from "@/components/admin/DailyCompletionCelebration";
 import { AddAppointmentDialog } from "@/components/admin/AddAppointmentDialog";
-import CounterCheckoutDialog from "@/components/admin/CounterCheckoutDialog";
 
 type Appointment = {
   id: string;
@@ -120,7 +119,7 @@ function AppointmentCard({
   onStatusChange: (id: string, status: CheckinStatus) => void;
   onRemove: (id: string) => void;
 }) {
-  const [checkoutOpen, setCheckoutOpen] = useState(false);
+  const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [justDone, setJustDone] = useState(false);
   const [showSecretaryTip, setShowSecretaryTip] = useState(false);
@@ -131,8 +130,45 @@ function AppointmentCard({
   const next = nextStatus(apt.checkin_status);
   const nextStep = next !== null ? getStep(next) : null;
 
-  // 「未来院」からでも、その場で会計（売上入力）ダイアログを開く（受付ページ内で完結）
-  const handleQuickToCheckout = () => setCheckoutOpen(true);
+  const buildSalesUrl = useCallback(() => {
+    const params = new URLSearchParams();
+    params.set("name", apt.customers?.name ?? "");
+    params.set("first_visit", String(apt.is_first_visit));
+    params.set("apt_id", apt.id);
+    if (apt.customers?.id) params.set("customer_id", apt.customers.id);
+    if (apt.course_id) params.set("course_id", apt.course_id);
+    if (apt.staff_id) params.set("staff_id", apt.staff_id);
+    if (apt.staff_name) params.set("staff_name", apt.staff_name);
+    if (apt.course_name) params.set("course", apt.course_name);
+    try {
+      const t = new Date(apt.start_time);
+      const hh = t.toLocaleString("ja-JP", { timeZone: "Asia/Tokyo", hour: "2-digit", hour12: false }).padStart(2, "0");
+      const mm = t.toLocaleString("ja-JP", { timeZone: "Asia/Tokyo", minute: "2-digit" }).padStart(2, "0");
+      params.set("next_time", `${hh}:${mm}`);
+    } catch {}
+    if (prediction) {
+      params.set("predicted_amount", String(prediction.predictedAmount));
+      params.set("predicted_memo", prediction.predictedMemo);
+      params.set("ai_message", prediction.aiMessage);
+      params.set("confidence", String(prediction.confidence));
+    }
+    return `/admin/sales?${params.toString()}`;
+  }, [apt, prediction]);
+
+  // 「未来院」状態から一発で会計画面（売上記帳ページ）まで進めるショートカット
+  const handleQuickToCheckout = () => {
+    startTransition(async () => {
+      const res = await updateCheckinStatus(apt.id, "done");
+      if (!res.success) {
+        toast.error(res.error ?? "更新に失敗しました");
+        return;
+      }
+      onStatusChange(apt.id, "done");
+      recordAction(COUNTER_DONE_KEY, SALES_PAGE_KEY);
+      toast.success(`${apt.customers?.name ?? "患者"}様を会計へ進めました`);
+      router.push(buildSalesUrl());
+    });
+  };
 
   const time = format(parseISO(apt.start_time), "HH:mm");
   const endTime = format(parseISO(apt.end_time), "HH:mm");
@@ -350,9 +386,9 @@ function AppointmentCard({
         {/* 会計登録へリンク（名前・初診フラグ・予測データをクエリパラメータで渡す） */}
         {(apt.checkin_status === "in_treatment" || apt.checkin_status === "arrived" || apt.checkin_status === "done") && (
           <div className="relative">
-            <button
-              type="button"
-              onClick={() => setCheckoutOpen(true)}
+            <Link
+              href={buildSalesUrl()}
+              onClick={() => recordAction(COUNTER_DONE_KEY, SALES_PAGE_KEY)}
               className={[
                 "flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium transition-all",
                 justDone
@@ -361,8 +397,8 @@ function AppointmentCard({
               ].join(" ")}
             >
               <CreditCard className={["w-3.5 h-3.5", justDone ? "animate-bounce" : ""].join(" ")} />
-              {justDone ? "会計入力 ✨" : "会計"}
-            </button>
+              {justDone ? "売上入力へ ✨" : "会計"}
+            </Link>
 
             {/* AI秘書ツールチップ（予測あり／なしで内容を切り替え） */}
             {showSecretaryTip && (
@@ -459,20 +495,6 @@ function AppointmentCard({
           }}
         />
       )}
-
-      {/* 会計（売上入力）ダイアログ — 受付ページ内で完結 */}
-      <CounterCheckoutDialog
-        open={checkoutOpen}
-        onOpenChange={setCheckoutOpen}
-        appointmentId={apt.id}
-        customerName={apt.customers?.name ?? ""}
-        customerBirthDate={apt.customers?.birth_date ?? null}
-        customerCity={apt.customers?.city_name ?? null}
-        isFirstVisit={apt.is_first_visit}
-        courseName={apt.course_name}
-        saleDate={parseISO(apt.start_time)}
-        onCompleted={(id) => onStatusChange(id, "done")}
-      />
     </div>
   );
 }
