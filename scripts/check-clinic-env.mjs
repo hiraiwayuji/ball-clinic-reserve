@@ -16,6 +16,14 @@ const name = (process.env.NEXT_PUBLIC_CLINIC_NAME ?? "").trim();
 const isVercelProd =
   process.env.VERCEL === "1" || process.env.VERCEL_ENV === "production";
 
+// DEMO / FAMILY_GIFT は接骨院テナントではない（clinic_id を持たない設計）。
+// クリニックenv必須チェックの対象外＝デモ/家族カレンダーのビルドを落とさない。
+const appMode = (process.env.NEXT_PUBLIC_APP_MODE ?? "CLINIC").toUpperCase();
+if (appMode === "DEMO" || appMode === "FAMILY_GIFT") {
+  console.log(`✅ [check-clinic-env] APP_MODE=${appMode} のためクリニックenvチェックをスキップ`);
+  process.exit(0);
+}
+
 if (!id) {
   if (isVercelProd) {
     console.error("❌ [check-clinic-env] NEXT_PUBLIC_CLINIC_ID が未設定です。");
