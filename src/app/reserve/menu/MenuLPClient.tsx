@@ -21,7 +21,6 @@ import type { PublicClinicSettings, ThemeColor } from "@/app/actions/publicSetti
 import { CLINIC_CONFIG } from "@/lib/clinic-config";
 import { getThemeClasses } from "@/lib/lp-theme";
 import LPHero from "@/components/reserve/LPHero";
-import LPFeatures from "@/components/reserve/LPFeatures";
 
 type Tab = "coupon" | "menu" | "all";
 type AudienceFilter = "all" | "first" | "repeat";
@@ -92,15 +91,9 @@ export default function MenuLPClient({ initialCourses, settings }: Props) {
 
   return (
     <div className="min-h-screen bg-slate-900 text-white" data-dark-page>
-      {/* ─── ヒーロー（院ごとカスタム） ─── */}
-      <LPHero settings={settings} fallbackName={CLINIC_CONFIG.name} />
-
-      {/* ─── お悩み・強み（院ごとカスタム） ─── */}
-      <LPFeatures
-        features={settings?.lp_features ?? null}
-        problems={settings?.lp_target_problems ?? null}
-        themeColor={themeColor}
-      />
+      {/* ─── ヒーロー（最小表示）。サイトに来た時点でメニューは把握済みなので、
+              お悩み・強み・口コミは出さず、すぐ下にクーポン/メニューを見せる ─── */}
+      <LPHero settings={settings} fallbackName={CLINIC_CONFIG.name} minimal />
 
       {/* ─── メニュー・クーポン セクション見出し ─── */}
       <div className="max-w-2xl mx-auto px-4 pt-6 pb-2 flex items-center justify-between">

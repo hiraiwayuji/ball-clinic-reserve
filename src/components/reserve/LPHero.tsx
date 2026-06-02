@@ -8,11 +8,14 @@ import { getThemeClasses } from "@/lib/lp-theme";
 interface Props {
   settings: PublicClinicSettings | null;
   fallbackName: string;
+  /** メニューLP用の最小表示。画像・CTA・口コミを省き、院名＋連絡先だけにして
+   *  すぐ下のクーポン/メニューに目が行くようにする。 */
+  minimal?: boolean;
 }
 
 const LINE_DEFAULT_URL = process.env.NEXT_PUBLIC_LINE_OFFICIAL_ACCOUNT_URL;
 
-export default function LPHero({ settings, fallbackName }: Props) {
+export default function LPHero({ settings, fallbackName, minimal = false }: Props) {
   const theme = getThemeClasses(settings?.theme_color ?? "blue");
   const title = settings?.hero_title || fallbackName;
   const subtitle = settings?.hero_subtitle;
@@ -34,22 +37,22 @@ export default function LPHero({ settings, fallbackName }: Props) {
           : undefined
       }
     >
-      <div className="max-w-3xl mx-auto px-5 pt-12 pb-10">
+      <div className={`max-w-3xl mx-auto px-5 ${minimal ? "pt-8 pb-5" : "pt-12 pb-10"}`}>
         {/* 院名 */}
         <p className={`text-[11px] font-bold uppercase tracking-[0.25em] ${theme.accentText} mb-3`}>
           {settings?.area_name ?? ""}
         </p>
-        <h1 className="text-3xl sm:text-4xl font-black text-white tracking-tight leading-tight">
+        <h1 className={`${minimal ? "text-2xl sm:text-3xl" : "text-3xl sm:text-4xl"} font-black text-white tracking-tight leading-tight`}>
           {title}
         </h1>
-        {subtitle && (
+        {subtitle && !minimal && (
           <p className={`mt-4 text-base sm:text-lg ${theme.leadText} leading-relaxed font-medium`}>
             {subtitle}
           </p>
         )}
 
-        {/* メインビジュアル */}
-        {heroImage && (
+        {/* メインビジュアル（最小表示では非表示） */}
+        {!minimal && heroImage && (
           <div className="mt-6 rounded-2xl overflow-hidden border border-white/10 shadow-2xl shadow-black/40 aspect-[16/9]">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
@@ -60,23 +63,26 @@ export default function LPHero({ settings, fallbackName }: Props) {
           </div>
         )}
 
-        {/* メインCTA */}
-        <Link
-          href="/reserve/menu"
-          className={`mt-6 flex items-center justify-center gap-2 w-full h-16 rounded-2xl ${theme.ctaBg} ${theme.ctaHoverBg} active:scale-[0.98] text-white text-base font-black shadow-xl ${theme.ctaShadow} transition-all`}
-        >
-          <Sparkles className="w-5 h-5" />
-          {ctaText}
-        </Link>
+        {/* メインCTA / セカンダリCTA（最小表示ではすぐ下がメニューなので省略） */}
+        {!minimal && (
+          <>
+            <Link
+              href="/reserve/menu"
+              className={`mt-6 flex items-center justify-center gap-2 w-full h-16 rounded-2xl ${theme.ctaBg} ${theme.ctaHoverBg} active:scale-[0.98] text-white text-base font-black shadow-xl ${theme.ctaShadow} transition-all`}
+            >
+              <Sparkles className="w-5 h-5" />
+              {ctaText}
+            </Link>
 
-        {/* セカンダリCTA */}
-        <Link
-          href="/reserve/calendar"
-          className="mt-2 flex items-center justify-center gap-2 w-full h-12 rounded-2xl bg-white/5 hover:bg-white/10 border border-white/15 text-white/90 text-sm font-bold transition"
-        >
-          <CalendarDays className="w-4 h-4" />
-          先にカレンダーで空き状況を確認
-        </Link>
+            <Link
+              href="/reserve/calendar"
+              className="mt-2 flex items-center justify-center gap-2 w-full h-12 rounded-2xl bg-white/5 hover:bg-white/10 border border-white/15 text-white/90 text-sm font-bold transition"
+            >
+              <CalendarDays className="w-4 h-4" />
+              先にカレンダーで空き状況を確認
+            </Link>
+          </>
+        )}
 
         {/* お問い合わせ群 */}
         <div className="mt-5 grid grid-cols-2 gap-2">
@@ -136,8 +142,8 @@ export default function LPHero({ settings, fallbackName }: Props) {
           </div>
         )}
 
-        {/* 患者の声（短文） */}
-        {settings?.lp_voice_quote && (
+        {/* 患者の声（短文・最小表示では非表示） */}
+        {!minimal && settings?.lp_voice_quote && (
           <div className="mt-7 bg-white/5 backdrop-blur border border-white/10 rounded-2xl p-4">
             <div className="flex items-start gap-2">
               <Star className={`w-4 h-4 ${theme.accentText} shrink-0 mt-0.5 fill-current`} />
