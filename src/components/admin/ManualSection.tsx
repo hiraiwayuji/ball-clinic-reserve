@@ -13,10 +13,12 @@ import {
   Megaphone,
   Sparkles,
   HelpCircle,
+  Tag,
+  Smartphone,
 } from "lucide-react";
 
-const MANUAL_VERSION = "v1.0";
-const MANUAL_UPDATED_AT = "2026-04-28";
+const MANUAL_VERSION = "v1.1";
+const MANUAL_UPDATED_AT = "2026-06-02";
 
 type Item = {
   icon: React.ReactNode;
@@ -145,6 +147,59 @@ export default function ManualSection() {
             キャンセル理由を入れておくと統計に反映されます。
           </Step>
           <Tip>受付画面では本日の予約一覧と来院状況（待合中・施術中・完了）が一目で見えます。</Tip>
+        </Section>
+
+        <Section
+          icon={<Tag className="w-4 h-4 text-amber-600" />}
+          title="コース・クーポンメニューを編集する（スマホでもOK）"
+          color="border-amber-200 dark:border-amber-900 bg-amber-50/50 dark:bg-amber-950/30"
+        >
+          <p>
+            患者さんの予約画面に出る <b>施術コース</b> と <b>クーポン</b> は、
+            「設定」→ <b>「施術コース設定」</b> からいつでも編集できます。
+            パソコンでもスマホでも、同じ手順・同じURLで操作できます。
+          </p>
+
+          <div className="rounded-md bg-sky-50 dark:bg-sky-950/40 border border-sky-200 dark:border-sky-900 p-3 text-xs text-sky-900 dark:text-sky-200 flex items-start gap-2">
+            <Smartphone className="w-4 h-4 shrink-0 mt-0.5" />
+            <span>
+              <b>スマホからの開き方</b>：いつものログインURLをスマホのブラウザで開いてログイン →
+              画面 <b>左上の「☰」</b> でメニューを開く → 一番下の <b>「設定」</b> →
+              パスコードを入力（パソコンと同じ番号）→ 下へスクロールして
+              <b>「施術コース設定」</b> へ。
+            </span>
+          </div>
+
+          <div className="space-y-3">
+            <Step n={1} title="コースは題名だけが一覧で並びます">
+              スマホでも見やすいよう、各コースは<b>題名のみ</b>のコンパクト表示です。
+              クーポンには 🏷 マーク、休止中は「無効」マークが付きます。
+            </Step>
+            <Step n={2} title="編集したいコースをタップして開く">
+              タップすると、カテゴリ・所要時間・料金・各種バッジ・説明と、
+              <b>「有効/無効」「編集」「削除」</b> ボタンが開きます。
+            </Step>
+            <Step n={3} title="「編集」から内容を変更して保存">
+              コース名・所要時間・料金（割引前の通常価格も）・写真・バッジ・説明を
+              まとめて変更できます。最後に <b>「保存」</b> をタップ。
+            </Step>
+            <Step n={4} title="並び順は左の ▲▼ ボタンで入れ替え">
+              上下の間にある <b>番号を書き換えて Enter</b> すると、その順番へ一気に移動できます。
+              ここで並べた順が、そのまま患者さんのメニュー画面（コースタブ・クーポンタブ）に反映されます。
+            </Step>
+            <Step n={5} title="クーポンに出すには「クーポンとして公開する」にチェック">
+              編集画面の <b>「クーポンとして公開する」</b> をONにすると、
+              メニュー画面の <b>クーポンタブ</b> に表示されます。並び順もこの上下ボタン通りです。
+            </Step>
+          </div>
+
+          <Tip>
+            「無効」にすると患者さんの画面から一時的に隠せます（削除せず残せるので、季節メニューの停止などに便利）。
+            完全に消すときは「削除」を使ってください。
+          </Tip>
+          <Tip>
+            <b>新規限定 / 再来限定</b> を使うと、そのクーポンを「初めての方だけ」「2回目以降の方だけ」に絞って出せます。
+          </Tip>
         </Section>
 
         <Section
