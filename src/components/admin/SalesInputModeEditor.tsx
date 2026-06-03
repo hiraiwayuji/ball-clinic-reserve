@@ -38,6 +38,22 @@ export default function SalesInputModeEditor({
   const setLabel = (idx: number, label: string) =>
     setColumns((prev) => prev.map((c, i) => (i === idx ? { ...c, label } : c)));
 
+  // 種別はカンマ（,、 区切り）で編集。空なら variants を外す。
+  const setVariants = (idx: number, raw: string) =>
+    setColumns((prev) =>
+      prev.map((c, i) => {
+        if (i !== idx) return c;
+        const variants = raw
+          .split(/[,、]/)
+          .map((v) => v.trim())
+          .filter(Boolean);
+        const next = { ...c } as TallyColumn;
+        if (variants.length) next.variants = variants;
+        else delete next.variants;
+        return next;
+      }),
+    );
+
   const move = (idx: number, dir: -1 | 1) => {
     setColumns((prev) => {
       const next = [...prev];
@@ -204,22 +220,35 @@ export default function SalesInputModeEditor({
             {loading ? (
               <div className="py-6 text-center text-slate-400"><Loader2 className="w-5 h-5 animate-spin inline-block" /></div>
             ) : (
-              <div className="space-y-2">
+              <div className="space-y-3">
                 {columns.map((c, i) => (
-                  <div key={i} className="flex items-center gap-2">
-                    <span className="w-6 text-center text-xs text-slate-400">{i + 1}</span>
-                    <Input value={c.label} placeholder="カラム名（例：保険柔整(J)）"
-                      onChange={(e) => setLabel(i, e.target.value)} className="flex-1" />
-                    <button type="button" onClick={() => move(i, -1)} disabled={i === 0}
-                      className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 disabled:opacity-30"><ArrowUp className="w-4 h-4" /></button>
-                    <button type="button" onClick={() => move(i, 1)} disabled={i === columns.length - 1}
-                      className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 disabled:opacity-30"><ArrowDown className="w-4 h-4" /></button>
-                    <button type="button" onClick={() => remove(i)}
-                      className="p-1.5 rounded-lg text-slate-300 hover:text-rose-500"><Trash2 className="w-4 h-4" /></button>
+                  <div key={i} className="flex items-start gap-2 rounded-xl border border-slate-100 p-2">
+                    <span className="w-6 text-center text-xs text-slate-400 pt-2.5">{i + 1}</span>
+                    <div className="flex-1 space-y-1.5">
+                      <Input value={c.label} placeholder="カラム名（例：鍼灸）"
+                        onChange={(e) => setLabel(i, e.target.value)} />
+                      <Input
+                        value={(c.variants ?? []).join("、")}
+                        placeholder="種別（任意・例：一般、学割、小児鍼）"
+                        onChange={(e) => setVariants(i, e.target.value)}
+                        className="text-xs"
+                      />
+                    </div>
+                    <div className="flex items-center pt-1">
+                      <button type="button" onClick={() => move(i, -1)} disabled={i === 0}
+                        className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 disabled:opacity-30"><ArrowUp className="w-4 h-4" /></button>
+                      <button type="button" onClick={() => move(i, 1)} disabled={i === columns.length - 1}
+                        className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 disabled:opacity-30"><ArrowDown className="w-4 h-4" /></button>
+                      <button type="button" onClick={() => remove(i)}
+                        className="p-1.5 rounded-lg text-slate-300 hover:text-rose-500"><Trash2 className="w-4 h-4" /></button>
+                    </div>
                   </div>
                 ))}
               </div>
             )}
+            <p className="text-[11px] text-slate-400 -mt-1">
+              「種別」を入れると、記帳画面でその列に種別えらびのプルダウンが出ます（例：鍼灸＝一般／学割／小児鍼…）。カンマか読点で区切ってください。
+            </p>
             <div className="flex justify-end">
               <Button type="button" onClick={save} disabled={saving} className="gap-1.5 bg-indigo-600 hover:bg-indigo-700">
                 {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}

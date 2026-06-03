@@ -31,6 +31,13 @@ export type TallyRow = {
   staff_id: string | null;
   is_first_visit: boolean;
   amounts: Record<string, number>; // colKey -> 金額
+  // 種別を持つ列で選ばれた種別（colKey -> 種別名。例: { shinkyu: "小児鍼" }）
+  variants?: Record<string, string>;
+  // 受付カウンターとの連動・次回予約のための予約紐付け（保存対象外、表示用）
+  appointment_id?: string | null;
+  customer_id?: string | null;
+  customer_phone?: string;
+  checkin_status?: string | null; // null|"arrived"|"in_treatment"|"done"
 };
 
 export type TallySheetData = {
@@ -44,16 +51,17 @@ export type TallySheetData = {
 const TALLY_PREFIX = "tally:";
 
 /** memo(JSON) から日計表メタ情報を取り出す */
-function parseTallyMemo(memo: string | null): { mrn: string; minutes: string } {
-  if (!memo) return { mrn: "", minutes: "" };
+function parseTallyMemo(memo: string | null): { mrn: string; minutes: string; variant: string } {
+  if (!memo) return { mrn: "", minutes: "", variant: "" };
   try {
     const d = JSON.parse(memo);
     return {
       mrn: d?.medicalRecordNumber ? String(d.medicalRecordNumber) : "",
       minutes: d?.minutes != null ? String(d.minutes) : "",
+      variant: d?.variant ? String(d.variant) : "",
     };
   } catch {
-    return { mrn: "", minutes: "" };
+    return { mrn: "", minutes: "", variant: "" };
   }
 }
 
@@ -88,8 +96,8 @@ export async function getTallySheet(dateStr: string): Promise<TallySheetData> {
   const dayEnd = `${dateStr}T23:59:59+09:00`;
   const { data: appts } = await sb
     .from("appointments")
-    .select(`id, start_time, end_time, is_first_visit, staff_id,
-      customers(name, medical_record_number)`)
+    .select(`id, start_time, end_time, is_first_visit, staff_id, checkin_status,
+      customers(id, name, phone, medical_record_number)`)
     .eq("clinic_id", clinicId)
     .neq("status", "cancelled")
     .gte("start_time", dayStart)
@@ -105,14 +113,15 @@ export async function getTallySheet(dateStr: string): Promise<TallySheetData> {
     .like("payment_type", `${TALLY_PREFIX}%`);
 
   // name -> 集約
-  type Agg = { amounts: Record<string, number>; staff_id: string | null; mrn: string; minutes: string; is_first_visit: boolean };
+  type Agg = { amounts: Record<string, number>; variants: Record<string, string>; staff_id: string | null; mrn: string; minutes: string; is_first_visit: boolean };
   const saved = new Map<string, Agg>();
   (savedRows ?? []).forEach((r: any) => {
     const name = r.customer_name as string;
     const colKey = String(r.payment_type ?? "").slice(TALLY_PREFIX.length);
     const meta = parseTallyMemo(r.memo);
-    const prev = saved.get(name) ?? { amounts: {}, staff_id: null, mrn: "", minutes: "", is_first_visit: false };
+    const prev = saved.get(name) ?? { amounts: {}, variants: {}, staff_id: null, mrn: "", minutes: "", is_first_visit: false };
     prev.amounts[colKey] = (prev.amounts[colKey] ?? 0) + (Number(r.treatment_fee) || 0);
+    if (meta.variant) prev.variants[colKey] = meta.variant;
     prev.staff_id = prev.staff_id ?? r.staff_id ?? null;
     prev.mrn = prev.mrn || meta.mrn;
     prev.minutes = prev.minutes || meta.minutes;
@@ -141,6 +150,11 @@ export async function getTallySheet(dateStr: string): Promise<TallySheetData> {
       staff_id: s?.staff_id ?? a.staff_id ?? null,
       is_first_visit: s?.is_first_visit ?? !!a.is_first_visit,
       amounts: s?.amounts ?? {},
+      variants: s?.variants ?? {},
+      appointment_id: a.id ?? null,
+      customer_id: cust?.id ?? null,
+      customer_phone: cust?.phone ?? "",
+      checkin_status: a.checkin_status ?? null,
     });
     usedNames.add(name);
   });
@@ -155,6 +169,11 @@ export async function getTallySheet(dateStr: string): Promise<TallySheetData> {
       staff_id: agg.staff_id,
       is_first_visit: agg.is_first_visit,
       amounts: agg.amounts,
+      variants: agg.variants,
+      appointment_id: null,
+      customer_id: null,
+      customer_phone: "",
+      checkin_status: null,
     });
   });
 
@@ -194,6 +213,11 @@ export async function saveTallySheet(
     return { success: false, error: "保存準備に失敗しました: " + delErr.message };
   }
 
+  // 列ごとの種別候補（種別の正当性チェック用）
+  const variantsByKey = new Map<string, Set<string>>(
+    columns.map((c) => [c.key, new Set((c.variants ?? []).map((v) => v.trim()).filter(Boolean))]),
+  );
+
   // 各行 → 金額のある列ごとに 1 行へ展開
   const insertRows: any[] = [];
   for (const row of rows) {
@@ -201,10 +225,6 @@ export async function saveTallySheet(
     if (!name) continue;
     const mrn = (row.medical_record_number ?? "").trim();
     const minutes = (row.minutes ?? "").toString().trim();
-    const memo = JSON.stringify({
-      ...(mrn ? { medicalRecordNumber: mrn } : {}),
-      ...(minutes ? { minutes } : {}),
-    });
     const staffId = row.staff_id || null;
 
     let firstLine = true;
@@ -215,6 +235,15 @@ export async function saveTallySheet(
       if (raw == null) continue;
       const amount = Math.round(Number(raw));
       if (!Number.isFinite(amount)) continue;
+      // 種別（その列に定義された候補にあるものだけ採用）
+      const variant = (row.variants?.[col.key] ?? "").trim();
+      const validVariant = variant && variantsByKey.get(col.key)?.has(variant) ? variant : "";
+      // memo は列ごと（種別が列で異なるため行共通にしない）
+      const memo = JSON.stringify({
+        ...(mrn ? { medicalRecordNumber: mrn } : {}),
+        ...(minutes ? { minutes } : {}),
+        ...(validVariant ? { variant: validVariant } : {}),
+      });
       insertRows.push({
         sale_date: dateStr,
         customer_name: name,

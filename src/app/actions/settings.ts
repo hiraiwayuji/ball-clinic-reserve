@@ -547,7 +547,11 @@ export async function updateTallyColumns(
     let key = (c.key ?? "").toLowerCase().replace(/[^a-z0-9_]+/g, "_").replace(/^_+|_+$/g, "");
     if (!key || seen.has(key)) key = `col_${i + 1}`;
     seen.add(key);
-    cleaned.push({ key, label, sort_order: i + 1 });
+    // 種別（プルダウン）。空文字・重複を除いた配列だけ保持し、無ければ省略。
+    const variants = Array.isArray(c.variants)
+      ? Array.from(new Set(c.variants.map((v) => (v ?? "").trim()).filter(Boolean)))
+      : [];
+    cleaned.push({ key, label, sort_order: i + 1, ...(variants.length ? { variants } : {}) });
   });
   if (cleaned.length === 0) {
     return { success: false, error: "有効なカラムがありません" };
