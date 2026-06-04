@@ -10,6 +10,7 @@ import {
   type PendingSalePatient,
   type CashSalePaymentType,
 } from "@/app/actions/sales";
+import { markAppointmentNoShow } from "@/app/actions/adminReserve";
 import { usePaymentCategories } from "@/lib/use-payment-categories";
 import { getPaymentCategoryColor } from "@/lib/payment-category-color";
 import { evaluateMedicalAid, type MedicalAidRules } from "@/lib/medical-aid";
@@ -20,7 +21,7 @@ import Link from "next/link";
 import {
   Bot, CheckSquare, Square, Loader2, Zap, AlertTriangle,
   ChevronLeft, Save, RefreshCw, User, Clock, Info, ClipboardList,
-  Plus, X, SplitSquareHorizontal,
+  Plus, X, SplitSquareHorizontal, UserX,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -160,6 +161,22 @@ function BulkSalesPageInner() {
     });
   };
 
+  // 来院されなかった方を「未来院（NoShow）」として一覧から外す。
+  // markAppointmentNoShow で予約が cancelled になり、この未入力一覧から自動で消える。
+  // （会計を全部終わらせた後でも、残った未来院の方をここで片付けられる）
+  const handleNoShow = (row: DraftRow) => {
+    startTransition(async () => {
+      const res = await markAppointmentNoShow(row.appointmentId);
+      if (res.success) {
+        // その場で一覧から除去（再取得を待たずに即反映）
+        setRows(prev => prev.filter(r => r.appointmentId !== row.appointmentId));
+        toast.success(`${row.customerName}様を未来院として外しました`);
+      } else {
+        toast.error(res.error ?? "未来院の処理に失敗しました");
+      }
+    });
+  };
+
   const checkedCount = rows.filter(r => r.checked && isSavable(r)).length;
   const totalAmount = rows
     .filter(r => r.checked && isSavable(r))
@@ -291,6 +308,7 @@ function BulkSalesPageInner() {
             </div>
             <p className="text-xs text-slate-500 dark:text-slate-400 mt-2">
               まず「全員を会計対象」を押して、来院されなかった方だけチェックを外す運用ができます。
+              来院されなかった方は、右の「未来院」ボタンで一覧から外せます（保存後でもOK）。
             </p>
           </div>
 
@@ -318,6 +336,7 @@ function BulkSalesPageInner() {
                 onChange={(updated) =>
                   setRows(prev => prev.map(r => r.appointmentId === row.appointmentId ? updated : r))
                 }
+                onNoShow={() => handleNoShow(row)}
               />
             ))}
           </div>
@@ -367,13 +386,17 @@ function DraftRowItem({
   paymentCategories,
   medicalAidRules,
   onCategoryAdded,
+  onNoShow,
 }: {
   row: DraftRow;
   onChange: (updated: DraftRow) => void;
   paymentCategories: PaymentCategoryRow[];
   medicalAidRules: MedicalAidRules | null;
   onCategoryAdded: () => Promise<void> | void;
+  onNoShow: () => void;
 }) {
+  // 「未来院」ボタンの押し間違い防止（1回目で確認、2回目で確定）
+  const [confirmingNoShow, setConfirmingNoShow] = useState(false);
   // 子ども医療費助成の判定（市町村＋生年月日）。対象なら医療助成ボタンを色分け。
   const medicalAid = evaluateMedicalAid({
     birthDate: row.birthDate,
@@ -539,6 +562,38 @@ function DraftRowItem({
             onChange={(e) => onChange({ ...row, editMemo: e.target.value })}
             className="h-9 text-sm"
           />
+        </div>
+
+        {/* 未来院（来院されなかった方をこの一覧から外す） */}
+        <div className="shrink-0">
+          {confirmingNoShow ? (
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => { setConfirmingNoShow(false); onNoShow(); }}
+                className="h-9 px-2.5 rounded-lg text-xs font-bold bg-rose-600 hover:bg-rose-700 text-white"
+              >
+                未来院にする
+              </button>
+              <button
+                type="button"
+                onClick={() => setConfirmingNoShow(false)}
+                className="h-9 px-2 rounded-lg text-xs font-medium text-slate-500 hover:text-slate-700 dark:text-slate-400"
+              >
+                やめる
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setConfirmingNoShow(true)}
+              title="来院されなかった方を一覧から外します"
+              className="h-9 px-2.5 rounded-lg text-xs font-bold text-rose-500 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/30 border border-rose-200 dark:border-rose-900/50 inline-flex items-center gap-1"
+            >
+              <UserX className="w-3.5 h-3.5" />
+              未来院
+            </button>
+          )}
         </div>
       </div>
 
