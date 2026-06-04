@@ -14,7 +14,8 @@ async function getSupabase() {
 
 export type VisitCategoryCount = { id: string; label: string; count: number };
 export type VisitBreakdown = {
-  totalVisits: number;   // のべ来院数（患者×日で1来院）
+  grossVisits: number;   // 全体の来院数（のべ・記帳行ベース＝従来の来院数）
+  totalVisits: number;   // 実来院数（患者×日で1来院）
   newVisits: number;     // 新規（初診）の来院
   hokenVisits: number;   // 保険を使った来院
   jihiVisits: number;    // 自費（実費）を使った来院
@@ -85,7 +86,10 @@ function buildVisitBreakdown(
     .filter((id) => (catCount.get(id) ?? 0) > 0)
     .map((id) => ({ id, label: VISIT_CATEGORY_LABEL[id], count: catCount.get(id)! }));
 
-  return { totalVisits, newVisits, hokenVisits, jihiVisits, bothVisits, byCategory };
+  // 全体の来院数（のべ）は記帳行ベース（従来の来院数と同じ）
+  const grossVisits = rows.length;
+
+  return { grossVisits, totalVisits, newVisits, hokenVisits, jihiVisits, bothVisits, byCategory };
 }
 
 /**
@@ -166,8 +170,10 @@ export async function getMonthlyEvaluation(year: number, month: number) {
     // 売上記帳モード（窓口日計表は1患者→複数行になるため、患者×日でまとめる）
     const isTally = (await getSalesInputMode()) === "tally";
     const visitBreakdown = buildVisitBreakdown(allSales ?? [], isTally);
-    const actualPatients = visitBreakdown.totalVisits;
-    const actualNewPatients = visitBreakdown.newVisits;
+    // 「来院数」指標（と1日平均来院数）は従来どおり記帳ベースの「のべ来院数」を使用。
+    // 「実来院数（患者×日）」は内訳カードで別表示する（数字を変えない）。
+    const actualPatients = visitBreakdown.grossVisits;
+    const actualNewPatients = allSales ? allSales.filter((s: any) => s.is_first_visit).length : 0;
 
     // Actual SNS Tasks (Count completed daily_tasks for the month)
     const { data: snsTasks } = await supabase

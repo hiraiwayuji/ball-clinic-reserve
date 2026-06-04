@@ -766,8 +766,14 @@ export default function EvaluationPage() {
             {/* 主要な人数 */}
             <div className="flex flex-wrap items-end gap-x-8 gap-y-4 mb-6">
               <div>
-                <div className="text-xs font-bold text-slate-500">のべ来院数</div>
+                <div className="text-xs font-bold text-slate-500">全体の来院数（のべ）</div>
                 <div className="text-4xl font-black text-slate-900">
+                  {visitBreakdown.grossVisits.toLocaleString()}<span className="text-base font-bold text-slate-400 ml-1">件</span>
+                </div>
+              </div>
+              <div>
+                <div className="text-xs font-bold text-slate-500">実来院数（実際の人数）</div>
+                <div className="text-4xl font-black text-slate-700">
                   {visitBreakdown.totalVisits.toLocaleString()}<span className="text-base font-bold text-slate-400 ml-1">人</span>
                 </div>
               </div>
@@ -817,7 +823,7 @@ export default function EvaluationPage() {
               </p>
             )}
             <p className="mt-1 text-xs text-slate-400">
-              ※同じ患者さんが同じ日に来た分は1来院として数えています。売上記帳のデータから自動で集計しています。
+              ※「全体の来院数（のべ）」は記帳した件数（＝1日平均来院数のもと）です。「実来院数」は同じ患者さんが同じ日に来た分を1人にまとめた実際の人数で、保険・自費の人数はこちらを基準にしています。すべて売上記帳から自動集計しています。
             </p>
           </CardContent>
         </Card>
