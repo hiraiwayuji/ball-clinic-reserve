@@ -14,7 +14,6 @@ import {
   CalendarClock,
   CalendarOff,
   Newspaper,
-  FileText,
 } from "lucide-react";
 import { isFamilyGift } from "@/lib/app-mode";
 
@@ -35,7 +34,6 @@ const CLINIC_NAV_ITEMS: NavItem[] = [
   { href: "/admin/sales", label: "売上記帳", icon: Coins, allow: ["owner"] },
   { href: "/admin/evaluation", label: "経営評価", icon: TrendingUp, allow: ["owner"] },
   { href: "/admin/marketing", label: "LINE・販促", icon: MessageSquare, allow: ["owner", "admin"] },
-  { href: "/admin/blog", label: "ブログ", icon: FileText, allow: ["owner", "admin"] },
   { href: "/admin/leaderboard", label: "ランキング", icon: Trophy, allow: ["owner", "admin", "staff"] },
   { href: "/admin/approvals", label: "承認", icon: ShieldCheck, allow: ["owner"] },
   { href: "/admin/my-schedule", label: "私の休み希望", icon: CalendarOff, allow: ["owner", "admin", "staff"] },
