@@ -431,6 +431,8 @@ export type MedicalAidRulesState = {
   rules: MedicalAidRules;
   isDefault: boolean;       // まだ院独自設定が無く、徳島デフォルトを表示しているか
   reviewedAt: string | null; // 最終見直し日（YYYY-MM-DD）
+  // 医療助成を選んだのに住所(city_name)が未登録のとき、会計画面でアラートを出すか（既定ON）
+  addressAlert: boolean;
 };
 
 export async function getMedicalAidRules(): Promise<MedicalAidRulesState> {
@@ -441,7 +443,7 @@ export async function getMedicalAidRules(): Promise<MedicalAidRulesState> {
 
   const { data } = await supabase
     .from("clinic_settings")
-    .select("medical_aid_rules, medical_aid_reviewed_at")
+    .select("medical_aid_rules, medical_aid_reviewed_at, medical_aid_address_alert")
     .eq("id", clinicId)
     .maybeSingle();
 
@@ -451,7 +453,39 @@ export async function getMedicalAidRules(): Promise<MedicalAidRulesState> {
     rules: hasCities ? (stored as MedicalAidRules) : DEFAULT_MEDICAL_AID_RULES,
     isDefault: !hasCities,
     reviewedAt: (data?.medical_aid_reviewed_at as string | null) ?? null,
+    // 列が無い/null の場合は既定ON（アラートあり）
+    addressAlert: (data as { medical_aid_address_alert?: boolean | null } | null)?.medical_aid_address_alert ?? true,
   };
+}
+
+// 医療助成の住所未登録アラートの ON/OFF を保存する（売上に関わる注意喚起＝owner専用）。
+export async function updateMedicalAidAddressAlert(
+  enabled: boolean,
+): Promise<{ success: boolean; error?: string }> {
+  const auth = await checkAdminAuth();
+  if (auth.role !== "owner") {
+    return { success: false, error: "この設定はオーナーのみ変更できます" };
+  }
+  const { createClient } = await import("@/lib/supabase/server");
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("clinic_settings")
+    .update({ medical_aid_address_alert: enabled })
+    .eq("id", auth.clinicId);
+  if (error) return { success: false, error: "保存に失敗しました: " + error.message };
+
+  await writeAudit({
+    clinicId: auth.clinicId,
+    actorUserId: auth.userId,
+    actorEmail: auth.email,
+    actorRole: auth.role,
+    actionType: "settings.update",
+    targetTable: "clinic_settings",
+    targetId: auth.clinicId,
+    after: { medical_aid_address_alert: enabled },
+  });
+  revalidatePath("/admin/settings");
+  return { success: true };
 }
 
 export async function updateMedicalAidRules(

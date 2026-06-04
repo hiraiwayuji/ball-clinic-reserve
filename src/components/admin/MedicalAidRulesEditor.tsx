@@ -9,6 +9,7 @@ import { HeartHandshake, Plus, Trash2, Loader2, Save, Info } from "lucide-react"
 import {
   getMedicalAidRules,
   updateMedicalAidRules,
+  updateMedicalAidAddressAlert,
 } from "@/app/actions/settings";
 import {
   SCHOOL_STAGES,
@@ -27,6 +28,9 @@ export default function MedicalAidRulesEditor() {
   const [reviewedAt, setReviewedAt] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  // 住所未登録アラートの ON/OFF（医療助成を選んだのに住所が無い時に注意を出すか）
+  const [addressAlert, setAddressAlert] = useState(true);
+  const [savingAlert, setSavingAlert] = useState(false);
 
   useEffect(() => {
     getMedicalAidRules()
@@ -34,9 +38,27 @@ export default function MedicalAidRulesEditor() {
         setRules(r.rules);
         setIsDefault(r.isDefault);
         setReviewedAt(r.reviewedAt);
+        setAddressAlert(r.addressAlert);
       })
       .finally(() => setLoading(false));
   }, []);
+
+  const toggleAddressAlert = async () => {
+    const next = !addressAlert;
+    setAddressAlert(next); // 楽観的に反映
+    setSavingAlert(true);
+    try {
+      const res = await updateMedicalAidAddressAlert(next);
+      if (res.success) {
+        toast.success(next ? "住所未登録アラートをONにしました" : "住所未登録アラートをOFFにしました");
+      } else {
+        setAddressAlert(!next); // 失敗したら戻す
+        toast.error(res.error ?? "保存に失敗しました");
+      }
+    } finally {
+      setSavingAlert(false);
+    }
+  };
 
   const setCity = (idx: number, patch: Partial<MedicalAidCityRule>) => {
     setRules((prev) => {
@@ -120,6 +142,33 @@ export default function MedicalAidRulesEditor() {
               {isDefault && " ／ 現在は徳島デフォルト値を表示中（保存すると院の設定になります）"}
             </p>
           </div>
+        </div>
+
+        {/* 住所未登録アラートの ON/OFF */}
+        <div className="flex items-start justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50/60 px-3 py-2.5">
+          <div className="text-xs text-slate-600">
+            <p className="font-bold text-amber-700">住所が未登録のときに注意を出す</p>
+            <p className="text-slate-500 mt-0.5">
+              会計で「医療助成」を選んだのに患者さんの住所（市町村）が未登録だと、
+              一覧で注意マークを表示します（保存はそのままできます）。
+            </p>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={addressAlert}
+            onClick={toggleAddressAlert}
+            disabled={savingAlert}
+            className={`relative shrink-0 mt-0.5 inline-flex h-6 w-11 items-center rounded-full transition-colors disabled:opacity-50 ${
+              addressAlert ? "bg-amber-500" : "bg-slate-300"
+            }`}
+          >
+            <span
+              className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform ${
+                addressAlert ? "translate-x-5" : "translate-x-0.5"
+              }`}
+            />
+          </button>
         </div>
 
         {loading || !rules ? (

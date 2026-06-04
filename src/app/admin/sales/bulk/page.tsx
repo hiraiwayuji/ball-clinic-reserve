@@ -55,10 +55,15 @@ function BulkSalesPageInner() {
   const [loading, setLoading] = useState(true);
   const [isPending, startTransition] = useTransition();
   const [medicalAidRules, setMedicalAidRules] = useState<MedicalAidRules | null>(null);
+  // 医療助成を選んだのに住所が未登録の時に注意を出すか（院の設定・既定ON）
+  const [addressAlert, setAddressAlert] = useState(true);
 
   // 医療費助成ルールを一度だけ読み込む（各行で 0円/600円 判定に使う）
   useEffect(() => {
-    getMedicalAidRules().then((r) => setMedicalAidRules(r.rules)).catch(() => {});
+    getMedicalAidRules().then((r) => {
+      setMedicalAidRules(r.rules);
+      setAddressAlert(r.addressAlert);
+    }).catch(() => {});
   }, []);
 
   const fetchPending = async () => {
@@ -332,6 +337,7 @@ function BulkSalesPageInner() {
                 row={row}
                 paymentCategories={paymentCategories}
                 medicalAidRules={medicalAidRules}
+                addressAlert={addressAlert}
                 onCategoryAdded={reloadCategories}
                 onChange={(updated) =>
                   setRows(prev => prev.map(r => r.appointmentId === row.appointmentId ? updated : r))
@@ -385,6 +391,7 @@ function DraftRowItem({
   onChange,
   paymentCategories,
   medicalAidRules,
+  addressAlert,
   onCategoryAdded,
   onNoShow,
 }: {
@@ -392,6 +399,7 @@ function DraftRowItem({
   onChange: (updated: DraftRow) => void;
   paymentCategories: PaymentCategoryRow[];
   medicalAidRules: MedicalAidRules | null;
+  addressAlert: boolean;
   onCategoryAdded: () => Promise<void> | void;
   onNoShow: () => void;
 }) {
@@ -407,6 +415,13 @@ function DraftRowItem({
   const aidBurden = effectiveWindowBurden(medicalAid, row.hagukumiPaidThisMonth);
   // 月600円ルールで「今月初回」だけ 600円 になる（2回目以降は0円）
   const aidFirstThisMonth = medicalAid.monthlyBurdenYen === 600 && !row.hagukumiPaidThisMonth;
+
+  // 「医療助成」を選んでいるか（通常モード＝区分タグ／明細モード＝各行の区分）
+  const hagukumiSelected = row.lines.length > 0
+    ? row.lines.some(l => l.paymentType === "hagukumi")
+    : row.paymentTypes.includes("hagukumi");
+  // 医療助成を選んだのに住所（市町村）が未登録 → 注意（設定でON時のみ・保存はブロックしない）
+  const showAddressAlert = addressAlert && hagukumiSelected && !row.cityName?.trim();
 
   // 助成の窓口金額をワンタップで反映（金額＝0/600、区分に「医療助成」を付与、明細モード解除）。
   const applyAidAmount = () => {
@@ -756,6 +771,17 @@ function DraftRowItem({
             >
               <Plus className="w-3 h-3" /> 明細を追加
             </button>
+          </div>
+        )}
+
+        {/* 医療助成を選んだのに住所未登録 → 注意（保存はブロックしない・設定でOFFにできる） */}
+        {showAddressAlert && (
+          <div className="flex items-start gap-1.5 rounded-lg border border-amber-300 bg-amber-50 dark:bg-amber-950/30 px-2.5 py-1.5">
+            <AlertTriangle className="w-3.5 h-3.5 text-amber-500 shrink-0 mt-0.5" />
+            <p className="text-[11px] text-amber-700 dark:text-amber-400 font-medium">
+              住所（市町村）が未登録です。医療助成の対象判定ができません。
+              <span className="text-amber-600/80">このまま保存もできます（初診アンケート等で住所をご登録ください）。</span>
+            </p>
           </div>
         )}
 
