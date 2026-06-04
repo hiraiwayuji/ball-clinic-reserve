@@ -13,7 +13,7 @@ import {
 import { markAppointmentNoShow } from "@/app/actions/adminReserve";
 import { usePaymentCategories } from "@/lib/use-payment-categories";
 import { getPaymentCategoryColor } from "@/lib/payment-category-color";
-import { evaluateMedicalAid, type MedicalAidRules } from "@/lib/medical-aid";
+import { evaluateMedicalAid, effectiveWindowBurden, type MedicalAidRules } from "@/lib/medical-aid";
 import { getMedicalAidRules } from "@/app/actions/settings";
 import { upsertPaymentCategory, type PaymentCategoryRow } from "@/app/actions/payment-categories";
 import { toast } from "sonner";
@@ -403,6 +403,25 @@ function DraftRowItem({
     cityName: row.cityName,
     rules: medicalAidRules,
   });
+  // 今月この院で助成受診済みか を踏まえた、今回の実窓口負担（0/600/null）。
+  const aidBurden = effectiveWindowBurden(medicalAid, row.hagukumiPaidThisMonth);
+  // 月600円ルールで「今月初回」だけ 600円 になる（2回目以降は0円）
+  const aidFirstThisMonth = medicalAid.monthlyBurdenYen === 600 && !row.hagukumiPaidThisMonth;
+
+  // 助成の窓口金額をワンタップで反映（金額＝0/600、区分に「医療助成」を付与、明細モード解除）。
+  const applyAidAmount = () => {
+    if (aidBurden == null) return;
+    const types = row.paymentTypes.includes("hagukumi")
+      ? row.paymentTypes
+      : [...row.paymentTypes, "hagukumi" as CashSalePaymentType];
+    onChange({
+      ...row,
+      lines: [],
+      editAmount: String(aidBurden),
+      paymentTypes: types,
+      checked: true,
+    });
+  };
   // 区分ごと金額分けモードか
   const splitMode = row.lines.length > 0;
   const hasAmount = splitMode
@@ -635,15 +654,34 @@ function DraftRowItem({
                   {opt.label}
                   {aidHighlight && (
                     <span className="ml-1 opacity-80">
-                      {medicalAid.monthlyBurdenYen === 0 ? "(0円)" : `(月${medicalAid.monthlyBurdenYen}円)`}
+                      {aidBurden === 0 ? "(今回0円)" : `(今回${aidBurden}円)`}
                     </span>
                   )}
                 </button>
               );
             })}
-            {medicalAid.applicable && (
-              <span className={`text-[10px] font-bold ${medicalAid.monthlyBurdenYen === 0 ? "text-emerald-600" : "text-amber-600"}`}>
-                👶 {medicalAid.city}・{medicalAid.stageLabel}（受給者証確認）
+            {medicalAid.applicable && aidBurden != null && (
+              <span className="inline-flex items-center gap-1.5 flex-wrap">
+                <span className={`text-[10px] font-bold ${aidBurden === 0 ? "text-emerald-600" : "text-amber-600"}`}>
+                  👶 {medicalAid.city}・{medicalAid.stageLabel}
+                  {medicalAid.monthlyBurdenYen === 0
+                    ? "（毎回0円）"
+                    : aidFirstThisMonth
+                      ? "（今月初回 → 窓口600円）"
+                      : "（今月受診済 → 窓口0円）"}
+                  ・受給者証確認
+                </span>
+                <button
+                  type="button"
+                  onClick={applyAidAmount}
+                  className={`px-2 py-0.5 rounded-md text-[10px] font-bold border transition-all ${
+                    aidBurden === 0
+                      ? "border-emerald-300 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-800 dark:hover:bg-emerald-950/40"
+                      : "border-amber-300 text-amber-700 hover:bg-amber-50 dark:border-amber-800 dark:hover:bg-amber-950/40"
+                  }`}
+                >
+                  {aidBurden === 0 ? "0円で入れる" : `${aidBurden}円で入れる`}
+                </button>
               </span>
             )}
             {isZero && row.paymentTypes.length === 0 && (

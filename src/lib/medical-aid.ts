@@ -148,6 +148,19 @@ const NONE: MedicalAidStatus = {
   message: null,
 };
 
+// 「今月この院で既に助成受診したか」を踏まえた、今回の実際の窓口負担額を返す。
+// - 助成対象外 / 判定不可 → null（金額サジェストしない）
+// - 月0円ルール → 常に 0
+// - 月600円ルール → 今月初回なら 600、今月2回目以降（paidThisMonth=true）なら 0
+export function effectiveWindowBurden(
+  status: MedicalAidStatus,
+  paidThisMonth: boolean,
+): number | null {
+  if (!status.applicable || status.monthlyBurdenYen == null) return null;
+  if (status.monthlyBurdenYen === 0) return 0;
+  return paidThisMonth ? 0 : status.monthlyBurdenYen;
+}
+
 // 患者の居住市町村＋生年月日から、子ども医療費助成の窓口負担を判定する。
 export function evaluateMedicalAid(opts: {
   birthDate?: string | null;

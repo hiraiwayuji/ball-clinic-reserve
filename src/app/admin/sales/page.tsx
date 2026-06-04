@@ -38,6 +38,8 @@ import { updateCheckinStatus, getLastAppointmentByCustomerName } from "@/app/act
 import { getActiveCoursesByPopularity, type ReservationCourse } from "@/app/actions/courses";
 import { usePaymentCategories } from "@/lib/use-payment-categories";
 import { getPaymentCategoryColor } from "@/lib/payment-category-color";
+import { evaluateMedicalAid, type MedicalAidRules } from "@/lib/medical-aid";
+import { getMedicalAidRules } from "@/app/actions/settings";
 import { toast } from "sonner";
 import Link from "next/link";
 import CashSalesImportDialog from "@/components/admin/CashSalesImportDialog";
@@ -53,6 +55,8 @@ function SalesPageInner() {
   const [date, setDate] = useState<Date | null>(null);
   const [sales, setSales] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  // 子ども医療費助成ルール（市町村×学年 → 0円/月600円）。一覧の住所横バッジに使う。
+  const [medicalAidRules, setMedicalAidRules] = useState<MedicalAidRules | null>(null);
   const [isPending, startTransition] = useTransition();
   const [isFirstVisit, setIsFirstVisit] = useState(false);
   const [showImport, setShowImport] = useState(false);
@@ -89,6 +93,11 @@ function SalesPageInner() {
   // コース一覧をマウント時に取得（実費プルダウンの選択肢）
   useEffect(() => {
     getActiveCoursesByPopularity().then(setActiveCourses).catch(() => setActiveCourses([]));
+  }, []);
+
+  // 医療費助成ルールをマウント時に一度だけ取得（一覧の住所横バッジ用）
+  useEffect(() => {
+    getMedicalAidRules().then((r) => setMedicalAidRules(r.rules)).catch(() => {});
   }, []);
 
   const totalAmount = useMemo(() => {
@@ -831,9 +840,33 @@ function SalesPageInner() {
                             )}
                           </div>
                           {sale.city_name && (
-                            <div className="flex items-center gap-1 mt-0.5 text-[11px] text-slate-400 dark:text-slate-500">
-                              <MapPin className="w-3 h-3" />
-                              {sale.city_name}
+                            <div className="flex items-center gap-1.5 mt-0.5 text-[11px] text-slate-400 dark:text-slate-500 flex-wrap">
+                              <span className="flex items-center gap-1">
+                                <MapPin className="w-3 h-3" />
+                                {sale.city_name}
+                              </span>
+                              {(() => {
+                                // 住所×生年月日から子ども医療費助成の対象/窓口負担を判定してバッジ表示
+                                const aid = evaluateMedicalAid({
+                                  birthDate: sale.birth_date,
+                                  cityName: sale.city_name,
+                                  rules: medicalAidRules,
+                                });
+                                if (!aid.applicable || aid.monthlyBurdenYen == null) return null;
+                                const free = aid.monthlyBurdenYen === 0;
+                                return (
+                                  <span
+                                    className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
+                                      free
+                                        ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400"
+                                        : "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-400"
+                                    }`}
+                                    title="子ども医療費助成（受給者証をご確認ください）"
+                                  >
+                                    👶 助成{free ? " 0円対象" : " 月600円対象"}
+                                  </span>
+                                );
+                              })()}
                             </div>
                           )}
                         </TableCell>

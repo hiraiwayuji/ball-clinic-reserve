@@ -100,6 +100,9 @@ export type PendingSalePatient = {
   /** 子ども医療費助成の判定用（市町村＋生年月日）。bulk画面で医療助成ボタンを色分けする。 */
   birthDate: string | null;
   cityName: string | null;
+  /** 今月この院で既に医療助成(hagukumi)の会計があるか。
+   *  月600円ルールの患者で「今月初回=600円／2回目以降=0円」を出し分けるのに使う。 */
+  hagukumiPaidThisMonth: boolean;
 };
 
 function getJstDateString(date = new Date()) {
@@ -175,6 +178,28 @@ export async function getTodayPendingSales(dateStr?: string): Promise<{ success:
       const normalizedName = sale.customer_name?.trim();
       if (!normalizedName) continue;
       enteredCounts.set(normalizedName, (enteredCounts.get(normalizedName) ?? 0) + 1);
+    }
+
+    // 今月この院で「医療助成(hagukumi)」の会計が既にある患者を集める。
+    // 月600円ルールの患者で「今月初回=600円／2回目以降=0円」を出し分けるのに使う。
+    // （対象日の売上は未入力なので、ここに入るのは過去日の助成受診のみ＝今月もう来た判定になる）
+    const monthStart = `${targetDate.slice(0, 7)}-01`;
+    const hagukumiPaidNames = new Set<string>();
+    {
+      const { data: monthHagukumi } = await supabase
+        .from("cash_sales")
+        .select("customer_name, payment_type, payment_types")
+        .eq("clinic_id", clinicId)
+        .gte("sale_date", monthStart)
+        .lte("sale_date", targetDate);
+      for (const s of monthHagukumi ?? []) {
+        const types = Array.isArray((s as { payment_types?: string[] | null }).payment_types)
+          ? ((s as { payment_types?: string[] | null }).payment_types ?? [])
+          : [];
+        const isHagukumi = (s as { payment_type?: string | null }).payment_type === "hagukumi" || types.includes("hagukumi");
+        const nm = (s as { customer_name?: string }).customer_name?.trim();
+        if (isHagukumi && nm) hagukumiPaidNames.add(nm);
+      }
     }
 
     // 売上未入力の患者だけ抽出して、コース価格 → AI履歴 → 空欄 の順で元情報を決める
@@ -288,6 +313,7 @@ export async function getTodayPendingSales(dateStr?: string): Promise<{ success:
         initialMemo,
         birthDate: custBirthDate,
         cityName: custCityName,
+        hagukumiPaidThisMonth: hagukumiPaidNames.has(customerName),
       });
     }
 
@@ -672,28 +698,32 @@ export async function getCashSales(dateStr: string) {
     const nameToMrn = new Map<string, string | null>();
     // 売上一覧（余裕のある画面）で住所＝市町村も出すため、名前→市町村もマップする。
     const nameToCity = new Map<string, string | null>();
+    // 医療費助成バッジ（0円/月600円対象）の学年判定に使う、名前→生年月日。
+    const nameToBirth = new Map<string, string | null>();
     if (uniqueNames.length > 0) {
       const { data: customers } = await supabase
         .from("customers")
-        .select("name, medical_record_number, city_name")
+        .select("name, medical_record_number, city_name, birth_date")
         .eq("clinic_id", clinicId)
         .in("name", uniqueNames);
-      const tally = new Map<string, { mrn: string | null; city: string | null; count: number }>();
+      const tally = new Map<string, { mrn: string | null; city: string | null; birth: string | null; count: number }>();
       (customers ?? []).forEach((c: any) => {
         const name = c.name as string;
         const mrn = c.medical_record_number ?? null;
         const city = c.city_name ?? null;
+        const birth = c.birth_date ?? null;
         const prev = tally.get(name);
         if (prev) {
-          tally.set(name, { mrn: prev.mrn, city: prev.city, count: prev.count + 1 });
+          tally.set(name, { mrn: prev.mrn, city: prev.city, birth: prev.birth, count: prev.count + 1 });
         } else {
-          tally.set(name, { mrn, city, count: 1 });
+          tally.set(name, { mrn, city, birth, count: 1 });
         }
       });
       tally.forEach((v, name) => {
         // 同名複数が居る場合は曖昧なので null
         nameToMrn.set(name, v.count === 1 ? v.mrn : null);
         nameToCity.set(name, v.count === 1 ? v.city : null);
+        nameToBirth.set(name, v.count === 1 ? v.birth : null);
       });
     }
 
@@ -710,6 +740,7 @@ export async function getCashSales(dateStr: string) {
       return {
         ...s,
         city_name: nameToCity.get(s.customer_name) ?? null,
+        birth_date: nameToBirth.get(s.customer_name) ?? null,
         medical_record_number:
           mrnFromMemo ?? nameToMrn.get(s.customer_name) ?? null,
       };
