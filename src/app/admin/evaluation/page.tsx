@@ -537,7 +537,16 @@ export default function EvaluationPage() {
     );
   }
 
-  const { targets, evalData, metrics } = data || {};
+  const { targets, evalData, metrics, visitBreakdown } = data || {};
+
+  const visitCatColor: Record<string, string> = {
+    hoken: "bg-blue-400",
+    jihi: "bg-emerald-400",
+    jibaiseki: "bg-violet-400",
+    hagukumi: "bg-amber-400",
+    kankeisha: "bg-rose-400",
+    other: "bg-slate-400",
+  };
 
   const radarData = [
     { label: "売上", value: metrics?.[1]?.score || 0, max: 100 },
@@ -743,6 +752,76 @@ export default function EvaluationPage() {
           </button>
         ))}
       </div>
+
+      {/* 来院数の内訳（保険・自費） */}
+      {visitBreakdown && (
+        <Card className="shadow-md border-slate-200">
+          <CardHeader className="pb-3 border-b border-slate-100 bg-slate-50">
+            <CardTitle className="text-lg flex items-center gap-2">
+              <Users className="w-5 h-5 text-blue-600" />
+              来院数の内訳（保険・自費）
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="pt-6">
+            {/* 主要な人数 */}
+            <div className="flex flex-wrap items-end gap-x-8 gap-y-4 mb-6">
+              <div>
+                <div className="text-xs font-bold text-slate-500">のべ来院数</div>
+                <div className="text-4xl font-black text-slate-900">
+                  {visitBreakdown.totalVisits.toLocaleString()}<span className="text-base font-bold text-slate-400 ml-1">人</span>
+                </div>
+              </div>
+              <div>
+                <div className="text-xs font-bold text-blue-600">保険の来院</div>
+                <div className="text-3xl font-black text-blue-700">
+                  {visitBreakdown.hokenVisits.toLocaleString()}<span className="text-sm font-bold text-blue-300 ml-1">人</span>
+                </div>
+              </div>
+              <div>
+                <div className="text-xs font-bold text-emerald-600">自費（実費）の来院</div>
+                <div className="text-3xl font-black text-emerald-700">
+                  {visitBreakdown.jihiVisits.toLocaleString()}<span className="text-sm font-bold text-emerald-300 ml-1">人</span>
+                </div>
+              </div>
+              <div>
+                <div className="text-xs font-bold text-amber-600">新規（初診）</div>
+                <div className="text-3xl font-black text-amber-700">
+                  {visitBreakdown.newVisits.toLocaleString()}<span className="text-sm font-bold text-amber-300 ml-1">人</span>
+                </div>
+              </div>
+            </div>
+
+            {/* 区分ごとのバー */}
+            {visitBreakdown.byCategory.length > 0 ? (
+              <div className="space-y-2">
+                {visitBreakdown.byCategory.map((c: any) => (
+                  <div key={c.id} className="flex items-center gap-3">
+                    <div className="w-28 text-sm font-medium text-slate-600 shrink-0">{c.label}</div>
+                    <div className="flex-1 h-5 bg-slate-100 rounded overflow-hidden">
+                      <div
+                        className={`h-full rounded transition-all ${visitCatColor[c.id] || "bg-slate-400"}`}
+                        style={{ width: `${visitBreakdown.totalVisits ? Math.round((c.count / visitBreakdown.totalVisits) * 100) : 0}%` }}
+                      />
+                    </div>
+                    <div className="w-16 text-right text-sm font-bold text-slate-800 shrink-0">{c.count}人</div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm text-slate-400">この月の来院データはまだありません。</p>
+            )}
+
+            {visitBreakdown.bothVisits > 0 && (
+              <p className="mt-4 text-xs text-slate-400">
+                ※保険と自費を併用した来院が {visitBreakdown.bothVisits} 人います。各区分に数えているため、区分ごとの合計はのべ来院数を上回ることがあります。
+              </p>
+            )}
+            <p className="mt-1 text-xs text-slate-400">
+              ※同じ患者さんが同じ日に来た分は1来院として数えています。売上記帳のデータから自動で集計しています。
+            </p>
+          </CardContent>
+        </Card>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         {/* --- Left: Score & Radar --- */}

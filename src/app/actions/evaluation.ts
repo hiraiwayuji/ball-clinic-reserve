@@ -4,9 +4,88 @@ import { createClient } from "@/lib/supabase/server";
 import { requireRole } from "@/app/actions/auth";
 import { revalidatePath } from "next/cache";
 import { getMonthlyTotalRevenue } from "./sales";
+import { getSalesInputMode } from "./tally";
 
 async function getSupabase() {
   return await createClient();
+}
+
+// ===== 来院数の内訳（保険・自費）集計 =====
+
+export type VisitCategoryCount = { id: string; label: string; count: number };
+export type VisitBreakdown = {
+  totalVisits: number;   // のべ来院数（患者×日で1来院）
+  newVisits: number;     // 新規（初診）の来院
+  hokenVisits: number;   // 保険を使った来院
+  jihiVisits: number;    // 自費（実費）を使った来院
+  bothVisits: number;    // 保険と自費を併用した来院
+  byCategory: VisitCategoryCount[]; // 区分ごとの来院数（併用は各区分に計上）
+};
+
+// 表示順とラベル（全院共通の標準区分）
+const VISIT_CATEGORY_ORDER = ["hoken", "jihi", "jibaiseki", "hagukumi", "kankeisha", "other"] as const;
+const VISIT_CATEGORY_LABEL: Record<string, string> = {
+  hoken: "保険",
+  jihi: "自費（実費）",
+  jibaiseki: "自賠責・労災",
+  hagukumi: "医療助成",
+  kankeisha: "関係者",
+  other: "その他",
+};
+
+// cash_sales の支払区分キー → 標準区分へ正規化。
+// 窓口日計表モードでは "tally:<列キー>" で保存され、保険列以外は基本的に自費（実費）。
+function normalizeVisitCategory(rawKey: string, isTally: boolean): string {
+  let key = (rawKey || "").trim();
+  if (key.startsWith("tally:")) key = key.slice("tally:".length);
+  if (key === "hoken") return "hoken";
+  if (key === "jihi") return "jihi";
+  if (key === "jibaiseki" || key === "rosai" || key === "jibai") return "jibaiseki";
+  if (key === "hagukumi") return "hagukumi";
+  if (key === "kankeisha") return "kankeisha";
+  if (key === "other" || key === "") return "other";
+  // 未知キー: 日計表の自費メニュー(鍼灸/整体/物販 等)は実費扱い、個別入力の独自区分はその他
+  return isTally ? "jihi" : "other";
+}
+
+function buildVisitBreakdown(
+  rows: Array<{ customer_name?: string | null; sale_date?: string | null; is_first_visit?: boolean | null; payment_type?: string | null; payment_types?: string[] | null }>,
+  isTally: boolean,
+): VisitBreakdown {
+  // 患者名×日付で1来院にまとめる（日計表は1患者が複数行になるため）
+  const groups = new Map<string, { buckets: Set<string>; isNew: boolean }>();
+  for (const r of rows) {
+    const name = String(r.customer_name ?? "").trim();
+    if (!name) continue;
+    const day = String(r.sale_date ?? "");
+    const gk = `${day}__${name}`;
+    const g = groups.get(gk) ?? { buckets: new Set<string>(), isNew: false };
+    const keys: string[] = Array.isArray(r.payment_types) && r.payment_types.length
+      ? r.payment_types
+      : (r.payment_type ? [r.payment_type] : [""]);
+    for (const k of keys) g.buckets.add(normalizeVisitCategory(String(k), isTally));
+    if (r.is_first_visit) g.isNew = true;
+    groups.set(gk, g);
+  }
+
+  const catCount = new Map<string, number>();
+  let totalVisits = 0, newVisits = 0, hokenVisits = 0, jihiVisits = 0, bothVisits = 0;
+  for (const g of groups.values()) {
+    totalVisits++;
+    if (g.isNew) newVisits++;
+    const hasHoken = g.buckets.has("hoken");
+    const hasJihi = g.buckets.has("jihi");
+    if (hasHoken) hokenVisits++;
+    if (hasJihi) jihiVisits++;
+    if (hasHoken && hasJihi) bothVisits++;
+    for (const b of g.buckets) catCount.set(b, (catCount.get(b) ?? 0) + 1);
+  }
+
+  const byCategory: VisitCategoryCount[] = VISIT_CATEGORY_ORDER
+    .filter((id) => (catCount.get(id) ?? 0) > 0)
+    .map((id) => ({ id, label: VISIT_CATEGORY_LABEL[id], count: catCount.get(id)! }));
+
+  return { totalVisits, newVisits, hokenVisits, jihiVisits, bothVisits, byCategory };
 }
 
 /**
@@ -79,13 +158,16 @@ export async function getMonthlyEvaluation(year: number, month: number) {
 
     const { data: allSales } = await supabase
       .from("cash_sales")
-      .select("id, is_first_visit")
+      .select("id, is_first_visit, customer_name, sale_date, payment_type, payment_types")
       .eq("clinic_id", clinicId)
       .gte("sale_date", firstDayStr)
       .lte("sale_date", endDateStr);
 
-    const actualPatients = allSales ? allSales.length : 0;
-    const actualNewPatients = allSales ? allSales.filter(s => s.is_first_visit).length : 0;
+    // 売上記帳モード（窓口日計表は1患者→複数行になるため、患者×日でまとめる）
+    const isTally = (await getSalesInputMode()) === "tally";
+    const visitBreakdown = buildVisitBreakdown(allSales ?? [], isTally);
+    const actualPatients = visitBreakdown.totalVisits;
+    const actualNewPatients = visitBreakdown.newVisits;
 
     // Actual SNS Tasks (Count completed daily_tasks for the month)
     const { data: snsTasks } = await supabase
@@ -120,7 +202,8 @@ export async function getMonthlyEvaluation(year: number, month: number) {
         actualIncome,
         actualPatients,
         actualSnsTasks,
-        actualNewPatients
+        actualNewPatients,
+        visitBreakdown
       }
     };
   } catch (error) {
