@@ -15,10 +15,11 @@ import {
   HelpCircle,
   Tag,
   Smartphone,
+  Network,
 } from "lucide-react";
 
-const MANUAL_VERSION = "v1.1";
-const MANUAL_UPDATED_AT = "2026-06-02";
+const MANUAL_VERSION = "v1.2";
+const MANUAL_UPDATED_AT = "2026-06-04";
 
 type Item = {
   icon: React.ReactNode;
@@ -215,6 +216,52 @@ export default function ManualSection() {
             <li><b>名寄せ・統合</b>：同一人物が二重登録されている場合は統合可能</li>
             <li><b>予約停止</b>：トラブル防止のため特定患者さんのWeb予約を停止できます</li>
           </ul>
+        </Section>
+
+        <Section
+          icon={<Network className="w-4 h-4 text-indigo-600" />}
+          title="顧客情報の統一（1人＝1カルテにまとまる）"
+          color="border-indigo-200 dark:border-indigo-900 bg-indigo-50/50 dark:bg-indigo-950/30"
+        >
+          <p>
+            このツールでは、1人の患者さんの情報が <b>1つのカルテ（顧客情報）</b> にまとまります。
+            <b>Web予約・LINE・受付・売上記帳・経営評価（来院数）</b> が、すべて同じカルテにつながるので、
+            どの画面で見ても同じ人として扱われ、二重に管理する必要がありません。
+          </p>
+
+          <div className="rounded-md bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-900 p-3 text-xs text-indigo-900 dark:text-indigo-200">
+            <div className="font-semibold mb-1">1つのカルテにつながっているもの</div>
+            <ul className="list-disc list-inside space-y-0.5">
+              <li>予約履歴（Web予約・受付・次回予約）</li>
+              <li>LINE紐づけ（リマインダー・クーポン・一括配信）</li>
+              <li>カルテ番号・電話番号・住所・アンケート</li>
+              <li>売上・来院数（保険／自費の人数もこのカルテ単位で集計）</li>
+            </ul>
+          </div>
+
+          <div className="space-y-3">
+            <Step n={1} title="本人の見分け方（自動）">
+              予約時はお名前で照合し、<b>カルテ番号・電話番号・LINE</b> で本人を特定します。
+              一度登録された方は、次回以降は同じカルテに自動でつながります。
+            </Step>
+            <Step n={2} title="二重登録になってしまったら（名寄せ・統合）">
+              姓名の間のスペース・旧姓・ひらがな／カナ違いなどで、同じ人が2件に分かれることがあります。
+              その時は <b>「顧客管理」</b> で2件を選んで <b>「統合」</b> すると、1つのカルテにまとまります。
+            </Step>
+            <Step n={3} title="統合すると引き継がれるもの">
+              カルテ番号・電話番号・LINE・住所などの空欄は、もう片方の情報で自動的に埋まり、
+              <b>予約履歴もすべて1つにまとまります</b>。お名前は「統合先（残す方）」を正として残します。
+            </Step>
+          </div>
+
+          <Tip>
+            来院数や「保険・自費の人数」も、このカルテ単位で数えています。
+            二重登録を統合しておくと、<b>実来院数がより正確</b>になります。
+          </Tip>
+          <Tip>
+            操作する場所は <b>「顧客管理」タブ</b> です。検索 → 2件を選択 → 統合、の流れです。
+            統合は元に戻せないので、別人でないかだけ確認してから行ってください。
+          </Tip>
         </Section>
 
         <Section
