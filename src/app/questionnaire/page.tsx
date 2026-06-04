@@ -5,9 +5,38 @@ import ClinicWordmark from "@/components/ClinicWordmark";
 import Link from "next/link";
 import { CheckCircle2, MessageCircle, ArrowLeft, ChevronRight } from "lucide-react";
 import { submitQuestionnaire } from "@/app/actions/questionnaire";
+import { createReservation } from "@/app/actions/reserve";
 import { getPublicClinicSettings } from "@/app/actions/publicSettings";
 import { toast } from "sonner";
 import { CLINIC_CONFIG } from "@/lib/clinic-config";
+
+// 予約ページから引き継ぐ「選んだ日時・お名前・電話」（reserve/page.tsx と同じキー）
+const PENDING_BOOKING_KEY = "ballClinic_pendingBooking";
+
+type PendingBooking = {
+  date: string;
+  time: string;
+  visitType: string;
+  name: string;
+  phone: string;
+  isWaitlistIntent?: boolean;
+  courseId?: string;
+  courseName?: string;
+  courseDurationMinutes?: number | null;
+  staffId?: string;
+  staffName?: string;
+  roomId?: string;
+  roomName?: string;
+};
+
+// "2026-06-10" → "6月10日（火）" のような表示にする（引き継ぎ確認の見出し用）。
+function formatPendingDate(dateStr: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateStr);
+  if (!m) return dateStr;
+  const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  const wd = ["日", "月", "火", "水", "木", "金", "土"][d.getDay()];
+  return `${Number(m[2])}月${Number(m[3])}日（${wd}）`;
+}
 
 // LINE 公式アカウント URL のフォールバック（env も DB も無いときのみ）
 const LINE_URL_FALLBACK =
@@ -40,9 +69,12 @@ function detectPrefecture(address: string | null | undefined): string {
 }
 
 export default function QuestionnairePage() {
-  const [step, setStep] = useState<"form" | "done">("form");
+  const [step, setStep] = useState<"form" | "done" | "booked">("form");
   const [submitting, setSubmitting] = useState(false);
   const [normalizedPhone, setNormalizedPhone] = useState("");
+  // 予約ページから引き継いだ仮予約の内容（あればアンケート後にそのまま確定する）
+  const [pendingBooking, setPendingBooking] = useState<PendingBooking | null>(null);
+  const [bookedIsWaiting, setBookedIsWaiting] = useState(false);
 
   // 院の公開設定（LINE URL・住所＝県判定）。マウント時に取得。
   const [lineUrl, setLineUrl] = useState<string>(LINE_URL_FALLBACK);
@@ -74,8 +106,48 @@ export default function QuestionnairePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // 予約ページから引き継いだ仮予約内容を読み込み、お名前・電話をプリフィルする。
+  // （無ければ従来どおり、単体のアンケートとして動作する）
+  useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem(PENDING_BOOKING_KEY);
+      if (!raw) return;
+      const b = JSON.parse(raw) as PendingBooking;
+      if (b && b.date && b.time) {
+        setPendingBooking(b);
+        if (b.name) setName(b.name);
+        if (b.phone) setPhone(b.phone);
+      }
+    } catch {}
+  }, []);
+
   // 選択中の県のクイック市町村ボタン
   const cityChoices = useMemo(() => CITIES_BY_PREFECTURE[prefecture] ?? [], [prefecture]);
+
+  // アンケート完了後、引き継いだ内容でそのまま仮予約を確定する。
+  const completePendingBooking = async (b: PendingBooking, fallbackPhone: string) => {
+    const fd = new FormData();
+    fd.append("date", b.date);
+    fd.append("time", b.time);
+    fd.append("name", b.name);
+    fd.append("phone", b.phone || fallbackPhone);
+    fd.append("visitType", b.visitType || "new");
+    fd.append("isWaitlistIntent", String(!!b.isWaitlistIntent));
+    if (b.courseId) {
+      fd.append("courseId", b.courseId);
+      if (b.courseName) fd.append("courseName", b.courseName);
+      if (b.courseDurationMinutes) fd.append("courseDurationMinutes", String(b.courseDurationMinutes));
+    }
+    if (b.staffId) {
+      fd.append("staffId", b.staffId);
+      if (b.staffName) fd.append("staffName", b.staffName);
+    }
+    if (b.roomId) {
+      fd.append("roomId", b.roomId);
+      if (b.roomName) fd.append("roomName", b.roomName);
+    }
+    return await createReservation(fd);
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -112,6 +184,22 @@ export default function QuestionnairePage() {
 
       if (result.success) {
         setNormalizedPhone(normalizedPhone);
+        // 予約ページから引き継いだ内容があれば、そのまま仮予約を確定する。
+        if (pendingBooking) {
+          const res: any = await completePendingBooking(pendingBooking, normalizedPhone);
+          try { sessionStorage.removeItem(PENDING_BOOKING_KEY); } catch {}
+          if (res?.success) {
+            try {
+              localStorage.setItem("ballClinic_savedName", pendingBooking.name || name.trim());
+              localStorage.setItem("ballClinic_savedPhone", normalizedPhone);
+            } catch {}
+            setBookedIsWaiting(!!res.isWaiting);
+            setStep("booked");
+            return;
+          }
+          // 仮予約の確定に失敗 → 通常の完了画面に切り替え、カレンダーから進んでもらう
+          toast.error(res?.error || "仮予約の確定に失敗しました。お手数ですが予約カレンダーからお進みください。");
+        }
         setStep("done");
       } else {
         toast.error(result.error || "送信に失敗しました");
@@ -120,6 +208,77 @@ export default function QuestionnairePage() {
       setSubmitting(false);
     }
   };
+
+  // 引き継いだ内容でそのまま仮予約が完了したときの画面（「さきほどの仮予約をさせていただきました」）
+  if (step === "booked") {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-indigo-900 via-blue-900 to-slate-900 flex flex-col items-center justify-center p-4">
+        <div className="max-w-md w-full space-y-4">
+          {/* ヘッダー */}
+          <div className="text-center space-y-3">
+            <div className="mx-auto w-fit">
+              <ClinicWordmark sizeClassName="w-40 h-14" />
+            </div>
+            <div className="w-16 h-16 bg-emerald-500 rounded-full flex items-center justify-center mx-auto shadow-lg shadow-emerald-500/40">
+              <CheckCircle2 className="w-10 h-10 text-white" />
+            </div>
+            <div>
+              <h1 className="text-2xl font-extrabold text-white">
+                {bookedIsWaiting ? "キャンセル待ちを受け付けました" : "さきほどの仮予約をお取りしました"}
+              </h1>
+              {pendingBooking && (
+                <p className="text-blue-100 text-base font-bold mt-2">
+                  {formatPendingDate(pendingBooking.date)} {pendingBooking.time}
+                </p>
+              )}
+              <p className="text-blue-200/70 text-sm mt-1">
+                院長がLINEにて内容を確認後、予約確定のご連絡をいたします。
+              </p>
+            </div>
+          </div>
+
+          {/* STEP 1: LINE紐づけ（確定連絡を受け取るため） */}
+          <div className="bg-[#06C755]/20 border-2 border-[#06C755]/60 rounded-2xl p-5 space-y-3">
+            <div className="flex items-center gap-2">
+              <span className="bg-[#06C755] text-white text-xs font-black px-2.5 py-1 rounded-full">STEP 1</span>
+              <p className="text-white font-bold text-sm">LINEを友だち追加する</p>
+            </div>
+            <p className="text-blue-100/70 text-xs">確定のご連絡をLINEでお届けするため、友だち追加をお願いします。</p>
+            <a
+              href={lineUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="flex w-full items-center justify-center bg-[#06C755] hover:bg-[#05b34c] text-white font-bold py-4 px-4 rounded-xl transition-all gap-2 text-base shadow-lg"
+            >
+              <MessageCircle className="w-5 h-5" />
+              友だち追加する（タップ）
+            </a>
+          </div>
+
+          {/* STEP 2: 4桁送信 */}
+          <div className="bg-white/10 border border-white/20 rounded-2xl p-5 space-y-3">
+            <div className="flex items-center gap-2">
+              <span className="bg-blue-500 text-white text-xs font-black px-2.5 py-1 rounded-full">STEP 2</span>
+              <p className="text-white font-bold text-sm">LINEでこの番号を送信する</p>
+            </div>
+            <div className="bg-white/10 rounded-xl p-4 text-center space-y-1">
+              <p className="text-blue-200/70 text-xs">友だち追加後、LINEのトーク画面でこの数字を送ってください</p>
+              <p className="text-white font-black text-5xl tracking-[0.3em] mt-2">{normalizedPhone.slice(-4)}</p>
+              <p className="text-blue-200/50 text-xs mt-1">（電話番号の下4桁）</p>
+            </div>
+            <p className="text-blue-200/60 text-xs text-center">
+              送信すると自動で紐づけ完了のメッセージが届きます
+            </p>
+          </div>
+
+          <Link href="/" className="text-blue-300/60 hover:text-white text-xs inline-flex items-center justify-center gap-1 w-full transition-colors py-2">
+            <ArrowLeft className="w-3 h-3" />
+            トップページへ
+          </Link>
+        </div>
+      </div>
+    );
+  }
 
   if (step === "done") {
     return (
@@ -222,6 +381,19 @@ export default function QuestionnairePage() {
               いただいた情報は、誕生月クーポンや特別なご案内にのみ使用します。
             </p>
           </div>
+
+          {/* 予約ページからの引き継ぎ案内（選んだ日時のままアンケート後に仮予約が完了する） */}
+          {pendingBooking && (
+            <div className="mb-6 bg-emerald-500/15 border border-emerald-400/40 rounded-2xl p-4 text-center space-y-1">
+              <p className="text-emerald-200 text-xs font-bold">選んでいただいた日時を引き継いでいます</p>
+              <p className="text-white font-extrabold text-lg">
+                {formatPendingDate(pendingBooking.date)} {pendingBooking.time}
+              </p>
+              <p className="text-emerald-100/80 text-xs">
+                このまま回答いただくと、日程を選び直すことなく仮予約が完了します。
+              </p>
+            </div>
+          )}
 
           <form onSubmit={handleSubmit} className="space-y-6">
             {/* お名前 */}

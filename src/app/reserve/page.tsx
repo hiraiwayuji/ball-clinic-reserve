@@ -30,6 +30,9 @@ import type { LinkedCustomer } from "@/lib/line-links";
 
 const SELECTED_CUSTOMER_KEY = "ballClinic_selectedCustomerId";
 const FAMILY_LIST_KEY = "ballClinic_familyList";
+// 初めての方をアンケートへ送る際、選んだ日時・お名前・電話を退避するキー。
+// アンケート完了後にこの内容で仮予約を確定し、「もう一度日程選び」をさせない。
+const PENDING_BOOKING_KEY = "ballClinic_pendingBooking";
 
 // 「友だち追加」用 URL は /R/ti/p/ 形式。/ti/p/ だけだと既に友だちでないと開けず
 // 「LINEの友だちではないユーザー」エラーになる
@@ -257,6 +260,29 @@ function ReserveContent() {
 
     const r = result as any;
     if (r.requiresQuestionnaire) {
+      // 初めての方 → アンケートへ。選んだ日時・お名前・電話・コース等を退避して
+      // アンケート完了後にそのまま仮予約を確定できるようにする（再度の日程選びを無くす）。
+      try {
+        const course = courses.find((c) => c.id === selectedCourseId);
+        const staff = staffList.find((s) => s.id === selectedStaffId);
+        const room = rooms.find((rm) => rm.id === selectedRoomId);
+        const booking = {
+          date: date ? format(date, "yyyy-MM-dd") : "",
+          time,
+          visitType,
+          name,
+          phone,
+          isWaitlistIntent: bookedTimes.includes(time),
+          courseId: course?.id ?? "",
+          courseName: course?.name ?? "",
+          courseDurationMinutes: course?.duration_minutes ?? null,
+          staffId: staff?.id ?? "",
+          staffName: staff?.name ?? "",
+          roomId: room?.id ?? "",
+          roomName: room?.name ?? "",
+        };
+        sessionStorage.setItem(PENDING_BOOKING_KEY, JSON.stringify(booking));
+      } catch {}
       setRequiresQuestionnaire(true);
     } else if (r.duplicate === "sameday") {
       // 同じ日の重複 → ブロックして LINE へ誘導
@@ -700,16 +726,19 @@ function ReserveContent() {
                 {requiresQuestionnaire && (
                   <div className="order-8 p-5 bg-blue-500/10 border border-blue-500/30 rounded-2xl space-y-4">
                     <p className="text-blue-200 font-bold text-sm">
-                      初めてオンライン予約をご希望の方は、先にアンケートへのご回答をお願いします
+                      初めての方は、続けてアンケートにご回答ください
                     </p>
                     <p className="text-blue-100/85 text-xs leading-relaxed">
-                      アンケートにご回答いただくとすぐにオンライン予約が可能になります。1分程度で完了します。
+                      いま選んでいただいた日時とお名前・お電話はそのまま引き継がれます。
+                      <br />
+                      アンケート（1分ほど）にお答えいただくと、もう一度日程を選び直すことなく
+                      <span className="font-bold text-white">そのまま仮予約が完了</span>します。
                     </p>
                     <Link
                       href="/questionnaire"
                       className="inline-flex w-full items-center justify-center bg-blue-600 hover:bg-blue-500 text-white font-bold py-4 px-4 rounded-2xl transition-all gap-2 text-sm"
                     >
-                      📋 アンケートに回答して予約に進む
+                      📋 アンケートに回答して仮予約を完了する
                     </Link>
                   </div>
                 )}

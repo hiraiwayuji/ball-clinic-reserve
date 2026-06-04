@@ -339,8 +339,10 @@ export function EditAppointmentDialog({
       const result = await updateAppointmentStatus(appointment.id, "confirmed");
       if (result.success) {
         toast.success("予約を確定しました");
-        // 確定後すぐに「LINEを送りますか？」を確認（一覧は裏で更新）
-        onSuccess?.();
+        // ★ここで onSuccess() を呼ぶと親が selectedAppointment を null にして
+        //   このダイアログごとアンマウントされ、直後の「LINEを送りますか？」ポップが
+        //   表示される前に消えてしまう（＝一覧に戻ってしまう）バグだった。
+        //   一覧の更新は、ポップを閉じたあと（送る／送らない）に行う。
         setLineConfirmOpen(true);
       } else {
         toast.error(result.error || "エラーが発生しました");
@@ -368,13 +370,16 @@ export function EditAppointmentDialog({
     } finally {
       setLineSending(false);
       setLineConfirmOpen(false);
+      // ポップを閉じてから一覧を更新（確定済みステータスを反映）
+      onSuccess?.();
       onOpenChange(false);
     }
   };
 
-  // 確定ポップ内「送らない」: 何もせず閉じる
+  // 確定ポップ内「送らない」: 送信せず閉じる（一覧は確定済みに更新）
   const handleSkipLine = () => {
     setLineConfirmOpen(false);
+    onSuccess?.();
     onOpenChange(false);
   };
 
