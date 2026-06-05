@@ -58,7 +58,7 @@ export type MonthAnalytics = {
   year: number;
   month: number;
   label: string;
-  revenue: { cash: number; insurance: number; total: number };
+  revenue: { cash: number; insurance: number; other: number; total: number };
   expenses: { total: number; byCategory: Record<string, number> };
   profit: number;
   visits: { total: number; newPatients: number; returning: number };
@@ -426,16 +426,21 @@ export async function getMonthAnalytics(year: number, month: number): Promise<Mo
     .eq("payment_month", startDate);
   const insurance = (insRows ?? []).reduce((s, r) => s + r.amount, 0);
 
-  // 経費（カテゴリ別）
-  const { data: expRows } = await supabase
+  // 経費記帳（支出・収入）。entry_type で支出と収入を分けて集計する。
+  // 収入（その他収入）は売上側へ、支出だけを経費合計に入れる。
+  const { data: ledgerRows } = await supabase
     .from("clinic_expenses")
-    .select("amount, category")
+    .select("amount, category, entry_type")
     .eq("clinic_id", clinicId)
     .gte("expense_date", startDate)
     .lte("expense_date", endDate);
-  const expTotal = (expRows ?? []).reduce((s, r) => s + r.amount, 0);
+  const expRows = (ledgerRows ?? []).filter((r) => r.entry_type !== "income");
+  const otherIncome = (ledgerRows ?? [])
+    .filter((r) => r.entry_type === "income")
+    .reduce((s, r) => s + r.amount, 0);
+  const expTotal = expRows.reduce((s, r) => s + r.amount, 0);
   const byCategory: Record<string, number> = {};
-  (expRows ?? []).forEach((r) => {
+  expRows.forEach((r) => {
     byCategory[r.category] = (byCategory[r.category] ?? 0) + r.amount;
   });
 
@@ -450,7 +455,7 @@ export async function getMonthAnalytics(year: number, month: number): Promise<Mo
   const visits = apptRows ?? [];
   const newPatients = visits.filter((a) => a.is_first_visit).length;
 
-  const totalRevenue = cash + insurance;
+  const totalRevenue = cash + insurance + otherIncome;
   const totalVisits = visits.length;
   const cashVisits = (cashRows ?? []).length;
 
@@ -466,7 +471,7 @@ export async function getMonthAnalytics(year: number, month: number): Promise<Mo
     year,
     month,
     label: `${year}年${month}月`,
-    revenue: { cash, insurance, total: totalRevenue },
+    revenue: { cash, insurance, other: otherIncome, total: totalRevenue },
     expenses: { total: expTotal, byCategory },
     profit: totalRevenue - expTotal,
     visits: { total: totalVisits, newPatients, returning: totalVisits - newPatients },

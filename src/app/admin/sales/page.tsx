@@ -495,7 +495,7 @@ function SalesPageInner() {
           <Link href="/admin/expenses">
             <Button variant="outline" size="sm" className="border-emerald-200 text-emerald-600 hover:bg-emerald-50 dark:border-emerald-800 dark:text-emerald-400 dark:hover:bg-emerald-950/50 font-bold">
               <Receipt className="w-4 h-4 mr-1.5" />
-              売上記帳へ
+              経費記帳へ
             </Button>
           </Link>
           <Link href="/admin/insurance">

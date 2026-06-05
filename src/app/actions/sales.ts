@@ -1065,6 +1065,8 @@ export async function addExpense(formData: FormData) {
     const memo = formData.get("memo") as string || "";
     const imageUrl = formData.get("image_url") as string || "";
     const department = (formData.get("department") as string) || null; // 部門（サロン/カフェ等）。未設定院は null
+    // 種別: expense（支出）/ income（収入）。未指定は従来どおり支出。
+    const entryType = (formData.get("entry_type") as string) === "income" ? "income" : "expense";
 
     if (!expenseDate || !category || isNaN(amount)) {
       return { success: false, error: "必須項目を入力してください" };
@@ -1081,6 +1083,7 @@ export async function addExpense(formData: FormData) {
         memo,
         image_url: imageUrl,
         department,
+        entry_type: entryType,
         clinic_id: clinicId
       }]);
 
@@ -1146,6 +1149,7 @@ export async function updateExpense(id: string, data: {
   amount?: number;
   memo?: string;
   department?: string | null;
+  entry_type?: "expense" | "income";
 }) {
   await requireRole(["owner", "admin"]);
   const { clinicId } = await checkAdminAuth();
@@ -1202,6 +1206,7 @@ export async function getMonthlyExpenses(year: number, month: number) {
       .from("clinic_expenses")
       .select("amount, category")
       .eq("clinic_id", clinicId)
+      .eq("entry_type", "expense") // 収入（その他収入）は経費合計に含めない
       .gte("expense_date", startOfMonth)
       .lte("expense_date", endOfMonth);
 

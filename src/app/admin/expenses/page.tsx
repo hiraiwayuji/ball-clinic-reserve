@@ -20,6 +20,11 @@ import { exportToExcel } from "@/lib/excel";
 import ExpensesImportDialog from "@/components/admin/ExpensesImportDialog";
 import { CategorySelect } from "@/components/admin/CategorySelect";
 
+// 収入（その他収入）のカテゴリ。受付の患者売上とは別に、雑収入・物販などを記帳する用途。
+const INCOME_CATEGORIES = ["物販", "自販機", "雑収入", "受取手数料", "受取利息", "その他収入"];
+
+type EntryType = "expense" | "income";
+
 type EditingState = {
   id: string;
   expense_date: string;
@@ -27,6 +32,7 @@ type EditingState = {
   description: string;
   amount: number;
   memo: string;
+  entry_type: EntryType;
 };
 
 export default function ExpensesPage() {
@@ -55,6 +61,9 @@ export default function ExpensesPage() {
   const [isSavingCategory, setIsSavingCategory] = useState(false);
   // 新規入力フォームのカテゴリ（controlled）
   const [formCategory, setFormCategory] = useState<string>("");
+  // 種別: 支出（経費）/ 収入（その他収入）。デフォルトは支出。
+  const [entryType, setEntryType] = useState<EntryType>("expense");
+  const isIncome = entryType === "income";
   // 部門（サロン/カフェ等）。clinic_settings.expense_departments が空の院では部門UIを出さない。
   const [departments, setDepartments] = useState<string[]>([]);
   const [formDepartment, setFormDepartment] = useState<string>("");
@@ -122,11 +131,12 @@ export default function ExpensesPage() {
     formData.set("expense_date", formExpenseDate || format(date, "yyyy-MM-dd"));
     formData.set("category", formCategory);
     formData.set("department", formDepartment);
+    formData.set("entry_type", entryType);
 
     startTransition(async () => {
       const res = await addExpense(formData);
       if (res.success) {
-        toast.success("経費を登録しました");
+        toast.success(isIncome ? "収入を登録しました" : "経費を登録しました");
         (e.target as HTMLFormElement).reset();
         setFormExpenseDate(format(date, "yyyy-MM-dd"));
         setFormCategory("");
@@ -306,6 +316,7 @@ export default function ExpensesPage() {
       description: expense.description || "",
       amount: expense.amount,
       memo: expense.memo || "",
+      entry_type: expense.entry_type === "income" ? "income" : "expense",
     });
   };
 
@@ -319,6 +330,7 @@ export default function ExpensesPage() {
       description: editingRow.description,
       amount: editingRow.amount,
       memo: editingRow.memo,
+      entry_type: editingRow.entry_type,
     });
     setIsSavingEdit(false);
     if (res.success) {
@@ -344,6 +356,7 @@ export default function ExpensesPage() {
     exportToExcel(
       expenses.map(e => ({
         expense_date: e.expense_date,
+        entry_type: e.entry_type === "income" ? "収入" : "支出",
         category: e.category || "",
         description: e.description || "",
         amount: e.amount,
@@ -351,24 +364,30 @@ export default function ExpensesPage() {
       })),
       [
         { key: "expense_date", label: "日付" },
+        { key: "entry_type",   label: "種別" },
         { key: "category",     label: "カテゴリ" },
         { key: "description",  label: "内容" },
         { key: "amount",       label: "金額" },
         { key: "memo",         label: "備考" },
       ],
-      `経費_${format(date!, "yyyy-MM")}.xlsx`
+      `経費記帳_${format(date!, "yyyy-MM")}.xlsx`
     );
   };
 
-  const totalAmount = expenses.reduce((sum, e) => sum + e.amount, 0);
+  // 支出・収入を分けて集計（収入は entry_type === "income"）。
+  const expenseRows = expenses.filter((e) => e.entry_type !== "income");
+  const incomeRows = expenses.filter((e) => e.entry_type === "income");
+  const expenseTotal = expenseRows.reduce((sum, e) => sum + e.amount, 0);
+  const incomeTotal = incomeRows.reduce((sum, e) => sum + e.amount, 0);
 
   // 部門×費目の集計（部門が設定されている院のみ）。「未分類」も1グループとして集計。
+  // 収入は部門サマリー（経費の内訳）には含めない。
   const departmentSummary = (() => {
     if (!useDepartments) return [];
     const groups = [...departments, "未分類"];
     return groups
       .map((dep) => {
-        const rows = expenses.filter((e) =>
+        const rows = expenseRows.filter((e) =>
           dep === "未分類" ? !e.department : e.department === dep
         );
         const total = rows.reduce((s, e) => s + e.amount, 0);
@@ -392,9 +411,9 @@ export default function ExpensesPage() {
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
           <div>
             <h1 className="text-3xl font-bold tracking-tight text-slate-900 dark:text-slate-100 border-l-4 border-emerald-600 pl-3">
-              売上記帳
+              経費記帳
             </h1>
-            <p className="text-muted-foreground mt-2">AIレシート読み取りで経費を効率化</p>
+            <p className="text-muted-foreground mt-2">経費（支出）と、その他の収入をまとめて記帳できます</p>
           </div>
           <div className="flex items-center gap-3 flex-wrap sm:flex-nowrap p-3 bg-slate-50 dark:bg-slate-800/50 rounded-xl border border-slate-200 dark:border-white/10">
             <span className="text-sm font-bold text-slate-500 dark:text-slate-400 mr-2 border-r dark:border-slate-700 pr-3">こちらの入力も必要ですか？</span>
@@ -536,13 +555,40 @@ export default function ExpensesPage() {
         <Card className="lg:col-span-1 shadow-sm border-slate-200 dark:border-white/10 dark:bg-slate-900/50">
           <CardHeader>
             <CardTitle className="text-lg flex items-center gap-2">
-              <Plus className="w-5 h-5 text-emerald-600" />
-              新規経費入力
+              <Plus className={`w-5 h-5 ${isIncome ? "text-sky-600" : "text-emerald-600"}`} />
+              {isIncome ? "新規収入入力" : "新規経費入力"}
             </CardTitle>
-            <CardDescription>{format(date, "M月d日 (E)", { locale: ja })} の経費</CardDescription>
+            <CardDescription>{format(date, "M月d日 (E)", { locale: ja })} の{isIncome ? "収入" : "経費"}</CardDescription>
           </CardHeader>
           <CardContent>
-            {/* 画像読み取りエリア */}
+            {/* 種別の切り替え（支出 / 収入） */}
+            <div className="mb-4 grid grid-cols-2 gap-2 p-1 bg-slate-100 dark:bg-slate-800/60 rounded-xl">
+              <button
+                type="button"
+                onClick={() => { setEntryType("expense"); setFormCategory(""); }}
+                className={`flex items-center justify-center gap-1.5 py-2.5 rounded-lg text-sm font-bold transition-all ${
+                  !isIncome
+                    ? "bg-emerald-600 text-white shadow"
+                    : "text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
+                }`}
+              >
+                <Receipt className="w-4 h-4" /> 支出（経費）
+              </button>
+              <button
+                type="button"
+                onClick={() => { setEntryType("income"); setFormCategory(""); }}
+                className={`flex items-center justify-center gap-1.5 py-2.5 rounded-lg text-sm font-bold transition-all ${
+                  isIncome
+                    ? "bg-sky-600 text-white shadow"
+                    : "text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
+                }`}
+              >
+                <Banknote className="w-4 h-4" /> 収入
+              </button>
+            </div>
+
+            {/* 画像読み取りエリア（レシート＝経費のみ） */}
+            {!isIncome && (
             <div className="mb-4 space-y-2">
               <input
                 ref={fileInputRef}
@@ -610,11 +656,12 @@ export default function ExpensesPage() {
                 </div>
               )}
             </div>
+            )}
 
             <form ref={formRef} onSubmit={handleSubmit} className="space-y-4">
               {/* 日付（OCRで自動入力、手動でも変更可） */}
               <div className="space-y-2">
-                <Label htmlFor="expense_date">経費の日付</Label>
+                <Label htmlFor="expense_date">{isIncome ? "収入の日付" : "経費の日付"}</Label>
                 <input
                   id="expense_date"
                   name="expense_date"
@@ -623,7 +670,7 @@ export default function ExpensesPage() {
                   onChange={(e) => setFormExpenseDate(e.target.value)}
                   className="w-full border border-slate-200 dark:border-slate-800 rounded-md px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 outline-none bg-white dark:bg-slate-950 text-slate-900 dark:text-slate-100"
                 />
-                <p className="text-xs text-slate-400">レシート読み取り時に自動入力。手動でも変更できます</p>
+                {!isIncome && <p className="text-xs text-slate-400">レシート読み取り時に自動入力。手動でも変更できます</p>}
               </div>
               {useDepartments && (
                 <div className="space-y-2">
@@ -643,19 +690,33 @@ export default function ExpensesPage() {
               )}
               <div className="space-y-2">
                 <Label htmlFor="category">カテゴリ</Label>
-                <CategorySelect
-                  selectId="category"
-                  value={formCategory}
-                  onChange={setFormCategory}
-                  customCategories={customCategories}
-                  onCustomCategoriesChange={setCustomCategories}
-                  placeholder="（後で決める）"
-                  withIcon
-                />
+                {isIncome ? (
+                  <select
+                    id="category"
+                    value={formCategory}
+                    onChange={(e) => setFormCategory(e.target.value)}
+                    className="w-full border border-slate-200 dark:border-slate-800 rounded-md px-3 py-2 text-sm focus:ring-2 focus:ring-sky-500 outline-none bg-white dark:bg-slate-950 text-slate-900 dark:text-slate-100"
+                  >
+                    <option value="">（後で決める）</option>
+                    {INCOME_CATEGORIES.map((c) => (
+                      <option key={c} value={c}>{c}</option>
+                    ))}
+                  </select>
+                ) : (
+                  <CategorySelect
+                    selectId="category"
+                    value={formCategory}
+                    onChange={setFormCategory}
+                    customCategories={customCategories}
+                    onCustomCategoriesChange={setCustomCategories}
+                    placeholder="（後で決める）"
+                    withIcon
+                  />
+                )}
               </div>
               <div className="space-y-2">
                 <Label htmlFor="description">内容</Label>
-                <Input id="description" name="description" placeholder="電気代（3月分）" />
+                <Input id="description" name="description" placeholder={isIncome ? "物販（プロテイン）" : "電気代（3月分）"} />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="amount">金額</Label>
@@ -673,10 +734,15 @@ export default function ExpensesPage() {
               {currentImageUrl && <input type="hidden" name="image_url" value={currentImageUrl} />}
 
               <div className="flex flex-col gap-2 pt-2">
-                <Button type="submit" className="w-full bg-emerald-600 hover:bg-emerald-700 h-10" disabled={isPending || isSavingPending}>
+                <Button
+                  type="submit"
+                  className={`w-full h-10 text-white ${isIncome ? "bg-sky-600 hover:bg-sky-700" : "bg-emerald-600 hover:bg-emerald-700"}`}
+                  disabled={isPending || isSavingPending}
+                >
                   {isPending ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Plus className="w-4 h-4 mr-2" />}
-                  正式に登録する
+                  {isIncome ? "収入を登録する" : "正式に登録する"}
                 </Button>
+                {!isIncome && (
                 <Button
                   type="button"
                   variant="outline"
@@ -687,6 +753,7 @@ export default function ExpensesPage() {
                   {isSavingPending ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
                   とりあえず保存（仕分け待ちへ）
                 </Button>
+                )}
               </div>
             </form>
           </CardContent>
@@ -694,14 +761,22 @@ export default function ExpensesPage() {
 
         {/* 経費リスト */}
         <Card className="lg:col-span-2 shadow-sm border-slate-200 dark:border-white/10 dark:bg-slate-900/50">
-          <CardHeader className="flex flex-row items-center justify-between">
+          <CardHeader className="flex flex-row items-center justify-between gap-4">
             <div>
-              <CardTitle className="text-slate-900 dark:text-slate-100">今月（{format(date, "M月")}）の確定済み経費</CardTitle>
+              <CardTitle className="text-slate-900 dark:text-slate-100">今月（{format(date, "M月")}）の記帳</CardTitle>
               <CardDescription>{expenses.length} 件の記録があります</CardDescription>
             </div>
-            <div className="text-right">
-              <p className="text-xs text-slate-500 dark:text-slate-400 font-medium">今月経費合計</p>
-              <p className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">¥{totalAmount.toLocaleString()}</p>
+            <div className="flex items-end gap-5">
+              <div className="text-right">
+                <p className="text-xs text-slate-500 dark:text-slate-400 font-medium">今月の支出合計</p>
+                <p className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">¥{expenseTotal.toLocaleString()}</p>
+              </div>
+              {incomeTotal > 0 && (
+                <div className="text-right">
+                  <p className="text-xs text-slate-500 dark:text-slate-400 font-medium">今月の収入合計</p>
+                  <p className="text-2xl font-bold text-sky-600 dark:text-sky-400">＋¥{incomeTotal.toLocaleString()}</p>
+                </div>
+              )}
             </div>
           </CardHeader>
           <CardContent>
@@ -729,7 +804,7 @@ export default function ExpensesPage() {
                       <TableCell colSpan={5} className="h-48 text-center">
                         <div className="flex flex-col items-center justify-center text-slate-400">
                           <Receipt className="w-12 h-12 mb-2 opacity-20" />
-                          <p>経費データがありません</p>
+                          <p>記帳データがありません</p>
                         </div>
                       </TableCell>
                     </TableRow>
@@ -750,14 +825,27 @@ export default function ExpensesPage() {
                                 />
                               </TableCell>
                               <TableCell>
-                                <CategorySelect
-                                  value={editingRow!.category}
-                                  onChange={(v) => setEditingRow(r => r ? { ...r, category: v } : r)}
-                                  customCategories={customCategories}
-                                  onCustomCategoriesChange={setCustomCategories}
-                                  placeholder="未分類"
-                                  size="compact"
-                                />
+                                {editingRow!.entry_type === "income" ? (
+                                  <select
+                                    value={editingRow!.category}
+                                    onChange={(e) => setEditingRow(r => r ? { ...r, category: e.target.value } : r)}
+                                    className="w-full border border-sky-300 rounded px-1.5 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-sky-500"
+                                  >
+                                    <option value="">未分類</option>
+                                    {INCOME_CATEGORIES.map((c) => (
+                                      <option key={c} value={c}>{c}</option>
+                                    ))}
+                                  </select>
+                                ) : (
+                                  <CategorySelect
+                                    value={editingRow!.category}
+                                    onChange={(v) => setEditingRow(r => r ? { ...r, category: v } : r)}
+                                    customCategories={customCategories}
+                                    onCustomCategoriesChange={setCustomCategories}
+                                    placeholder="未分類"
+                                    size="compact"
+                                  />
+                                )}
                               </TableCell>
                               <TableCell>
                                 <div className="space-y-1">
@@ -815,12 +903,21 @@ export default function ExpensesPage() {
                               </TableCell>
                               <TableCell>
                                 <div className="flex items-center gap-1 flex-wrap">
+                                  {expense.entry_type === "income" && (
+                                    <span className="text-xs bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-300 px-2 py-1 rounded-full font-bold">
+                                      収入
+                                    </span>
+                                  )}
                                   {useDepartments && expense.department && (
                                     <span className="text-xs bg-slate-100 text-slate-600 px-2 py-1 rounded-full font-medium">
                                       {expense.department}
                                     </span>
                                   )}
-                                  <span className="text-xs bg-emerald-50 text-emerald-700 px-2 py-1 rounded-full font-medium">
+                                  <span className={`text-xs px-2 py-1 rounded-full font-medium ${
+                                    expense.entry_type === "income"
+                                      ? "bg-sky-50 text-sky-700 dark:bg-sky-950/40 dark:text-sky-300"
+                                      : "bg-emerald-50 text-emerald-700"
+                                  }`}>
                                     {expense.category || "未分類"}
                                   </span>
                                 </div>
@@ -850,7 +947,9 @@ export default function ExpensesPage() {
                                 </div>
                                 {expense.memo && <div className="text-xs text-slate-400 mt-0.5">{expense.memo}</div>}
                               </TableCell>
-                              <TableCell className="text-right font-bold text-slate-700">¥{expense.amount.toLocaleString()}</TableCell>
+                              <TableCell className={`text-right font-bold ${expense.entry_type === "income" ? "text-sky-600 dark:text-sky-400" : "text-slate-700 dark:text-slate-200"}`}>
+                                {expense.entry_type === "income" ? "＋" : ""}¥{expense.amount.toLocaleString()}
+                              </TableCell>
                               <TableCell className="text-right">
                                 <div className="flex items-center justify-end gap-1">
                                   <Button
