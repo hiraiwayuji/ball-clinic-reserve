@@ -69,11 +69,19 @@ export async function findSameDayAppointmentsByName(
     const byId = new Map(
       sameNameCustomers.map((c) => [c.id, c]),
     );
+    // start_time は timestamptz（UTC保存）。そのまま slice すると UTC 時刻になり
+    // 「18:30 の予約が 09:30」と 9 時間ずれて表示される事故になる。必ず JST に変換する。
+    const jstTime = new Intl.DateTimeFormat("ja-JP", {
+      timeZone: "Asia/Tokyo",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    });
     const appointments = (apts ?? []).map((a) => {
       const cust = byId.get(a.customer_id as string);
       return {
         id: a.id as string,
-        time: String(a.start_time).slice(11, 16),
+        time: jstTime.format(new Date(a.start_time as string)),
         customerId: (a.customer_id as string) ?? null,
         phone: cust?.phone ?? null,
         medicalRecordNumber: cust?.medical_record_number ?? null,
