@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useSearchParams, useRouter } from "next/navigation";
-import { Sparkles, CalendarDays, ClipboardList, Users, Coffee, Flower2, X } from "lucide-react";
+import { CalendarDays, ClipboardList, Users, Coffee, Flower2, X } from "lucide-react";
 import LPHero from "@/components/reserve/LPHero";
 import LPFeatures from "@/components/reserve/LPFeatures";
 import { getPublicClinicSettings, type PublicClinicSettings } from "@/app/actions/publicSettings";
@@ -208,7 +208,7 @@ export default function ReserveLandingPage() {
               {/* 4ステップで「いつ仮予約になり、いつ完了か」を最初に伝える */}
               <ol className="space-y-2.5">
                 {[
-                  { n: "1", t: "「メニュー」か「日時」を選ぶ" },
+                  { n: "1", t: "「はじめての予約はこちら」から日時を選ぶ" },
                   { n: "2", t: "お名前などを入れて申し込む" },
                   { n: "3", t: "初めての方は1回だけアンケート（選んだ日時はそのまま引き継ぎ）" },
                   { n: "4", t: "院からLINEで「予約確定」の連絡 → 完了！" },
@@ -226,13 +226,13 @@ export default function ReserveLandingPage() {
                 <br />
                 誕生月クーポンなど、お得なご案内にも使わせていただきます。
               </p>
-              <button
-                type="button"
+              <Link
+                href="/reserve/calendar"
                 onClick={dismissFirstTimePopup}
                 className="flex items-center justify-center gap-2 w-full bg-blue-600 hover:bg-blue-700 text-white font-black py-3.5 px-4 rounded-2xl transition shadow-lg shadow-blue-500/30"
               >
                 予約をはじめる
-              </button>
+              </Link>
               <Link
                 href="/questionnaire"
                 onClick={dismissFirstTimePopup}
@@ -312,7 +312,7 @@ export default function ReserveLandingPage() {
             <CalendarDays className="w-5 h-5 text-blue-300 shrink-0 mt-0.5" />
             <div className="space-y-1.5">
               <p className="text-blue-50 font-bold text-sm leading-snug">
-                初めての方も、まず下から「メニュー」か「日時」をお選びください
+                初めての方も、上の「はじめての予約はこちら」からお進みください
               </p>
               <p className="text-blue-100/70 text-xs leading-relaxed">
                 お申し込みの途中で、初めての方だけ1回かんたんなアンケート登録があります。
@@ -323,41 +323,6 @@ export default function ReserveLandingPage() {
           </div>
         </div>
       )}
-
-      {/* メイン導線セクション */}
-      <div className="max-w-3xl mx-auto px-5 py-8 space-y-3">
-        <h2 className="text-[11px] font-bold uppercase tracking-[0.25em] text-white/40 mb-3">
-          ご予約方法をお選びください
-        </h2>
-
-        <Link
-          href="/reserve/menu"
-          className={`flex items-center gap-3 w-full p-5 rounded-2xl ${theme.ctaBg} ${theme.ctaHoverBg} active:scale-[0.99] text-white shadow-xl ${theme.ctaShadow} transition`}
-        >
-          <div className="w-12 h-12 bg-white/20 rounded-xl flex items-center justify-center shrink-0">
-            <Sparkles className="w-6 h-6 text-white" />
-          </div>
-          <div className="flex-1 text-left">
-            <div className="text-base font-black">クーポン・メニューから選ぶ</div>
-            <div className="text-xs text-white/80 mt-0.5">写真付きで内容と価格を確認できます</div>
-          </div>
-          <span className="text-white/80 text-xl font-black">→</span>
-        </Link>
-
-        <Link
-          href="/reserve/calendar"
-          className="flex items-center gap-3 w-full p-5 rounded-2xl bg-white/5 hover:bg-white/10 border border-white/10 text-white transition"
-        >
-          <div className="w-12 h-12 bg-white/10 rounded-xl flex items-center justify-center shrink-0">
-            <CalendarDays className={`w-6 h-6 ${theme.accentText}`} />
-          </div>
-          <div className="flex-1 text-left">
-            <div className="text-base font-black">日付から空き状況を確認</div>
-            <div className="text-xs text-white/60 mt-0.5">先に空き日時を見て予約したい方向け</div>
-          </div>
-          <span className="text-white/40 text-xl font-black">→</span>
-        </Link>
-      </div>
 
       {/* 初めての方向け */}
       <div className="max-w-3xl mx-auto px-5 pb-12">

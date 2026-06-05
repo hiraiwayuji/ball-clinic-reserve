@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { CalendarDays, Sparkles, MapPin, Phone, Globe, Instagram, MessageCircle, Star } from "lucide-react";
+import { CalendarDays, MapPin, Phone, Globe, Instagram, MessageCircle, Star } from "lucide-react";
 import type { PublicClinicSettings } from "@/app/actions/publicSettings";
 import { getThemeClasses } from "@/lib/lp-theme";
 
@@ -21,8 +21,6 @@ export default function LPHero({ settings, fallbackName, minimal = false }: Prop
   const subtitle = settings?.hero_subtitle;
   const heroImage = settings?.hero_image_url;
   const heroBackground = settings?.hero_background_url;
-
-  const ctaText = settings?.lp_cta_text || "クーポン・メニューから予約する";
 
   return (
     <section
@@ -63,25 +61,15 @@ export default function LPHero({ settings, fallbackName, minimal = false }: Prop
           </div>
         )}
 
-        {/* メインCTA / セカンダリCTA（最小表示ではすぐ下がメニューなので省略） */}
+        {/* メインCTA：初めての方も迷わない「1本だけ」の予約ボタン（最小表示では省略） */}
         {!minimal && (
-          <>
-            <Link
-              href="/reserve/menu"
-              className={`mt-6 flex items-center justify-center gap-2 w-full h-16 rounded-2xl ${theme.ctaBg} ${theme.ctaHoverBg} active:scale-[0.98] text-white text-base font-black shadow-xl ${theme.ctaShadow} transition-all`}
-            >
-              <Sparkles className="w-5 h-5" />
-              {ctaText}
-            </Link>
-
-            <Link
-              href="/reserve/calendar"
-              className="mt-2 flex items-center justify-center gap-2 w-full h-12 rounded-2xl bg-white/5 hover:bg-white/10 border border-white/15 text-white/90 text-sm font-bold transition"
-            >
-              <CalendarDays className="w-4 h-4" />
-              先にカレンダーで空き状況を確認
-            </Link>
-          </>
+          <Link
+            href="/reserve/calendar"
+            className={`mt-6 flex items-center justify-center gap-2 w-full h-16 rounded-2xl ${theme.ctaBg} ${theme.ctaHoverBg} active:scale-[0.98] text-white text-lg font-black shadow-xl ${theme.ctaShadow} transition-all`}
+          >
+            <CalendarDays className="w-5 h-5" />
+            はじめての予約はこちら
+          </Link>
         )}
 
         {/* お問い合わせ群 */}
