@@ -82,6 +82,8 @@ function ReserveContent() {
   const [duplicateOtherDay, setDuplicateOtherDay] = useState<string | null>(null);
   // 別日重複の確認後に再送信するための FormData 退避
   const pendingFormData = useRef<FormData | null>(null);
+  // アンケート誘導ボックスへ自動スクロールするための ref（初めての方の戸惑い防止）
+  const questionnaireBoxRef = useRef<HTMLDivElement | null>(null);
   const [clinicHolidays, setClinicHolidays] = useState<ClinicHoliday[]>([]);
   // LINE 経由で選択された家族 customer（あれば name/phone をプリフィル + customerId を送信）
   const [selectedFamilyMember, setSelectedFamilyMember] = useState<LinkedCustomer | null>(null);
@@ -170,6 +172,13 @@ function ReserveContent() {
       .subscribe();
     return () => { supabase.removeChannel(channel); };
   }, [date]);
+
+  // アンケートが必要になったら、その案内まで自動でスクロールして気づいてもらう
+  useEffect(() => {
+    if (requiresQuestionnaire && questionnaireBoxRef.current) {
+      questionnaireBoxRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  }, [requiresQuestionnaire]);
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -416,6 +425,35 @@ function ReserveContent() {
     return <ReserveLandingPage />;
   }
 
+  // ── 進捗ステップの計算（「今どこ／終わってる・終わってない」を見せる） ──
+  const dateDone = !!date && !!time;
+  const menuDone = !!selectedCourseId;
+  const customerDone = !!visitType && !!name.trim() && (visitType !== "new" || !!phone);
+  const steps = reserveFlow === "menu_first"
+    ? [
+        { label: "メニュー", done: menuDone },
+        { label: "日時", done: dateDone },
+        { label: "お客様情報", done: customerDone },
+        { label: "申し込み", done: false },
+      ]
+    : [
+        { label: "日時", done: dateDone },
+        { label: "お客様情報", done: customerDone },
+        { label: "申し込み", done: false },
+      ];
+  // 「今いるステップ」= 最初の未完了。すべて完了なら最後（申し込み）を指す。
+  const currentStepIndex = (() => {
+    const i = steps.findIndex((s) => !s.done);
+    return i === -1 ? steps.length - 1 : i;
+  })();
+
+  // 申し込みボタンの「あと何が足りないか」（日時はこの画面では必ず選択済み）
+  const missingFields: string[] = [];
+  if (!visitType) missingFields.push("初診・再診の選択");
+  if (!name.trim()) missingFields.push("お名前");
+  if (visitType === "new" && !phone) missingFields.push("電話番号");
+  const canSubmit = missingFields.length === 0;
+
   return (
     <div className="min-h-screen bg-slate-900 text-slate-200" data-dark-page>
       <div className="relative max-w-4xl mx-auto py-12 px-4 md:px-8">
@@ -429,6 +467,51 @@ function ReserveContent() {
 
         <div className="grid lg:grid-cols-12 gap-8 items-start">
           <div className="lg:col-span-8 space-y-6">
+            {/* 進捗ステップ：いま何ステップ目か・どこまで終わっているかを見せる */}
+            <div className="bg-white/5 backdrop-blur-xl rounded-3xl border border-white/10 px-4 py-5 shadow-xl">
+              <p className="text-blue-100/60 text-[11px] font-bold uppercase tracking-widest mb-4 text-center">
+                ご予約の進みぐあい
+              </p>
+              <ol className="flex items-start justify-between">
+                {steps.map((s, i) => {
+                  // 各ステップは「自分が完了していれば緑✓」。今やる所（最初の未完了）だけ青。
+                  const isDone = s.done;
+                  const isCurrent = !s.done && i === currentStepIndex;
+                  return (
+                    <li key={s.label} className="flex items-center flex-1 last:flex-none">
+                      <div className="flex flex-col items-center gap-1.5 shrink-0 w-16">
+                        <div
+                          className={`w-9 h-9 rounded-full flex items-center justify-center text-sm font-black border-2 transition-all ${
+                            isDone
+                              ? "bg-emerald-500 border-emerald-400 text-white"
+                              : isCurrent
+                                ? "bg-blue-600 border-blue-400 text-white ring-4 ring-blue-500/30"
+                                : "bg-white/5 border-white/15 text-blue-100/40"
+                          }`}
+                        >
+                          {isDone ? <CheckCircle2 className="w-5 h-5" /> : i + 1}
+                        </div>
+                        <span
+                          className={`text-[11px] font-bold text-center leading-tight ${
+                            isCurrent ? "text-white" : isDone ? "text-emerald-300" : "text-blue-100/40"
+                          }`}
+                        >
+                          {s.label}
+                        </span>
+                      </div>
+                      {i < steps.length - 1 && (
+                        <div
+                          className={`h-0.5 flex-1 -mt-5 rounded-full ${
+                            s.done ? "bg-emerald-500" : "bg-white/10"
+                          }`}
+                        />
+                      )}
+                    </li>
+                  );
+                })}
+              </ol>
+            </div>
+
             <div className="bg-white/5 backdrop-blur-xl rounded-[2.5rem] border border-white/10 p-8 md:p-10 shadow-2xl">
               <form onSubmit={handleSubmit} className="flex flex-col gap-10">
 
@@ -715,30 +798,56 @@ function ReserveContent() {
                 </section>
 
                 <div className="order-6 bg-white/5 border border-white/10 p-5 rounded-2xl text-sm text-blue-100/85 space-y-1">
-                  <p className="font-bold text-white text-sm">⚠️ 仮予約について</p>
-                  <p>こちらは仮予約です。院長がLINEにて確認後、予約確定のご連絡をいたします。</p>
+                  <p className="font-bold text-white text-sm">⚠️ これは「仮予約」です</p>
+                  <p>下のボタンで仮予約を申し込めます。院長がLINEで内容を確認したあと、
+                  「予約確定」のご連絡をして完了になります。</p>
                 </div>
 
-                <Button type="submit" disabled={!visitType || !name.trim() || isSubmitting} className="order-7 w-full h-20 text-xl font-black rounded-3xl bg-blue-600 hover:bg-blue-500 text-white disabled:opacity-40">
-                  {isSubmitting ? "送信中..." : "仮予約を申し込む"}
-                </Button>
+                {/* あと何が足りないか／そろったかを、ボタンの直前で必ず知らせる */}
+                <div className="order-7 space-y-3">
+                  {canSubmit ? (
+                    <p className="text-center text-emerald-300 text-sm font-bold">
+                      ✅ 入力がそろいました。下のボタンで仮予約を申し込めます
+                    </p>
+                  ) : (
+                    <p className="text-center text-amber-300 text-sm font-bold">
+                      あと <span className="text-white">{missingFields.join("、")}</span> を入力すると申し込めます
+                    </p>
+                  )}
+                  <Button
+                    type="submit"
+                    disabled={!canSubmit || isSubmitting}
+                    className="w-full h-20 text-xl font-black rounded-3xl bg-blue-600 hover:bg-blue-500 text-white disabled:opacity-40"
+                  >
+                    {isSubmitting ? "送信中..." : "この内容で仮予約を申し込む"}
+                  </Button>
+                </div>
 
                 {requiresQuestionnaire && (
-                  <div className="order-8 p-5 bg-blue-500/10 border border-blue-500/30 rounded-2xl space-y-4">
-                    <p className="text-blue-200 font-bold text-sm">
-                      初めての方は、続けてアンケートにご回答ください
+                  <div
+                    ref={questionnaireBoxRef}
+                    className="order-8 p-6 bg-amber-500/15 border-2 border-amber-400/50 rounded-3xl space-y-4 scroll-mt-24"
+                  >
+                    <p className="text-amber-200 font-black text-base flex items-center gap-2">
+                      ⏳ まだ仮予約は完了していません
                     </p>
-                    <p className="text-blue-100/85 text-xs leading-relaxed">
-                      いま選んでいただいた日時とお名前・お電話はそのまま引き継がれます。
+                    <p className="text-amber-100/90 text-sm leading-relaxed">
+                      初めてオンライン予約をされる方は、
+                      <span className="font-bold text-white">最初の1回だけ</span>
+                      かんたんなアンケート登録が必要です（次回からは不要です）。
+                    </p>
+                    <div className="bg-white/10 border border-white/15 rounded-2xl p-4 text-sm text-amber-50/90 leading-relaxed">
+                      いま選んでいただいた
+                      <span className="font-bold text-white">日時・お名前・お電話はそのまま引き継ぎます。</span>
                       <br />
-                      アンケート（1分ほど）にお答えいただくと、もう一度日程を選び直すことなく
-                      <span className="font-bold text-white">そのまま仮予約が完了</span>します。
-                    </p>
+                      下のボタンから1分ほどのアンケートに答えていただくと、
+                      <span className="font-bold text-white">選び直しなしで、そのまま仮予約が完了</span>します。
+                    </div>
                     <Link
                       href="/questionnaire"
-                      className="inline-flex w-full items-center justify-center bg-blue-600 hover:bg-blue-500 text-white font-bold py-4 px-4 rounded-2xl transition-all gap-2 text-sm"
+                      className="inline-flex w-full items-center justify-center bg-amber-500 hover:bg-amber-400 text-amber-950 font-black py-5 px-4 rounded-2xl transition-all gap-2 text-base shadow-lg shadow-amber-500/30"
                     >
-                      📋 アンケートに回答して仮予約を完了する
+                      📋 アンケートに答えて仮予約を完了する →
                     </Link>
                   </div>
                 )}

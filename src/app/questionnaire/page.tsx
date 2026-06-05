@@ -294,8 +294,13 @@ export default function QuestionnairePage() {
               <CheckCircle2 className="w-10 h-10 text-white" />
             </div>
             <div>
-              <h1 className="text-2xl font-extrabold text-white">ご登録ありがとうございます！</h1>
-              <p className="text-blue-200/70 text-sm mt-1">あと2ステップで完了です</p>
+              <h1 className="text-2xl font-extrabold text-white">ご登録が完了しました！</h1>
+              <p className="text-amber-200/90 text-sm mt-2 font-bold">
+                ※ まだ予約は取れていません
+              </p>
+              <p className="text-blue-200/70 text-xs mt-1">
+                続けて日時を選んでご予約ください（下の STEP 3）
+              </p>
             </div>
           </div>
 
@@ -384,13 +389,18 @@ export default function QuestionnairePage() {
 
           {/* 予約ページからの引き継ぎ案内（選んだ日時のままアンケート後に仮予約が完了する） */}
           {pendingBooking && (
-            <div className="mb-6 bg-emerald-500/15 border border-emerald-400/40 rounded-2xl p-4 text-center space-y-1">
-              <p className="text-emerald-200 text-xs font-bold">選んでいただいた日時を引き継いでいます</p>
-              <p className="text-white font-extrabold text-lg">
+            <div className="mb-6 bg-emerald-500/15 border-2 border-emerald-400/50 rounded-2xl p-4 text-center space-y-1">
+              <p className="text-emerald-200 text-xs font-bold">
+                あと少しで仮予約完了です（最後のステップ）
+              </p>
+              <p className="text-emerald-100/70 text-[11px]">選んでいただいた日時を引き継いでいます</p>
+              <p className="text-white font-extrabold text-lg mt-1">
                 {formatPendingDate(pendingBooking.date)} {pendingBooking.time}
               </p>
-              <p className="text-emerald-100/80 text-xs">
-                このまま回答いただくと、日程を選び直すことなく仮予約が完了します。
+              <p className="text-emerald-100/80 text-xs mt-1">
+                このまま回答いただくと、
+                <br className="sm:hidden" />
+                日程を選び直すことなく仮予約が完了します。
               </p>
             </div>
           )}
@@ -611,7 +621,7 @@ export default function QuestionnairePage() {
               >
                 {submitting ? "送信中..." : (
                   <>
-                    アンケートを送信する
+                    {pendingBooking ? "アンケートに答えて仮予約を完了する" : "アンケートを送信する"}
                     <ChevronRight className="w-5 h-5" />
                   </>
                 )}

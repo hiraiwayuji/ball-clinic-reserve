@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useSearchParams, useRouter } from "next/navigation";
-import { Sparkles, CalendarDays, ClipboardList, Users, Coffee, Flower2, AlertTriangle, X } from "lucide-react";
+import { Sparkles, CalendarDays, ClipboardList, Users, Coffee, Flower2, X } from "lucide-react";
 import LPHero from "@/components/reserve/LPHero";
 import LPFeatures from "@/components/reserve/LPFeatures";
 import { getPublicClinicSettings, type PublicClinicSettings } from "@/app/actions/publicSettings";
@@ -194,39 +194,52 @@ export default function ReserveLandingPage() {
             >
               <X className="w-5 h-5" />
             </button>
-            <div className="bg-amber-400 px-6 pt-6 pb-5 text-center">
+            <div className="bg-blue-600 px-6 pt-6 pb-5 text-center">
               <div className="mx-auto w-14 h-14 rounded-full bg-white/90 flex items-center justify-center mb-3">
-                <AlertTriangle className="w-7 h-7 text-amber-500" />
+                <ClipboardList className="w-7 h-7 text-blue-600" />
               </div>
-              <h2 id="first-time-popup-title" className="text-lg font-black text-amber-950 leading-snug">
+              <h2 id="first-time-popup-title" className="text-lg font-black text-white leading-snug">
                 初めての方へ
                 <br />
-                大切なお願いです
+                ご予約の流れ
               </h2>
             </div>
             <div className="px-6 py-5 space-y-4">
-              <p className="text-sm leading-relaxed">
-                初めてオンライン予約をされる方は、
-                <strong className="text-amber-700">アンケートのご記入がないと「仮予約」のお申し込みができません。</strong>
+              {/* 4ステップで「いつ仮予約になり、いつ完了か」を最初に伝える */}
+              <ol className="space-y-2.5">
+                {[
+                  { n: "1", t: "「メニュー」か「日時」を選ぶ" },
+                  { n: "2", t: "お名前などを入れて申し込む" },
+                  { n: "3", t: "初めての方は1回だけアンケート（選んだ日時はそのまま引き継ぎ）" },
+                  { n: "4", t: "院からLINEで「予約確定」の連絡 → 完了！" },
+                ].map((s) => (
+                  <li key={s.n} className="flex items-start gap-3">
+                    <span className="shrink-0 w-6 h-6 rounded-full bg-blue-100 text-blue-700 text-xs font-black flex items-center justify-center mt-0.5">
+                      {s.n}
+                    </span>
+                    <span className="text-sm leading-relaxed text-slate-700">{s.t}</span>
+                  </li>
+                ))}
+              </ol>
+              <p className="text-xs leading-relaxed text-slate-500 bg-slate-50 rounded-xl p-3">
+                アンケートは初めての1回だけの登録です。
+                <br />
+                誕生月クーポンなど、お得なご案内にも使わせていただきます。
               </p>
-              <p className="text-xs leading-relaxed text-slate-500">
-                先にアンケート（1〜2分）にお答えいただくと、そのままご予約に進めます。ご予約は院からの「ご予約確定」のLINEが届いて完了となります。
-              </p>
-              <Link
-                href="/questionnaire"
-                onClick={dismissFirstTimePopup}
-                className="flex items-center justify-center gap-2 w-full bg-amber-500 hover:bg-amber-600 text-white font-black py-3.5 px-4 rounded-2xl transition shadow-lg shadow-amber-500/30"
-              >
-                <ClipboardList className="w-5 h-5" />
-                アンケートに回答して予約へ進む
-              </Link>
               <button
                 type="button"
                 onClick={dismissFirstTimePopup}
+                className="flex items-center justify-center gap-2 w-full bg-blue-600 hover:bg-blue-700 text-white font-black py-3.5 px-4 rounded-2xl transition shadow-lg shadow-blue-500/30"
+              >
+                予約をはじめる
+              </button>
+              <Link
+                href="/questionnaire"
+                onClick={dismissFirstTimePopup}
                 className="block w-full text-center text-xs text-slate-400 hover:text-slate-600 py-1"
               >
-                すでに登録済みの方・あとで回答する方はこちら
-              </button>
+                先にアンケートだけ済ませておく
+              </Link>
             </div>
           </div>
         </div>
@@ -292,17 +305,19 @@ export default function ReserveLandingPage() {
         </div>
       )}
 
-      {/* 初めての方向け 注意アラート（常時表示） */}
+      {/* 初めての方向け 流れ案内（常時表示・まず日時選びへ誘導） */}
       {family.length === 0 && (
         <div className="max-w-3xl mx-auto px-5 pt-6">
-          <div className="flex items-start gap-3 bg-amber-400/15 border border-amber-400/40 rounded-2xl p-4">
-            <AlertTriangle className="w-5 h-5 text-amber-300 shrink-0 mt-0.5" />
+          <div className="flex items-start gap-3 bg-blue-500/15 border border-blue-400/40 rounded-2xl p-4">
+            <CalendarDays className="w-5 h-5 text-blue-300 shrink-0 mt-0.5" />
             <div className="space-y-1.5">
-              <p className="text-amber-100 font-bold text-sm leading-snug">
-                初めての方は、アンケート未記入だと「仮予約」になりません
+              <p className="text-blue-50 font-bold text-sm leading-snug">
+                初めての方も、まず下から「メニュー」か「日時」をお選びください
               </p>
-              <p className="text-amber-100/70 text-xs leading-relaxed">
-                ご予約の前に、まず下の「アンケートに回答して登録する」からご記入をお願いします（1〜2分）。ご予約は院からの確定LINEが届いて完了です。
+              <p className="text-blue-100/70 text-xs leading-relaxed">
+                お申し込みの途中で、初めての方だけ1回かんたんなアンケート登録があります。
+                選んだ日時はそのまま引き継がれるので、選び直しはいりません。
+                ご予約は院からの確定LINEが届いて完了です。
               </p>
             </div>
           </div>
@@ -354,16 +369,18 @@ export default function ReserveLandingPage() {
             </p>
           </div>
           <p className="text-white font-bold text-sm">
-            アンケートのご記入をお願いします（未記入だと仮予約になりません）
+            アンケート登録は、予約のお申し込み中に1回だけでOKです
           </p>
           <p className="text-white/50 text-xs leading-relaxed">
-            お名前・電話番号・誕生月などをご登録いただくと、オンライン予約が可能になります。アンケートがないと「仮予約」のお申し込みができませんので、初めての方は先にご回答ください。誕生月クーポンなどの特典もご利用いただけます。
+            上から日時を選んでお申し込みいただくと、初めての方は途中でアンケート（1〜2分）にご案内します。
+            選んだ日時はそのまま引き継がれるので、選び直しはいりません。
+            先に済ませておきたい方は、下のボタンからどうぞ。誕生月クーポンなどの特典もご利用いただけます。
           </p>
           <Link
             href="/questionnaire"
             className="inline-flex w-full items-center justify-center bg-white/10 hover:bg-white/20 border border-white/20 text-white font-bold py-3 px-4 rounded-2xl transition gap-2 text-sm"
           >
-            アンケートに回答して登録する
+            先にアンケートだけ登録しておく
           </Link>
         </div>
       </div>
