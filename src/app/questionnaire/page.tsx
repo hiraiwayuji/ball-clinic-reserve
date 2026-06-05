@@ -125,12 +125,15 @@ export default function QuestionnairePage() {
   const cityChoices = useMemo(() => CITIES_BY_PREFECTURE[prefecture] ?? [], [prefecture]);
 
   // アンケート完了後、引き継いだ内容でそのまま仮予約を確定する。
-  const completePendingBooking = async (b: PendingBooking, fallbackPhone: string) => {
+  // 照合に使う電話は「いまアンケートで登録した番号(registeredPhone)」を最優先にする。
+  // 予約フォームの電話(b.phone)は桁不足・別番号に直された等で顧客と食い違うことがあり、
+  // それを優先すると「顧客が見つからない＝初めての方」に逆戻りして仮予約が確定しない事故になる。
+  const completePendingBooking = async (b: PendingBooking, registeredPhone: string) => {
     const fd = new FormData();
     fd.append("date", b.date);
     fd.append("time", b.time);
     fd.append("name", b.name);
-    fd.append("phone", b.phone || fallbackPhone);
+    fd.append("phone", registeredPhone || b.phone);
     fd.append("visitType", b.visitType || "new");
     fd.append("isWaitlistIntent", String(!!b.isWaitlistIntent));
     if (b.courseId) {
