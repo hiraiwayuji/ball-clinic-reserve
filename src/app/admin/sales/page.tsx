@@ -33,7 +33,7 @@ import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Calendar as CalendarIcon, Plus, Trash2, Loader2, Coins, User, UserPlus, Landmark, Receipt, Upload, Download, Clock, Bot, X, AlertTriangle, Zap, Pencil, ShieldCheck, CalendarPlus, MapPin } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
-import { addCashSale, getCashSales, deleteCashSale, updateCashSale, searchSalesPatients, getCustomerByMedicalRecord, getLastSaleForCustomer, updateCustomerCityByName, SalesPatientSuggestion, type CashSalePaymentType } from "@/app/actions/sales";
+import { addCashSale, getCashSales, deleteCashSale, updateCashSale, searchSalesPatients, getCustomerByMedicalRecord, getLastSaleForCustomer, updateCustomerCityByName, updateCustomerProfileByName, SalesPatientSuggestion, type CashSalePaymentType } from "@/app/actions/sales";
 import { updateCheckinStatus, getLastAppointmentByCustomerName } from "@/app/actions/adminReserve";
 import { getActiveCoursesByPopularity, type ReservationCourse } from "@/app/actions/courses";
 import { usePaymentCategories } from "@/lib/use-payment-categories";
@@ -141,6 +141,8 @@ function SalesPageInner() {
     payment_types: string[];
     sale_date: string;
     cityName: string;
+    medicalRecordNumber: string;
+    birthDate: string;
   }>({
     customer_name: "",
     treatment_fee: "",
@@ -151,6 +153,8 @@ function SalesPageInner() {
     payment_types: [],
     sale_date: "",
     cityName: "",
+    medicalRecordNumber: "",
+    birthDate: "",
   });
   // 売上修正ダイアログで市町村を保存中か／その他手入力
   const [savingEditCity, setSavingEditCity] = useState(false);
@@ -337,6 +341,8 @@ function SalesPageInner() {
       payment_types: initialPaymentTypes,
       sale_date: sale.sale_date ?? "",
       cityName: sale.city_name ?? "",
+      medicalRecordNumber: sale.medical_record_number ?? "",
+      birthDate: (sale.birth_date ?? "").slice(0, 10),
     });
   };
 
@@ -393,6 +399,21 @@ function SalesPageInner() {
       fd.set("payment_types", JSON.stringify(editForm.payment_types));
       const res = await updateCashSale(fd);
       if (res.success) {
+        // 患者プロフィール（カルテ番号・生年月日・市町村）も氏名で更新する。
+        // 元の値から変わっている時だけ送る。
+        const profile: { medicalRecordNumber?: string; birthDate?: string; cityName?: string } = {};
+        if (editForm.medicalRecordNumber !== ((editTarget.medical_record_number ?? ""))) {
+          profile.medicalRecordNumber = editForm.medicalRecordNumber;
+        }
+        if (editForm.birthDate !== ((editTarget.birth_date ?? "").slice(0, 10))) {
+          profile.birthDate = editForm.birthDate;
+        }
+        if (editForm.cityName !== ((editTarget.city_name ?? ""))) {
+          profile.cityName = editForm.cityName;
+        }
+        if (Object.keys(profile).length > 0) {
+          await updateCustomerProfileByName(trimmedName, profile);
+        }
         toast.success("更新しました");
         setEditTarget(null);
         fetchSales(date);
@@ -1014,6 +1035,24 @@ function SalesPageInner() {
                   onChange={(e) => setEditForm(f => ({ ...f, customer_name: e.target.value }))}
                   placeholder="やまだ たろう"
                 />
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-semibold text-slate-600">カルテ番号</Label>
+                  <Input
+                    value={editForm.medicalRecordNumber}
+                    onChange={(e) => setEditForm(f => ({ ...f, medicalRecordNumber: e.target.value }))}
+                    placeholder="例: A-1234"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-semibold text-slate-600">生年月日</Label>
+                  <Input
+                    type="date"
+                    value={editForm.birthDate}
+                    onChange={(e) => setEditForm(f => ({ ...f, birthDate: e.target.value }))}
+                  />
+                </div>
               </div>
               <div className="space-y-1.5">
                 <Label className="text-xs font-semibold text-slate-600">金額（円）</Label>

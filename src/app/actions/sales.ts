@@ -374,6 +374,35 @@ export async function updateCustomerCityByName(
   return { success: true, updated: data?.length ?? 0 };
 }
 
+/**
+ * 売上修正ダイアログ等から、氏名で患者のプロフィール（カルテ番号・生年月日・市町村）を
+ * まとめて登録/更新する。cash_sales は氏名ベースのため customerId が無い画面用。
+ * undefined のフィールドは更新しない。同名が複数いる場合は同名全員に入る点に注意。
+ */
+export async function updateCustomerProfileByName(
+  customerName: string,
+  fields: { medicalRecordNumber?: string | null; birthDate?: string | null; cityName?: string | null },
+): Promise<{ success: boolean; error?: string; updated?: number }> {
+  const { clinicId } = await checkAdminAuth();
+  const name = (customerName ?? "").trim();
+  if (!name) return { success: false, error: "お名前が空です" };
+  const patch: Record<string, unknown> = {};
+  if (fields.medicalRecordNumber !== undefined) patch.medical_record_number = (fields.medicalRecordNumber ?? "").trim() || null;
+  if (fields.birthDate !== undefined) patch.birth_date = (fields.birthDate ?? "").trim() || null;
+  if (fields.cityName !== undefined) patch.city_name = (fields.cityName ?? "").trim() || null;
+  if (Object.keys(patch).length === 0) return { success: true, updated: 0 };
+  const sb = getAdminSupabase() ?? (await getSupabase());
+  if (!sb) return { success: false, error: "接続エラーが発生しました" };
+  const { data, error } = await sb
+    .from("customers")
+    .update(patch)
+    .eq("clinic_id", clinicId)
+    .eq("name", name)
+    .select("id");
+  if (error) return { success: false, error: "保存に失敗しました: " + error.message };
+  return { success: true, updated: data?.length ?? 0 };
+}
+
 // 支払区分は payment_categories マスタで管理（院ごとに追加・編集可）。
 // 型は string に緩めて、validation は DB レベルで行う（FK 強制ではなく、
 // 値の存在チェックは UI 側の listPaymentCategories に委譲）。
