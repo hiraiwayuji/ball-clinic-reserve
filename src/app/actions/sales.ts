@@ -80,6 +80,8 @@ export async function getSalesPrediction(customerName: string): Promise<SalesPre
 // 今日の売上未入力患者リスト（一括入力画面用）
 export type PendingSalePatient = {
   appointmentId: string;
+  /** 顧客ID（受付画面でその場で市町村を登録する等に使う。null は予約に顧客未紐付け） */
+  customerId: string | null;
   customerName: string;
   medicalRecordNumber: string | null;
   isFirstVisit: boolean;
@@ -139,7 +141,7 @@ export async function getTodayPendingSales(dateStr?: string): Promise<{ success:
     // 指定日の「会計完了」予約を取得（コース情報も snapshot として一緒に取る）
     const { data: appointments, error: aptError } = await supabase
       .from("appointments")
-      .select("id, is_first_visit, start_time, checkin_status, status, course_id, course_name, customers(name, medical_record_number, birth_date, city_name)")
+      .select("id, is_first_visit, start_time, checkin_status, status, course_id, course_name, customers(id, name, medical_record_number, birth_date, city_name)")
       .eq("clinic_id", clinicId)
       .neq("status", "cancelled")
       .gte("start_time", dayStart)
@@ -212,7 +214,7 @@ export async function getTodayPendingSales(dateStr?: string): Promise<{ success:
       status: string;
       course_id: string | null;
       course_name: string | null;
-      customers: { name?: string; medical_record_number?: string | null; birth_date?: string | null; city_name?: string | null } | { name?: string; medical_record_number?: string | null; birth_date?: string | null; city_name?: string | null }[] | null;
+      customers: { id?: string; name?: string; medical_record_number?: string | null; birth_date?: string | null; city_name?: string | null } | { id?: string; name?: string; medical_record_number?: string | null; birth_date?: string | null; city_name?: string | null }[] | null;
     }>) {
       const customerName = getAppointmentCustomerName(apt.customers);
       if (!customerName) continue;
@@ -299,6 +301,7 @@ export async function getTodayPendingSales(dateStr?: string): Promise<{ success:
 
       pending.push({
         appointmentId: apt.id,
+        customerId: custObj?.id ?? null,
         customerName,
         medicalRecordNumber,
         isFirstVisit,
@@ -322,6 +325,28 @@ export async function getTodayPendingSales(dateStr?: string): Promise<{ success:
     console.error("Error fetching pending sales:", error);
     return { success: false, data: [], error: "取得に失敗しました" };
   }
+}
+
+/**
+ * 受付の売上入力画面から、患者の居住市町村(city_name)をその場で登録/更新する。
+ * 医療助成（市町村×学年で窓口0/600円）の対象判定に使う。受付スタッフも実行可。
+ */
+export async function updateCustomerCity(
+  customerId: string,
+  cityName: string,
+): Promise<{ success: boolean; error?: string }> {
+  const { clinicId } = await checkAdminAuth();
+  if (!customerId) return { success: false, error: "顧客が特定できません" };
+  const city = (cityName ?? "").trim();
+  const sb = getAdminSupabase() ?? (await getSupabase());
+  if (!sb) return { success: false, error: "接続エラーが発生しました" };
+  const { error } = await sb
+    .from("customers")
+    .update({ city_name: city || null })
+    .eq("id", customerId)
+    .eq("clinic_id", clinicId);
+  if (error) return { success: false, error: "保存に失敗しました: " + error.message };
+  return { success: true };
 }
 
 // 支払区分は payment_categories マスタで管理（院ごとに追加・編集可）。

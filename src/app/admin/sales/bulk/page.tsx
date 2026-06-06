@@ -7,13 +7,14 @@ import { useSearchParams } from "next/navigation";
 import {
   getTodayPendingSales,
   bulkAddCashSales,
+  updateCustomerCity,
   type PendingSalePatient,
   type CashSalePaymentType,
 } from "@/app/actions/sales";
 import { markAppointmentNoShow } from "@/app/actions/adminReserve";
 import { usePaymentCategories } from "@/lib/use-payment-categories";
 import { getPaymentCategoryColor } from "@/lib/payment-category-color";
-import { evaluateMedicalAid, effectiveWindowBurden, type MedicalAidRules } from "@/lib/medical-aid";
+import { evaluateMedicalAid, effectiveWindowBurden, DEFAULT_MEDICAL_AID_RULES, type MedicalAidRules } from "@/lib/medical-aid";
 import { getMedicalAidRules } from "@/app/actions/settings";
 import { upsertPaymentCategory, type PaymentCategoryRow } from "@/app/actions/payment-categories";
 import { toast } from "sonner";
@@ -405,6 +406,10 @@ function DraftRowItem({
 }) {
   // 「未来院」ボタンの押し間違い防止（1回目で確認、2回目で確定）
   const [confirmingNoShow, setConfirmingNoShow] = useState(false);
+  // 医療助成の警告から、その場で市町村を登録するためのUI状態
+  const [savingCity, setSavingCity] = useState(false);
+  const [cityChoice, setCityChoice] = useState("");
+  const [customCity, setCustomCity] = useState("");
   // 子ども医療費助成の判定（市町村＋生年月日）。対象なら医療助成ボタンを色分け。
   const medicalAid = evaluateMedicalAid({
     birthDate: row.birthDate,
@@ -422,6 +427,26 @@ function DraftRowItem({
     : row.paymentTypes.includes("hagukumi");
   // 医療助成を選んだのに住所（市町村）が未登録 → 注意（設定でON時のみ・保存はブロックしない）
   const showAddressAlert = addressAlert && hagukumiSelected && !row.cityName?.trim();
+
+  // 警告から「その場で市町村を登録」するための候補（院の助成ルールの市町村）と保存処理
+  const aidCities = (medicalAidRules?.cities ?? DEFAULT_MEDICAL_AID_RULES.cities).map((c) => c.city);
+  const saveCity = async (city: string) => {
+    const c = (city ?? "").trim();
+    if (!c || !row.customerId || savingCity) return;
+    setSavingCity(true);
+    try {
+      const res = await updateCustomerCity(row.customerId, c);
+      if (res.success) {
+        // ローカルの行も更新 → その場で助成判定が走り、警告が消えて0/600円が出る
+        onChange({ ...row, cityName: c });
+        toast.success(`${row.customerName}様の市町村を「${c}」に登録しました`);
+      } else {
+        toast.error(res.error || "市町村の登録に失敗しました");
+      }
+    } finally {
+      setSavingCity(false);
+    }
+  };
 
   // 助成の窓口金額をワンタップで反映（金額＝0/600、区分に「医療助成」を付与、明細モード解除）。
   const applyAidAmount = () => {
@@ -774,14 +799,63 @@ function DraftRowItem({
           </div>
         )}
 
-        {/* 医療助成を選んだのに住所未登録 → 注意（保存はブロックしない・設定でOFFにできる） */}
+        {/* 医療助成を選んだのに住所未登録 → 注意＋その場で市町村を登録（保存はブロックしない） */}
         {showAddressAlert && (
-          <div className="flex items-start gap-1.5 rounded-lg border border-amber-300 bg-amber-50 dark:bg-amber-950/30 px-2.5 py-1.5">
-            <AlertTriangle className="w-3.5 h-3.5 text-amber-500 shrink-0 mt-0.5" />
-            <p className="text-[11px] text-amber-700 dark:text-amber-400 font-medium">
-              住所（市町村）が未登録です。医療助成の対象判定ができません。
-              <span className="text-amber-600/80">このまま保存もできます（初診アンケート等で住所をご登録ください）。</span>
-            </p>
+          <div className="rounded-lg border border-amber-300 bg-amber-50 dark:bg-amber-950/30 px-2.5 py-1.5 space-y-1.5">
+            <div className="flex items-start gap-1.5">
+              <AlertTriangle className="w-3.5 h-3.5 text-amber-500 shrink-0 mt-0.5" />
+              <p className="text-[11px] text-amber-700 dark:text-amber-400 font-medium">
+                住所（市町村）が未登録です。医療助成の対象判定ができません。
+                <span className="text-amber-600/80">このまま保存もできます。</span>
+              </p>
+            </div>
+            {row.customerId ? (
+              <div className="flex flex-wrap items-center gap-1.5 pl-5">
+                <span className="text-[11px] text-amber-700 font-bold">ここで登録 →</span>
+                <select
+                  value={cityChoice}
+                  disabled={savingCity}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setCityChoice(v);
+                    if (v && v !== "__other__") saveCity(v);
+                  }}
+                  className="h-7 rounded-md border border-amber-300 bg-white text-[12px] px-2 text-slate-700 focus:outline-none focus:ring-1 focus:ring-amber-400 disabled:opacity-50"
+                >
+                  <option value="">市町村を選ぶ</option>
+                  {aidCities.map((c) => (
+                    <option key={c} value={c}>{c}</option>
+                  ))}
+                  <option value="__other__">その他（手入力）</option>
+                </select>
+                {cityChoice === "__other__" && (
+                  <>
+                    <Input
+                      type="text"
+                      value={customCity}
+                      onChange={(e) => setCustomCity(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); saveCity(customCity); } }}
+                      placeholder="市町村名（例: 藍住町）"
+                      className="h-7 w-36 text-[12px]"
+                    />
+                    <Button
+                      type="button"
+                      size="sm"
+                      disabled={savingCity || !customCity.trim()}
+                      onClick={() => saveCity(customCity)}
+                      className="h-7 bg-amber-600 hover:bg-amber-700 text-white text-[11px] px-3"
+                    >
+                      登録
+                    </Button>
+                  </>
+                )}
+                {savingCity && <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-500" />}
+              </div>
+            ) : (
+              <p className="text-[10px] text-amber-600/80 pl-5">
+                ※この患者さんは予約に未紐付けのため、ここでは登録できません（カルテ／アンケートでご登録ください）。
+              </p>
+            )}
           </div>
         )}
 

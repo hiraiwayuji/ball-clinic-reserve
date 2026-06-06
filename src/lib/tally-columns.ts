@@ -16,7 +16,7 @@ export type TallyColumn = {
 // からだ鍼灸整骨院のメニュー構成（2026-06 リニューアル）。
 // 種別が複数あるものは variants でセル内プルダウンに展開する。
 export const DEFAULT_TALLY_COLUMNS: TallyColumn[] = [
-  { key: "hoken",    label: "保険施術",            sort_order: 1,  variants: ["J", "S"] },
+  { key: "hoken",    label: "保険施術",            sort_order: 1,  variants: ["J", "S", "J+S"] },
   { key: "taping",   label: "テーピング",          sort_order: 2,  variants: ["一般", "学割"] },
   { key: "shinkyu",  label: "鍼灸",                sort_order: 3,  variants: ["一般", "学割", "小児鍼", "置鍼", "電気鍼"] },
   { key: "keiraku",  label: "経絡治療",            sort_order: 4 },
