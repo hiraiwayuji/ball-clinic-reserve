@@ -16,16 +16,13 @@ export type TallyColumn = {
 // からだ鍼灸整骨院のメニュー構成（2026-06 リニューアル）。
 // 種別が複数あるものは variants でセル内プルダウンに展開する。
 export const DEFAULT_TALLY_COLUMNS: TallyColumn[] = [
-  { key: "hoken",    label: "保険施術",            sort_order: 1,  variants: ["J", "S", "J+S"] },
+  { key: "hoken",    label: "保険施術",            sort_order: 1,  variants: ["J", "S", "J+S", "自賠"] },
   { key: "taping",   label: "テーピング",          sort_order: 2,  variants: ["一般", "学割"] },
   { key: "shinkyu",  label: "鍼灸",                sort_order: 3,  variants: ["一般", "学割", "小児鍼", "置鍼", "電気鍼"] },
   { key: "keiraku",  label: "経絡治療",            sort_order: 4 },
   { key: "zenshin",  label: "じっくり全身調整",     sort_order: 5 },
   { key: "seitai",   label: "整体",                sort_order: 6 },
-  { key: "remake",   label: "院長トータルリメイク", sort_order: 7 },
-  { key: "personal", label: "パーソナルトレーニング", sort_order: 8 },
-  { key: "pilates",  label: "ピラティス",          sort_order: 9 },
-  { key: "buppan",   label: "物販",                sort_order: 10 },
-  // 自賠責は窓口0円で計上する運用があるため列として残す（不要なら列設定から削除可）。
-  { key: "jibaiseki", label: "自賠責",             sort_order: 11 },
+  { key: "remake",   label: "院長トータルリメイク", sort_order: 7, variants: ["60分", "90分"] },
+  { key: "personal", label: "パーソナルトレーニング", sort_order: 8, variants: ["パーソナル", "ピラティス"] },
+  { key: "buppan",   label: "物販",                sort_order: 9 },
 ];

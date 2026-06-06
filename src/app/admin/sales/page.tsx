@@ -33,12 +33,12 @@ import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Calendar as CalendarIcon, Plus, Trash2, Loader2, Coins, User, UserPlus, Landmark, Receipt, Upload, Download, Clock, Bot, X, AlertTriangle, Zap, Pencil, ShieldCheck, CalendarPlus, MapPin } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
-import { addCashSale, getCashSales, deleteCashSale, updateCashSale, searchSalesPatients, getCustomerByMedicalRecord, getLastSaleForCustomer, SalesPatientSuggestion, type CashSalePaymentType } from "@/app/actions/sales";
+import { addCashSale, getCashSales, deleteCashSale, updateCashSale, searchSalesPatients, getCustomerByMedicalRecord, getLastSaleForCustomer, updateCustomerCityByName, SalesPatientSuggestion, type CashSalePaymentType } from "@/app/actions/sales";
 import { updateCheckinStatus, getLastAppointmentByCustomerName } from "@/app/actions/adminReserve";
 import { getActiveCoursesByPopularity, type ReservationCourse } from "@/app/actions/courses";
 import { usePaymentCategories } from "@/lib/use-payment-categories";
 import { getPaymentCategoryColor } from "@/lib/payment-category-color";
-import { evaluateMedicalAid, type MedicalAidRules } from "@/lib/medical-aid";
+import { evaluateMedicalAid, DEFAULT_MEDICAL_AID_RULES, type MedicalAidRules } from "@/lib/medical-aid";
 import { getMedicalAidRules } from "@/app/actions/settings";
 import { toast } from "sonner";
 import Link from "next/link";
@@ -140,6 +140,7 @@ function SalesPageInner() {
     is_first_visit: boolean;
     payment_types: string[];
     sale_date: string;
+    cityName: string;
   }>({
     customer_name: "",
     treatment_fee: "",
@@ -149,7 +150,11 @@ function SalesPageInner() {
     is_first_visit: false,
     payment_types: [],
     sale_date: "",
+    cityName: "",
   });
+  // 売上修正ダイアログで市町村を保存中か／その他手入力
+  const [savingEditCity, setSavingEditCity] = useState(false);
+  const [editCityCustom, setEditCityCustom] = useState("");
   const [isUpdating, setIsUpdating] = useState(false);
 
   // 受付カウンターからの遷移: URLパラメータで名前・初診フラグ・予測データを受け取る
@@ -331,7 +336,30 @@ function SalesPageInner() {
       is_first_visit: !!sale.is_first_visit,
       payment_types: initialPaymentTypes,
       sale_date: sale.sale_date ?? "",
+      cityName: sale.city_name ?? "",
     });
+  };
+
+  // 売上修正ダイアログから市町村を登録（医療助成の判定に使う・氏名で更新）
+  const editAidCities = (medicalAidRules?.cities ?? DEFAULT_MEDICAL_AID_RULES.cities).map((c) => c.city);
+  const saveEditCity = async (city: string) => {
+    const c = (city ?? "").trim();
+    const name = editForm.customer_name.trim();
+    if (!c || !name || savingEditCity) return;
+    setSavingEditCity(true);
+    try {
+      const res = await updateCustomerCityByName(name, c);
+      if (res.success) {
+        setEditForm((f) => ({ ...f, cityName: c }));
+        if (editTarget) editTarget.city_name = c;
+        setEditCityCustom("");
+        toast.success(`${name}様の市町村を「${c}」に登録しました`);
+      } else {
+        toast.error(res.error || "市町村の登録に失敗しました");
+      }
+    } finally {
+      setSavingEditCity(false);
+    }
   };
 
   const handleUpdate = async () => {
@@ -1042,6 +1070,51 @@ function SalesPageInner() {
                   })}
                 </div>
               </div>
+              {/* 医療助成を選んだら、その場で市町村を登録（助成の窓口0/600円判定に使う） */}
+              {editForm.payment_types.includes("hagukumi") && (
+                <div className="space-y-1.5 rounded-lg border border-violet-200 dark:border-violet-800/40 bg-violet-50 dark:bg-violet-950/20 px-2.5 py-2">
+                  <Label className="text-xs font-semibold text-violet-700 dark:text-violet-300 flex items-center gap-1">
+                    <MapPin className="w-3.5 h-3.5" />
+                    お住まい（市町村）
+                    <span className="text-violet-400 font-normal normal-case">医療助成の判定に使います</span>
+                  </Label>
+                  {editForm.cityName ? (
+                    <p className="text-xs text-violet-700 dark:text-violet-300">
+                      現在の登録：<span className="font-bold">{editForm.cityName}</span>
+                    </p>
+                  ) : (
+                    <p className="text-[11px] text-violet-500">未登録です。選ぶと対象判定ができるようになります。</p>
+                  )}
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <select
+                      value=""
+                      disabled={savingEditCity}
+                      onChange={(e) => { if (e.target.value) saveEditCity(e.target.value); }}
+                      className="h-9 rounded-md border border-violet-300 bg-white dark:bg-slate-800 text-sm px-2 text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-1 focus:ring-violet-400 disabled:opacity-50"
+                    >
+                      <option value="">市町村を選んで登録</option>
+                      {editAidCities.map((c) => (<option key={c} value={c}>{c}</option>))}
+                    </select>
+                    <Input
+                      value={editCityCustom}
+                      onChange={(e) => setEditCityCustom(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); saveEditCity(editCityCustom); } }}
+                      placeholder="その他（手入力）"
+                      className="h-9 w-32 text-sm"
+                    />
+                    <Button
+                      type="button"
+                      size="sm"
+                      onClick={() => saveEditCity(editCityCustom)}
+                      disabled={savingEditCity || !editCityCustom.trim()}
+                      className="h-9 bg-violet-600 hover:bg-violet-700 text-white text-xs px-3"
+                    >
+                      {savingEditCity ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : "登録"}
+                    </Button>
+                  </div>
+                </div>
+              )}
+
               <div className="flex items-center gap-2 pt-1">
                 <input
                   type="checkbox"

@@ -349,6 +349,31 @@ export async function updateCustomerCity(
   return { success: true };
 }
 
+/**
+ * 売上修正ダイアログ等から、氏名で患者の市町村(city_name)を登録/更新する。
+ * cash_sales は氏名ベースのため customerId が無い画面用。同名が複数いる場合は
+ * その院の同名顧客すべてに同じ市町村が入る点に注意（実害は小・受給者証で最終確認）。
+ */
+export async function updateCustomerCityByName(
+  customerName: string,
+  cityName: string,
+): Promise<{ success: boolean; error?: string; updated?: number }> {
+  const { clinicId } = await checkAdminAuth();
+  const name = (customerName ?? "").trim();
+  if (!name) return { success: false, error: "お名前が空です" };
+  const city = (cityName ?? "").trim();
+  const sb = getAdminSupabase() ?? (await getSupabase());
+  if (!sb) return { success: false, error: "接続エラーが発生しました" };
+  const { data, error } = await sb
+    .from("customers")
+    .update({ city_name: city || null })
+    .eq("clinic_id", clinicId)
+    .eq("name", name)
+    .select("id");
+  if (error) return { success: false, error: "保存に失敗しました: " + error.message };
+  return { success: true, updated: data?.length ?? 0 };
+}
+
 // 支払区分は payment_categories マスタで管理（院ごとに追加・編集可）。
 // 型は string に緩めて、validation は DB レベルで行う（FK 強制ではなく、
 // 値の存在チェックは UI 側の listPaymentCategories に委譲）。

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, useTransition, useCallback } from "react";
+import { useEffect, useMemo, useState, useTransition, useCallback, useRef } from "react";
 import { format } from "date-fns";
 import Link from "next/link";
 import { toast } from "sonner";
@@ -91,6 +91,27 @@ export default function TallySheet({ initialDate }: { initialDate?: string }) {
   const [saving, startSaving] = useTransition();
   // 次回予約ダイアログ（対象行を1つだけ開く）
   const [nextReserveRow, setNextReserveRow] = useState<UIRow | null>(null);
+
+  // 横スクロール同期：列が多くて1画面に収まらない時、表の上にも分かりやすいスライドバーを出す。
+  // （行が多いと下端のスクロールバーまで遠いので、上からも横移動できるようにする）
+  const tableScrollRef = useRef<HTMLDivElement>(null);
+  const topScrollRef = useRef<HTMLDivElement>(null);
+  const [tableWidth, setTableWidth] = useState(1100);
+  useEffect(() => {
+    const measure = () => {
+      const t = tableScrollRef.current?.querySelector("table");
+      if (t) setTableWidth(t.scrollWidth);
+    };
+    measure();
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+  }, [columns, rows.length]);
+  const syncTopToTable = () => {
+    if (tableScrollRef.current && topScrollRef.current) tableScrollRef.current.scrollLeft = topScrollRef.current.scrollLeft;
+  };
+  const syncTableToTop = () => {
+    if (tableScrollRef.current && topScrollRef.current) topScrollRef.current.scrollLeft = tableScrollRef.current.scrollLeft;
+  };
 
   const load = useCallback((d: string) => {
     setLoading(true);
@@ -315,8 +336,19 @@ export default function TallySheet({ initialDate }: { initialDate?: string }) {
         </div>
       </div>
 
+      {/* 横スクロール用スライドバー（表の上）。下端まで行かなくても横に動かせる */}
+      <div
+        ref={topScrollRef}
+        onScroll={syncTopToTable}
+        className="overflow-x-auto rounded-t-xl border border-b-0 border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800"
+        style={{ height: 16 }}
+        aria-hidden
+      >
+        <div style={{ width: tableWidth, height: 1 }} />
+      </div>
+
       {/* グリッド */}
-      <div className="overflow-x-auto rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-sm">
+      <div ref={tableScrollRef} onScroll={syncTableToTop} className="overflow-x-auto rounded-b-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-sm">
         <table className="w-full text-sm border-collapse min-w-[1100px]">
           <thead>
             <tr className="bg-slate-50 dark:bg-slate-900/50 text-slate-600 dark:text-slate-300">
