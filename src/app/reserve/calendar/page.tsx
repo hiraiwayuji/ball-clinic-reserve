@@ -8,7 +8,7 @@ import { ja } from "date-fns/locale";
 import { ChevronLeft, ChevronRight, ArrowLeft, Clock, CalendarDays, X, CheckCircle2, AlertCircle, Sparkles, Phone, MessageCircle } from "lucide-react";
 import { createWaitlistReservation } from "@/app/actions/reserve";
 import { getClinicHolidays, type ClinicHoliday } from "@/app/actions/holidays";
-import { getActiveCourses, getCourseRequiredStaffSchedule, type ReservationCourse } from "@/app/actions/courses";
+import { getActiveCourses, getCourseRequiredStaffSchedule, getCoursesAvailability, type ReservationCourse } from "@/app/actions/courses";
 import { getBlockedTimesForCurrentClinic } from "@/app/actions/staff-schedule";
 import { isStaffAvailableOn, type StaffSchedule } from "@/lib/staff-availability";
 import { Button } from "@/components/ui/button";
@@ -25,6 +25,15 @@ import { PUBLIC_CLINIC_ID } from "@/lib/default-clinic-id";
 // 静的なTIME_SLOTS, MAX_SLOTSを削除
 
 type AvailabilityLevel = "available" | "few" | "full" | "closed" | "past";
+
+// "2026-06-08" → "6/8（月）"
+function formatShortDate(ymd: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(ymd);
+  if (!m) return ymd;
+  const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  const wd = ["日", "月", "火", "水", "木", "金", "土"][d.getDay()];
+  return `${Number(m[2])}/${Number(m[3])}（${wd}）`;
+}
 
 function getAvailabilityLevel(dateStr: string, bookedCount: number, date: Date, clinicHolidays: ClinicHoliday[], slotMinutes: SlotMinutes, schedule: Schedule, staffSchedule?: StaffSchedule | null): AvailabilityLevel {
   const isHoliday = clinicHolidays.some(h => h.date === dateStr);
@@ -138,6 +147,8 @@ function ReserveCalendarContent() {
   // 担当固定コース（さみ整体など）のスタッフ出勤日。設定時は出勤日以外を選べなくする。
   const [staffSchedule, setStaffSchedule] = useState<StaffSchedule | null>(null);
   const [staffScheduleName, setStaffScheduleName] = useState<string>("");
+  // 選択コースの最短の空き日（"yyyy-MM-dd" / null=空き無し / undefined=未取得）
+  const [courseNextDate, setCourseNextDate] = useState<string | null | undefined>(undefined);
   // 日付を押したら時間帯パネルへ自動スクロールするための ref
   const timePanelRef = useRef<HTMLDivElement | null>(null);
   const [currentMonth, setCurrentMonth] = useState<Date | null>(null);
@@ -232,6 +243,7 @@ function ReserveCalendarContent() {
       setSelectedCourse(null);
       setStaffSchedule(null);
       setStaffScheduleName("");
+      setCourseNextDate(undefined);
       return;
     }
     let mounted = true;
@@ -240,6 +252,13 @@ function ReserveCalendarContent() {
       const found = courses.find(c => c.id === courseIdParam) ?? null;
       setSelectedCourse(found);
     });
+    // このコースの最短の空き日（予約・出勤日・所要時間を考慮）を取得して前向きに案内する
+    setCourseNextDate(undefined);
+    getCoursesAvailability().then(list => {
+      if (!mounted) return;
+      const hit = list.find(a => a.courseId === courseIdParam);
+      setCourseNextDate(hit ? hit.nextDate : null);
+    }).catch(() => { if (mounted) setCourseNextDate(null); });
     // 担当固定コースなら、そのスタッフの出勤日スケジュールを取得（さみ整体など）
     getCourseRequiredStaffSchedule(courseIdParam).then(res => {
       if (!mounted) return;
@@ -508,11 +527,23 @@ function ReserveCalendarContent() {
           </div>
         )}
 
-        {/* ─── 担当固定コース（さみ整体など）の案内 ─── */}
-        {staffScheduleName && (
-          <div className="mt-4 bg-emerald-500/10 border border-emerald-500/30 rounded-2xl p-3 text-sm text-emerald-100">
-            🗓 <span className="font-bold">{staffScheduleName}</span>さんの出勤日のみ「◯空き」で表示しています（出勤日だけ選べます）。
-          </div>
+        {/* ─── 選択コースの空き案内（さみ整体など「休」が多い日でも空きがあると分かるように） ─── */}
+        {selectedCourse && courseNextDate !== undefined && (
+          courseNextDate ? (
+            <div className="mt-4 bg-emerald-500/15 border border-emerald-500/40 rounded-2xl p-3.5 text-sm text-emerald-50">
+              <p className="font-black text-emerald-200">✅ {selectedCourse.name} は予約できます！</p>
+              <p className="mt-0.5 leading-relaxed">
+                最短 <span className="font-bold text-white">{formatShortDate(courseNextDate)}</span> に空きあり。
+                下のカレンダーで <span className="text-emerald-300 font-bold">緑の◯</span> の日を選んでください。
+                {staffScheduleName ? `（${staffScheduleName}さんの出勤日のみ受付）` : ""}
+              </p>
+            </div>
+          ) : (
+            <div className="mt-4 bg-amber-500/15 border border-amber-500/40 rounded-2xl p-3.5 text-sm text-amber-100">
+              {selectedCourse.name} の直近30日の空きはお問い合わせください
+              {staffScheduleName ? `（${staffScheduleName}さんの出勤日のみ受付）` : ""}。
+            </div>
+          )
         )}
 
         {/* ─── 月ナビゲーション ─── */}
