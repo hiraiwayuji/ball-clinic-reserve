@@ -17,6 +17,7 @@ import {
   Info,
 } from "lucide-react";
 import type { ReservationCourse } from "@/app/actions/courses";
+import { getCoursesAvailability } from "@/app/actions/courses";
 import type { PublicClinicSettings, ThemeColor } from "@/app/actions/publicSettings";
 import { CLINIC_CONFIG } from "@/lib/clinic-config";
 import { getThemeClasses } from "@/lib/lp-theme";
@@ -36,6 +37,15 @@ function audienceOf(course: ReservationCourse): "first" | "repeat" | "all" {
   return "all";
 }
 
+// "2026-06-09" → "6/9（火）"
+function formatShortDate(ymd: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(ymd);
+  if (!m) return ymd;
+  const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  const wd = ["日", "月", "火", "水", "木", "金", "土"][d.getDay()];
+  return `${Number(m[2])}/${Number(m[3])}（${wd}）`;
+}
+
 function formatPercent(price: number, regular: number): string {
   if (regular <= 0 || price >= regular) return "";
   const off = Math.round(((regular - price) / regular) * 100);
@@ -46,6 +56,21 @@ export default function MenuLPClient({ initialCourses, settings }: Props) {
   const [tab, setTab] = useState<Tab>("all");
   const [audience, setAudience] = useState<AudienceFilter>("all");
   const [selectedCourse, setSelectedCourse] = useState<ReservationCourse | null>(null);
+  // メニュー別の最短空き日（courseId -> "yyyy-MM-dd" | null）。読込前は undefined。
+  const [availability, setAvailability] = useState<Record<string, string | null> | null>(null);
+
+  useEffect(() => {
+    let mounted = true;
+    getCoursesAvailability()
+      .then((list) => {
+        if (!mounted) return;
+        const map: Record<string, string | null> = {};
+        list.forEach((a) => { map[a.courseId] = a.nextDate; });
+        setAvailability(map);
+      })
+      .catch(() => {});
+    return () => { mounted = false; };
+  }, []);
 
   const themeColor = settings?.theme_color ?? "blue";
   const theme = getThemeClasses(themeColor);
@@ -175,6 +200,7 @@ export default function MenuLPClient({ initialCourses, settings }: Props) {
               key={course.id}
               course={course}
               themeColor={themeColor}
+              availabilityDate={availability ? (availability[course.id] ?? null) : undefined}
               onSelect={() => setSelectedCourse(course)}
             />
           ))
@@ -203,10 +229,13 @@ export default function MenuLPClient({ initialCourses, settings }: Props) {
 function CouponCard({
   course,
   themeColor,
+  availabilityDate,
   onSelect,
 }: {
   course: ReservationCourse;
   themeColor: ThemeColor;
+  /** 最短の空き日 "yyyy-MM-dd" / null=30日以内空き無し / undefined=読込中 */
+  availabilityDate?: string | null;
   onSelect: () => void;
 }) {
   const aud = audienceOf(course);
@@ -314,6 +343,21 @@ function CouponCard({
           </div>
         </div>
       </div>
+
+      {/* 空き状況バッジ（最短の空き日） */}
+      {availabilityDate !== undefined && (
+        <div className="px-3 pb-2 -mt-1">
+          {availabilityDate ? (
+            <span className="inline-flex items-center gap-1 text-[11px] font-black text-emerald-300 bg-emerald-500/15 border border-emerald-500/40 rounded-full px-2.5 py-1">
+              ◯ 空きあり・最短 {formatShortDate(availabilityDate)}
+            </span>
+          ) : (
+            <span className="inline-flex items-center gap-1 text-[11px] font-bold text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-full px-2.5 py-1">
+              直近の空きはお問い合わせください
+            </span>
+          )}
+        </div>
+      )}
 
       {/* CTA帯（タップで詳細を表示） */}
       <div className={`border-t border-zinc-800 ${theme.accentBgSoft} px-4 py-2.5 flex items-center justify-between`}>

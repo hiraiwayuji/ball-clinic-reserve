@@ -462,6 +462,113 @@ export async function getCourseRequiredStaffSchedule(courseId: string): Promise<
 }
 
 // ─────────────────────────────────────────────────────────
+// メニュー別の「最短の空き日」（メニュー一覧カードの空きバッジ用）
+// ─────────────────────────────────────────────────────────
+export type CourseAvailability = { courseId: string; nextDate: string | null }; // nextDate: "yyyy-MM-dd" or null(30日以内に空き無し)
+
+export async function getCoursesAvailability(): Promise<CourseAvailability[]> {
+  const { createClient: createAdminClient } = await import("@supabase/supabase-js");
+  const { buildSchedule, getTimeSlots, isTimeSlotWithinTwoHours } = await import("@/lib/time-slots");
+  const { isStaffAvailableOnYmd } = await import("@/lib/staff-availability");
+  const DEFAULT_CLINIC_ID = PUBLIC_CLINIC_ID;
+  try {
+    const admin = createAdminClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
+
+    // 院設定（営業時間・枠サイズ）
+    const { data: settings } = await admin
+      .from("clinic_settings")
+      .select("slot_duration_minutes, business_open_weekday, business_close_weekday, business_open_saturday, business_close_saturday, business_break_start_weekday, business_break_end_weekday, business_break_start_saturday, business_break_end_saturday, closed_weekdays")
+      .eq("id", DEFAULT_CLINIC_ID)
+      .maybeSingle();
+    const schedule = buildSchedule(settings);
+    const slotMinutes = ([15, 20, 30].includes(Number(settings?.slot_duration_minutes)) ? Number(settings?.slot_duration_minutes) : 30) as 15 | 20 | 30;
+
+    const courses = await getActiveCourses();
+    if (courses.length === 0) return [];
+
+    // 期間（今日〜30日）
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const end = new Date(today); end.setDate(end.getDate() + 30);
+    const ymd = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+
+    // 休診日
+    const { data: holidays } = await admin
+      .from("clinic_holidays").select("date").eq("clinic_id", DEFAULT_CLINIC_ID);
+    const holidaySet = new Set((holidays ?? []).map((h: { date: string }) => String(h.date).slice(0, 10)));
+
+    // 予約（30日分）→ 日付ごとの予約済み30分スロット集合
+    const startUTC = new Date(`${ymd(today)}T00:00:00+09:00`).toISOString();
+    const endUTC = new Date(`${ymd(end)}T23:59:59+09:00`).toISOString();
+    const { data: apts } = await admin
+      .from("appointments").select("start_time, end_time")
+      .eq("clinic_id", DEFAULT_CLINIC_ID).neq("status", "cancelled")
+      .gte("start_time", startUTC).lte("start_time", endUTC);
+    const bookedByDate = new Map<string, Set<string>>();
+    for (const a of apts ?? []) {
+      const s = new Date((a as { start_time: string }).start_time).getTime();
+      const e = (a as { end_time?: string | null }).end_time ? new Date((a as { end_time: string }).end_time).getTime() : s + 30 * 60000;
+      for (let cur = s; cur < e; cur += 30 * 60000) {
+        const j = new Date(cur + 9 * 3600000);
+        const dk = `${j.getUTCFullYear()}-${String(j.getUTCMonth() + 1).padStart(2, "0")}-${String(j.getUTCDate()).padStart(2, "0")}`;
+        const tk = `${String(j.getUTCHours()).padStart(2, "0")}:${String(j.getUTCMinutes()).padStart(2, "0")}`;
+        if (!bookedByDate.has(dk)) bookedByDate.set(dk, new Set());
+        bookedByDate.get(dk)!.add(tk);
+      }
+    }
+
+    // 担当固定コースのスタッフ出勤スケジュールをまとめて取得
+    const staffIds = Array.from(new Set(courses.map((c) => c.required_staff_id).filter(Boolean))) as string[];
+    const staffSched = new Map<string, { weekdays: number[]; dates: { date: string; available: boolean }[] }>();
+    if (staffIds.length > 0) {
+      const { data: staffRows } = await admin
+        .from("reservation_staff").select("id, schedule_based_booking, booking_weekdays")
+        .eq("clinic_id", DEFAULT_CLINIC_ID).in("id", staffIds);
+      const { data: dateRows } = await admin
+        .from("staff_booking_dates").select("staff_id, date, available")
+        .eq("clinic_id", DEFAULT_CLINIC_ID).in("staff_id", staffIds);
+      for (const s of staffRows ?? []) {
+        if (!(s as { schedule_based_booking?: boolean }).schedule_based_booking) continue;
+        const weekdays = String((s as { booking_weekdays?: string }).booking_weekdays ?? "").split(",").map((x) => x.trim()).filter(Boolean).map(Number);
+        const dates = (dateRows ?? []).filter((d: { staff_id: string }) => d.staff_id === (s as { id: string }).id)
+          .map((d: { date: string; available: boolean }) => ({ date: String(d.date).slice(0, 10), available: !!d.available }));
+        staffSched.set((s as { id: string }).id, { weekdays, dates });
+      }
+    }
+
+    const result: CourseAvailability[] = [];
+    for (const course of courses) {
+      const dur = course.duration_minutes || slotMinutes;
+      const steps = Math.max(1, Math.ceil(dur / slotMinutes));
+      const sched = course.required_staff_id ? staffSched.get(course.required_staff_id) : undefined;
+      let next: string | null = null;
+      for (let i = 0; i <= 30 && !next; i++) {
+        const d = new Date(today); d.setDate(d.getDate() + i);
+        const key = ymd(d);
+        if (holidaySet.has(key)) continue;
+        if (sched && !isStaffAvailableOnYmd(key, sched)) continue;
+        const slots = getTimeSlots(d, { slotMinutes, schedule });
+        if (slots.length === 0) continue;
+        const booked = bookedByDate.get(key) ?? new Set<string>();
+        for (let idx = 0; idx < slots.length; idx++) {
+          if (isTimeSlotWithinTwoHours(d, slots[idx])) continue;
+          let fits = true;
+          for (let k = 0; k < steps; k++) {
+            const sl = slots[idx + k];
+            if (!sl || booked.has(sl)) { fits = false; break; }
+          }
+          if (fits) { next = key; break; }
+        }
+      }
+      result.push({ courseId: course.id, nextDate: next });
+    }
+    return result;
+  } catch (e) {
+    console.error("[getCoursesAvailability] failed:", e);
+    return [];
+  }
+}
+
+// ─────────────────────────────────────────────────────────
 // 個室（ReservationRoom）
 // ─────────────────────────────────────────────────────────
 
