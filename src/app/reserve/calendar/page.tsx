@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, Suspense } from "react";
+import { useState, useEffect, useCallback, useRef, Suspense } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { format, isSameMonth, isSameDay, isToday, isPast, startOfDay, startOfMonth, endOfMonth, eachDayOfInterval, startOfWeek, endOfWeek } from "date-fns";
@@ -138,6 +138,8 @@ function ReserveCalendarContent() {
   // 担当固定コース（さみ整体など）のスタッフ出勤日。設定時は出勤日以外を選べなくする。
   const [staffSchedule, setStaffSchedule] = useState<StaffSchedule | null>(null);
   const [staffScheduleName, setStaffScheduleName] = useState<string>("");
+  // 日付を押したら時間帯パネルへ自動スクロールするための ref
+  const timePanelRef = useRef<HTMLDivElement | null>(null);
   const [currentMonth, setCurrentMonth] = useState<Date | null>(null);
   const [monthlyData, setMonthlyData] = useState<Record<string, number>>({});
   const [clinicHolidays, setClinicHolidays] = useState<ClinicHoliday[]>([]);
@@ -315,6 +317,16 @@ function ReserveCalendarContent() {
       supabase.removeChannel(channel);
     };
   }, [currentMonth, selectedDate, fetchMonthData]);
+
+  // 日付を選んだら、下の時間帯パネルへ自動スクロール（スマホで探さなくて済むように）。
+  // 時間枠の読み込み完了後（loadingDay=false）に実行＝レイアウト確定後なので確実に上端まで寄る。
+  useEffect(() => {
+    if (!selectedDate || loadingDay) return;
+    const id = setTimeout(() => {
+      timePanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 80);
+    return () => clearTimeout(id);
+  }, [selectedDate, loadingDay]);
 
   const handleDayClick = async (date: Date, level: AvailabilityLevel) => {
     if (level === "closed" || level === "past") return;
@@ -629,7 +641,7 @@ function ReserveCalendarContent() {
 
         {/* ─── 選択日の時間帯パネル ─── */}
         {selectedDate && (
-          <div className="mt-4 bg-zinc-900 rounded-3xl border border-zinc-800 overflow-hidden">
+          <div ref={timePanelRef} className="mt-4 scroll-mt-20 bg-zinc-900 rounded-3xl border border-zinc-800 overflow-hidden">
 
             {/* パネルヘッダー */}
             <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-800">
