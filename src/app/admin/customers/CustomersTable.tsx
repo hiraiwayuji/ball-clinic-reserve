@@ -507,11 +507,11 @@ function EditableRow({
 
         <TableCell>
           <button type="button" onClick={() => setQOpen(true)}
-            className="flex items-center gap-1 text-[11px] text-slate-500 dark:text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 px-2 py-1 rounded-lg transition-colors">
-            <ClipboardList className="w-3 h-3" />
-            {customer.city_name ? customer.city_name + " / " : ""}
-            {customer.gender ? (GENDER_LABEL[customer.gender] ?? customer.gender) + " / " : ""}
-            {customer.referral_source ?? "分析データ"}
+            title="住所・生年月日・市町村などを編集"
+            className="flex items-center gap-1 text-[11px] text-blue-600 dark:text-blue-400 hover:text-blue-700 hover:bg-blue-50 dark:hover:bg-blue-900/20 px-2 py-1 rounded-lg border border-blue-200 dark:border-blue-800/50 transition-colors">
+            <Pencil className="w-3 h-3" />
+            住所・生年月日など編集
+            {customer.city_name ? <span className="text-slate-400 dark:text-slate-500">（{customer.city_name}）</span> : null}
           </button>
           <QuestionnaireDialog
             open={qOpen} onOpenChange={setQOpen}

@@ -68,6 +68,8 @@ function ReserveContent() {
   const [staffList, setStaffList] = useState<ReservationStaff[]>([]);
   const [rooms, setRooms] = useState<ReservationRoom[]>([]);
   const [selectedCourseId, setSelectedCourseId] = useState<string>("");
+  // メニューからコースを選んで来た場合(courseId付き)は、フォームで再選択させず「確認」だけ出す。
+  const [courseLocked, setCourseLocked] = useState<boolean>(!!initialCourseId);
   const [selectedStaffId, setSelectedStaffId] = useState<string>("");
   const [selectedRoomId, setSelectedRoomId] = useState<string>("");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -615,6 +617,30 @@ function ReserveContent() {
                     <h2 className="text-xl font-bold text-white tracking-tight">
                       {reserveFlow === "menu_first" ? "① 施術コース" : "施術コース"}
                     </h2>
+                    {(() => {
+                      const sel = courses.find(c => c.id === selectedCourseId);
+                      // メニューから選んで来た（courseLocked）＆選択済み → 確認だけ表示
+                      if (courseLocked && sel) {
+                        return (
+                          <div className="flex items-center justify-between gap-3 p-4 rounded-2xl border border-blue-500 bg-blue-600/20">
+                            <div className="min-w-0">
+                              <p className="text-[11px] text-blue-200/70 font-bold">選択中のコース</p>
+                              <p className="font-bold text-white text-sm mt-0.5">{sel.name}</p>
+                              <p className="text-xs text-blue-100/80 mt-0.5">
+                                {sel.duration_minutes}分{sel.price != null ? ` / ¥${sel.price.toLocaleString()}` : ""}
+                              </p>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => setCourseLocked(false)}
+                              className="shrink-0 text-xs font-bold text-blue-100 bg-white/10 hover:bg-white/20 border border-white/20 rounded-lg px-3 py-2"
+                            >
+                              変更する
+                            </button>
+                          </div>
+                        );
+                      }
+                      return (
                     <div className="grid gap-3">
                       {courses.map(course => {
                         const isSelected = selectedCourseId === course.id;
@@ -653,6 +679,8 @@ function ReserveContent() {
                         );
                       })}
                     </div>
+                      );
+                    })()}
                   </section>
                 )}
 
