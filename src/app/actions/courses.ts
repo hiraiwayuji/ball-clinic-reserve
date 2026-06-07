@@ -23,6 +23,8 @@ export type ReservationCourse = {
   badge_label: string | null;
   /** 集計用カテゴリ: jusei (柔整) / shinkyu (鍼灸) / seitai (整体) / null (未分類) */
   category?: "jusei" | "shinkyu" | "seitai" | null;
+  /** このスタッフが出勤している日だけ予約可（NULL=誰でも可）。予約時はこのスタッフを自動で担当に。 */
+  required_staff_id?: string | null;
   // ── 部門・席予約（カフェ等）。部門なし院では全て NULL/既定値で従来通り動く ──
   /** どの部門のメニューか（'サロン' | 'カフェ' 等）。NULL=部門なし院 */
   department?: string | null;
@@ -56,6 +58,10 @@ export type ReservationStaff = {
   target_shinkyu?: number | null;
   /** 月間目標: 整体カテゴリ */
   target_seitai?: number | null;
+  /** true=「基本休み・出る日だけ予約可」モード（さみ等）。false=従来どおり常に予約可 */
+  schedule_based_booking?: boolean;
+  /** 毎週の出勤曜日（csv: 0=日,1=月,…,6=土）。schedule_based_booking 時に使用 */
+  booking_weekdays?: string | null;
 };
 
 // ── コース取得（管理側：全件） ──
@@ -219,6 +225,10 @@ export async function saveCourse(course: Partial<ReservationCourse> & { name: st
   if (normalizedCategory !== undefined) {
     payload.category = normalizedCategory;
   }
+  // 担当固定（さみ整体など）。undefined は触らない、null/空は解除。
+  if (course.required_staff_id !== undefined) {
+    payload.required_staff_id = course.required_staff_id || null;
+  }
 
   if (course.id) {
     const { error } = await supabase
@@ -317,6 +327,9 @@ export async function saveStaff(staff: Partial<ReservationStaff> & { name: strin
   if (normalizedJusei   !== undefined) payload.target_jusei   = normalizedJusei;
   if (normalizedShinkyu !== undefined) payload.target_shinkyu = normalizedShinkyu;
   if (normalizedSeitai  !== undefined) payload.target_seitai  = normalizedSeitai;
+  // 出勤日ベース予約（さみ等）
+  if (staff.schedule_based_booking !== undefined) payload.schedule_based_booking = !!staff.schedule_based_booking;
+  if (staff.booking_weekdays !== undefined) payload.booking_weekdays = staff.booking_weekdays || null;
 
   if (staff.id) {
     const { error } = await supabase
@@ -352,6 +365,100 @@ export async function deleteStaff(id: string) {
   if (error) return { success: false, error: error.message };
   revalidatePath("/admin/settings");
   return { success: true };
+}
+
+// ─────────────────────────────────────────────────────────
+// スタッフ出勤日（schedule_based_booking 用：さみ整体など）
+// ─────────────────────────────────────────────────────────
+export type StaffBookingDate = { date: string; available: boolean };
+
+// 管理側：個別の出勤日／例外休を取得
+export async function getStaffBookingDates(staffId: string): Promise<StaffBookingDate[]> {
+  const { clinicId } = await checkAdminAuth();
+  const { createClient } = await import("@/lib/supabase/server");
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("staff_booking_dates")
+    .select("date, available")
+    .eq("clinic_id", clinicId)
+    .eq("staff_id", staffId)
+    .order("date");
+  return (data ?? []).map((d: { date: string; available: boolean }) => ({
+    date: String(d.date).slice(0, 10),
+    available: !!d.available,
+  }));
+}
+
+// 管理側：個別日を登録/更新（available=true 出勤追加 / false 例外休）
+export async function setStaffBookingDate(staffId: string, date: string, available: boolean) {
+  const { clinicId } = await checkAdminAuth();
+  const { createClient } = await import("@/lib/supabase/server");
+  const supabase = await createClient();
+  // tenant-isolation-ignore: clinic_id を明示設定済み
+  const { error } = await supabase
+    .from("staff_booking_dates")
+    .upsert({ clinic_id: clinicId, staff_id: staffId, date, available }, { onConflict: "staff_id,date" });
+  if (error) return { success: false, error: error.message };
+  revalidatePath("/admin/settings");
+  return { success: true };
+}
+
+// 管理側：個別日の設定を削除（曜日ルールだけに戻す）
+export async function removeStaffBookingDate(staffId: string, date: string) {
+  const { clinicId } = await checkAdminAuth();
+  const { createClient } = await import("@/lib/supabase/server");
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("staff_booking_dates")
+    .delete()
+    .eq("clinic_id", clinicId)
+    .eq("staff_id", staffId)
+    .eq("date", date);
+  if (error) return { success: false, error: error.message };
+  revalidatePath("/admin/settings");
+  return { success: true };
+}
+
+// 患者予約フロー用：コースに担当固定があり、そのスタッフが出勤日ベースなら
+// 出勤曜日・個別日を返す。無ければ null（＝日付制限なし）。
+export async function getCourseRequiredStaffSchedule(courseId: string): Promise<
+  { staffId: string; staffName: string; weekdays: number[]; dates: StaffBookingDate[] } | null
+> {
+  if (!courseId) return null;
+  const { createClient: createAdminClient } = await import("@supabase/supabase-js");
+  const DEFAULT_CLINIC_ID = PUBLIC_CLINIC_ID;
+  const admin = createAdminClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
+  const { data: course } = await admin
+    .from("reservation_courses")
+    .select("required_staff_id")
+    .eq("id", courseId)
+    .eq("clinic_id", DEFAULT_CLINIC_ID)
+    .maybeSingle();
+  const staffId = (course?.required_staff_id as string | null | undefined) ?? null;
+  if (!staffId) return null;
+  const { data: staff } = await admin
+    .from("reservation_staff")
+    .select("id, name, schedule_based_booking, booking_weekdays")
+    .eq("id", staffId)
+    .eq("clinic_id", DEFAULT_CLINIC_ID)
+    .maybeSingle();
+  if (!staff || !staff.schedule_based_booking) return null;
+  const weekdays = String(staff.booking_weekdays ?? "")
+    .split(",").map((s) => s.trim()).filter(Boolean).map(Number).filter((n) => n >= 0 && n <= 6);
+  const { data: dates } = await admin
+    .from("staff_booking_dates")
+    .select("date, available")
+    .eq("clinic_id", DEFAULT_CLINIC_ID)
+    .eq("staff_id", staffId);
+  return {
+    staffId: staff.id as string,
+    staffName: staff.name as string,
+    weekdays,
+    dates: (dates ?? []).map((d: { date: string; available: boolean }) => ({
+      date: String(d.date).slice(0, 10),
+      available: !!d.available,
+    })),
+  };
 }
 
 // ─────────────────────────────────────────────────────────

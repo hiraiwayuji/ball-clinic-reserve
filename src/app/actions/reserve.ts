@@ -324,8 +324,8 @@ export async function createReservation(formData: FormData) {
     const courseId = (formData.get("courseId") as string) || null;
     const courseName = (formData.get("courseName") as string) || null;
     const courseDurationStr = formData.get("courseDurationMinutes") as string | null;
-    const staffId = (formData.get("staffId") as string) || null;
-    const staffName = (formData.get("staffName") as string) || null;
+    let staffId = (formData.get("staffId") as string) || null;
+    let staffName = (formData.get("staffName") as string) || null;
     const roomId = (formData.get("roomId") as string) || null;
     const roomName = (formData.get("roomName") as string) || null;
     const requestedCustomerId = (formData.get("customerId") as string) || null;
@@ -356,6 +356,45 @@ export async function createReservation(formData: FormData) {
       let customerId: string | null = null;
 
       const adminDb = getAdminSupabase() || supabase;
+
+      // ── 担当固定コース（さみ整体など）の出勤日チェック＋担当の自動確定 ──
+      // required_staff_id 付きコースは、そのスタッフが出勤している日だけ予約可。
+      if (courseId) {
+        const { data: courseRow } = await adminDb
+          .from("reservation_courses")
+          .select("required_staff_id")
+          .eq("id", courseId)
+          .eq("clinic_id", PUBLIC_CLINIC_ID)
+          .maybeSingle();
+        const reqStaffId = (courseRow?.required_staff_id as string | null) ?? null;
+        if (reqStaffId) {
+          const { data: reqStaff } = await adminDb
+            .from("reservation_staff")
+            .select("id, name, schedule_based_booking, booking_weekdays")
+            .eq("id", reqStaffId)
+            .eq("clinic_id", PUBLIC_CLINIC_ID)
+            .maybeSingle();
+          if (reqStaff?.schedule_based_booking) {
+            const weekdays = String(reqStaff.booking_weekdays ?? "")
+              .split(",").map((s) => s.trim()).filter(Boolean).map(Number);
+            const { data: ovr } = await adminDb
+              .from("staff_booking_dates")
+              .select("available")
+              .eq("clinic_id", PUBLIC_CLINIC_ID)
+              .eq("staff_id", reqStaffId)
+              .eq("date", rawDate)
+              .maybeSingle();
+            const wd = new Date(`${rawDate}T00:00:00`).getDay();
+            const available = ovr ? !!ovr.available : weekdays.includes(wd);
+            if (!available) {
+              return { success: false, error: `${reqStaff.name ?? "担当"}さんはその日はご予約を受け付けていません。出勤日からお選びください。` };
+            }
+            // 担当をそのスタッフに確定（クライアント未設定でも確実に紐づける）
+            staffId = reqStaff.id as string;
+            staffName = (reqStaff.name as string) ?? staffName;
+          }
+        }
+      }
 
       // ── LINE 経由の家族選択 ──
       // /reserve に lt トークン経由で来たユーザーは ball_line_uid cookie を持つ。

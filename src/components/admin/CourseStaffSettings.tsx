@@ -9,9 +9,130 @@ import {
   saveCourse, deleteCourse, reorderCourses,
   saveStaff, deleteStaff,
   saveRoom, deleteRoom,
-  type ReservationCourse, type ReservationStaff, type ReservationRoom,
+  getStaffBookingDates, setStaffBookingDate, removeStaffBookingDate,
+  type ReservationCourse, type ReservationStaff, type ReservationRoom, type StaffBookingDate,
 } from "@/app/actions/courses";
-import { Plus, Trash2, GripVertical, Clock, Pencil, Check, X, User, DoorOpen, Sparkles, Tag, Star, ChevronUp, ChevronDown } from "lucide-react";
+import { Plus, Trash2, GripVertical, Clock, Pencil, Check, X, User, DoorOpen, Sparkles, Tag, Star, ChevronUp, ChevronDown, CalendarDays } from "lucide-react";
+
+const WEEKDAY_LABELS = ["日", "月", "火", "水", "木", "金", "土"];
+
+// 出勤日ベース予約スタッフ（さみ整体など）の出勤日エディタ：曜日＋個別日（追加/休み/削除）
+function StaffScheduleEditor({ staff, onChanged }: { staff: ReservationStaff; onChanged: () => void }) {
+  const [scheduleBased, setScheduleBased] = useState(!!staff.schedule_based_booking);
+  const [weekdays, setWeekdays] = useState<number[]>(
+    String(staff.booking_weekdays ?? "").split(",").map(s => s.trim()).filter(Boolean).map(Number),
+  );
+  const [dates, setDates] = useState<StaffBookingDate[]>([]);
+  const [newDate, setNewDate] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    getStaffBookingDates(staff.id).then(setDates).catch(() => {});
+  }, [staff.id]);
+
+  const persistBase = async (next: { scheduleBased?: boolean; weekdays?: number[] }) => {
+    const sb = next.scheduleBased ?? scheduleBased;
+    const wd = next.weekdays ?? weekdays;
+    setBusy(true);
+    const res = await saveStaff({
+      id: staff.id, name: staff.name,
+      schedule_based_booking: sb,
+      booking_weekdays: wd.slice().sort((a, b) => a - b).join(","),
+    });
+    setBusy(false);
+    if (res.success) onChanged(); else toast.error(res.error ?? "保存に失敗しました");
+  };
+
+  const toggleWeekday = (d: number) => {
+    const next = weekdays.includes(d) ? weekdays.filter(x => x !== d) : [...weekdays, d];
+    setWeekdays(next);
+    persistBase({ weekdays: next });
+  };
+
+  const addDate = async (available: boolean) => {
+    if (!newDate) return;
+    setBusy(true);
+    const res = await setStaffBookingDate(staff.id, newDate, available);
+    setBusy(false);
+    if (res.success) {
+      setDates(await getStaffBookingDates(staff.id));
+      setNewDate("");
+      toast.success(available ? "出勤日を追加しました" : "休みに設定しました");
+    } else toast.error(res.error ?? "保存に失敗しました");
+  };
+
+  const removeDate = async (date: string) => {
+    setBusy(true);
+    const res = await removeStaffBookingDate(staff.id, date);
+    setBusy(false);
+    if (res.success) setDates(await getStaffBookingDates(staff.id));
+    else toast.error(res.error ?? "削除に失敗しました");
+  };
+
+  return (
+    <div className="mt-2 border rounded-xl p-3 bg-indigo-50/60 border-indigo-200 dark:bg-slate-900 dark:border-slate-700 space-y-3">
+      <label className="flex items-center gap-2 text-sm font-semibold text-slate-700 dark:text-slate-200">
+        <input
+          type="checkbox"
+          checked={scheduleBased}
+          disabled={busy}
+          onChange={(e) => { setScheduleBased(e.target.checked); persistBase({ scheduleBased: e.target.checked }); }}
+          className="w-4 h-4 accent-indigo-600"
+        />
+        出勤日だけ予約を受け付ける（基本休み・出る日だけ）
+      </label>
+
+      {scheduleBased && (
+        <>
+          <div>
+            <Label className="text-xs text-slate-600 dark:text-slate-300">毎週の出勤曜日</Label>
+            <div className="flex flex-wrap gap-1.5 mt-1">
+              {WEEKDAY_LABELS.map((lbl, d) => (
+                <button
+                  key={d}
+                  type="button"
+                  disabled={busy}
+                  onClick={() => toggleWeekday(d)}
+                  className={`w-9 h-9 rounded-lg text-sm font-bold border transition-colors ${
+                    weekdays.includes(d)
+                      ? "bg-indigo-600 border-indigo-600 text-white"
+                      : "bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-600 text-slate-500"
+                  }`}
+                >
+                  {lbl}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <Label className="text-xs text-slate-600 dark:text-slate-300">個別の日（不定期の出勤・お休み）</Label>
+            <div className="flex flex-wrap items-center gap-2 mt-1">
+              <Input type="date" value={newDate} onChange={(e) => setNewDate(e.target.value)} className="h-9 w-40" />
+              <Button size="sm" disabled={busy || !newDate} onClick={() => addDate(true)} className="h-9 bg-emerald-600 hover:bg-emerald-700 text-white text-xs">＋出勤日にする</Button>
+              <Button size="sm" variant="outline" disabled={busy || !newDate} onClick={() => addDate(false)} className="h-9 text-xs">この日は休み</Button>
+            </div>
+            {dates.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 mt-2">
+                {dates.map((d) => (
+                  <span key={d.date} className={`inline-flex items-center gap-1 text-xs font-medium px-2 py-1 rounded-lg border ${
+                    d.available ? "bg-emerald-50 border-emerald-200 text-emerald-700" : "bg-rose-50 border-rose-200 text-rose-700"
+                  }`}>
+                    {d.date}（{d.available ? "出勤" : "休み"}）
+                    <button type="button" onClick={() => removeDate(d.date)} className="hover:opacity-60" title="削除"><X className="w-3 h-3" /></button>
+                  </span>
+                ))}
+              </div>
+            )}
+            <p className="text-[10px] text-slate-500 mt-1">
+              ※ 曜日に無い日に出るとき「＋出勤日にする」。曜日の日に休むとき「この日は休み」。予約サイトに反映されます。
+            </p>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
 
 interface Props {
   initialCourses: ReservationCourse[];
@@ -472,6 +593,7 @@ function StaffRow({
   const [targetShinkyu, setTargetShinkyu] = useState(staff.target_shinkyu ? String(staff.target_shinkyu) : "");
   const [targetSeitai, setTargetSeitai] = useState(staff.target_seitai ? String(staff.target_seitai) : "");
   const [saving, setSaving] = useState(false);
+  const [showSchedule, setShowSchedule] = useState(false);
 
   const parseTarget = (v: string): number | null | "error" => {
     const t = v.trim();
@@ -605,6 +727,7 @@ function StaffRow({
   }
 
   return (
+    <div>
     <div className={`flex items-center gap-3 border rounded-xl px-3 py-2.5 transition-colors ${staff.is_active ? "bg-white dark:bg-slate-800" : "bg-slate-50 dark:bg-slate-800/50 opacity-60"}`}>
       <GripVertical className="w-4 h-4 text-slate-300 shrink-0" />
       <User className="w-4 h-4 text-slate-400 shrink-0" />
@@ -641,6 +764,17 @@ function StaffRow({
         >
           {staff.is_active ? "有効" : "無効"}
         </button>
+        <button
+          onClick={() => setShowSchedule((v) => !v)}
+          title="出勤日を設定（出勤日だけ予約可にする）"
+          className={`text-xs px-2 py-1 rounded-md font-semibold inline-flex items-center gap-1 transition-colors ${
+            staff.schedule_based_booking || showSchedule
+              ? "bg-indigo-100 text-indigo-700 hover:bg-indigo-200"
+              : "bg-slate-100 text-slate-500 hover:bg-slate-200"
+          }`}
+        >
+          <CalendarDays className="w-3.5 h-3.5" /> 出勤日
+        </button>
         <Button size="icon" variant="ghost" className="h-7 w-7 text-slate-400 hover:text-blue-600" onClick={() => setEditing(true)}>
           <Pencil className="w-3.5 h-3.5" />
         </Button>
@@ -648,6 +782,8 @@ function StaffRow({
           <Trash2 className="w-3.5 h-3.5" />
         </Button>
       </div>
+      </div>
+      {showSchedule && <StaffScheduleEditor staff={staff} onChanged={onSaved} />}
     </div>
   );
 }

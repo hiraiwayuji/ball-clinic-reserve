@@ -15,7 +15,8 @@ import { CalendarIcon, ArrowLeft, CheckCircle2, Phone, MapPin, MessageCircle, X 
 import { createClient } from "@/lib/supabase/client";
 import { createReservation, getDailyAvailability } from "@/app/actions/reserve";
 import { getClinicHolidays, type ClinicHoliday } from "@/app/actions/holidays";
-import { getActiveCourses, getActiveStaff, getActiveRooms, type ReservationCourse, type ReservationStaff, type ReservationRoom } from "@/app/actions/courses";
+import { getActiveCourses, getActiveStaff, getActiveRooms, getCourseRequiredStaffSchedule, type ReservationCourse, type ReservationStaff, type ReservationRoom } from "@/app/actions/courses";
+import { isStaffAvailableOn, type StaffSchedule } from "@/lib/staff-availability";
 import { useSearchParams } from "next/navigation";
 import { getTimeSlots, isDateWithinAllowedRange } from "@/lib/time-slots";
 import { useClinicSlotDuration } from "@/lib/use-clinic-slot-duration";
@@ -89,6 +90,8 @@ function ReserveContent() {
   const [selectedFamilyMember, setSelectedFamilyMember] = useState<LinkedCustomer | null>(null);
   // 予約フロー：datetime_first (既存) / menu_first (からだ等の治療院系UX)
   const [reserveFlow, setReserveFlow] = useState<"datetime_first" | "menu_first">("datetime_first");
+  // 担当固定コース（さみ整体など）。選ぶとそのスタッフの出勤日だけ予約可・担当を自動設定。
+  const [requiredStaff, setRequiredStaff] = useState<{ staffId: string; staffName: string; schedule: StaffSchedule } | null>(null);
 
   // 営業時間・休診日（DB＝院ごと。ハードコード禁止）
   const [hoursLines, setHoursLines] = useState<string[]>([]);
@@ -172,6 +175,33 @@ function ReserveContent() {
       .subscribe();
     return () => { supabase.removeChannel(channel); };
   }, [date]);
+
+  // 担当固定コース（さみ整体など）を選んだら、そのスタッフの出勤日スケジュールを取得し
+  // 担当を自動でそのスタッフに設定する。固定でないコースなら解除。
+  useEffect(() => {
+    if (!selectedCourseId) { setRequiredStaff(null); return; }
+    let cancelled = false;
+    getCourseRequiredStaffSchedule(selectedCourseId)
+      .then((res) => {
+        if (cancelled) return;
+        if (res) {
+          setRequiredStaff({ staffId: res.staffId, staffName: res.staffName, schedule: { weekdays: res.weekdays, dates: res.dates } });
+          setSelectedStaffId(res.staffId);
+        } else {
+          setRequiredStaff(null);
+        }
+      })
+      .catch(() => { if (!cancelled) setRequiredStaff(null); });
+    return () => { cancelled = true; };
+  }, [selectedCourseId]);
+
+  // 担当固定コースで、選択済みの日付がそのスタッフの出勤日でなくなったら日時をクリア（選び直し）
+  useEffect(() => {
+    if (requiredStaff && date && !isStaffAvailableOn(date, requiredStaff.schedule)) {
+      setDate(undefined);
+      setTime("");
+    }
+  }, [requiredStaff, date]);
 
   // アンケートが必要になったら、その案内まで自動でスクロールして気づいてもらう
   useEffect(() => {
@@ -530,6 +560,11 @@ function ReserveContent() {
                   <h2 className="text-xl font-bold text-white tracking-tight">
                     {reserveFlow === "menu_first" ? "③ ご希望の日時" : "ご希望の日時"}
                   </h2>
+                  {requiredStaff && (
+                    <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-2xl p-3 text-sm text-emerald-100">
+                      🗓 <span className="font-bold">{requiredStaff.staffName}</span>さんの出勤日のみご予約いただけます（出勤日だけ選べます）。
+                    </div>
+                  )}
                   <div className="grid md:grid-cols-2 gap-6">
                     <div className="space-y-2">
                       <Label className="text-blue-100/85 font-bold text-xs uppercase">予約日</Label>
@@ -551,7 +586,8 @@ function ReserveContent() {
                               const day = date.getDay();
                               const today = new Date();
                               today.setHours(0, 0, 0, 0);
-                              return isHoliday || date < today || day === 0 || day === 3 || !isDateWithinAllowedRange(date);
+                              const samiBlocked = requiredStaff ? !isStaffAvailableOn(date, requiredStaff.schedule) : false;
+                              return isHoliday || date < today || day === 0 || day === 3 || !isDateWithinAllowedRange(date) || samiBlocked;
                             }}
                           />
                         </PopoverContent>
