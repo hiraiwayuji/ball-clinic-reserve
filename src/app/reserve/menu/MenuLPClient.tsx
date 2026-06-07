@@ -43,7 +43,7 @@ function formatPercent(price: number, regular: number): string {
 }
 
 export default function MenuLPClient({ initialCourses, settings }: Props) {
-  const [tab, setTab] = useState<Tab>("coupon");
+  const [tab, setTab] = useState<Tab>("all");
   const [audience, setAudience] = useState<AudienceFilter>("all");
   const [selectedCourse, setSelectedCourse] = useState<ReservationCourse | null>(null);
 

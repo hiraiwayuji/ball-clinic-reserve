@@ -8,8 +8,9 @@ import { ja } from "date-fns/locale";
 import { ChevronLeft, ChevronRight, ArrowLeft, Clock, CalendarDays, X, CheckCircle2, AlertCircle, Sparkles, Phone, MessageCircle } from "lucide-react";
 import { createWaitlistReservation } from "@/app/actions/reserve";
 import { getClinicHolidays, type ClinicHoliday } from "@/app/actions/holidays";
-import { getActiveCourses, type ReservationCourse } from "@/app/actions/courses";
+import { getActiveCourses, getCourseRequiredStaffSchedule, type ReservationCourse } from "@/app/actions/courses";
 import { getBlockedTimesForCurrentClinic } from "@/app/actions/staff-schedule";
+import { isStaffAvailableOn, type StaffSchedule } from "@/lib/staff-availability";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -25,13 +26,16 @@ import { PUBLIC_CLINIC_ID } from "@/lib/default-clinic-id";
 
 type AvailabilityLevel = "available" | "few" | "full" | "closed" | "past";
 
-function getAvailabilityLevel(dateStr: string, bookedCount: number, date: Date, clinicHolidays: ClinicHoliday[], slotMinutes: SlotMinutes, schedule: Schedule): AvailabilityLevel {
+function getAvailabilityLevel(dateStr: string, bookedCount: number, date: Date, clinicHolidays: ClinicHoliday[], slotMinutes: SlotMinutes, schedule: Schedule, staffSchedule?: StaffSchedule | null): AvailabilityLevel {
   const isHoliday = clinicHolidays.some(h => h.date === dateStr);
   if (isHoliday) return "closed";
 
   const day = date.getDay();
   if (schedule.closedDays.includes(day)) return "closed";
   if (isPast(startOfDay(date)) && !isToday(date)) return "past";
+
+  // 担当固定コース（さみ整体など）：そのスタッフの出勤日以外は休診扱いにして選べなくする
+  if (staffSchedule && !isStaffAvailableOn(date, staffSchedule)) return "closed";
 
   // 1ヶ月制限のチェック
   if (!isDateWithinAllowedRange(date)) return "closed";
@@ -131,6 +135,9 @@ function ReserveCalendarContent() {
   const courseIdParam = searchParams.get("courseId");
 
   const [selectedCourse, setSelectedCourse] = useState<ReservationCourse | null>(null);
+  // 担当固定コース（さみ整体など）のスタッフ出勤日。設定時は出勤日以外を選べなくする。
+  const [staffSchedule, setStaffSchedule] = useState<StaffSchedule | null>(null);
+  const [staffScheduleName, setStaffScheduleName] = useState<string>("");
   const [currentMonth, setCurrentMonth] = useState<Date | null>(null);
   const [monthlyData, setMonthlyData] = useState<Record<string, number>>({});
   const [clinicHolidays, setClinicHolidays] = useState<ClinicHoliday[]>([]);
@@ -221,6 +228,8 @@ function ReserveCalendarContent() {
   useEffect(() => {
     if (!courseIdParam) {
       setSelectedCourse(null);
+      setStaffSchedule(null);
+      setStaffScheduleName("");
       return;
     }
     let mounted = true;
@@ -229,6 +238,12 @@ function ReserveCalendarContent() {
       const found = courses.find(c => c.id === courseIdParam) ?? null;
       setSelectedCourse(found);
     });
+    // 担当固定コースなら、そのスタッフの出勤日スケジュールを取得（さみ整体など）
+    getCourseRequiredStaffSchedule(courseIdParam).then(res => {
+      if (!mounted) return;
+      if (res) { setStaffSchedule({ weekdays: res.weekdays, dates: res.dates }); setStaffScheduleName(res.staffName); }
+      else { setStaffSchedule(null); setStaffScheduleName(""); }
+    }).catch(() => { if (mounted) { setStaffSchedule(null); setStaffScheduleName(""); } });
     return () => { mounted = false; };
   }, [courseIdParam]);
 
@@ -481,6 +496,13 @@ function ReserveCalendarContent() {
           </div>
         )}
 
+        {/* ─── 担当固定コース（さみ整体など）の案内 ─── */}
+        {staffScheduleName && (
+          <div className="mt-4 bg-emerald-500/10 border border-emerald-500/30 rounded-2xl p-3 text-sm text-emerald-100">
+            🗓 <span className="font-bold">{staffScheduleName}</span>さんの出勤日のみ「◯空き」で表示しています（出勤日だけ選べます）。
+          </div>
+        )}
+
         {/* ─── 月ナビゲーション ─── */}
         <div className="flex items-center justify-between py-5">
           <button
@@ -538,7 +560,7 @@ function ReserveCalendarContent() {
               {calDays.map((day, idx) => {
                 const dateStr = format(day, "yyyy-MM-dd");
                 const bookedCount = monthlyData[dateStr] || 0;
-                const level = getAvailabilityLevel(dateStr, bookedCount, day, clinicHolidays, slotMinutes, schedule);
+                const level = getAvailabilityLevel(dateStr, bookedCount, day, clinicHolidays, slotMinutes, schedule, staffSchedule);
                 const isSelected = selectedDate && isSameDay(day, selectedDate);
                 const isCurrentMonth = isSameMonth(day, currentMonth);
                 const isClickable = level !== "closed" && level !== "past" && isCurrentMonth;

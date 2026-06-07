@@ -64,11 +64,11 @@ export default function LPHero({ settings, fallbackName, minimal = false }: Prop
         {/* メインCTA：初めての方も迷わない「1本だけ」の予約ボタン（最小表示では省略） */}
         {!minimal && (
           <Link
-            href="/reserve/calendar"
+            href="/reserve/menu"
             className={`mt-6 flex items-center justify-center gap-2 w-full h-16 rounded-2xl ${theme.ctaBg} ${theme.ctaHoverBg} active:scale-[0.98] text-white text-lg font-black shadow-xl ${theme.ctaShadow} transition-all`}
           >
             <CalendarDays className="w-5 h-5" />
-            はじめての予約はこちら
+            メニューを選んで予約する
           </Link>
         )}
 

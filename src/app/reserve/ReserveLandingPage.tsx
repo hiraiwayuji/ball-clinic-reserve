@@ -227,7 +227,7 @@ export default function ReserveLandingPage() {
                 誕生月クーポンなど、お得なご案内にも使わせていただきます。
               </p>
               <Link
-                href="/reserve/calendar"
+                href="/reserve/menu"
                 onClick={dismissFirstTimePopup}
                 className="flex items-center justify-center gap-2 w-full bg-blue-600 hover:bg-blue-700 text-white font-black py-3.5 px-4 rounded-2xl transition shadow-lg shadow-blue-500/30"
               >
