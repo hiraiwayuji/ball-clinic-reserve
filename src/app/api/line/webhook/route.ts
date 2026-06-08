@@ -159,9 +159,16 @@ export async function POST(req: NextRequest) {
       // パターン:
       //   "1234"           → 単純4桁（従来）
       //   "家族追加 1234"   → 家族として明示的に追加（フラグ ON 時）
-      const familyAddMatch = userMessage.match(/^家族追加[\s　]*(\d{4,6})$/);
+      // 家族追加は誤って他人を紐付けるリスクが高いので下6桁必須にする（衝突を大幅低減）
+      const familyAddMatch = userMessage.match(/^家族追加[\s　]*(\d{6,})$/);
+      const familyAddTooShort = /^家族追加[\s　]*\d{1,5}$/.test(userMessage);
       const plainDigitsMatch = /^\d{4,6}$/.test(userMessage) ? userMessage : null;
       const phoneSuffix = familyAddMatch ? familyAddMatch[1] : plainDigitsMatch;
+
+      if (familyAddTooShort) {
+        await replyMessage(replyToken, [{ type: "text", text: "ご家族の追加は、間違い防止のため電話番号の【下6桁】でお願いします。\n例：「家族追加 123456」\n\n※ ご不明な場合は受付スタッフにお申し付けください。" }], lineUserId);
+        continue;
+      }
 
       if (phoneSuffix) {
         const sb = getSupabase();
@@ -182,8 +189,31 @@ export async function POST(req: NextRequest) {
             .or(`phone.like.%${phoneSuffix},phone.like.%-${phoneSuffix}`);
 
           const matches = allMatches ?? [];
-          // 既にこの LINE に紐付いている customer は候補から除外
-          const candidates = matches.filter((c) => !alreadyLinkedIds.has(c.id));
+
+          // 別のLINEに既に紐付いている顧客を特定（なりすまし・誤紐付け防止）。
+          // customers.line_user_id（旧）と customer_line_links（複数）の両方で確認する。
+          const matchIds = matches.map((c) => c.id);
+          const linkedToOtherLine = new Set<string>();
+          if (matchIds.length > 0) {
+            const { data: otherLinks } = await sb
+              .from("customer_line_links")
+              .select("customer_id, line_user_id")
+              .eq("clinic_id", DEFAULT_CLINIC_ID)
+              .in("customer_id", matchIds);
+            for (const l of otherLinks ?? []) {
+              if ((l as any).line_user_id && (l as any).line_user_id !== lineUserId) {
+                linkedToOtherLine.add((l as any).customer_id);
+              }
+            }
+          }
+
+          // 候補 = 末尾一致 かつ 「このLINE未紐付け」かつ「他人のLINEに紐付いていない」
+          const candidates = matches.filter(
+            (c) =>
+              !alreadyLinkedIds.has(c.id) &&
+              !linkedToOtherLine.has(c.id) &&
+              !((c as any).line_user_id && (c as any).line_user_id !== lineUserId),
+          );
 
           if (candidates.length === 1) {
             const target = candidates[0];
@@ -201,13 +231,16 @@ export async function POST(req: NextRequest) {
             } else if (isFamilyAddition) {
               await replyMessage(replyToken, [{ type: "text", text: `${target.name}さんを家族として追加しました！👨‍👩‍👧\n予約時に「誰の予約か」を選べるようになります。` }], lineUserId);
             } else {
-              await replyMessage(replyToken, [{ type: "text", text: `${target.name}さん、紐づけが完了しました！✅\n予約リマインダーや誕生月クーポンをLINEでお届けします 🎉\n\n※ ご家族の予約も同じLINEで管理できます。「家族追加 1234」（電話番号下4桁）で追加可能です。` }], lineUserId);
+              await replyMessage(replyToken, [{ type: "text", text: `${target.name}さん、紐づけが完了しました！✅\n予約リマインダーや誕生月クーポンをLINEでお届けします 🎉\n\n※ ご家族の予約も同じLINEで管理できます。「家族追加 123456」（電話番号の下6桁）で追加できます。` }], lineUserId);
             }
           } else if (candidates.length > 1) {
             await replyMessage(replyToken, [{ type: "text", text: "同じ末尾の番号が複数見つかりました。\n下4桁ではなく下6桁を送ってもう一度お試しください。\n解決しない場合は受付スタッフにお申し付けください。" }], lineUserId);
-          } else if (matches.length > 0 && alreadyLinkedIds.size > 0) {
+          } else if (matches.length > 0 && alreadyLinkedIds.size > 0 && linkedToOtherLine.size === 0) {
             // 候補は全て既に同じLINEに紐付き済み
             await replyMessage(replyToken, [{ type: "text", text: "ご指定の方は既に紐付け済みです 😊" }], lineUserId);
+          } else if (matches.length > 0) {
+            // 末尾は一致したが、別のLINEに紐付いている等で自動紐付けできない → スタッフ確認へ（情報は出さない）
+            await replyMessage(replyToken, [{ type: "text", text: "恐れ入りますが、この番号は自動で紐づけできませんでした。\nご本人確認のため、受付スタッフにお申し付けください 🙏" }], lineUserId);
           } else {
             console.log(`照合失敗: message=${userMessage}, matches=${JSON.stringify(allMatches)}`);
             await replyMessage(replyToken, [{ type: "text", text: "電話番号が見つかりませんでした。\n・下4桁が正しいかご確認ください\n・ハイフンなしの数字4桁のみ送ってください\n・ご不明な場合は受付スタッフまで 😊" }], lineUserId);
