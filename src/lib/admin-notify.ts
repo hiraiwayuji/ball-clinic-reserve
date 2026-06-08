@@ -159,6 +159,12 @@ export async function sendEmailToOwners(
 ): Promise<void> {
   const resendKey = process.env.RESEND_API_KEY;
   if (!resendKey) return;
+  // 独自ドメイン認証後は RESEND_FROM（例: "予約 <info@example.com>" or "info@example.com"）を設定すれば
+  // そのまま本番送信元に切り替わる。未設定なら Resend テスト送信元（アカウント所有者宛のみ届く）。
+  const fromEnv = process.env.RESEND_FROM?.trim();
+  const fromValue = fromEnv
+    ? (fromEnv.includes("<") ? fromEnv : `${fromLabel} <${fromEnv}>`)
+    : `${fromLabel} <onboarding@resend.dev>`;
   const targets = await getOwnerEmailTargets(clinicId);
   if (targets.length === 0) return;
   await Promise.all(
@@ -168,7 +174,7 @@ export async function sendEmailToOwners(
           method: "POST",
           headers: { "Content-Type": "application/json", Authorization: `Bearer ${resendKey}` },
           body: JSON.stringify({
-            from: `${fromLabel} <onboarding@resend.dev>`,
+            from: fromValue,
             to: [email],
             subject,
             text,
