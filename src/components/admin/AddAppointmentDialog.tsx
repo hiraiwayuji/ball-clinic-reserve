@@ -100,6 +100,8 @@ export function AddAppointmentDialog({
   // 追加メニュー・追加担当（同じ予約に複数項目を紐付け）
   const [additionalCourses, setAdditionalCourses] = useState<string[]>([]);
   const [additionalStaff, setAdditionalStaff] = useState<string[]>([]);
+  // ダブル施術：さみ整体↔ボール担当を同時に組む（相方を additional に自動セット）
+  const [doubleOn, setDoubleOn] = useState(false);
 
   // 患者サジェスト
   const [nameValue, setNameValue] = useState("");
@@ -155,6 +157,7 @@ export function AddAppointmentDialog({
       setRoomId("");
       setAdditionalCourses([]);
       setAdditionalStaff([]);
+      setDoubleOn(false);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, defaultDate, defaultTime, defaultStaffId, defaultCourseId, defaultName, defaultPhone, defaultMedicalRecordNumber, defaultVisitType]);
@@ -185,6 +188,37 @@ export function AddAppointmentDialog({
       const c = courses.find(c => c.id === id);
       if (c) setDuration(String(c.duration_minutes));
     }
+  };
+
+  // ── ダブル施術（さみ整体 ↔ ボール担当を同時に） ──
+  const samiStaff = staffList.find((s) => s.name === "さみ");
+  const ballStaff = staffList.find((s) => s.name === "ボール");
+  const samiCourse = courses.find((c) => c.name === "さみ整体");
+  const selectedCourseObj = courses.find((c) => c.id === courseId);
+  // 主役レーンの担当 = 選択コースの担当 or 選んだ担当スタッフ
+  const primaryStaffId = selectedCourseObj?.required_staff_id || staffId || "";
+  const isSamiPrimary = !!(samiStaff && primaryStaffId === samiStaff.id);
+  const isBallPrimary = !!(ballStaff && primaryStaffId === ballStaff.id);
+  const canDouble = !!(samiStaff && ballStaff && (isSamiPrimary || isBallPrimary));
+
+  const toggleDouble = () => {
+    if (doubleOn) {
+      // OFF：相方を外す
+      setDoubleOn(false);
+      setAdditionalStaff([]);
+      setAdditionalCourses([]);
+      return;
+    }
+    if (isSamiPrimary && ballStaff) {
+      // さみ整体 → ボール担当をプラス
+      setAdditionalStaff([ballStaff.id]);
+      setAdditionalCourses([]);
+    } else if (isBallPrimary) {
+      // ボール担当施術 → さみ整体をプラス（担当も さみ）
+      setAdditionalCourses(samiCourse ? [samiCourse.id] : []);
+      setAdditionalStaff(samiStaff ? [samiStaff.id] : []);
+    }
+    setDoubleOn(true);
   };
 
   // 名前入力でデバウンス検索
@@ -671,6 +705,24 @@ export function AddAppointmentDialog({
                   ))}
                 </select>
                 <p className="text-[10px] text-slate-500">選ぶと所要時間も自動で入ります。売上一括入力の元情報にも反映されます。</p>
+
+                {/* ダブル施術（さみ整体↔ボール担当を同時に） */}
+                {canDouble && (
+                  <button
+                    type="button"
+                    onClick={toggleDouble}
+                    aria-pressed={doubleOn}
+                    className={`mt-2 w-full h-11 rounded-lg border text-sm font-bold transition-all ${
+                      doubleOn
+                        ? "bg-violet-600 border-violet-600 text-white"
+                        : "border-violet-300 text-violet-700 hover:bg-violet-50"
+                    }`}
+                  >
+                    {doubleOn
+                      ? "✓ ダブル施術 ON（同時に2人で施術）"
+                      : `＋ ダブル施術にする（${isSamiPrimary ? "ボール担当も同時" : "さみ整体も同時"}）`}
+                  </button>
+                )}
 
                 {/* 追加メニュー（複数選択可） */}
                 {additionalCourses.map((cid, idx) => (
