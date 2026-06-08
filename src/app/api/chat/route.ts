@@ -261,16 +261,18 @@ export async function POST(request: NextRequest) {
     // 認証ユーザーの clinic_id と role を動的に取得（未ログイン時はフォールバック）
     const { data: { user } } = await supabase.auth.getUser();
     const userClinicInfo = await (async () => {
-      if (!user) return { clinicId: process.env.NEXT_PUBLIC_CLINIC_ID ?? "00000000-0000-0000-0000-000000000001", role: null as string | null };
-      // tenant-isolation-ignore: clinic_id 解決自体のクエリ（user → clinic）
+      const expected = process.env.NEXT_PUBLIC_CLINIC_ID ?? "00000000-0000-0000-0000-000000000001";
+      if (!user) return { clinicId: expected, role: null as string | null };
+      // このデプロイの院に所属しているか確認して解決（複数院ユーザーの誤院取得を防ぐ）
+      // tenant-isolation-ignore: user_id ＋ expected clinic_id で所属確認する解決クエリ
       const { data } = await supabase
         .from("clinic_users")
         .select("clinic_id, role")
         .eq("user_id", user.id)
-        .limit(1)
-        .single();
+        .eq("clinic_id", expected)
+        .maybeSingle();
       return {
-        clinicId: data?.clinic_id ?? (process.env.NEXT_PUBLIC_CLINIC_ID ?? "00000000-0000-0000-0000-000000000001"),
+        clinicId: data?.clinic_id ?? expected,
         role: (data?.role as string | undefined) ?? null,
       };
     })();
@@ -458,15 +460,17 @@ export async function GET() {
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
     const DEFAULT_CLINIC_ID = await (async () => {
-      if (!user) return process.env.NEXT_PUBLIC_CLINIC_ID ?? "00000000-0000-0000-0000-000000000001";
-      // tenant-isolation-ignore: clinic_id 解決自体のクエリ（user → clinic）
+      const expected = process.env.NEXT_PUBLIC_CLINIC_ID ?? "00000000-0000-0000-0000-000000000001";
+      if (!user) return expected;
+      // このデプロイの院に所属しているか確認して解決（複数院ユーザーの誤院取得を防ぐ）
+      // tenant-isolation-ignore: user_id ＋ expected clinic_id で所属確認する解決クエリ
       const { data } = await supabase
         .from("clinic_users")
         .select("clinic_id")
         .eq("user_id", user.id)
-        .limit(1)
-        .single();
-      return data?.clinic_id ?? (process.env.NEXT_PUBLIC_CLINIC_ID ?? "00000000-0000-0000-0000-000000000001");
+        .eq("clinic_id", expected)
+        .maybeSingle();
+      return data?.clinic_id ?? expected;
     })();
     const { data, error } = await supabase
       .from("ai_chat_messages")

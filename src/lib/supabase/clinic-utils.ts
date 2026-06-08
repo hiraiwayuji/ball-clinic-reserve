@@ -10,17 +10,20 @@ const DEFAULT_CLINIC_ID = "00000000-0000-0000-0000-000000000001";
 export async function getCurrentClinicId(): Promise<string> {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return DEFAULT_CLINIC_ID;
+  // 各 Vercel デプロイは「その院専用」。このデプロイの clinic を正とする。
+  const expected = process.env.NEXT_PUBLIC_CLINIC_ID || DEFAULT_CLINIC_ID;
+  if (!user) return expected;
 
-  // tenant-isolation-ignore: user_id から所属 clinic を引く認証ヘルパー。
-  // 構造上、ここで clinic_id を絞ると「クリニックの解決」自体ができない。
-  // ※ メモリの「マルチテナント clinic_id 解決バグ」も別途要修正（複数院紐付き対応）。
+  // user_id だけで .single() すると、複数院に紐づくユーザーが「最初に見つかった別院」を
+  // 取得してしまう（マルチテナント clinic_id 解決バグ）。このデプロイの clinic に
+  // 所属しているかを clinic_id 付きで確認し、所属していればその院を返す。
+  // tenant-isolation-ignore: user_id ＋ expected clinic_id で所属確認するための解決ヘルパー。
   const { data } = await supabase
     .from("clinic_users")
     .select("clinic_id")
     .eq("user_id", user.id)
-    .limit(1)
-    .single();
+    .eq("clinic_id", expected)
+    .maybeSingle();
 
-  return data?.clinic_id ?? DEFAULT_CLINIC_ID;
+  return data?.clinic_id ?? expected;
 }

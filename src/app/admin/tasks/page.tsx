@@ -47,9 +47,11 @@ export default function TasksPage() {
     const supabase = createClient();
     supabase.auth.getUser().then(async ({ data: { user } }) => {
       if (!user) return;
-      // tenant-isolation-ignore: clinic_id 解決自体のクエリ（user → clinic）。Phase 6 で複数院対応予定
-      const { data } = await supabase.from("clinic_users").select("clinic_id").eq("user_id", user.id).single();
-      setClinicId(data?.clinic_id ?? (process.env.NEXT_PUBLIC_CLINIC_ID ?? "00000000-0000-0000-0000-000000000001"));
+      // このデプロイの院を正とし、所属確認のうえ解決（複数院ユーザーの誤院取得を防ぐ）
+      const expected = process.env.NEXT_PUBLIC_CLINIC_ID ?? "00000000-0000-0000-0000-000000000001";
+      // tenant-isolation-ignore: user_id ＋ expected clinic_id で所属確認する解決クエリ
+      const { data } = await supabase.from("clinic_users").select("clinic_id").eq("user_id", user.id).eq("clinic_id", expected).maybeSingle();
+      setClinicId(data?.clinic_id ?? expected);
     });
   }, []);
 
