@@ -72,6 +72,10 @@ function ReserveContent() {
   const [courseLocked, setCourseLocked] = useState<boolean>(!!initialCourseId);
   const [selectedStaffId, setSelectedStaffId] = useState<string>("");
   const [selectedRoomId, setSelectedRoomId] = useState<string>("");
+  // 「水素を追加」：施術の直後30分に水素予約も入れる（ボールのみ・水素コースがある院で表示）
+  const [addHydrogen, setAddHydrogen] = useState(false);
+  // 完了画面で「水素も追加できたか」を表示するための結果
+  const [hydrogenResult, setHydrogenResult] = useState<{ added: boolean; time: string | null; error: string | null } | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
   const [isWaitingResult, setIsWaitingResult] = useState(false);
@@ -253,6 +257,13 @@ function ReserveContent() {
           formData.append("courseDurationMinutes", course.duration_minutes.toString());
         }
       }
+      // 「水素を追加」ON のときだけ送信（水素コースが存在し、施術が水素自体でない場合）
+      {
+        const waterCourse = courses.find(c => c.name === "水素");
+        if (addHydrogen && waterCourse && selectedCourseId && selectedCourseId !== waterCourse.id) {
+          formData.append("addHydrogen", "true");
+        }
+      }
       if (selectedStaffId) {
         const staff = staffList.find(s => s.id === selectedStaffId);
         if (staff) {
@@ -287,6 +298,14 @@ function ReserveContent() {
       localStorage.setItem("ballClinic_savedName", name);
       if (phone) localStorage.setItem("ballClinic_savedPhone", phone);
       setIsWaitingResult(result.isWaiting || false);
+      {
+        const rh = result as any;
+        if (rh.hydrogenAdded || rh.hydrogenError) {
+          setHydrogenResult({ added: !!rh.hydrogenAdded, time: rh.hydrogenTime ?? null, error: rh.hydrogenError ?? null });
+        } else {
+          setHydrogenResult(null);
+        }
+      }
       setIsSuccess(true);
       // LINE未連携の人には、完了後に「下4桁を送って連携してください」ポップアップを出す
       const r2 = result as any;
@@ -367,6 +386,17 @@ function ReserveContent() {
             {isWaitingResult ? "キャンセル待ち受付完了" : "仮予約を受け付けました"}
           </h1>
           <p className="text-blue-200 text-sm mb-6">院長がLINEにて内容を確認後、予約確定のご連絡をいたします。</p>
+          {hydrogenResult && (
+            hydrogenResult.added ? (
+              <div className="mb-6 mx-auto max-w-sm rounded-2xl bg-cyan-500/15 border border-cyan-400/30 px-4 py-3 text-cyan-100 text-sm font-bold">
+                💧 水素も追加しました{hydrogenResult.time ? `（${hydrogenResult.time}〜・施術の直後）` : ""}
+              </div>
+            ) : (
+              <div className="mb-6 mx-auto max-w-sm rounded-2xl bg-amber-500/15 border border-amber-400/30 px-4 py-3 text-amber-100 text-sm font-bold">
+                ⚠️ 水素は追加できませんでした（{hydrogenResult.error ?? "空きなし"}）。施術のご予約は受け付けています。
+              </div>
+            )
+          )}
           <div className="h-1 w-20 bg-emerald-500 mx-auto mb-6 rounded-full" />
           <div className="bg-white/5 border border-white/10 p-6 rounded-3xl mb-6 text-left space-y-3">
             <p className="text-white font-bold text-center mb-4 flex items-center justify-center gap-2">
@@ -683,6 +713,36 @@ function ReserveContent() {
                     })()}
                   </section>
                 )}
+
+                {/* 水素を追加（施術の直後30分に水素予約も入れる）。ボール＝水素コースがある院のみ表示。 */}
+                {(() => {
+                  const waterCourse = courses.find(c => c.name === "水素");
+                  if (!waterCourse) return null;
+                  if (!selectedCourseId || selectedCourseId === waterCourse.id) return null;
+                  return (
+                    <section className={`${reserveFlow === "menu_first" ? "order-1" : "order-2"}`}>
+                      <button
+                        type="button"
+                        onClick={() => setAddHydrogen(v => !v)}
+                        aria-pressed={addHydrogen}
+                        className={`w-full flex items-center justify-between gap-3 p-4 rounded-2xl border transition-all ${
+                          addHydrogen ? "bg-cyan-600/25 border-cyan-400" : "bg-white/5 border-white/10 hover:bg-white/10"
+                        }`}
+                      >
+                        <div className="text-left min-w-0">
+                          <p className="font-bold text-white text-sm">💧 水素を追加する</p>
+                          <p className="text-xs text-blue-100/80 mt-0.5">
+                            施術のあと、続けて30分の水素もご一緒に
+                            （{waterCourse.duration_minutes}分{waterCourse.price != null ? ` / ¥${waterCourse.price.toLocaleString()}` : ""}）
+                          </p>
+                        </div>
+                        <span className={`shrink-0 w-12 h-7 rounded-full relative transition-colors ${addHydrogen ? "bg-cyan-400" : "bg-white/20"}`}>
+                          <span className={`absolute top-0.5 w-6 h-6 bg-white rounded-full transition-all ${addHydrogen ? "left-[1.6rem]" : "left-0.5"}`} />
+                        </span>
+                      </button>
+                    </section>
+                  );
+                })()}
 
                 {/* 指名選択 */}
                 {staffList.length > 0 && (

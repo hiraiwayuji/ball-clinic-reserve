@@ -765,7 +765,79 @@ export async function createReservation(formData: FormData) {
       }
       
       const reservationNumber = appointmentData.id.split('-')[0].toUpperCase();
+
+      // ── 「水素を追加」：施術の直後30分に水素予約も入れる ──
+      // 施術が確定（キャンセル待ちでない）のときだけ。水素レーンが空いていて営業時間内なら追加。
+      let hydrogenAdded = false;
+      let hydrogenTime: string | null = null;
+      let hydrogenError: string | null = null;
+      const addHydrogen = formData.get("addHydrogen") === "true";
+      if (addHydrogen && !isCapacityFull) {
+        try {
+          const { data: water } = await adminDb
+            .from("reservation_courses")
+            .select("id, name, duration_minutes, required_staff_id")
+            .eq("clinic_id", DEFAULT_CLINIC_ID)
+            .eq("name", "水素")
+            .eq("is_active", true)
+            .maybeSingle();
+          if (water && water.id !== courseId) {
+            const wDur = Number(water.duration_minutes ?? 30) || 30;
+            const wStartIso = endDateTimeStr; // 施術終了直後
+            const wStart = new Date(wStartIso);
+            const wEndIso = new Date(wStart.getTime() + wDur * 60000).toISOString();
+            const wStaffId = (water.required_staff_id as string | null) ?? null;
+            // 開始スロット(HH:mm JST)が営業時間内か
+            const wHHMM = new Intl.DateTimeFormat("ja-JP", { timeZone: "Asia/Tokyo", hour: "2-digit", minute: "2-digit", hour12: false }).format(wStart);
+            const businessSlots = getTimeSlots(new Date(`${rawDate}T00:00:00+09:00`));
+            const inHours = businessSlots.includes(wHHMM);
+            // 水素レーンが空いているか
+            let laneFree = true;
+            if (wStaffId) {
+              const { data: wConf } = await adminDb
+                .from("appointments")
+                .select("id")
+                .eq("clinic_id", DEFAULT_CLINIC_ID)
+                .eq("staff_id", wStaffId)
+                .neq("status", "cancelled")
+                .lt("start_time", wEndIso)
+                .gt("end_time", wStartIso)
+                .limit(1);
+              laneFree = !(wConf && wConf.length > 0);
+            }
+            if (inHours && laneFree) {
+              const { error: wErr } = await adminDb.from("appointments").insert([{
+                customer_id: customerId,
+                start_time: wStartIso,
+                end_time: wEndIso,
+                memo: "【水素 追加】施術後に続けて",
+                is_first_visit: false,
+                status: "pending",
+                clinic_id: DEFAULT_CLINIC_ID,
+                course_id: water.id,
+                course_name: water.name,
+                ...(wStaffId ? { staff_id: wStaffId, staff_name: "水素" } : {}),
+              }]);
+              if (!wErr) { hydrogenAdded = true; hydrogenTime = wHHMM; }
+              else { console.error("hydrogen insert error", wErr); hydrogenError = "登録に失敗しました"; }
+            } else {
+              hydrogenError = !inHours ? "営業時間外のため追加できませんでした" : "その時間は水素が満席でした";
+            }
+          }
+        } catch (e) {
+          console.error("hydrogen add failed", e);
+          hydrogenError = "水素の追加でエラーが発生しました";
+        }
+      }
+
         await notifyOwner(name, phone, rawDate, time, visitType, symptoms, reservationNumber, isCapacityFull, courseName, staffName);
+        // 水素を追加した場合はオーナーにも知らせる
+        if (hydrogenAdded && hydrogenTime) {
+          await pushLineToOwners(
+            PUBLIC_CLINIC_ID,
+            `💧【水素 追加】${name}様 ${rawDate} ${hydrogenTime}〜（施術の直後）`,
+          );
+        }
         // 別日の既存予約がある状態で、ご本人が「院に確認済み」として追加予約した場合はオーナーに注意喚起
         if (hasOtherDayDuplicate && confirmedExisting) {
           await pushLineToOwners(
@@ -773,7 +845,7 @@ export async function createReservation(formData: FormData) {
             `⚠️【複数予約の確認】${name}様は既存のご予約（${otherDayInfo}）がある状態で、ご本人が「院に確認済み」として追加予約を取られました。\n新規: ${rawDate} ${time}\n予約番号: ${reservationNumber}`,
           );
         }
-  return { success: true, isWaiting: isCapacityFull, reservationNumber, lineLinked, phoneLast4 };
+  return { success: true, isWaiting: isCapacityFull, reservationNumber, lineLinked, phoneLast4, hydrogenAdded, hydrogenTime, hydrogenError };
     } else {
       // SupabaseのURLが設定されていない場合の動作保証（デモ用）
       console.log("Supabase URL not configured. Simulating successful reservation.");
