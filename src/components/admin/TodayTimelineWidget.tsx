@@ -284,16 +284,36 @@ export default function TodayTimelineWidget() {
                         ? "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300"
                         : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300")
                   : "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300";
+                // ── 時間がかぶる予約を縦に段積み（サブレーン）して全部見えるようにする ──
+                // 開始時刻順に、空いている一番上のサブレーンへ割り当てる（貪欲法）。
+                const sortedApts = [...apts].sort(
+                  (a, b) => minuteOfDayJst(a.start_time) - minuteOfDayJst(b.start_time),
+                );
+                const laneEnds: number[] = [];
+                const laneOf = new Map<string, number>();
+                for (const a of sortedApts) {
+                  const sMin = minuteOfDayJst(a.start_time);
+                  const eMin = Math.max(
+                    a.end_time ? minuteOfDayJst(a.end_time) : sMin + data.slotMinutes,
+                    sMin + data.slotMinutes,
+                  );
+                  let lane = laneEnds.findIndex((end) => end <= sMin);
+                  if (lane === -1) { lane = laneEnds.length; laneEnds.push(eMin); }
+                  else laneEnds[lane] = eMin;
+                  laneOf.set(a.id, lane);
+                }
+                const laneCount = Math.max(1, laneEnds.length);
                 return (
                   <div
                     key={s.id}
                     className="grid relative border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50/50 dark:hover:bg-slate-800/30"
                     style={{
                       gridTemplateColumns: `140px repeat(${timeMarks.length}, minmax(28px, 1fr))`,
+                      gridTemplateRows: `repeat(${laneCount}, minmax(24px, auto))`,
                       minHeight: "48px",
                     }}
                   >
-                    <div className="px-2 py-1 text-sm font-medium text-slate-800 dark:text-slate-100 flex items-center justify-between gap-1 sticky left-0 bg-white dark:bg-slate-900 z-10 border-r border-slate-200 dark:border-slate-700">
+                    <div className="px-2 py-1 text-sm font-medium text-slate-800 dark:text-slate-100 flex items-center justify-between gap-1 sticky left-0 bg-white dark:bg-slate-900 z-10 border-r border-slate-200 dark:border-slate-700" style={{ gridRow: "1 / -1" }}>
                       <span className="truncate">{s.name}</span>
                       {(monthCount > 0 || target > 0) ? (
                         <span
@@ -316,6 +336,7 @@ export default function TodayTimelineWidget() {
                         onClick={() => handleEmptyCellClick(s.id, m.minute)}
                         aria-label={`${s.name} ${m.label} に新規予約を追加`}
                         title={`${s.name} ${m.label} ・クリックで新規予約`}
+                        style={{ gridRow: "1 / -1" }}
                         className={`h-full hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors cursor-pointer ${
                           m.label.includes(":00")
                             ? "border-l border-slate-300 dark:border-slate-600"
@@ -348,7 +369,7 @@ export default function TodayTimelineWidget() {
                           className={`text-[11px] leading-tight rounded border px-1 py-0.5 my-0.5 text-left truncate hover:ring-2 hover:ring-blue-400 transition-all ${cls}`}
                           style={{
                             gridColumn: `${gridColStart} / span ${colSpan}`,
-                            gridRow: 1,
+                            gridRow: (laneOf.get(a.id) ?? 0) + 1,
                             alignSelf: "stretch",
                           }}
                           title={`${fmtTime(a.start_time)} ${a.customer_name ?? ""}${a.medical_record_number ? ` (No.${a.medical_record_number})` : ""} ${a.course_name ?? ""}`}

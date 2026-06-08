@@ -2,13 +2,13 @@
 
 import { useState, useEffect, useCallback, useRef, Suspense } from "react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useSearchParams, useRouter } from "next/navigation";
 import { format, isSameMonth, isSameDay, isToday, isPast, startOfDay, startOfMonth, endOfMonth, eachDayOfInterval, startOfWeek, endOfWeek } from "date-fns";
 import { ja } from "date-fns/locale";
 import { ChevronLeft, ChevronRight, ArrowLeft, Clock, CalendarDays, X, CheckCircle2, AlertCircle, Sparkles, Phone, MessageCircle } from "lucide-react";
 import { createWaitlistReservation, getDailyAvailability } from "@/app/actions/reserve";
 import { getClinicHolidays, type ClinicHoliday } from "@/app/actions/holidays";
-import { getActiveCourses, getCourseRequiredStaffSchedule, getCoursesAvailability, type ReservationCourse } from "@/app/actions/courses";
+import { getActiveCourses, getActiveStaff, getCourseRequiredStaffSchedule, getCoursesAvailability, type ReservationCourse } from "@/app/actions/courses";
 import { getBlockedTimesForCurrentClinic } from "@/app/actions/staff-schedule";
 import { isStaffAvailableOn, type StaffSchedule } from "@/lib/staff-availability";
 import { Button } from "@/components/ui/button";
@@ -141,9 +141,15 @@ function ReserveCalendarContent() {
   const slotMinutes = useClinicSlotDuration();
   const schedule = useClinicSchedule();
   const searchParams = useSearchParams();
+  const router = useRouter();
   const courseIdParam = searchParams.get("courseId");
 
   const [selectedCourse, setSelectedCourse] = useState<ReservationCourse | null>(null);
+  // スタッフ(レーン)タブ：担当ごとに「そのスタッフのメニュー」を切り替えるための一覧
+  type Lane = { staffId: string; staffName: string; courses: ReservationCourse[]; schedule: StaffSchedule | null };
+  const [lanes, setLanes] = useState<Lane[]>([]);
+  // 複数メニューを持つレーンを開いたときのメニュー選択用
+  const [openLaneId, setOpenLaneId] = useState<string | null>(null);
   // 担当固定コース（さみ整体など）のスタッフ出勤日。設定時は出勤日以外を選べなくする。
   const [staffSchedule, setStaffSchedule] = useState<StaffSchedule | null>(null);
   const [staffScheduleName, setStaffScheduleName] = useState<string>("");
@@ -273,14 +279,72 @@ function ReserveCalendarContent() {
     return () => { mounted = false; };
   }, [courseIdParam]);
 
+  // スタッフ(レーン)タブ用：担当付きコースをスタッフごとにまとめて読み込む
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const [courses, staff] = await Promise.all([getActiveCourses(), getActiveStaff()]);
+        if (!mounted) return;
+        const staffById = new Map(staff.map((s) => [s.id, s]));
+        const byStaff = new Map<string, ReservationCourse[]>();
+        for (const c of courses) {
+          const sid = c.required_staff_id;
+          if (!sid) continue;
+          const st = staffById.get(sid);
+          if (!st || st.is_active === false || st.available_for_online_booking === false) continue;
+          if (!byStaff.has(sid)) byStaff.set(sid, []);
+          byStaff.get(sid)!.push(c);
+        }
+        const laneList: Lane[] = [];
+        for (const [sid, cs] of byStaff) {
+          const st = staffById.get(sid)!;
+          let schedule: StaffSchedule | null = null;
+          if (st.schedule_based_booking) {
+            try {
+              const r = await getCourseRequiredStaffSchedule(cs[0].id);
+              if (r) schedule = { weekdays: r.weekdays, dates: r.dates };
+            } catch {}
+          }
+          laneList.push({ staffId: sid, staffName: st.name, courses: cs, schedule });
+        }
+        if (mounted) setLanes(laneList);
+      } catch { /* タブ無しでも予約は可能 */ }
+    })();
+    return () => { mounted = false; };
+  }, []);
+
+  // メニュー担当(レーン)を切り替える：URLのcourseIdを差し替えて各表示を連動させる
+  const selectLaneCourse = (course: ReservationCourse) => {
+    setOpenLaneId(null);
+    setSelectedCourse(course);
+    const params = new URLSearchParams(Array.from(searchParams.entries()));
+    params.set("courseId", course.id);
+    router.replace(`/reserve/calendar?${params.toString()}`, { scroll: false });
+  };
+
+  // コース(レーン)を切り替えたら、選択中の日付の空きを取り直す
+  useEffect(() => {
+    if (!selectedDate) return;
+    const dateStr = format(selectedDate, "yyyy-MM-dd");
+    getDailyAvailability(dateStr, courseIdParam).then(setDailySlots).catch(() => {});
+    // selectedDate の変更は handleDayClick 側で取得するため依存に含めない
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [courseIdParam]);
+
+  // 月データ取得（月 or レーン切替で再取得）。選択中の日付はここでは消さない。
   useEffect(() => {
     if (currentMonth) {
       fetchMonthData(currentMonth);
     }
+  }, [currentMonth, fetchMonthData]);
+
+  // 月が変わったときだけ選択をリセット（レーンタブ切替では日付選択を維持する）
+  useEffect(() => {
     setSelectedDate(null);
     setDailySlots([]);
     setWaitlistState("idle");
-  }, [currentMonth, fetchMonthData]);
+  }, [currentMonth]);
 
   // リアルタイム同期の設定 (Supabase Real-time)
   useEffect(() => {
@@ -641,6 +705,64 @@ function ReserveCalendarContent() {
                 <X className="w-4 h-4" />
               </button>
             </div>
+
+            {/* スタッフ(レーン)タブ：押すとそのスタッフのメニューに切替＝空き時間も切り替わる */}
+            {(() => {
+              const dayLanes = lanes.filter(
+                (l) => !l.schedule || isStaffAvailableOn(selectedDate, l.schedule),
+              );
+              if (dayLanes.length < 2) return null;
+              return (
+                <div className="px-4 pt-3 border-b border-zinc-800 pb-3">
+                  <p className="text-[11px] text-zinc-400 font-bold mb-2">担当・メニューを選ぶ</p>
+                  <div className="flex gap-2 overflow-x-auto pb-1">
+                    {dayLanes.map((lane) => {
+                      const active = selectedCourse?.required_staff_id === lane.staffId;
+                      return (
+                        <div key={lane.staffId} className="shrink-0">
+                          <button
+                            onClick={() =>
+                              lane.courses.length === 1
+                                ? selectLaneCourse(lane.courses[0])
+                                : setOpenLaneId(openLaneId === lane.staffId ? null : lane.staffId)
+                            }
+                            className={`px-3.5 py-2 rounded-xl text-sm font-black whitespace-nowrap border transition ${
+                              active
+                                ? "bg-blue-600 border-blue-500 text-white"
+                                : "bg-zinc-800 border-zinc-700 text-zinc-200 hover:bg-zinc-700"
+                            }`}
+                          >
+                            {lane.staffName}
+                            {lane.courses.length > 1 && (
+                              <span className="ml-1 text-[10px] opacity-70">▼</span>
+                            )}
+                          </button>
+                          {openLaneId === lane.staffId && lane.courses.length > 1 && (
+                            <div className="mt-1.5 flex flex-col gap-1 bg-zinc-800 rounded-xl p-1.5 border border-zinc-700 min-w-[160px]">
+                              {lane.courses.map((c) => (
+                                <button
+                                  key={c.id}
+                                  onClick={() => selectLaneCourse(c)}
+                                  className={`text-left px-2.5 py-2 rounded-lg text-xs font-bold leading-snug ${
+                                    selectedCourse?.id === c.id
+                                      ? "bg-blue-600 text-white"
+                                      : "text-zinc-200 hover:bg-zinc-700"
+                                  }`}
+                                >
+                                  {c.name}
+                                  {c.duration_minutes ? `・${c.duration_minutes}分` : ""}
+                                  {c.price != null ? `・¥${c.price.toLocaleString()}` : ""}
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })()}
 
             {/* 時間スロット */}
             <div className="p-4">

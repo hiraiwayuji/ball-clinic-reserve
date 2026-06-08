@@ -62,6 +62,8 @@ export type ReservationStaff = {
   schedule_based_booking?: boolean;
   /** 毎週の出勤曜日（csv: 0=日,1=月,…,6=土）。schedule_based_booking 時に使用 */
   booking_weekdays?: string | null;
+  /** オンライン予約の対象スタッフか（予約サイトのレーン/担当に出すか） */
+  available_for_online_booking?: boolean | null;
 };
 
 // ── コース取得（管理側：全件） ──
