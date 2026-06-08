@@ -330,6 +330,57 @@ export async function createManualReservation(formData: FormData) {
       return { success: false, error: `予約情報の登録に失敗しました: ${appointmentErr.message}` };
     }
 
+    // ── 「水素を追加」（新規追加時）：最初の予約の直後 or 同時刻に水素を入れる ──
+    const addHydrogen = formData.get("addHydrogen") === "true";
+    const hydrogenTiming = (formData.get("hydrogenTiming") as string) === "same" ? "same" : "after";
+    if (addHydrogen) {
+      try {
+        const { data: water } = await supabase
+          .from("reservation_courses")
+          .select("id, name, duration_minutes, required_staff_id")
+          .eq("clinic_id", clinicId)
+          .eq("name", "水素")
+          .eq("is_active", true)
+          .maybeSingle();
+        if (water && water.id !== courseId) {
+          const wDur = Number(water.duration_minutes ?? 30) || 30;
+          const wBase = hydrogenTiming === "same" ? baseDate : new Date(baseDate.getTime() + durationMinutes * 60 * 1000);
+          const wStartIso = wBase.toISOString();
+          const wEndIso = new Date(wBase.getTime() + wDur * 60 * 1000).toISOString();
+          const wStaffId = (water.required_staff_id as string | null) ?? null;
+          let laneFree = true;
+          if (wStaffId) {
+            const { data: conf } = await supabase
+              .from("appointments")
+              .select("id")
+              .eq("clinic_id", clinicId)
+              .eq("staff_id", wStaffId)
+              .neq("status", "cancelled")
+              .lt("start_time", wEndIso)
+              .gt("end_time", wStartIso)
+              .limit(1);
+            laneFree = !(conf && conf.length > 0);
+          }
+          if (laneFree) {
+            await supabase.from("appointments").insert([{
+              customer_id: customerId,
+              start_time: wStartIso,
+              end_time: wEndIso,
+              memo: hydrogenTiming === "same" ? "【水素 追加・同時刻】" : "【水素 追加・施術後】",
+              is_first_visit: false,
+              status: "confirmed",
+              clinic_id: clinicId,
+              course_id: water.id,
+              course_name: water.name,
+              ...(wStaffId ? { staff_id: wStaffId, staff_name: "水素" } : {}),
+            }]);
+          }
+        }
+      } catch (e) {
+        console.error("manual hydrogen add failed", e);
+      }
+    }
+
     // ── 監査ログ + スタッフ操作通知 ──
     const auth = await checkAdminAuth();
     await writeAudit({
