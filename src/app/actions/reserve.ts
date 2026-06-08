@@ -830,12 +830,107 @@ export async function createReservation(formData: FormData) {
         }
       }
 
+      // ── 「ヘッドスパを追加」：実費施術の直後にヘッドスパ(¥2000セット)を入れる ──
+      // ヘッドスパが出勤日＆レーンが空き＆営業時間内のときだけ追加。価格は専用の
+      // 組合せコース「ヘッドスパ（実費施術セット）」(¥2000)で反映する。
+      let headspaAdded = false;
+      let headspaTime: string | null = null;
+      let headspaError: string | null = null;
+      const addHeadspa = formData.get("addHeadspa") === "true";
+      if (addHeadspa && !isCapacityFull) {
+        try {
+          const { data: hs } = await adminDb
+            .from("reservation_courses")
+            .select("id, name, duration_minutes, required_staff_id")
+            .eq("clinic_id", DEFAULT_CLINIC_ID)
+            .eq("name", "ヘッドスパ（実費施術セット）")
+            .maybeSingle();
+          if (hs && hs.id !== courseId) {
+            const hStaffId = (hs.required_staff_id as string | null) ?? null;
+            // ヘッドスパの出勤日チェック
+            let staffOk = true;
+            if (hStaffId) {
+              const { data: st } = await adminDb
+                .from("reservation_staff")
+                .select("schedule_based_booking, booking_weekdays")
+                .eq("id", hStaffId)
+                .eq("clinic_id", DEFAULT_CLINIC_ID)
+                .maybeSingle();
+              if (st?.schedule_based_booking) {
+                const wds = String(st.booking_weekdays ?? "").split(",").map((s) => s.trim()).filter(Boolean).map(Number);
+                const { data: ovr } = await adminDb
+                  .from("staff_booking_dates")
+                  .select("available")
+                  .eq("clinic_id", DEFAULT_CLINIC_ID)
+                  .eq("staff_id", hStaffId)
+                  .eq("date", rawDate)
+                  .maybeSingle();
+                const wd = new Date(`${rawDate}T00:00:00`).getDay();
+                staffOk = ovr ? !!ovr.available : wds.includes(wd);
+              }
+            }
+            if (!staffOk) {
+              headspaError = "その日はヘッドスパがお休みでした";
+            } else {
+              const hDur = Number(hs.duration_minutes ?? 30) || 30;
+              const hStartIso = endDateTimeStr; // 施術終了直後
+              const hStart = new Date(hStartIso);
+              const hEndIso = new Date(hStart.getTime() + hDur * 60000).toISOString();
+              const hHHMM = new Intl.DateTimeFormat("ja-JP", { timeZone: "Asia/Tokyo", hour: "2-digit", minute: "2-digit", hour12: false }).format(hStart);
+              const businessSlots = getTimeSlots(new Date(`${rawDate}T00:00:00+09:00`));
+              const inHours = businessSlots.includes(hHHMM);
+              let laneFree = true;
+              if (hStaffId) {
+                const { data: hConf } = await adminDb
+                  .from("appointments")
+                  .select("id")
+                  .eq("clinic_id", DEFAULT_CLINIC_ID)
+                  .eq("staff_id", hStaffId)
+                  .neq("status", "cancelled")
+                  .lt("start_time", hEndIso)
+                  .gt("end_time", hStartIso)
+                  .limit(1);
+                laneFree = !(hConf && hConf.length > 0);
+              }
+              if (inHours && laneFree) {
+                const { error: hErr } = await adminDb.from("appointments").insert([{
+                  customer_id: customerId,
+                  start_time: hStartIso,
+                  end_time: hEndIso,
+                  memo: "【ヘッドスパ 追加・実費施術セット ¥2000】施術後に続けて",
+                  is_first_visit: false,
+                  status: "pending",
+                  clinic_id: DEFAULT_CLINIC_ID,
+                  course_id: hs.id,
+                  course_name: hs.name,
+                  ...(hStaffId ? { staff_id: hStaffId, staff_name: "ヘッドスパ" } : {}),
+                }]);
+                if (!hErr) { headspaAdded = true; headspaTime = hHHMM; }
+                else { console.error("headspa insert error", hErr); headspaError = "登録に失敗しました"; }
+              } else {
+                headspaError = !inHours ? "営業時間外のため追加できませんでした" : "その時間はヘッドスパが満席でした";
+              }
+            }
+          }
+        } catch (e) {
+          console.error("headspa add failed", e);
+          headspaError = "ヘッドスパの追加でエラーが発生しました";
+        }
+      }
+
         await notifyOwner(name, phone, rawDate, time, visitType, symptoms, reservationNumber, isCapacityFull, courseName, staffName);
         // 水素を追加した場合はオーナーにも知らせる
         if (hydrogenAdded && hydrogenTime) {
           await pushLineToOwners(
             PUBLIC_CLINIC_ID,
             `💧【水素 追加】${name}様 ${rawDate} ${hydrogenTime}〜（施術の直後）`,
+          );
+        }
+        // ヘッドスパを追加した場合もオーナーに知らせる
+        if (headspaAdded && headspaTime) {
+          await pushLineToOwners(
+            PUBLIC_CLINIC_ID,
+            `💆【ヘッドスパ 追加・¥2000セット】${name}様 ${rawDate} ${headspaTime}〜（実費施術の直後）`,
           );
         }
         // 別日の既存予約がある状態で、ご本人が「院に確認済み」として追加予約した場合はオーナーに注意喚起
@@ -845,7 +940,7 @@ export async function createReservation(formData: FormData) {
             `⚠️【複数予約の確認】${name}様は既存のご予約（${otherDayInfo}）がある状態で、ご本人が「院に確認済み」として追加予約を取られました。\n新規: ${rawDate} ${time}\n予約番号: ${reservationNumber}`,
           );
         }
-  return { success: true, isWaiting: isCapacityFull, reservationNumber, lineLinked, phoneLast4, hydrogenAdded, hydrogenTime, hydrogenError };
+  return { success: true, isWaiting: isCapacityFull, reservationNumber, lineLinked, phoneLast4, hydrogenAdded, hydrogenTime, hydrogenError, headspaAdded, headspaTime, headspaError };
     } else {
       // SupabaseのURLが設定されていない場合の動作保証（デモ用）
       console.log("Supabase URL not configured. Simulating successful reservation.");

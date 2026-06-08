@@ -76,6 +76,9 @@ function ReserveContent() {
   const [addHydrogen, setAddHydrogen] = useState(false);
   // 完了画面で「水素も追加できたか」を表示するための結果
   const [hydrogenResult, setHydrogenResult] = useState<{ added: boolean; time: string | null; error: string | null } | null>(null);
+  // 「ヘッドスパを追加」：実費施術の直後にヘッドスパ(¥2000セット)を入れる
+  const [addHeadspa, setAddHeadspa] = useState(false);
+  const [headspaResult, setHeadspaResult] = useState<{ added: boolean; time: string | null; error: string | null } | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
   const [isWaitingResult, setIsWaitingResult] = useState(false);
@@ -264,6 +267,13 @@ function ReserveContent() {
           formData.append("addHydrogen", "true");
         }
       }
+      // 「ヘッドスパを追加」ON のときだけ送信（実費施術を選んでいる場合）
+      {
+        const selCourse = courses.find(c => c.id === selectedCourseId);
+        if (addHeadspa && selCourse?.name === "実費施術（小中高）") {
+          formData.append("addHeadspa", "true");
+        }
+      }
       if (selectedStaffId) {
         const staff = staffList.find(s => s.id === selectedStaffId);
         if (staff) {
@@ -304,6 +314,11 @@ function ReserveContent() {
           setHydrogenResult({ added: !!rh.hydrogenAdded, time: rh.hydrogenTime ?? null, error: rh.hydrogenError ?? null });
         } else {
           setHydrogenResult(null);
+        }
+        if (rh.headspaAdded || rh.headspaError) {
+          setHeadspaResult({ added: !!rh.headspaAdded, time: rh.headspaTime ?? null, error: rh.headspaError ?? null });
+        } else {
+          setHeadspaResult(null);
         }
       }
       setIsSuccess(true);
@@ -394,6 +409,17 @@ function ReserveContent() {
             ) : (
               <div className="mb-6 mx-auto max-w-sm rounded-2xl bg-amber-500/15 border border-amber-400/30 px-4 py-3 text-amber-100 text-sm font-bold">
                 ⚠️ 水素は追加できませんでした（{hydrogenResult.error ?? "空きなし"}）。施術のご予約は受け付けています。
+              </div>
+            )
+          )}
+          {headspaResult && (
+            headspaResult.added ? (
+              <div className="mb-6 mx-auto max-w-sm rounded-2xl bg-violet-500/15 border border-violet-400/30 px-4 py-3 text-violet-100 text-sm font-bold">
+                💆 ヘッドスパも追加しました{headspaResult.time ? `（${headspaResult.time}〜・¥2,000セット）` : ""}
+              </div>
+            ) : (
+              <div className="mb-6 mx-auto max-w-sm rounded-2xl bg-amber-500/15 border border-amber-400/30 px-4 py-3 text-amber-100 text-sm font-bold">
+                ⚠️ ヘッドスパは追加できませんでした（{headspaResult.error ?? "空きなし"}）。施術のご予約は受け付けています。
               </div>
             )
           )}
@@ -738,6 +764,34 @@ function ReserveContent() {
                         </div>
                         <span className={`shrink-0 w-12 h-7 rounded-full relative transition-colors ${addHydrogen ? "bg-cyan-400" : "bg-white/20"}`}>
                           <span className={`absolute top-0.5 w-6 h-6 bg-white rounded-full transition-all ${addHydrogen ? "left-[1.6rem]" : "left-0.5"}`} />
+                        </span>
+                      </button>
+                    </section>
+                  );
+                })()}
+
+                {/* ヘッドスパを追加（実費施術の直後に¥2000セットで）。実費施術を選んだときだけ表示。 */}
+                {(() => {
+                  const selCourse = courses.find(c => c.id === selectedCourseId);
+                  if (!selCourse || selCourse.name !== "実費施術（小中高）") return null;
+                  return (
+                    <section className={`${reserveFlow === "menu_first" ? "order-1" : "order-2"}`}>
+                      <button
+                        type="button"
+                        onClick={() => setAddHeadspa(v => !v)}
+                        aria-pressed={addHeadspa}
+                        className={`w-full flex items-center justify-between gap-3 p-4 rounded-2xl border transition-all ${
+                          addHeadspa ? "bg-violet-600/25 border-violet-400" : "bg-white/5 border-white/10 hover:bg-white/10"
+                        }`}
+                      >
+                        <div className="text-left min-w-0">
+                          <p className="font-bold text-white text-sm">💆 ヘッドスパを追加する（¥2,000）</p>
+                          <p className="text-xs text-blue-100/80 mt-0.5">
+                            実費施術と同じ日のヘッドスパは特別価格 ¥2,000（通常¥4,000）。施術のあと続けて30分。
+                          </p>
+                        </div>
+                        <span className={`shrink-0 w-12 h-7 rounded-full relative transition-colors ${addHeadspa ? "bg-violet-400" : "bg-white/20"}`}>
+                          <span className={`absolute top-0.5 w-6 h-6 bg-white rounded-full transition-all ${addHeadspa ? "left-[1.6rem]" : "left-0.5"}`} />
                         </span>
                       </button>
                     </section>
