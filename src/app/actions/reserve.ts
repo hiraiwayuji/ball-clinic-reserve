@@ -57,7 +57,68 @@ function getAdminSupabase() {
 }
 
 const DEFAULT_CLINIC_ID = PUBLIC_CLINIC_ID;
-const MAX_CAPACITY = 1; // 1枠あたりの最大受け入れ人数（1名入れば予約済みにする）
+const MAX_CAPACITY = 1; // 単一枠モード（AILUS/RELAQ等）の1枠あたり定員
+
+// 日付文字列 "YYYY-MM-DD" の曜日(0=日)。既存の required_staff チェックと同じ算出方法で統一。
+function weekdayOf(dateStr: string): number {
+  return new Date(`${dateStr}T00:00:00`).getDay();
+}
+
+/**
+ * その日の「同時受付枠数（定員）」を返す。
+ * - clinic_settings.booking_capacity_mode = 'per_available_staff' の院:
+ *     その日にオンライン受付できるスタッフ(レーン)数。
+ *     ・schedule_based でないスタッフは常時1レーン
+ *     ・schedule_based は staff_booking_dates の当日上書き優先、無ければ booking_weekdays
+ *   ※ 0 にはせず最低1（設定ミスで全枠ロックを防ぐ）。
+ * - それ以外（'single' / 未設定）: 常に 1（従来挙動・AILUS/RELAQ 等は不変）。
+ */
+async function getDayCapacity(
+  db: { from: (t: string) => any },
+  clinicId: string,
+  dateStr: string,
+): Promise<number> {
+  try {
+    const { data: settings } = await db
+      .from("clinic_settings")
+      .select("booking_capacity_mode")
+      .eq("id", clinicId)
+      .maybeSingle();
+    const mode = (settings?.booking_capacity_mode as string | undefined) ?? "single";
+    if (mode !== "per_available_staff") return MAX_CAPACITY;
+
+    const { data: staff } = await db
+      .from("reservation_staff")
+      .select("id, schedule_based_booking, booking_weekdays")
+      .eq("clinic_id", clinicId)
+      .eq("is_active", true)
+      .or("available_for_online_booking.is.null,available_for_online_booking.eq.true");
+    if (!staff || staff.length === 0) return 1;
+
+    const wd = weekdayOf(dateStr);
+    const { data: overrides } = await db
+      .from("staff_booking_dates")
+      .select("staff_id, available")
+      .eq("clinic_id", clinicId)
+      .eq("date", dateStr);
+    const ovrMap = new Map(
+      (overrides ?? []).map((o: { staff_id: string; available: boolean }) => [o.staff_id, !!o.available]),
+    );
+
+    let count = 0;
+    for (const s of staff as Array<{ id: string; schedule_based_booking?: boolean; booking_weekdays?: string }>) {
+      if (!s.schedule_based_booking) { count++; continue; }
+      if (ovrMap.has(s.id)) { if (ovrMap.get(s.id)) count++; continue; }
+      const wds = String(s.booking_weekdays ?? "")
+        .split(",").map((x) => x.trim()).filter(Boolean).map(Number);
+      if (wds.includes(wd)) count++;
+    }
+    return Math.max(1, count);
+  } catch (e) {
+    console.error("getDayCapacity failed; falling back to 1", e);
+    return 1;
+  }
+}
 
 /**
  * 氏名照合用の正規化。
@@ -244,7 +305,9 @@ export async function getMonthlyAvailability(year: number, month: number): Promi
 }
 
 // 指定日の予約状況（埋まっている時間帯）を取得するアクション
-export async function getDailyAvailability(dateStr: string) {
+// courseId を渡すと、そのコースの担当(レーン)の空きで判定する（レーンが空いていれば予約可）。
+// courseId 無し / 担当未設定のコースは、その日の定員(プール)で判定する。
+export async function getDailyAvailability(dateStr: string, courseId?: string | null) {
   noStore();
   const supabase = getAdminSupabase() || await getSupabase();
   if (!supabase) return [];
@@ -253,9 +316,23 @@ export async function getDailyAvailability(dateStr: string) {
     const startOfDay = `${dateStr}T00:00:00+09:00`;
     const endOfDay = `${dateStr}T23:59:59+09:00`;
 
+    // コースに担当(レーン)が設定されていれば、そのレーンの空きで判定する
+    let requiredStaffId: string | null = null;
+    if (courseId) {
+      const { data: c } = await supabase
+        .from("reservation_courses")
+        .select("required_staff_id")
+        .eq("id", courseId)
+        .eq("clinic_id", DEFAULT_CLINIC_ID)
+        .maybeSingle();
+      requiredStaffId = (c?.required_staff_id as string | null) ?? null;
+    }
+
+    const dayCapacity = await getDayCapacity(supabase, DEFAULT_CLINIC_ID, dateStr);
+
     const { data, error } = await supabase
       .from("appointments")
-      .select("start_time, end_time")
+      .select("start_time, end_time, staff_id")
       .eq("clinic_id", DEFAULT_CLINIC_ID)
       .gte("start_time", startOfDay)
       .lte("start_time", endOfDay)
@@ -268,10 +345,12 @@ export async function getDailyAvailability(dateStr: string) {
 
     // 取得した予約日時の開始・終了から、各30分枠ごとの予約数をカウント
     const slotCounts: Record<string, number> = {};
-    data.forEach((app: { start_time: string, end_time?: string }) => {
+    (data ?? []).forEach((app: { start_time: string, end_time?: string, staff_id?: string | null }) => {
+      // コース担当が指定されている場合は、そのレーンの予約のみを数える
+      if (requiredStaffId && app.staff_id !== requiredStaffId) return;
       const start = new Date(app.start_time);
       const end = app.end_time ? new Date(app.end_time) : new Date(start.getTime() + 30 * 60000);
-      
+
       let current = start.getTime();
       while (current < end.getTime()) {
         const jstFormatter = new Intl.DateTimeFormat('ja-JP', {
@@ -280,18 +359,18 @@ export async function getDailyAvailability(dateStr: string) {
           minute: '2-digit',
           hour12: false
         });
-        
+
         const timeKey = jstFormatter.format(new Date(current)); // "HH:mm" in JST
-        
+
         slotCounts[timeKey] = (slotCounts[timeKey] || 0) + 1;
         current += 30 * 60000;
       }
     });
 
-    // 定員(MAX_CAPACITY)に達した枠のみを「埋まっている」として返す
-    const bookedTimes = Object.keys(slotCounts).filter(time => slotCounts[time] >= MAX_CAPACITY);
-    
-    console.log(`[DEBUG] getDailyAvailability for ${dateStr} returned (filled slots):`, bookedTimes);
+    // 担当レーン指定時は1名で満枠、未指定時はその日の定員で判定
+    const threshold = requiredStaffId ? 1 : dayCapacity;
+    const bookedTimes = Object.keys(slotCounts).filter(time => slotCounts[time] >= threshold);
+
     return bookedTimes;
   } catch (err) {
     console.error(err);
@@ -374,22 +453,27 @@ export async function createReservation(formData: FormData) {
             .eq("id", reqStaffId)
             .eq("clinic_id", PUBLIC_CLINIC_ID)
             .maybeSingle();
-          if (reqStaff?.schedule_based_booking) {
-            const weekdays = String(reqStaff.booking_weekdays ?? "")
-              .split(",").map((s) => s.trim()).filter(Boolean).map(Number);
-            const { data: ovr } = await adminDb
-              .from("staff_booking_dates")
-              .select("available")
-              .eq("clinic_id", PUBLIC_CLINIC_ID)
-              .eq("staff_id", reqStaffId)
-              .eq("date", rawDate)
-              .maybeSingle();
-            const wd = new Date(`${rawDate}T00:00:00`).getDay();
-            const available = ovr ? !!ovr.available : weekdays.includes(wd);
-            if (!available) {
-              return { success: false, error: `${reqStaff.name ?? "担当"}さんはその日はご予約を受け付けていません。出勤日からお選びください。` };
+          if (reqStaff) {
+            if (reqStaff.schedule_based_booking) {
+              // 出勤日制（さみ・ヘッドスパ等）はその日に出勤していなければ予約不可
+              const weekdays = String(reqStaff.booking_weekdays ?? "")
+                .split(",").map((s) => s.trim()).filter(Boolean).map(Number);
+              const { data: ovr } = await adminDb
+                .from("staff_booking_dates")
+                .select("available")
+                .eq("clinic_id", PUBLIC_CLINIC_ID)
+                .eq("staff_id", reqStaffId)
+                .eq("date", rawDate)
+                .maybeSingle();
+              const wd = new Date(`${rawDate}T00:00:00`).getDay();
+              const available = ovr ? !!ovr.available : weekdays.includes(wd);
+              if (!available) {
+                return { success: false, error: `${reqStaff.name ?? "担当"}さんはその日はご予約を受け付けていません。出勤日からお選びください。` };
+              }
             }
-            // 担当をそのスタッフに確定（クライアント未設定でも確実に紐づける）
+            // 担当(レーン)をそのスタッフに確定（schedule有無に関わらず）。
+            // これにより各レーンが下部の「スタッフ重複チェック」で同時1名に制限される
+            // （院長＝1人/水素＝1台/ヘッドスパ＝1人/さみ＝1人）。
             staffId = reqStaff.id as string;
             staffName = (reqStaff.name as string) ?? staffName;
           }
@@ -580,26 +664,7 @@ export async function createReservation(formData: FormData) {
         // confirmedExisting === true → 院に確認済みとして続行（予約成立後にオーナーへ通知）
       }
 
-      // 予約枠の定員チェック（必ず自院のみで判定）
-      const { data: existingApps } = await adminDb
-        .from("appointments")
-        .select("id")
-        .eq("clinic_id", DEFAULT_CLINIC_ID)
-        .eq("start_time", startDateTimeStr)
-        .neq("status", "cancelled");
-        
-      const isCapacityFull = existingApps && existingApps.length >= MAX_CAPACITY;
-      
-      // ダブルブッキングの厳格な防御（ユーザーが空きだと思って押したのに埋まっていた場合）
-      if (isCapacityFull && !isWaitlistIntent) {
-        return { success: false, error: "申し訳ありません。タッチの差で予約が埋まりました。お手数ですが、別のお時間をお選びください。" };
-      }
-
-      const finalStatus = isCapacityFull ? "waiting" : "pending";
-
-      // 予約の作成
-      const isFirstVisit = visitType === "new";
-
+      // 所要時間と終了時刻（重複判定・定員判定に使用）
       // コースが選択されていればその所要時間、なければ初診60分/再診30分
       const durationMinutes = courseDurationStr
         ? Number(courseDurationStr)
@@ -607,6 +672,41 @@ export async function createReservation(formData: FormData) {
       const jstDate = new Date(startDateTimeStr);
       const endDate = new Date(jstDate.getTime() + durationMinutes * 60000);
       const endDateTimeStr = endDate.toISOString();
+
+      // ── 予約枠の定員チェック（必ず自院のみで判定） ──
+      // per_available_staff モード（ボール/からだ/マッスル）:
+      //   その日の出勤レーン数まで同時受付可。時間帯が重なる予約数で判定。
+      //   各レーンの「同時1名」は下部のスタッフ重複チェックで担保する。
+      // single モード（AILUS/RELAQ 等）:
+      //   従来通り同一開始時刻で1枠のみ（挙動を変えない）。
+      const dayCapacity = await getDayCapacity(adminDb, DEFAULT_CLINIC_ID, rawDate);
+      let occupied = 0;
+      if (dayCapacity <= 1) {
+        const { data: sameStart } = await adminDb
+          .from("appointments")
+          .select("id")
+          .eq("clinic_id", DEFAULT_CLINIC_ID)
+          .eq("start_time", startDateTimeStr)
+          .neq("status", "cancelled");
+        occupied = sameStart?.length ?? 0;
+      } else {
+        const { data: overlapping } = await adminDb
+          .from("appointments")
+          .select("id")
+          .eq("clinic_id", DEFAULT_CLINIC_ID)
+          .neq("status", "cancelled")
+          .lt("start_time", endDateTimeStr)   // 既存の開始 < 新規の終了
+          .gt("end_time", startDateTimeStr);  // 既存の終了 > 新規の開始
+        occupied = overlapping?.length ?? 0;
+      }
+      const isCapacityFull = occupied >= dayCapacity;
+
+      // ダブルブッキングの厳格な防御（ユーザーが空きだと思って押したのに埋まっていた場合）
+      if (isCapacityFull && !isWaitlistIntent) {
+        return { success: false, error: "申し訳ありません。タッチの差で予約が埋まりました。お手数ですが、別のお時間をお選びください。" };
+      }
+
+      const finalStatus = isCapacityFull ? "waiting" : "pending";
 
       // ── 個室の重複チェック ──
       // 同じ room_id で時間帯が重複するキャンセル以外の予約があればブロック

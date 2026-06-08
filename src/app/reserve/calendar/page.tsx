@@ -6,7 +6,7 @@ import { useSearchParams } from "next/navigation";
 import { format, isSameMonth, isSameDay, isToday, isPast, startOfDay, startOfMonth, endOfMonth, eachDayOfInterval, startOfWeek, endOfWeek } from "date-fns";
 import { ja } from "date-fns/locale";
 import { ChevronLeft, ChevronRight, ArrowLeft, Clock, CalendarDays, X, CheckCircle2, AlertCircle, Sparkles, Phone, MessageCircle } from "lucide-react";
-import { createWaitlistReservation } from "@/app/actions/reserve";
+import { createWaitlistReservation, getDailyAvailability } from "@/app/actions/reserve";
 import { getClinicHolidays, type ClinicHoliday } from "@/app/actions/holidays";
 import { getActiveCourses, getCourseRequiredStaffSchedule, getCoursesAvailability, type ReservationCourse } from "@/app/actions/courses";
 import { getBlockedTimesForCurrentClinic } from "@/app/actions/staff-schedule";
@@ -171,6 +171,9 @@ function ReserveCalendarContent() {
   const [waitlistError, setWaitlistError] = useState("");
   const [waitlistNumber, setWaitlistNumber] = useState("");
 
+  // 選択コースの担当(レーン)。設定されていれば月グリッドもそのレーンの空きで色付けする。
+  const requiredStaffId = selectedCourse?.required_staff_id ?? null;
+
   const fetchMonthData = useCallback(async (monthDate: Date) => {
     setLoadingMonth(true);
     const supabase = createClient();
@@ -188,7 +191,7 @@ function ReserveCalendarContent() {
     // 直接Supabaseからデータを取得（マルチテナント漏洩対策で clinic_id フィルタ必須・
     // customers JOIN は他院の患者名漏洩リスクのため取得しない）
     const [ { data: aptData }, { data: holidayData } ] = await Promise.all([
-      supabase.from("appointments").select("start_time, end_time")
+      supabase.from("appointments").select("start_time, end_time, staff_id")
         .eq("clinic_id", PUBLIC_CLINIC_ID)
         .gte("start_time", startOfMonthUTC)
         .lte("start_time", endOfMonthUTC)
@@ -200,7 +203,9 @@ function ReserveCalendarContent() {
     const counts: Record<string, number> = {};
     if (aptData) {
       const stepMs = slotMinutes * 60000;
-      aptData.forEach((app: { start_time: string; end_time?: string | null }) => {
+      aptData.forEach((app: { start_time: string; end_time?: string | null; staff_id?: string | null }) => {
+        // コースに担当(レーン)がある場合は、そのレーンの予約だけを数える
+        if (requiredStaffId && app.staff_id !== requiredStaffId) return;
         const dStart = new Date(app.start_time);
         const dEnd = app.end_time ? new Date(app.end_time) : new Date(dStart.getTime() + stepMs);
         let current = dStart.getTime();
@@ -231,7 +236,7 @@ function ReserveCalendarContent() {
     setMonthlyData(counts);
     setClinicHolidays(holidayData || []);
     setLoadingMonth(false);
-  }, []);
+  }, [requiredStaffId, slotMinutes, schedule]);
 
   useEffect(() => {
     setCurrentMonth(new Date(new Date().getFullYear(), new Date().getMonth(), 1));
@@ -290,35 +295,9 @@ function ReserveCalendarContent() {
           if (currentMonth) fetchMonthData(currentMonth);
           if (selectedDate) {
             const dateStr = format(selectedDate, "yyyy-MM-dd");
-            const startOfDayUTC = new Date(`${dateStr}T00:00:00+09:00`).toISOString();
-            const endOfDayUTC = new Date(`${dateStr}T23:59:59+09:00`).toISOString();
-            supabase.from("appointments").select("start_time, end_time")
-              .eq("clinic_id", PUBLIC_CLINIC_ID)
-              .gte("start_time", startOfDayUTC)
-              .lte("start_time", endOfDayUTC)
-              .neq("status", "cancelled")
-              .then(({data}) => {
-              const slotCounts: Record<string, number> = {};
-              if (data) {
-                data.forEach((app: any) => {
-                  const start = new Date(app.start_time);
-                  const end = app.end_time ? new Date(app.end_time) : new Date(start.getTime() + 30 * 60000);
-                  let current = start.getTime();
-                  while (current < end.getTime()) {
-                    // 絶対時間に9時間(JST)を加え、フォーマットブレのない手動0埋めでHH:mmを生成
-                    const jstDate = new Date(current + 9 * 3600000);
-                    const hh = String(jstDate.getUTCHours()).padStart(2, '0');
-                    const mm = String(jstDate.getUTCMinutes()).padStart(2, '0');
-                    const timeKey = `${hh}:${mm}`;
-                    
-                    slotCounts[timeKey] = (slotCounts[timeKey] || 0) + 1;
-                    current += 30 * 60000;
-                  }
-                });
-              }
-              const bookedTimes = Object.keys(slotCounts).filter(time => slotCounts[time] >= 1);
-              setDailySlots(bookedTimes);
-            });
+            getDailyAvailability(dateStr, courseIdParam)
+              .then((bookedTimes) => setDailySlots(bookedTimes))
+              .catch(() => {});
           }
         }
       )
@@ -335,7 +314,7 @@ function ReserveCalendarContent() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [currentMonth, selectedDate, fetchMonthData]);
+  }, [currentMonth, selectedDate, fetchMonthData, courseIdParam]);
 
   // 日付を選んだら、下の時間帯パネルへ自動スクロール（スマホで探さなくて済むように）。
   // 時間枠の読み込み完了後（loadingDay=false）に実行＝レイアウト確定後なので確実に上端まで寄る。
@@ -355,53 +334,21 @@ function ReserveCalendarContent() {
     setLoadingDay(true);
     
     const dateStr = format(date, "yyyy-MM-dd");
-    const supabase = createClient();
-
-    // JSTからUTC文字列に厳密に変換する (DBのUTCデータと100%一致させるため)
-    const startOfDayUTC = new Date(`${dateStr}T00:00:00+09:00`).toISOString();
-    const endOfDayUTC = new Date(`${dateStr}T23:59:59+09:00`).toISOString();
-
-    // 【重要】clinic_id フィルタ必須。これが無いと他院（karada/relaq等）の予約まで
-    // 拾って「予約済」表示になり、本院の空き枠が見えなくなる（マルチテナント漏洩）。
-    // また customers JOIN は他院の患者名が leak するので start/end のみ取得する。
-    const { data: aptData, error: aptError } = await supabase
-      .from("appointments")
-      .select("start_time, end_time")
-      .eq("clinic_id", PUBLIC_CLINIC_ID)
-      .gte("start_time", startOfDayUTC)
-      .lte("start_time", endOfDayUTC)
-      .neq("status", "cancelled");
-
-    if (aptError) console.error("データ取得エラー:", aptError);
 
     // 並行してスタッフ予定（全スタッフ不在の時間帯）を取得
     getBlockedTimesForCurrentClinic(dateStr)
       .then((blocked) => setBlockedSlots(blocked))
       .catch(() => setBlockedSlots([]));
 
-    const slotCounts: Record<string, number> = {};
-    if (aptData) {
-      aptData.forEach((app: { start_time: string; end_time?: string | null }) => {
-        const start = new Date(app.start_time);
-        const end = app.end_time ? new Date(app.end_time) : new Date(start.getTime() + 30 * 60000);
-        let current = start.getTime();
-        while (current < end.getTime()) {
-          // 絶対時間に9時間(JST)を加え、フォーマットブレのない手動0埋めでHH:mmを生成
-          const jstDate = new Date(current + 9 * 3600000);
-          const hh = String(jstDate.getUTCHours()).padStart(2, '0');
-          const mm = String(jstDate.getUTCMinutes()).padStart(2, '0');
-          const timeKey = `${hh}:${mm}`;
-          
-          slotCounts[timeKey] = (slotCounts[timeKey] || 0) + 1;
-          
-          current += 30 * 60000;
-        }
-      });
+    // 埋まっている時間帯はサーバ側で「コースの担当(レーン)の空き」を基準に判定する。
+    // （定員/レーンのロジックを reserve.ts の1か所に集約。clinic_id フィルタもサーバ側で実施）
+    try {
+      const bookedTimes = await getDailyAvailability(dateStr, courseIdParam);
+      setDailySlots(bookedTimes);
+    } catch (e) {
+      console.error("空き時間の取得に失敗:", e);
+      setDailySlots([]);
     }
-
-    const bookedTimes = Object.keys(slotCounts).filter(time => slotCounts[time] >= 1);
-    
-    setDailySlots(bookedTimes);
     setLoadingDay(false);
   };
 

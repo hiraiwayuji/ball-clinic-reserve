@@ -155,14 +155,14 @@ function ReserveContent() {
     if (date) {
       const fetchAvailability = async () => {
         const dateStr = format(date, "yyyy-MM-dd");
-        const times = await getDailyAvailability(dateStr);
+        const times = await getDailyAvailability(dateStr, selectedCourseId);
         setBookedTimes(times);
       };
       fetchAvailability();
     } else {
       setBookedTimes([]);
     }
-  }, [date]);
+  }, [date, selectedCourseId]);
 
   useEffect(() => {
     const supabase = createClient();
@@ -171,12 +171,12 @@ function ReserveContent() {
       .on("postgres_changes", { event: "*", schema: "public", table: "appointments" }, () => {
         if (date) {
           const dateStr = format(date, "yyyy-MM-dd");
-          getDailyAvailability(dateStr).then(setBookedTimes);
+          getDailyAvailability(dateStr, selectedCourseId).then(setBookedTimes);
         }
       })
       .subscribe();
     return () => { supabase.removeChannel(channel); };
-  }, [date]);
+  }, [date, selectedCourseId]);
 
   // 担当固定コース（さみ整体など）を選んだら、そのスタッフの出勤日スケジュールを取得し
   // 担当を自動でそのスタッフに設定する。固定でないコースなら解除。
