@@ -16,7 +16,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { createManualReservation } from "@/app/actions/adminReserve";
+import { createManualReservation, getAddonCourseInfo } from "@/app/actions/adminReserve";
 import { findSameDayAppointmentsByName } from "@/app/actions/duplicateCheck";
 import { searchPatientsForBooking, PatientSuggestion } from "@/app/actions/patientSearch";
 import { getCourses, getStaffList, getRooms, type ReservationCourse, type ReservationStaff, type ReservationRoom } from "@/app/actions/courses";
@@ -102,9 +102,10 @@ export function AddAppointmentDialog({
   const [additionalStaff, setAdditionalStaff] = useState<string[]>([]);
   // ダブル施術：さみ整体↔ボール担当を同時に組む（相方を additional に自動セット）
   const [doubleOn, setDoubleOn] = useState(false);
-  // 水素を追加：この予約に水素も入れる（after=施術後 / same=同時刻）
-  const [addHydrogen, setAddHydrogen] = useState(false);
-  const [hydrogenTiming, setHydrogenTiming] = useState<"after" | "same">("after");
+  // 施術後に○○を追加：設定された追加メニュー（after=施術後 / same=同時刻）
+  const [addAddon, setAddAddon] = useState(false);
+  const [addonTiming, setAddonTiming] = useState<"after" | "same">("after");
+  const [addonInfo, setAddonInfo] = useState<{ courseId: string; name: string } | null>(null);
 
   // 患者サジェスト
   const [nameValue, setNameValue] = useState("");
@@ -144,6 +145,9 @@ export function AddAppointmentDialog({
       if (rooms.length === 0) {
         getRooms().then(setRooms).catch(() => {});
       }
+      if (!addonInfo) {
+        getAddonCourseInfo().then(setAddonInfo).catch(() => {});
+      }
     } else {
       // ダイアログを閉じたらリセット
       setNameValue("");
@@ -161,8 +165,8 @@ export function AddAppointmentDialog({
       setAdditionalCourses([]);
       setAdditionalStaff([]);
       setDoubleOn(false);
-      setAddHydrogen(false);
-      setHydrogenTiming("after");
+      setAddAddon(false);
+      setAddonTiming("after");
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, defaultDate, defaultTime, defaultStaffId, defaultCourseId, defaultName, defaultPhone, defaultMedicalRecordNumber, defaultVisitType]);
@@ -318,14 +322,10 @@ export function AddAppointmentDialog({
     if (resolvedCustomerId) formData.set("customerId", resolvedCustomerId);
     formData.set("additionalCourseIds", JSON.stringify(additionalCourses.filter(Boolean)));
     formData.set("additionalStaffIds", JSON.stringify(additionalStaff.filter(Boolean)));
-    // 「水素を追加」（水素レーンがある院＝ボール・施術が水素自体でないとき）
-    {
-      const waterExists = staffList.some((s) => s.name === "水素");
-      const selCourse = courses.find((c) => c.id === courseId);
-      if (addHydrogen && waterExists && selCourse?.name !== "水素") {
-        formData.set("addHydrogen", "true");
-        formData.set("hydrogenTiming", hydrogenTiming);
-      }
+    // 「施術後に○○を追加」（設定された追加メニューがあり、施術がそのメニュー自体でないとき）
+    if (addAddon && addonInfo && courseId !== addonInfo.courseId) {
+      formData.set("addAddon", "true");
+      formData.set("addonTiming", addonTiming);
     }
     formData.append("date", format(date, "yyyy-MM-dd"));
     formData.append("time", time);
@@ -776,30 +776,29 @@ export function AddAppointmentDialog({
               </div>
             )}
 
-            {/* 水素を追加（水素レーンがある院＝ボールのみ・施術が水素自体でないとき表示） */}
-            {staffList.some((s) => s.name === "水素") &&
-              courses.find((c) => c.id === courseId)?.name !== "水素" && (
+            {/* 施術後に○○を追加（設定された追加メニューがあり・施術がそのメニュー自体でないとき表示） */}
+            {addonInfo && courseId !== addonInfo.courseId && (
               <div className="space-y-2">
                 <button
                   type="button"
-                  onClick={() => setAddHydrogen((v) => !v)}
-                  aria-pressed={addHydrogen}
+                  onClick={() => setAddAddon((v) => !v)}
+                  aria-pressed={addAddon}
                   className={`w-full flex items-center justify-between gap-2 h-11 px-3 rounded-lg border text-sm font-bold transition-all ${
-                    addHydrogen ? "bg-cyan-600 border-cyan-600 text-white" : "border-cyan-300 text-cyan-700 hover:bg-cyan-50"
+                    addAddon ? "bg-cyan-600 border-cyan-600 text-white" : "border-cyan-300 text-cyan-700 hover:bg-cyan-50"
                   }`}
                 >
-                  <span>💧 水素を追加する</span>
-                  <span className={`text-xs ${addHydrogen ? "text-white/90" : "text-cyan-500"}`}>{addHydrogen ? "ON" : "OFF"}</span>
+                  <span>＋ {addonInfo.name}を追加する</span>
+                  <span className={`text-xs ${addAddon ? "text-white/90" : "text-cyan-500"}`}>{addAddon ? "ON" : "OFF"}</span>
                 </button>
-                {addHydrogen && (
+                {addAddon && (
                   <div className="flex gap-2">
                     {([["after", "施術後に追加"], ["same", "同時刻に追加"]] as const).map(([val, label]) => (
                       <button
                         key={val}
                         type="button"
-                        onClick={() => setHydrogenTiming(val)}
+                        onClick={() => setAddonTiming(val)}
                         className={`flex-1 h-10 rounded-lg border text-sm font-semibold transition-all ${
-                          hydrogenTiming === val ? "bg-cyan-100 border-cyan-400 text-cyan-800" : "border-slate-200 text-slate-600 hover:bg-slate-50"
+                          addonTiming === val ? "bg-cyan-100 border-cyan-400 text-cyan-800" : "border-slate-200 text-slate-600 hover:bg-slate-50"
                         }`}
                       >
                         {label}

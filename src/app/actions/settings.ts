@@ -96,6 +96,10 @@ export type ClinicSettings = {
   // 売上記帳のタイプ（オーナーが選択）。
   // per_patient: 患者ごとの個別入力（既存）/ tally: 窓口日計表グリッド（からだ等）
   sales_input_mode?: "per_patient" | "tally" | null;
+  // 「施術後に○○を追加」ボタンで追加するメニュー（reservation_courses.id）。
+  // 設定すると管理画面（予約詳細/編集/新規追加）に「施術後に〇〇を追加」ボタンが出る。
+  // 例: ボール=水素。NULL ならボタン非表示。
+  addon_course_id?: string | null;
   // 窓口日計表モードの金額カラム定義（JSONB）。専用 getter/setter で更新するため
   // settingsData には載せない（updateClinicSettings 経由では更新しない）。NULL ならデフォルト6列。
   tally_columns?: TallyColumn[] | null;
@@ -250,6 +254,7 @@ export async function updateClinicSettings(
     expense_owner_only: settings.expense_owner_only ?? false,
     departments: settings.departments ?? [],
     sales_input_mode: settings.sales_input_mode ?? "per_patient",
+    addon_course_id: settings.addon_course_id ?? null,
   };
 
   const targetData = {

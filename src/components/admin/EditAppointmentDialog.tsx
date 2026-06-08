@@ -24,7 +24,8 @@ import {
   updateAppointmentStatus,
   sendLineConfirmation,
   notifyWaitlistOpening,
-  addHydrogenToAppointment,
+  addAddonToAppointment,
+  getAddonCourseInfo,
   type WaitlistCandidate,
 } from "@/app/actions/adminReserve";
 import { getCourses, getStaffList, getRooms, type ReservationCourse, type ReservationStaff, type ReservationRoom } from "@/app/actions/courses";
@@ -72,6 +73,8 @@ export function EditAppointmentDialog({
   // 次回予約フォームの初期日時（1週間後の同じ曜日・同じ時刻）
   const [nextDefaultDate, setNextDefaultDate] = useState<Date | undefined>();
   const [nextDefaultTime, setNextDefaultTime] = useState<string>("");
+  // 「施術後に○○を追加」用の設定メニュー
+  const [addonInfo, setAddonInfo] = useState<{ courseId: string; name: string } | null>(null);
 
   // コース・スタッフ・個室マスタ
   const [courses, setCourses] = useState<ReservationCourse[]>([]);
@@ -187,6 +190,9 @@ export function EditAppointmentDialog({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, appointment]);
 
+  // 追加メニュー設定を取得（「施術後に○○を追加」ボタン用）
+  useEffect(() => { getAddonCourseInfo().then(setAddonInfo).catch(() => setAddonInfo(null)); }, []);
+
   // コース選択時に所要時間も連動して更新
   const handleCourseChange = (id: string) => {
     setCourseId(id);
@@ -233,18 +239,19 @@ export function EditAppointmentDialog({
     }
   };
 
-  // 予約に水素を追加（施術後 or 同時刻）。同一患者へ直接ひもづけ。
-  const handleAddHydrogen = async (timing: "after" | "same") => {
+  // 予約に「設定された追加メニュー」を追加（施術後 or 同時刻）。同一患者へ直接ひもづけ。
+  const handleAddAddon = async (timing: "after" | "same") => {
     if (!appointment) return;
+    const label = addonInfo?.name ?? "メニュー";
     setIsSubmitting(true);
     try {
-      const res = await addHydrogenToAppointment(appointment.id, timing);
+      const res = await addAddonToAppointment(appointment.id, timing);
       if (res.success) {
-        toast.success(timing === "same" ? "同時刻に水素を追加しました" : "施術後に水素を追加しました");
+        toast.success(timing === "same" ? `同時刻に${label}を追加しました` : `施術後に${label}を追加しました`);
         onSuccess?.();
         onOpenChange(false);
       } else {
-        toast.error(res.error ?? "水素の追加に失敗しました");
+        toast.error(res.error ?? "追加に失敗しました");
       }
     } catch {
       toast.error("通信エラーが発生しました");
@@ -664,33 +671,29 @@ export function EditAppointmentDialog({
               次回予約を入れる
             </Button>
 
-            {/* 水素を追加（水素レーンがある院＝ボールのみ・水素予約自体には出さない） */}
-            {(() => {
-              const waterStaff = staffList.find((s) => s.name === "水素");
-              if (!waterStaff || appointment.staff_id === waterStaff.id) return null;
-              return (
-                <div className="flex gap-2">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => handleAddHydrogen("after")}
-                    disabled={isSubmitting}
-                    className="flex-1 h-10 border-cyan-300 text-cyan-700 hover:bg-cyan-50 rounded-xl text-sm"
-                  >
-                    💧 施術後に水素
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => handleAddHydrogen("same")}
-                    disabled={isSubmitting}
-                    className="flex-1 h-10 border-cyan-300 text-cyan-700 hover:bg-cyan-50 rounded-xl text-sm"
-                  >
-                    💧 同時刻に水素
-                  </Button>
-                </div>
-              );
-            })()}
+            {/* 施術後に○○を追加（設定 addon_course_id がある院のみ・追加メニュー自体には出さない） */}
+            {addonInfo && appointment.course_id !== addonInfo.courseId && (
+              <div className="flex gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => handleAddAddon("after")}
+                  disabled={isSubmitting}
+                  className="flex-1 h-10 border-cyan-300 text-cyan-700 hover:bg-cyan-50 rounded-xl text-sm"
+                >
+                  ＋ 施術後に{addonInfo.name}
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => handleAddAddon("same")}
+                  disabled={isSubmitting}
+                  className="flex-1 h-10 border-cyan-300 text-cyan-700 hover:bg-cyan-50 rounded-xl text-sm"
+                >
+                  ＋ 同時刻に{addonInfo.name}
+                </Button>
+              </div>
+            )}
 
             {/* Secondary actions */}
             <div className="flex gap-2">

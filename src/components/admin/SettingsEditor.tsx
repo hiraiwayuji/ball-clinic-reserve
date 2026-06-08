@@ -1,12 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Save, Loader2, MessageSquare, Video, Settings, Target, MapPin, Hash, Coins } from "lucide-react";
 import { ClinicSettings, updateClinicSettings } from "@/app/actions/settings";
+import { getActiveCourses, type ReservationCourse } from "@/app/actions/courses";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
@@ -19,6 +20,9 @@ export default function SettingsEditor({ initialSettings }: { initialSettings: C
   const router = useRouter();
   const [settings, setSettings] = useState<ClinicSettings | null>(initialSettings);
   const [isSaving, setIsSaving] = useState(false);
+  const [courses, setCourses] = useState<ReservationCourse[]>([]);
+
+  useEffect(() => { getActiveCourses().then(setCourses).catch(() => {}); }, []);
 
   
     const handleSave = async () => {
@@ -115,6 +119,28 @@ export default function SettingsEditor({ initialSettings }: { initialSettings: C
                     先生ごとに横並びで表示します。
                   </p>
                 </div>
+              </div>
+
+              {/* 施術後に○○を追加（管理画面の予約詳細/編集/新規追加に出るボタン） */}
+              <div className="border-t pt-4 mt-2 space-y-2">
+                <Label className="font-bold">施術後に追加できるメニュー</Label>
+                <select
+                  value={settings?.addon_course_id ?? ""}
+                  onChange={(e) => updateField("addon_course_id", e.target.value || null)}
+                  className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm bg-white"
+                >
+                  <option value="">なし（ボタンを出さない）</option>
+                  {courses.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}（{c.duration_minutes}分{c.price != null ? ` / ¥${c.price.toLocaleString()}` : ""}）
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-slate-500 leading-relaxed">
+                  ここでメニューを選ぶと、管理画面の予約（詳細・編集・新規追加）に<br />
+                  「＋ 施術後に◯◯を追加」「＋ 同時刻に◯◯を追加」ボタンが出ます。<br />
+                  例：ボール接骨院は「水素」を設定。施術と同じ患者さんに、その場で追加できます。
+                </p>
               </div>
 
               {/* 営業時間（予約スロット範囲） */}

@@ -13,7 +13,7 @@ import {
 import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
 import { getTimelineForDate, type TimelineData, type TimelineAppointment } from "@/app/actions/timeline";
-import { updateCheckinStatus, addHydrogenToAppointment } from "@/app/actions/adminReserve";
+import { updateCheckinStatus, addAddonToAppointment, getAddonCourseInfo } from "@/app/actions/adminReserve";
 import { AddAppointmentDialog } from "@/components/admin/AddAppointmentDialog";
 import { EditAppointmentDialog } from "@/components/admin/EditAppointmentDialog";
 
@@ -53,6 +53,8 @@ export default function TodayTimelineWidget() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedApt, setSelectedApt] = useState<TimelineAppointment | null>(null);
+  // 「施術後に○○を追加」用：院ごとに設定された追加メニュー（未設定ならボタン非表示）
+  const [addonInfo, setAddonInfo] = useState<{ courseId: string; name: string } | null>(null);
 
   // 新規予約ダイアログ（空きセルクリックで開く）
   const [reserveDialog, setReserveDialog] = useState<{
@@ -81,6 +83,9 @@ export default function TodayTimelineWidget() {
   const [actionLoading, setActionLoading] = useState(false);
 
   useEffect(() => { setDate(new Date()); }, []);
+
+  // 追加メニュー設定を取得（「施術後に○○を追加」ボタンの表示・ラベル用）
+  useEffect(() => { getAddonCourseInfo().then(setAddonInfo).catch(() => setAddonInfo(null)); }, []);
 
   const fetchData = useCallback(async (d: Date) => {
     setLoading(true);
@@ -145,18 +150,19 @@ export default function TodayTimelineWidget() {
     }
   };
 
-  // 予約に「水素」を追加（施術後 or 同時刻）。同一患者へ直接ひもづけ＝重複アラート無し。
-  const handleAddHydrogen = async (apt: TimelineAppointment, timing: "after" | "same") => {
+  // 予約に「設定された追加メニュー」を追加（施術後 or 同時刻）。同一患者へ直接ひもづけ＝重複アラート無し。
+  const handleAddAddon = async (apt: TimelineAppointment, timing: "after" | "same") => {
     if (actionLoading) return;
+    const label = addonInfo?.name ?? "メニュー";
     setActionLoading(true);
     try {
-      const res = await addHydrogenToAppointment(apt.id, timing);
+      const res = await addAddonToAppointment(apt.id, timing);
       if (res.success) {
-        toast.success(timing === "same" ? "同時刻に水素を追加しました" : "施術後に水素を追加しました");
+        toast.success(timing === "same" ? `同時刻に${label}を追加しました` : `施術後に${label}を追加しました`);
         setSelectedApt(null);
         if (date) fetchData(date);
       } else {
-        toast.error(res.error ?? "水素の追加に失敗しました");
+        toast.error(res.error ?? "追加に失敗しました");
       }
     } finally {
       setActionLoading(false);
@@ -515,24 +521,24 @@ export default function TodayTimelineWidget() {
                 </Button>
               </div>
 
-              {/* 水素を追加（水素レーンがある院＝ボールのみ・水素予約自体には出さない） */}
-              {data?.staff?.some((s) => s.name === "水素") && selectedApt.staff_name !== "水素" && (
+              {/* 施術後に○○を追加（設定 addon_course_id がある院のみ・追加メニュー自体には出さない） */}
+              {addonInfo && selectedApt.course_id !== addonInfo.courseId && (
                 <div className="flex gap-2">
                   <Button
-                    onClick={() => handleAddHydrogen(selectedApt, "after")}
+                    onClick={() => handleAddAddon(selectedApt, "after")}
                     disabled={actionLoading}
                     variant="outline"
                     className="flex-1 border-cyan-300 dark:border-cyan-700 text-cyan-700 dark:text-cyan-300 hover:bg-cyan-50 dark:hover:bg-cyan-950/50"
                   >
-                    💧 施術後に水素
+                    ＋ 施術後に{addonInfo.name}
                   </Button>
                   <Button
-                    onClick={() => handleAddHydrogen(selectedApt, "same")}
+                    onClick={() => handleAddAddon(selectedApt, "same")}
                     disabled={actionLoading}
                     variant="outline"
                     className="flex-1 border-cyan-300 dark:border-cyan-700 text-cyan-700 dark:text-cyan-300 hover:bg-cyan-50 dark:hover:bg-cyan-950/50"
                   >
-                    💧 同時刻に水素
+                    ＋ 同時刻に{addonInfo.name}
                   </Button>
                 </div>
               )}
