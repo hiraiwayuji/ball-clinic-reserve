@@ -13,7 +13,7 @@ import {
 import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
 import { getTimelineForDate, type TimelineData, type TimelineAppointment } from "@/app/actions/timeline";
-import { updateCheckinStatus } from "@/app/actions/adminReserve";
+import { updateCheckinStatus, addHydrogenToAppointment } from "@/app/actions/adminReserve";
 import { AddAppointmentDialog } from "@/components/admin/AddAppointmentDialog";
 import { EditAppointmentDialog } from "@/components/admin/EditAppointmentDialog";
 
@@ -139,6 +139,24 @@ export default function TodayTimelineWidget() {
         if (date) fetchData(date);
       } else {
         toast.error(res.error ?? "受付処理に失敗しました");
+      }
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  // 予約に「水素」を追加（施術後 or 同時刻）。同一患者へ直接ひもづけ＝重複アラート無し。
+  const handleAddHydrogen = async (apt: TimelineAppointment, timing: "after" | "same") => {
+    if (actionLoading) return;
+    setActionLoading(true);
+    try {
+      const res = await addHydrogenToAppointment(apt.id, timing);
+      if (res.success) {
+        toast.success(timing === "same" ? "同時刻に水素を追加しました" : "施術後に水素を追加しました");
+        setSelectedApt(null);
+        if (date) fetchData(date);
+      } else {
+        toast.error(res.error ?? "水素の追加に失敗しました");
       }
     } finally {
       setActionLoading(false);
@@ -496,6 +514,29 @@ export default function TodayTimelineWidget() {
                   会計へ
                 </Button>
               </div>
+
+              {/* 水素を追加（水素レーンがある院＝ボールのみ・水素予約自体には出さない） */}
+              {data?.staff?.some((s) => s.name === "水素") && selectedApt.staff_name !== "水素" && (
+                <div className="flex gap-2">
+                  <Button
+                    onClick={() => handleAddHydrogen(selectedApt, "after")}
+                    disabled={actionLoading}
+                    variant="outline"
+                    className="flex-1 border-cyan-300 dark:border-cyan-700 text-cyan-700 dark:text-cyan-300 hover:bg-cyan-50 dark:hover:bg-cyan-950/50"
+                  >
+                    💧 施術後に水素
+                  </Button>
+                  <Button
+                    onClick={() => handleAddHydrogen(selectedApt, "same")}
+                    disabled={actionLoading}
+                    variant="outline"
+                    className="flex-1 border-cyan-300 dark:border-cyan-700 text-cyan-700 dark:text-cyan-300 hover:bg-cyan-50 dark:hover:bg-cyan-950/50"
+                  >
+                    💧 同時刻に水素
+                  </Button>
+                </div>
+              )}
+
               <Button
                 onClick={() => {
                   let timeStr: string | undefined;

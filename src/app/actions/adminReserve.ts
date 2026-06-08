@@ -33,6 +33,80 @@ function maskName(name: string | null | undefined): string {
 }
 
 
+/**
+ * 既存予約に「水素」を追加する（同一患者・同じ日に紐づける）。
+ * timing: "after"=施術の直後 / "same"=同時刻。
+ * 新規追加ダイアログの「同じ日に2件」アラートを回避し、水素レーンの重複だけチェックする。
+ */
+export async function addHydrogenToAppointment(appointmentId: string, timing: "after" | "same") {
+  const { clinicId } = await checkAdminAuth();
+  const supabase = getAdminSupabase();
+  if (!supabase) return { success: false, error: "サーバー設定エラー（service role key 未設定）" };
+  try {
+    const { data: apt } = await supabase
+      .from("appointments")
+      .select("id, customer_id, start_time, end_time")
+      .eq("id", appointmentId)
+      .eq("clinic_id", clinicId)
+      .maybeSingle();
+    if (!apt || !apt.customer_id) return { success: false, error: "元の予約が見つかりませんでした" };
+
+    const { data: water } = await supabase
+      .from("reservation_courses")
+      .select("id, name, duration_minutes, required_staff_id")
+      .eq("clinic_id", clinicId)
+      .eq("name", "水素")
+      .eq("is_active", true)
+      .maybeSingle();
+    if (!water) return { success: false, error: "水素メニューが見つかりませんでした" };
+
+    const wDur = Number(water.duration_minutes ?? 30) || 30;
+    const baseIso = timing === "same" ? apt.start_time : (apt.end_time ?? apt.start_time);
+    const wStart = new Date(baseIso);
+    const wStartIso = wStart.toISOString();
+    const wEndIso = new Date(wStart.getTime() + wDur * 60000).toISOString();
+    const wStaffId = (water.required_staff_id as string | null) ?? null;
+
+    // 水素レーンの重複チェック
+    if (wStaffId) {
+      const { data: conf } = await supabase
+        .from("appointments")
+        .select("id")
+        .eq("clinic_id", clinicId)
+        .eq("staff_id", wStaffId)
+        .neq("status", "cancelled")
+        .lt("start_time", wEndIso)
+        .gt("end_time", wStartIso)
+        .limit(1);
+      if (conf && conf.length > 0) {
+        return { success: false, error: "その時間は水素がすでに埋まっています。別の時間でお試しください。" };
+      }
+    }
+
+    const { error } = await supabase.from("appointments").insert([{
+      customer_id: apt.customer_id,
+      start_time: wStartIso,
+      end_time: wEndIso,
+      memo: timing === "same" ? "【水素 追加・同時刻】" : "【水素 追加・施術後】",
+      is_first_visit: false,
+      status: "confirmed",
+      clinic_id: clinicId,
+      course_id: water.id,
+      course_name: water.name,
+      ...(wStaffId ? { staff_id: wStaffId, staff_name: "水素" } : {}),
+    }]);
+    if (error) {
+      console.error("addHydrogenToAppointment insert error", error);
+      return { success: false, error: "水素の追加に失敗しました" };
+    }
+    revalidatePath("/admin/dashboard");
+    return { success: true };
+  } catch (e) {
+    console.error("addHydrogenToAppointment failed", e);
+    return { success: false, error: "水素の追加でエラーが発生しました" };
+  }
+}
+
 export async function createManualReservation(formData: FormData) {
   const { clinicId } = await checkAdminAuth();
   try {
