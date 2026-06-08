@@ -31,6 +31,7 @@ export type Customer = {
   created_at: string;
   appointmentCount: number;
   cancelCount: number;
+  noShowCount: number;
   lastVisit: string | null;
   booking_suspended: boolean;
   line_user_id: string | null;
@@ -482,6 +483,13 @@ function EditableRow({
           {customer.cancelCount > 0
             ? <Badge variant="secondary" className={"px-3 " + (customer.cancelCount >= 3 ? "bg-orange-100 text-orange-700" : "")}>{customer.cancelCount} 回</Badge>
             : <span className="text-slate-400 text-sm">0 回</span>}
+          {customer.noShowCount > 0 && (
+            <div className="mt-1">
+              <Badge className={"px-2 text-[11px] " + (customer.noShowCount >= 2 ? "bg-rose-600 text-white" : "bg-rose-100 text-rose-700")}>
+                未来院 {customer.noShowCount}
+              </Badge>
+            </div>
+          )}
         </TableCell>
 
         <TableCell className="text-sm text-slate-600 dark:text-slate-400 whitespace-nowrap">

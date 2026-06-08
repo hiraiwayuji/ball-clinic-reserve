@@ -764,7 +764,7 @@ export async function markAppointmentNoShow(
 
     const { error } = await supabase
       .from("appointments")
-      .update({ status: "cancelled", checkin_status: null })
+      .update({ status: "cancelled", checkin_status: null, no_show: true })
       .eq("id", appointmentId)
       .eq("clinic_id", auth.clinicId);
 

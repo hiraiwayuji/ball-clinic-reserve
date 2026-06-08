@@ -13,6 +13,7 @@ type CustomerWithStats = {
   created_at: string;
   appointmentCount: number;
   cancelCount: number;
+  noShowCount: number;
   lastVisit: string | null;
   booking_suspended: boolean;
   line_user_id: string | null;
@@ -33,6 +34,7 @@ type AppointmentRow = {
   id: string;
   start_time: string;
   status: string | null;
+  no_show?: boolean | null;
 };
 
 type CustomerRow = Omit<CustomerWithStats, "appointmentCount" | "cancelCount" | "lastVisit"> & {
@@ -78,7 +80,8 @@ export async function getCustomers(): Promise<CustomerWithStats[]> {
         appointments (
           id,
           start_time,
-          status
+          status,
+          no_show
         )
       `)
       .eq("clinic_id", clinicId)
@@ -134,6 +137,7 @@ export async function getCustomers(): Promise<CustomerWithStats[]> {
       const appointments = c.appointments || [];
       const cancelled = appointments.filter((a) => a.status === "cancelled");
       const active = appointments.filter((a) => a.status !== "cancelled");
+      const noShow = appointments.filter((a) => a.no_show === true);
 
       let lastVisit = null;
       if (active.length > 0) {
@@ -150,6 +154,7 @@ export async function getCustomers(): Promise<CustomerWithStats[]> {
         created_at: c.created_at,
         appointmentCount: active.length,
         cancelCount: cancelled.length,
+        noShowCount: noShow.length,
         lastVisit,
         booking_suspended: c.booking_suspended ?? false,
         line_user_id: c.line_user_id ?? null,
