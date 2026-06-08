@@ -789,7 +789,8 @@ export async function createReservation(formData: FormData) {
             const wStaffId = (water.required_staff_id as string | null) ?? null;
             // 開始スロット(HH:mm JST)が営業時間内か
             const wHHMM = new Intl.DateTimeFormat("ja-JP", { timeZone: "Asia/Tokyo", hour: "2-digit", minute: "2-digit", hour12: false }).format(wStart);
-            const businessSlots = getTimeSlots(new Date(`${rawDate}T00:00:00+09:00`));
+            // 曜日判定はサーバ(UTC)でも JST の暦日と一致させる（+09:00 を付けると前日にズレるので付けない）
+            const businessSlots = getTimeSlots(new Date(`${rawDate}T00:00:00`));
             const inHours = businessSlots.includes(wHHMM);
             // 水素レーンが空いているか
             let laneFree = true;
@@ -819,9 +820,10 @@ export async function createReservation(formData: FormData) {
                 ...(wStaffId ? { staff_id: wStaffId, staff_name: "水素" } : {}),
               }]);
               if (!wErr) { hydrogenAdded = true; hydrogenTime = wHHMM; }
-              else { console.error("hydrogen insert error", wErr); hydrogenError = "登録に失敗しました"; }
+              else { console.error("hydrogen insert error", wErr); hydrogenError = "水素が同じ時間にすでにご予約の可能性があります。お手数ですがLINEでお問い合わせ、または当日 院にお問い合わせください。"; }
             } else {
-              hydrogenError = !inHours ? "営業時間外のため追加できませんでした" : "その時間は水素が満席でした";
+              // 同時刻に水素が入っている可能性 → お問い合わせへ案内（「営業時間外」など分かりにくい表現は出さない）
+              hydrogenError = "水素が同じ時間にすでにご予約の可能性があります。お手数ですがLINEでお問い合わせ、または当日 院にお問い合わせください。";
             }
           }
         } catch (e) {
@@ -877,7 +879,8 @@ export async function createReservation(formData: FormData) {
               const hStart = new Date(hStartIso);
               const hEndIso = new Date(hStart.getTime() + hDur * 60000).toISOString();
               const hHHMM = new Intl.DateTimeFormat("ja-JP", { timeZone: "Asia/Tokyo", hour: "2-digit", minute: "2-digit", hour12: false }).format(hStart);
-              const businessSlots = getTimeSlots(new Date(`${rawDate}T00:00:00+09:00`));
+              // 曜日判定はサーバ(UTC)でも JST の暦日と一致させる（+09:00 を付けると前日にズレる）
+              const businessSlots = getTimeSlots(new Date(`${rawDate}T00:00:00`));
               const inHours = businessSlots.includes(hHHMM);
               let laneFree = true;
               if (hStaffId) {
@@ -906,9 +909,9 @@ export async function createReservation(formData: FormData) {
                   ...(hStaffId ? { staff_id: hStaffId, staff_name: "ヘッドスパ" } : {}),
                 }]);
                 if (!hErr) { headspaAdded = true; headspaTime = hHHMM; }
-                else { console.error("headspa insert error", hErr); headspaError = "登録に失敗しました"; }
+                else { console.error("headspa insert error", hErr); headspaError = "ヘッドスパが同じ時間にすでにご予約の可能性があります。お手数ですがLINEでお問い合わせ、または当日 院にお問い合わせください。"; }
               } else {
-                headspaError = !inHours ? "営業時間外のため追加できませんでした" : "その時間はヘッドスパが満席でした";
+                headspaError = "ヘッドスパが同じ時間にすでにご予約の可能性があります。お手数ですがLINEでお問い合わせ、または当日 院にお問い合わせください。";
               }
             }
           }

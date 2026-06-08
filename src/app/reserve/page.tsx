@@ -408,7 +408,7 @@ function ReserveContent() {
               </div>
             ) : (
               <div className="mb-6 mx-auto max-w-sm rounded-2xl bg-amber-500/15 border border-amber-400/30 px-4 py-3 text-amber-100 text-sm font-bold">
-                ⚠️ 水素は追加できませんでした（{hydrogenResult.error ?? "空きなし"}）。施術のご予約は受け付けています。
+                ⚠️ {hydrogenResult.error ?? "水素は追加できませんでした。"}<br />施術のご予約は受け付けています。
               </div>
             )
           )}
@@ -419,7 +419,7 @@ function ReserveContent() {
               </div>
             ) : (
               <div className="mb-6 mx-auto max-w-sm rounded-2xl bg-amber-500/15 border border-amber-400/30 px-4 py-3 text-amber-100 text-sm font-bold">
-                ⚠️ ヘッドスパは追加できませんでした（{headspaResult.error ?? "空きなし"}）。施術のご予約は受け付けています。
+                ⚠️ {headspaResult.error ?? "ヘッドスパは追加できませんでした。"}<br />施術のご予約は受け付けています。
               </div>
             )
           )}
