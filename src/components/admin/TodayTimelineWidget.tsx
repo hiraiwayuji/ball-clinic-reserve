@@ -13,7 +13,7 @@ import {
 import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
 import { getTimelineForDate, type TimelineData, type TimelineAppointment } from "@/app/actions/timeline";
-import { updateCheckinStatus, addAddonToAppointment, getAddonCourseInfo } from "@/app/actions/adminReserve";
+import { updateCheckinStatus, addAddonToAppointment, getAddonCourseInfo, sendReviewRequest, getReviewRequestConfig } from "@/app/actions/adminReserve";
 import { AddAppointmentDialog } from "@/components/admin/AddAppointmentDialog";
 import { EditAppointmentDialog } from "@/components/admin/EditAppointmentDialog";
 
@@ -55,6 +55,8 @@ export default function TodayTimelineWidget() {
   const [selectedApt, setSelectedApt] = useState<TimelineAppointment | null>(null);
   // 「施術後に○○を追加」用：院ごとに設定された追加メニュー（未設定ならボタン非表示）
   const [addonInfo, setAddonInfo] = useState<{ courseId: string; name: string } | null>(null);
+  // Googleクチコミ依頼が使えるか（設定URLがある院のみボタン表示）
+  const [reviewEnabled, setReviewEnabled] = useState(false);
 
   // 新規予約ダイアログ（空きセルクリックで開く）
   const [reserveDialog, setReserveDialog] = useState<{
@@ -86,6 +88,22 @@ export default function TodayTimelineWidget() {
 
   // 追加メニュー設定を取得（「施術後に○○を追加」ボタンの表示・ラベル用）
   useEffect(() => { getAddonCourseInfo().then(setAddonInfo).catch(() => setAddonInfo(null)); }, []);
+
+  // Googleクチコミ依頼の可否（設定URLがあるか）
+  useEffect(() => { getReviewRequestConfig().then((c) => setReviewEnabled(c.enabled)).catch(() => setReviewEnabled(false)); }, []);
+
+  // 来院後のGoogleクチコミお願いLINEを送る
+  const handleSendReview = async (apt: TimelineAppointment) => {
+    if (actionLoading) return;
+    setActionLoading(true);
+    try {
+      const res = await sendReviewRequest(apt.id);
+      if (res.success) toast.success(`${apt.customer_name ?? "患者"}様へ口コミお願いLINEを送りました`);
+      else toast.error(res.error ?? "送信に失敗しました");
+    } finally {
+      setActionLoading(false);
+    }
+  };
 
   const fetchData = useCallback(async (d: Date) => {
     setLoading(true);
@@ -541,6 +559,19 @@ export default function TodayTimelineWidget() {
                     ＋ 同時刻に{addonInfo.name}
                   </Button>
                 </div>
+              )}
+
+              {/* Googleクチコミお願いLINE（設定URLがある院のみ） */}
+              {reviewEnabled && (
+                <Button
+                  type="button"
+                  onClick={() => handleSendReview(selectedApt)}
+                  disabled={actionLoading}
+                  variant="outline"
+                  className="w-full border-amber-300 dark:border-amber-700 text-amber-700 dark:text-amber-300 hover:bg-amber-50 dark:hover:bg-amber-950/50"
+                >
+                  ★ Google口コミをお願いする（LINE送信）
+                </Button>
               )}
 
               <Button

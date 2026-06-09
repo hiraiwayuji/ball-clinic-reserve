@@ -6,7 +6,8 @@ import { revalidatePath } from "next/cache";
 import { checkAdminAuth } from "./auth";
 import { writeAudit, notifyOwnerOfStaffAction } from "@/lib/audit";
 import { awardPoints } from "@/lib/gamification";
-import { getLineAccessToken } from "@/lib/admin-notify";
+import { getLineAccessToken, pushLineToCustomer } from "@/lib/admin-notify";
+import { getLineUserIdsForCustomer } from "@/lib/line-links";
 
 async function getSupabase() {
   return await createClient();
@@ -139,6 +140,58 @@ export async function addAddonToAppointment(appointmentId: string, timing: "afte
     console.error("addAddonToAppointment failed", e);
     return { success: false, error: "追加でエラーが発生しました" };
   }
+}
+
+/** Googleクチコミ依頼が使えるか（設定URLがあるか）＋URLを返す。 */
+export async function getReviewRequestConfig(): Promise<{ enabled: boolean; url: string | null }> {
+  const { clinicId } = await checkAdminAuth();
+  const supabase = getAdminSupabase();
+  if (!supabase) return { enabled: false, url: null };
+  const { data } = await supabase
+    .from("clinic_settings")
+    .select("google_review_url")
+    .eq("id", clinicId)
+    .maybeSingle();
+  const url = (data?.google_review_url as string | null) ?? null;
+  return { enabled: !!url, url };
+}
+
+/** 来院後のGoogleクチコミお願いLINEを、その予約の患者へ送る。 */
+export async function sendReviewRequest(appointmentId: string): Promise<{ success: boolean; error?: string }> {
+  const { clinicId } = await checkAdminAuth();
+  const supabase = getAdminSupabase();
+  if (!supabase) return { success: false, error: "サーバー設定エラー" };
+
+  const { data: settings } = await supabase
+    .from("clinic_settings")
+    .select("google_review_url, clinic_name")
+    .eq("id", clinicId)
+    .maybeSingle();
+  const url = (settings?.google_review_url as string | null) ?? null;
+  if (!url) return { success: false, error: "Googleクチコミのリンクが未設定です（設定画面で登録してください）" };
+
+  const { data: apt } = await supabase
+    .from("appointments")
+    .select("id, customer_id, customers(name)")
+    .eq("id", appointmentId)
+    .eq("clinic_id", clinicId)
+    .maybeSingle();
+  if (!apt || !apt.customer_id) return { success: false, error: "予約が見つかりません" };
+
+  const lineUids = await getLineUserIdsForCustomer(apt.customer_id as string);
+  if (lineUids.length === 0) return { success: false, error: "この患者さんはLINE未連携のため送れません" };
+
+  const cust = Array.isArray((apt as any).customers) ? (apt as any).customers[0] : (apt as any).customers;
+  const name = cust?.name ? `${cust.name}様\n` : "";
+  const clinicName = (settings?.clinic_name as string | null) || "当院";
+  const text = `${name}本日は${clinicName}にご来院いただきありがとうございました🙏\n\nもしよろしければ、Googleのクチコミで感想をいただけると、スタッフ一同とても励みになります！\n下のリンクから★を選ぶだけでカンタンに投稿できます👇\n${url}`;
+
+  let sent = 0;
+  for (const uid of lineUids) {
+    try { await pushLineToCustomer(uid, text); sent++; } catch (e) { console.error("sendReviewRequest push error", e); }
+  }
+  if (sent === 0) return { success: false, error: "送信に失敗しました" };
+  return { success: true };
 }
 
 export async function createManualReservation(formData: FormData) {

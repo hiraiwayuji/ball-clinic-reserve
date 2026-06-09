@@ -143,6 +143,21 @@ export default function SettingsEditor({ initialSettings }: { initialSettings: C
                 </p>
               </div>
 
+              {/* Googleクチコミ依頼リンク */}
+              <div className="border-t pt-4 mt-2 space-y-2">
+                <Label className="font-bold">Googleクチコミ投稿リンク</Label>
+                <Input
+                  value={settings?.google_review_url ?? ""}
+                  onChange={(e) => updateField("google_review_url", e.target.value || null)}
+                  placeholder="https://search.google.com/local/writereview?placeid=..."
+                />
+                <p className="text-xs text-slate-500 leading-relaxed">
+                  設定すると、予約詳細に「★ Google口コミをお願いする（LINE送信）」ボタンが出ます。<br />
+                  来院後の患者さんへ、★を付けるだけのクチコミ投稿リンク付きLINEを送れます。<br />
+                  リンクはGoogleマップでお店を開き「クチコミを書く」画面のアドレスです。
+                </p>
+              </div>
+
               {/* 営業時間（予約スロット範囲） */}
               <div className="border-t pt-4 mt-2 space-y-3">
                 <Label className="font-bold">公開予約時間（患者向け予約画面）</Label>

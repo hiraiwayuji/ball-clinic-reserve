@@ -100,6 +100,8 @@ export type ClinicSettings = {
   // 設定すると管理画面（予約詳細/編集/新規追加）に「施術後に〇〇を追加」ボタンが出る。
   // 例: ボール=水素。NULL ならボタン非表示。
   addon_course_id?: string | null;
+  // Googleクチコミ投稿リンク（★直行）。設定すると「口コミお願い」LINEを送れる。
+  google_review_url?: string | null;
   // 窓口日計表モードの金額カラム定義（JSONB）。専用 getter/setter で更新するため
   // settingsData には載せない（updateClinicSettings 経由では更新しない）。NULL ならデフォルト6列。
   tally_columns?: TallyColumn[] | null;
@@ -255,6 +257,7 @@ export async function updateClinicSettings(
     departments: settings.departments ?? [],
     sales_input_mode: settings.sales_input_mode ?? "per_patient",
     addon_course_id: settings.addon_course_id ?? null,
+    google_review_url: settings.google_review_url ?? null,
   };
 
   const targetData = {
