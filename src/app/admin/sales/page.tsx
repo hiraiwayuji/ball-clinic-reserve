@@ -30,6 +30,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { BirthDateInput } from "@/app/admin/customers/BirthDateInput";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Calendar as CalendarIcon, Plus, Trash2, Loader2, Coins, User, UserPlus, Landmark, Receipt, Upload, Download, Clock, Bot, X, AlertTriangle, Zap, Pencil, ShieldCheck, CalendarPlus, MapPin } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
@@ -1045,14 +1046,13 @@ function SalesPageInner() {
                     placeholder="例: A-1234"
                   />
                 </div>
-                <div className="space-y-1.5">
-                  <Label className="text-xs font-semibold text-slate-600">生年月日</Label>
-                  <Input
-                    type="date"
-                    value={editForm.birthDate}
-                    onChange={(e) => setEditForm(f => ({ ...f, birthDate: e.target.value }))}
-                  />
-                </div>
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs font-semibold text-slate-600">生年月日</Label>
+                <BirthDateInput
+                  value={editForm.birthDate}
+                  onChange={(v) => setEditForm(f => ({ ...f, birthDate: v }))}
+                />
               </div>
               <div className="space-y-1.5">
                 <Label className="text-xs font-semibold text-slate-600">金額（円）</Label>
