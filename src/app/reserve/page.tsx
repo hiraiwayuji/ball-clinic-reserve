@@ -645,7 +645,9 @@ function ReserveContent() {
                               const today = new Date();
                               today.setHours(0, 0, 0, 0);
                               const samiBlocked = requiredStaff ? !isStaffAvailableOn(date, requiredStaff.schedule) : false;
-                              return isHoliday || date < today || day === 0 || day === 3 || !isDateWithinAllowedRange(date, false, schedule.bookingHorizonDays) || samiBlocked;
+                              // 休診曜日は院ごと（clinic_settings.closed_weekdays 由来）。ハードコード禁止。
+                              const isClosedDay = schedule.closedDays.includes(day);
+                              return isHoliday || date < today || isClosedDay || !isDateWithinAllowedRange(date, false, schedule.bookingHorizonDays) || samiBlocked;
                             }}
                           />
                         </PopoverContent>
