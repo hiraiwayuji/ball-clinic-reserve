@@ -5,6 +5,7 @@ import { PUBLIC_CLINIC_ID } from "@/lib/default-clinic-id";
 import { getLineUidFromCookie } from "@/app/actions/family-line";
 import { pushLineToOwners } from "@/lib/admin-notify";
 import { isDateWithinAllowedRange, isTimeSlotWithinTwoHours } from "@/lib/time-slots";
+import { getBookingHorizonDays } from "@/app/actions/clinic-slot";
 
 const CLINIC_ID = PUBLIC_CLINIC_ID;
 
@@ -122,7 +123,8 @@ export async function rescheduleMyReservation(
   if (!apt) return { ok: false, error: "ご本人の予約として確認できませんでした。" };
 
   if (!newDate || !newTime) return { ok: false, error: "日付と時間を選んでください。" };
-  if (!isDateWithinAllowedRange(new Date(newDate))) return { ok: false, error: "1ヶ月より先の予約はできません。" };
+  const horizonDays = await getBookingHorizonDays();
+  if (!isDateWithinAllowedRange(new Date(newDate), false, horizonDays)) return { ok: false, error: `${horizonDays}日より先の予約はできません。` };
   if (isTimeSlotWithinTwoHours(newDate, newTime)) return { ok: false, error: "直前（2時間以内）への変更はお電話・LINEでお願いします。" };
 
   // 所要時間は元予約を維持

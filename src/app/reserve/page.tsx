@@ -645,7 +645,7 @@ function ReserveContent() {
                               const today = new Date();
                               today.setHours(0, 0, 0, 0);
                               const samiBlocked = requiredStaff ? !isStaffAvailableOn(date, requiredStaff.schedule) : false;
-                              return isHoliday || date < today || day === 0 || day === 3 || !isDateWithinAllowedRange(date) || samiBlocked;
+                              return isHoliday || date < today || day === 0 || day === 3 || !isDateWithinAllowedRange(date, false, schedule.bookingHorizonDays) || samiBlocked;
                             }}
                           />
                         </PopoverContent>

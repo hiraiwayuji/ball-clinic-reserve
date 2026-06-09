@@ -61,6 +61,8 @@ export type ClinicSettings = {
   business_break_end_weekday?: string | null;
   business_break_start_saturday?: string | null;
   business_break_end_saturday?: string | null;
+  // 患者Web予約で今日から何日先まで選べるか（運用モード設定）。デフォルト30。マッスル=90（3ヶ月）。
+  booking_horizon_days?: number | null;
   // 管理画面タイムテーブル専用の表示時間（任意・NULL なら business_* にフォールバック）
   // 例：からだ＝公開は 10:00-20:00、管理画面では準備時間込みで 9:00-21:00
   admin_timeline_open_weekday?: string | null;
@@ -105,6 +107,9 @@ export type ClinicSettings = {
   // 窓口日計表モードの金額カラム定義（JSONB）。専用 getter/setter で更新するため
   // settingsData には載せない（updateClinicSettings 経由では更新しない）。NULL ならデフォルト6列。
   tally_columns?: TallyColumn[] | null;
+  // 料金プラン。free=基本機能 / premium=画像・動画・生成AI画像など上位機能も。
+  // 販売者制御のため settingsData には載せない（オーナーの設定UIからは変更不可・読み取り専用）。
+  plan?: "free" | "premium" | null;
 };
 
 
@@ -237,6 +242,7 @@ export async function updateClinicSettings(
     business_break_end_weekday:    settings.business_break_end_weekday ?? null,
     business_break_start_saturday: settings.business_break_start_saturday ?? null,
     business_break_end_saturday:   settings.business_break_end_saturday ?? null,
+    booking_horizon_days:    settings.booking_horizon_days ?? 30,
     closed_weekdays:         settings.closed_weekdays ?? null,
     admin_timeline_open_weekday:   settings.admin_timeline_open_weekday ?? null,
     admin_timeline_close_weekday:  settings.admin_timeline_close_weekday ?? null,

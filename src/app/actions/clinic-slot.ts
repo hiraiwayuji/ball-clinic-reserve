@@ -2,7 +2,7 @@
 
 import { PUBLIC_CLINIC_ID } from "@/lib/default-clinic-id";
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
-import { type SlotMinutes, type Schedule, buildSchedule } from "@/lib/time-slots";
+import { type SlotMinutes, type Schedule, buildSchedule, normalizeBookingHorizonDays, DEFAULT_BOOKING_HORIZON_DAYS } from "@/lib/time-slots";
 
 export type ClinicViewType = "list" | "timeline";
 export type AiSecretaryMode = "global" | "admin_only";
@@ -56,13 +56,41 @@ export async function getCurrentSchedule(): Promise<Schedule> {
     );
     const { data } = await sb
       .from("clinic_settings")
-      .select("business_open_weekday, business_close_weekday, business_open_saturday, business_close_saturday, business_break_start_weekday, business_break_end_weekday, business_break_start_saturday, business_break_end_saturday, closed_weekdays")
+      .select("business_open_weekday, business_close_weekday, business_open_saturday, business_close_saturday, business_break_start_weekday, business_break_end_weekday, business_break_start_saturday, business_break_end_saturday, closed_weekdays, booking_horizon_days")
       .eq("id", PUBLIC_CLINIC_ID)
       .maybeSingle();
     return buildSchedule(data);
   } catch (e: any) {
     console.error("[getCurrentSchedule] fallback to default:", e?.message ?? e);
     return buildSchedule(null);
+  }
+}
+
+/**
+ * 患者Web予約で今日から何日先まで選べるか（clinic_settings.booking_horizon_days）。
+ * 営業時間と同じ運用モード設定。デフォルト 30（従来挙動）。
+ * 公開予約のサーバーアクション（reserve / cafe / 予約変更）の上限チェックで使用。
+ * Fail-safe: 取得失敗時はデフォルト 30 を返す。
+ */
+export async function getBookingHorizonDays(): Promise<number> {
+  try {
+    if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
+      return DEFAULT_BOOKING_HORIZON_DAYS;
+    }
+    const sb = createSupabaseClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL,
+      process.env.SUPABASE_SERVICE_ROLE_KEY,
+      { auth: { persistSession: false } },
+    );
+    const { data } = await sb
+      .from("clinic_settings")
+      .select("booking_horizon_days")
+      .eq("id", PUBLIC_CLINIC_ID)
+      .maybeSingle();
+    return normalizeBookingHorizonDays(data?.booking_horizon_days);
+  } catch (e: any) {
+    console.error("[getBookingHorizonDays] fallback to default:", e?.message ?? e);
+    return DEFAULT_BOOKING_HORIZON_DAYS;
   }
 }
 

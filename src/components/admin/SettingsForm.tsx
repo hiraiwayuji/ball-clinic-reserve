@@ -270,6 +270,32 @@ export default function SettingsForm({ initialSettings }: { initialSettings: Cli
                     </div>
                     <p className="text-[10px] text-slate-500 dark:text-slate-500">クリックで切替（赤=休診）。祝日は clinic_holidays（別画面）で管理。</p>
                   </div>
+
+                  {/* ─── 予約可能期間（今日から何日先まで患者がWeb予約できるか） ─── */}
+                  <div className="space-y-1.5 pt-3 mt-1 border-t border-dashed border-slate-200 dark:border-white/10">
+                    <Label className="text-xs text-slate-600 dark:text-slate-400 font-bold">予約可能期間（先まで予約できる日数）</Label>
+                    <div className="flex gap-1.5 flex-wrap">
+                      {[
+                        { v: 30, label: "1ヶ月先まで" },
+                        { v: 60, label: "2ヶ月先まで" },
+                        { v: 90, label: "3ヶ月先まで" },
+                      ].map(({ v, label }) => {
+                        const current = settings?.booking_horizon_days ?? 30;
+                        const isOn = current === v;
+                        return (
+                          <button key={v} type="button" onClick={() => updateField("booking_horizon_days", v)}
+                            className={`px-3 py-1.5 rounded-md text-xs font-bold border transition-colors ${
+                              isOn
+                                ? "bg-emerald-100 border-emerald-300 text-emerald-700 dark:bg-emerald-900/40 dark:border-emerald-700 dark:text-emerald-200"
+                                : "bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-300"
+                            }`}>
+                            {label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <p className="text-[10px] text-slate-500 dark:text-slate-500">患者さんの予約画面で、今日から何日先まで日付を選べるかを決めます（標準は1ヶ月先まで）。</p>
+                  </div>
                 </div>
               </div>
 

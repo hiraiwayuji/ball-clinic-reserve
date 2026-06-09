@@ -18,7 +18,18 @@ export type Schedule = {
   weekday:  { start: string; end: string; breakStart?: string | null; breakEnd?: string | null };
   saturday: { start: string; end: string; breakStart?: string | null; breakEnd?: string | null };
   closedDays: number[]; // JS getDay(): 0=日, 3=水, ...
+  // 患者Web予約で今日から何日先まで選べるか（運用モード設定 clinic_settings.booking_horizon_days）。
+  // デフォルト 30（従来挙動）。例: マッスル整体 = 90（3ヶ月先まで）。
+  bookingHorizonDays: number;
 };
+
+/** 予約可能期間（日数）のデフォルトと正規化。1〜365 にクランプ。 */
+export const DEFAULT_BOOKING_HORIZON_DAYS = 30;
+export function normalizeBookingHorizonDays(v: number | null | undefined): number {
+  const n = typeof v === "number" ? Math.floor(v) : DEFAULT_BOOKING_HORIZON_DAYS;
+  if (!Number.isFinite(n) || n < 1) return DEFAULT_BOOKING_HORIZON_DAYS;
+  return Math.min(n, 365);
+}
 
 /** "HH:MM:SS" / "HH:MM" / null → "HH:MM" / null に正規化 */
 function normalizeHHMM(v: string | null | undefined): string | null {
@@ -37,6 +48,7 @@ export function buildSchedule(settings: {
   business_break_start_saturday?: string | null;
   business_break_end_saturday?: string | null;
   closed_weekdays?: string | null;
+  booking_horizon_days?: number | null;
 } | null | undefined): Schedule {
   const s = settings ?? {};
   const closedRaw = s.closed_weekdays ?? "0,3";
@@ -58,6 +70,7 @@ export function buildSchedule(settings: {
       breakEnd:   normalizeHHMM(s.business_break_end_saturday),
     },
     closedDays: closedDays.length > 0 ? closedDays : [0, 3],
+    bookingHorizonDays: normalizeBookingHorizonDays(s.booking_horizon_days),
   };
 }
 
@@ -202,12 +215,16 @@ export function getMaxSlots(date: Date, slotMinutes: SlotMinutes = 30, schedule?
   return Math.floor(totalMin / slotMinutes);
 }
 
-export function isDateWithinAllowedRange(date: Date, isAdmin: boolean = false): boolean {
+export function isDateWithinAllowedRange(
+  date: Date,
+  isAdmin: boolean = false,
+  horizonDays: number = DEFAULT_BOOKING_HORIZON_DAYS,
+): boolean {
   if (isAdmin) return true;
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const limit = new Date(today);
-  limit.setDate(limit.getDate() + 30);
+  limit.setDate(limit.getDate() + normalizeBookingHorizonDays(horizonDays));
   return date >= today && date <= limit;
 }
 

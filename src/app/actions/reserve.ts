@@ -38,6 +38,7 @@ async function notifyOwner(
 import { createClient as createServerClient } from "@/lib/supabase/server";
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { getTimeSlots, isDateWithinAllowedRange, isTimeSlotWithinTwoHours } from "@/lib/time-slots";
+import { getBookingHorizonDays } from "@/app/actions/clinic-slot";
 import { unstable_noStore as noStore } from "next/cache";
 
 async function getSupabase() {
@@ -162,10 +163,11 @@ export async function createWaitlistReservation(formData: FormData) {
       return { success: false, error: "必須項目が不足しています" };
     }
 
-    // 1ヶ月制限のチェック
+    // 予約可能期間（院ごと clinic_settings.booking_horizon_days）のチェック
+    const horizonDays = await getBookingHorizonDays();
     const reservationDate = new Date(dateStr);
-    if (!isDateWithinAllowedRange(reservationDate)) {
-      return { success: false, error: "1ヶ月より先の予約はできません。" };
+    if (!isDateWithinAllowedRange(reservationDate, false, horizonDays)) {
+      return { success: false, error: `${horizonDays}日より先の予約はできません。` };
     }
 
     // 2時間前制限のチェック
@@ -419,10 +421,11 @@ export async function createReservation(formData: FormData) {
       return { success: false, error: "初診の場合は電話番号が必須です" };
     }
 
-    // 1ヶ月制限のチェック
+    // 予約可能期間（院ごと clinic_settings.booking_horizon_days）のチェック
+    const horizonDays = await getBookingHorizonDays();
     const reservationDate = new Date(rawDate);
-    if (!isDateWithinAllowedRange(reservationDate)) {
-      return { success: false, error: "1ヶ月より先の予約はできません。" };
+    if (!isDateWithinAllowedRange(reservationDate, false, horizonDays)) {
+      return { success: false, error: `${horizonDays}日より先の予約はできません。` };
     }
 
     // 2時間前制限のチェック

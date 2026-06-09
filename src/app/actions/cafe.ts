@@ -5,6 +5,7 @@ import { pushLineToOwners, sendEmailToOwners } from "@/lib/admin-notify";
 import { getLineUidFromCookie } from "@/app/actions/family-line";
 import { resolveBookingCustomer } from "@/lib/booking-customer";
 import { isDateWithinAllowedRange, isTimeSlotWithinTwoHours } from "@/lib/time-slots";
+import { getBookingHorizonDays } from "@/app/actions/clinic-slot";
 import {
   getCafeSlots,
   cafeOccupancyRange,
@@ -232,9 +233,10 @@ export async function createCafeReservation(formData: FormData) {
       return { success: false, error: "初めての方は電話番号が必須です" };
     }
 
+    const horizonDays = await getBookingHorizonDays();
     const reservationDate = new Date(`${rawDate}T00:00:00+09:00`);
-    if (!isDateWithinAllowedRange(reservationDate)) {
-      return { success: false, error: "1ヶ月より先の予約はできません。" };
+    if (!isDateWithinAllowedRange(reservationDate, false, horizonDays)) {
+      return { success: false, error: `${horizonDays}日より先の予約はできません。` };
     }
     if (isTimeSlotWithinTwoHours(rawDate, time)) {
       return { success: false, error: "直前（2時間以内）のご予約はお電話またはLINEにてお問い合わせください。" };

@@ -26,6 +26,12 @@ import { PUBLIC_CLINIC_ID } from "@/lib/default-clinic-id";
 
 type AvailabilityLevel = "available" | "few" | "full" | "closed" | "past";
 
+// 予約可能期間の人にやさしい表示。90 → "3ヶ月"、30 → "1ヶ月"、それ以外は "〇日"。
+function horizonLabel(days: number): string {
+  if (days % 30 === 0) return `${days / 30}ヶ月`;
+  return `${days}日`;
+}
+
 // "2026-06-08" → "6/8（月）"
 function formatShortDate(ymd: string): string {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(ymd);
@@ -46,8 +52,8 @@ function getAvailabilityLevel(dateStr: string, bookedCount: number, date: Date, 
   // 担当固定コース（さみ整体など）：そのスタッフの出勤日以外は休診扱いにして選べなくする
   if (staffSchedule && !isStaffAvailableOn(date, staffSchedule)) return "closed";
 
-  // 1ヶ月制限のチェック
-  if (!isDateWithinAllowedRange(date)) return "closed";
+  // 予約可能期間（院ごと clinic_settings.booking_horizon_days）外は休診扱い
+  if (!isDateWithinAllowedRange(date, false, schedule.bookingHorizonDays)) return "closed";
 
   // 実際に予約可能なスロット（2時間前制限にかかっていないもの）をカウントする
   const allSlots = getTimeSlots(date, { slotMinutes, schedule });
@@ -496,7 +502,7 @@ function ReserveCalendarContent() {
             <h1 className="text-sm font-black text-white truncate">予約空き状況カレンダー</h1>
           </div>
           <div className="shrink-0 text-right">
-            <p className="text-[10px] text-zinc-300 font-bold">1ヶ月先まで予約可</p>
+            <p className="text-[10px] text-zinc-300 font-bold">{horizonLabel(schedule.bookingHorizonDays)}先まで予約可</p>
           </div>
         </div>
       </div>
@@ -551,7 +557,7 @@ function ReserveCalendarContent() {
             </div>
           ) : (
             <div className="mt-4 bg-amber-500/15 border border-amber-500/40 rounded-2xl p-3.5 text-sm text-amber-100">
-              {selectedCourse.name} の直近30日の空きはお問い合わせください
+              {selectedCourse.name} の直近{schedule.bookingHorizonDays}日の空きはお問い合わせください
               {staffScheduleName ? `（${staffScheduleName}さんの出勤日のみ受付）` : ""}。
             </div>
           )
