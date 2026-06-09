@@ -7,8 +7,8 @@ import {
   ComposedChart, Area,
 } from "recharts";
 import {
-  getComparisonData, getYearlyTrend, getWeekdayBreakdown, getCustomerAnalytics, getVisitorComparison,
-  type ComparisonResult, type YearlyTrendPoint, type CustomerAnalytics, type VisitorDemographicsComparison,
+  getComparisonData, getYearlyTrend, getWeekdayBreakdown, getCustomerAnalytics, getVisitorComparison, getMenuBreakdown,
+  type ComparisonResult, type YearlyTrendPoint, type CustomerAnalytics, type VisitorDemographicsComparison, type MenuBreakdownRow,
 } from "@/app/actions/analytics";
 import { generateAnalyticsComment } from "@/app/actions/ai-secretary";
 import {
@@ -117,6 +117,7 @@ export default function AnalyticsPage() {
   const [comparison, setComparison] = useState<ComparisonResult | null>(null);
   const [trend, setTrend] = useState<YearlyTrendPoint[]>([]);
   const [weekday, setWeekday] = useState<{ day: string; count: number }[]>([]);
+  const [menuBreakdown, setMenuBreakdown] = useState<MenuBreakdownRow[]>([]);
   const [trendYear, setTrendYear] = useState(THIS_YEAR);
   const [loading, setLoading] = useState(true);
   const [customerData, setCustomerData] = useState<CustomerAnalytics | null>(null);
@@ -128,18 +129,20 @@ export default function AnalyticsPage() {
   const load = useCallback(() => {
     setLoading(true);
     startTransition(async () => {
-      const [comp, tr, wd, cust, vis] = await Promise.all([
+      const [comp, tr, wd, cust, vis, menu] = await Promise.all([
         getComparisonData(yearA, monthA, yearB, monthB),
         getYearlyTrend(trendYear),
         getWeekdayBreakdown(yearA, monthA),
         getCustomerAnalytics(yearA, monthA),
         getVisitorComparison(yearA, monthA, yearB, monthB),
+        getMenuBreakdown(yearA, monthA),
       ]);
       setComparison(comp);
       setTrend(tr);
       setWeekday(wd);
       setCustomerData(cust);
       setVisitorComparison(vis);
+      setMenuBreakdown(menu);
       setLoading(false);
     });
   }, [yearA, monthA, yearB, monthB, trendYear]);
@@ -392,6 +395,41 @@ export default function AnalyticsPage() {
                 </tbody>
               </table>
             </div>
+          </div>
+
+          {/* メニュー別 予約数・概算売上（当月） */}
+          <div className="bg-white dark:bg-slate-900/50 rounded-2xl border border-slate-100 dark:border-white/10 shadow-sm overflow-hidden">
+            <div className="px-5 py-4 border-b border-slate-100 dark:border-white/10 flex items-center gap-2">
+              <ChartBar className="w-4 h-4 text-indigo-500" />
+              <h2 className="font-bold text-slate-800 dark:text-slate-100">メニュー別 予約数・概算売上（{a.label}）</h2>
+            </div>
+            {menuBreakdown.length === 0 ? (
+              <div className="px-5 py-8 text-center text-slate-400 text-sm">この月のメニュー別データはありません</div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="bg-slate-50 dark:bg-slate-800">
+                      <th className="px-5 py-3 text-left text-xs font-bold text-slate-500 dark:text-slate-400 uppercase">メニュー</th>
+                      <th className="px-5 py-3 text-right text-xs font-bold text-slate-500 dark:text-slate-400 uppercase">予約数</th>
+                      <th className="px-5 py-3 text-right text-xs font-bold text-slate-500 dark:text-slate-400 uppercase">概算売上</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-50 dark:divide-slate-800">
+                    {menuBreakdown.map((m) => (
+                      <tr key={m.courseName} className="hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors">
+                        <td className="px-5 py-3 font-semibold text-slate-800 dark:text-slate-100">{m.courseName}</td>
+                        <td className="px-5 py-3 text-right text-indigo-700 dark:text-indigo-400 font-bold">{m.count}件</td>
+                        <td className="px-5 py-3 text-right text-slate-600 dark:text-slate-300">{m.estRevenue != null ? yen(m.estRevenue) : "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <p className="text-[11px] text-slate-400 px-5 py-3">
+                  ※ 概算売上 = メニュー単価 × 予約数（追加メニューも含む・キャンセル除く）。実際の会計額とは異なる場合があります。
+                </p>
+              </div>
+            )}
           </div>
 
           {/* グラフ2カラム */}

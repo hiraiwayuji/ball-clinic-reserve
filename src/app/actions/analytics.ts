@@ -751,3 +751,53 @@ export async function getCustomerAnalytics(year: number, month: number): Promise
 
   return results;
 }
+
+// ── メニュー別の予約数・概算売上（その月） ──
+// 予約のメイン course_name ＋ additional_courses を集計。概算売上はコース単価×件数。
+export type MenuBreakdownRow = { courseName: string; count: number; estRevenue: number | null };
+
+export async function getMenuBreakdown(year: number, month: number): Promise<MenuBreakdownRow[]> {
+  const { clinicId } = await checkAdminAuth();
+  const supabase = await createClient();
+
+  const monthStr = `${year}-${String(month).padStart(2, "0")}`;
+  const daysInMonth = new Date(year, month, 0).getDate();
+  const startTs = `${monthStr}-01T00:00:00+09:00`;
+  const endTs = `${monthStr}-${String(daysInMonth).padStart(2, "0")}T23:59:59+09:00`;
+
+  const { data: rows } = await supabase
+    .from("appointments")
+    .select("course_name, additional_courses")
+    .eq("clinic_id", clinicId)
+    .gte("start_time", startTs)
+    .lte("start_time", endTs)
+    .neq("status", "cancelled");
+
+  const counts = new Map<string, number>();
+  for (const r of rows ?? []) {
+    if (r.course_name) counts.set(r.course_name, (counts.get(r.course_name) ?? 0) + 1);
+    const adds = (r.additional_courses as { course_name?: string }[] | null) ?? [];
+    for (const ac of adds) {
+      if (ac?.course_name) counts.set(ac.course_name, (counts.get(ac.course_name) ?? 0) + 1);
+    }
+  }
+
+  const names = Array.from(counts.keys());
+  const priceByName = new Map<string, number | null>();
+  if (names.length > 0) {
+    const { data: courses } = await supabase
+      .from("reservation_courses")
+      .select("name, price")
+      .eq("clinic_id", clinicId)
+      .in("name", names);
+    for (const c of courses ?? []) priceByName.set(c.name as string, (c.price as number | null) ?? null);
+  }
+
+  return names
+    .map((n) => {
+      const count = counts.get(n)!;
+      const price = priceByName.get(n);
+      return { courseName: n, count, estRevenue: price != null ? price * count : null };
+    })
+    .sort((a, b) => b.count - a.count);
+}
