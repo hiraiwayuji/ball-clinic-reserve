@@ -277,6 +277,33 @@ export async function POST(req: NextRequest) {
         continue;
       }
 
+      // 予約の確認・変更・キャンセル → 管理ページURLを返信（本人確認トークン付き）
+      const manageKeywords = ["予約確認", "予約の確認", "予約変更", "予約の変更", "予約のキャンセル", "キャンセル", "予約管理", "確認・変更", "予約をキャンセル"];
+      if (manageKeywords.includes(userMessage)) {
+        const sb = getSupabase();
+        if (sb) {
+          const token = generateReserveToken();
+          const expiresAt = new Date(Date.now() + 30 * 60 * 1000).toISOString();
+          const { error: tokenErr } = await sb.from("line_reserve_tokens").insert({
+            token,
+            line_user_id: lineUserId,
+            clinic_id: DEFAULT_CLINIC_ID,
+            expires_at: expiresAt,
+          });
+          if (tokenErr) {
+            console.error("Manage token insert error:", tokenErr);
+            await replyMessage(replyToken, [{ type: "text", text: "URLの発行に失敗しました。お手数ですが受付スタッフまでお問い合わせください。" }], lineUserId);
+          } else {
+            const url = `${getReserveBaseUrl()}/reserve/manage?lt=${token}`;
+            await replyMessage(replyToken, [{
+              type: "text",
+              text: `ご予約の確認・時間変更・キャンセルはこちら 📋\n${url}\n\n※ このリンクは30分間有効です。`,
+            }], lineUserId);
+          }
+        }
+        continue;
+      }
+
       const prefixOptions = ["予約番号:", "予約番号："];
       for (const prefix of prefixOptions) {
         if (userMessage.startsWith(prefix)) {
