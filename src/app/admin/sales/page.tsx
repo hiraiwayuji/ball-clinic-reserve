@@ -413,7 +413,14 @@ function SalesPageInner() {
           profile.cityName = editForm.cityName;
         }
         if (Object.keys(profile).length > 0) {
-          await updateCustomerProfileByName(trimmedName, profile);
+          const profileRes = await updateCustomerProfileByName(trimmedName, profile);
+          if (!profileRes.success) {
+            // 売上(cash_sales)自体は更新済み。カルテ番号・生年月日だけ保存に失敗した場合は
+            // 黙って成功扱いにせず、はっきり知らせる（飛び込み患者で多発していた）。
+            toast.error(profileRes.error || "カルテ番号・生年月日の保存に失敗しました");
+            setIsUpdating(false);
+            return;
+          }
         }
         toast.success("更新しました");
         setEditTarget(null);
@@ -1012,7 +1019,7 @@ function SalesPageInner() {
 
       {/* 売上修正ダイアログ */}
       <Dialog open={!!editTarget} onOpenChange={(o) => !o && setEditTarget(null)}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>売上を修正</DialogTitle>
             <DialogDescription>

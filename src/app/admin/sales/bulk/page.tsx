@@ -79,7 +79,8 @@ function BulkSalesPageInner() {
             checked: p.confidence === "certain" || p.confidence === "likely",
             editAmount: p.initialAmount,
             editMemo: p.initialMemo,
-            paymentTypes: [] as CashSalePaymentType[],
+            // AI履歴から予測した支払区分を事前選択（ぼーるくんは確認・修正だけ）。
+            paymentTypes: (p.initialPaymentTypes ?? []) as CashSalePaymentType[],
             lines: [] as PaymentLine[],
           }))
       );

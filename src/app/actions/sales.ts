@@ -99,6 +99,9 @@ export type PendingSalePatient = {
   initialAmount: string;
   /** bulk画面で初期表示するメモ（コース名 > AI予測メモ > "" の優先順位） */
   initialMemo: string;
+  /** AI履歴から予測した支払区分（過去3ヶ月で最頻の組合せ）。bulk画面で事前選択する。
+   *  履歴が無い・常に区分なし(通常自費)なら空配列。 */
+  initialPaymentTypes: CashSalePaymentType[];
   /** 子ども医療費助成の判定用（市町村＋生年月日）。bulk画面で医療助成ボタンを色分けする。 */
   birthDate: string | null;
   cityName: string | null;
@@ -244,10 +247,11 @@ export async function getTodayPendingSales(dateStr?: string): Promise<{ success:
 
       // ── 第2優先: AI履歴予測（コース価格が無い時だけ計算） ──
       let prediction: SalesPrediction | null = null;
+      let predictedPaymentTypes: CashSalePaymentType[] = [];
       if (reservedCoursePrice == null && !isFirstVisit) {
         const { data: hist } = await supabase
           .from("cash_sales")
-          .select("treatment_fee, memo, sale_date")
+          .select("treatment_fee, memo, sale_date, payment_type, payment_types")
           .eq("clinic_id", clinicId)
           .eq("customer_name", customerName)
           .gte("sale_date", getJstDateString(new Date(Date.now() - 90 * 24 * 60 * 60 * 1000)))
@@ -256,9 +260,24 @@ export async function getTodayPendingSales(dateStr?: string): Promise<{ success:
         if (hist && hist.length > 0) {
           const amtFreq: Record<number, number> = {};
           const memoFreq: Record<string, number> = {};
+          // 支払区分の最頻組合せを予測（過去で実際に使った区分のみカウント）。
+          const ptFreq: Record<string, number> = {};
           for (const row of hist) {
             amtFreq[row.treatment_fee] = (amtFreq[row.treatment_fee] || 0) + 1;
             if (row.memo) memoFreq[row.memo] = (memoFreq[row.memo] || 0) + 1;
+            const sig = normalizePaymentTypes((row as any).payment_types)
+              ?? (normalizePaymentType((row as any).payment_type) ? [normalizePaymentType((row as any).payment_type)!] : null);
+            // self_pay 単独は「区分なし＝通常自費」と同義なので予測対象外（ボタン押下を要求しない）
+            const meaningful = (sig ?? []).filter((k) => k && k !== "self_pay");
+            if (meaningful.length > 0) {
+              const key = [...meaningful].sort().join("|");
+              ptFreq[key] = (ptFreq[key] || 0) + 1;
+            }
+          }
+          const topPt = Object.entries(ptFreq).sort((a, b) => Number(b[1]) - Number(a[1]))[0];
+          // 最頻区分が履歴の過半数で使われている時だけ事前選択（迷う患者には付けない）
+          if (topPt && Number(topPt[1]) * 2 >= hist.length) {
+            predictedPaymentTypes = topPt[0].split("|");
           }
           const topAmt = Object.entries(amtFreq).sort((a, b) => Number(b[1]) - Number(a[1]))[0];
           const predAmt = Number(topAmt[0]);
@@ -314,6 +333,7 @@ export async function getTodayPendingSales(dateStr?: string): Promise<{ success:
         amountSource,
         initialAmount,
         initialMemo,
+        initialPaymentTypes: predictedPaymentTypes,
         birthDate: custBirthDate,
         cityName: custCityName,
         hagukumiPaidThisMonth: hagukumiPaidNames.has(customerName),
@@ -400,6 +420,19 @@ export async function updateCustomerProfileByName(
     .eq("name", name)
     .select("id");
   if (error) return { success: false, error: "保存に失敗しました: " + error.message };
+
+  // 該当する customers 行が無い患者（受付の一括入力だけで cash_sales に居る飛び込み・新患など）は
+  // update が 0 件になり、カルテ番号・生年月日が保存先を失う。その場合は customers 行を新規作成して
+  // プロフィールを確実に残す。空の値しか無い時は作らない（空の患者行を量産しない）。
+  if ((data?.length ?? 0) === 0) {
+    const hasMeaningfulValue = Object.values(patch).some((v) => v !== null && v !== "");
+    if (!hasMeaningfulValue) return { success: true, updated: 0 };
+    const { error: insertError } = await sb
+      .from("customers")
+      .insert({ clinic_id: clinicId, name, ...patch });
+    if (insertError) return { success: false, error: "患者情報の新規登録に失敗しました: " + insertError.message };
+    return { success: true, updated: 1 };
+  }
   return { success: true, updated: data?.length ?? 0 };
 }
 
