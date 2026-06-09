@@ -9,6 +9,7 @@ import { createReservation } from "@/app/actions/reserve";
 import { getPublicClinicSettings } from "@/app/actions/publicSettings";
 import { toast } from "sonner";
 import { CLINIC_CONFIG } from "@/lib/clinic-config";
+import { BirthDateInput } from "@/app/admin/customers/BirthDateInput";
 
 // 予約ページから引き継ぐ「選んだ日時・お名前・電話」（reserve/page.tsx と同じキー）
 const PENDING_BOOKING_KEY = "ballClinic_pendingBooking";
@@ -608,12 +609,7 @@ export default function QuestionnairePage() {
               <label className="text-blue-100/85 font-bold text-xs uppercase tracking-wide">
                 生年月日 <span className="text-blue-400/50 font-normal normal-case text-[11px]">（任意・子ども医療費助成をご利用の方はご記入ください）</span>
               </label>
-              <input
-                type="date"
-                value={birthDate}
-                onChange={(e) => setBirthDate(e.target.value)}
-                className="w-full h-14 bg-white/5 border border-white/10 rounded-2xl px-4 text-white placeholder:text-white/50 focus:outline-none focus:border-blue-500/50 focus:bg-white/10 transition-all [color-scheme:dark]"
-              />
+              <BirthDateInput value={birthDate} onChange={setBirthDate} variant="patient" />
             </div>
 
             <div className="pt-2">

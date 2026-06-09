@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { ClipboardList, Loader2 } from "lucide-react";
+import { BirthDateInput } from "./BirthDateInput";
 
 const MONTHS = Array.from({ length: 12 }, (_, i) => i + 1);
 const AGE_GROUPS = ["19歳以下", "20代", "30代", "40代", "50代", "60代以上"];
@@ -196,12 +197,7 @@ export function QuestionnaireDialog({ open, onOpenChange, customerId, customerNa
           {/* 生年月日 */}
           <div className="space-y-1.5">
             <label className="text-xs font-bold text-slate-600">生年月日（医療費助成の判定・年齢分析用）</label>
-            <input
-              type="date"
-              value={birthDate}
-              onChange={e => setBirthDate(e.target.value)}
-              className="w-full h-9 border border-slate-200 rounded-lg px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
-            />
+            <BirthDateInput value={birthDate} onChange={setBirthDate} />
           </div>
 
           {/* 住所 */}
