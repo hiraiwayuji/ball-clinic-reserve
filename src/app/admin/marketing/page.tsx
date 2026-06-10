@@ -235,7 +235,7 @@ export default function MarketingDashboardPage() {
         <div>
           <h1 className="text-3xl font-bold tracking-tight flex items-center gap-2 text-slate-900 dark:text-slate-100">
             <MessageCircle className="h-8 w-8 text-green-500" />
-            V-ARC 販促・LINE管理
+            SNS・LINE・販促
           </h1>
           <p className="text-slate-500 dark:text-slate-400 mt-1">
             LINEリマインド・キャンペーンを患者様へ一括送信します。<br />
@@ -244,6 +244,13 @@ export default function MarketingDashboardPage() {
         </div>
         
         <div className="flex flex-col sm:flex-row gap-3">
+          <Link href="/admin/marketing/ai-posts">
+            <Button className="bg-gradient-to-r from-blue-600 to-sky-500 hover:from-blue-700 hover:to-sky-600 text-white shadow-lg px-6 font-bold">
+              <Sparkles className="w-4 h-4 mr-2" />
+              AI投稿作成
+              <ArrowRight className="w-4 h-4 ml-2" />
+            </Button>
+          </Link>
           <Link href="/admin/marketing/seo">
             <Button className="bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-700 hover:to-violet-700 text-white shadow-lg px-6 font-bold">
               <Globe className="w-4 h-4 mr-2" />

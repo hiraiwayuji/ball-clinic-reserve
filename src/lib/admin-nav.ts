@@ -33,7 +33,7 @@ const CLINIC_NAV_ITEMS: NavItem[] = [
   { href: "/admin/customers", label: "顧客管理", icon: Users, allow: ["owner", "admin", "staff"] },
   { href: "/admin/sales", label: "売上記帳", icon: Coins, allow: ["owner"] },
   { href: "/admin/evaluation", label: "経営評価", icon: TrendingUp, allow: ["owner"] },
-  { href: "/admin/marketing", label: "LINE・販促", icon: MessageSquare, allow: ["owner", "admin"] },
+  { href: "/admin/marketing", label: "SNS・LINE等", icon: MessageSquare, allow: ["owner", "admin"] },
   { href: "/admin/leaderboard", label: "ランキング", icon: Trophy, allow: ["owner", "admin", "staff"] },
   { href: "/admin/approvals", label: "承認", icon: ShieldCheck, allow: ["owner"] },
   { href: "/admin/my-schedule", label: "私の休み希望", icon: CalendarOff, allow: ["owner", "admin", "staff"] },

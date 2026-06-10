@@ -35,6 +35,8 @@ const TENANT_TABLES = new Set([
   "admin_notification_targets",
   "ai_blog_proposals",
   "ai_chat_messages",
+  "ai_marketing_posts",
+  "ai_marketing_profiles",
   "ai_memos",
   "appointments",
   "audit_log",
