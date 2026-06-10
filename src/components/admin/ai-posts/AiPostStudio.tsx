@@ -657,6 +657,9 @@ export default function AiPostStudio({ onSaved, prefill }: Props) {
               onChange={(e) => patchResult({ line_text: e.target.value })}
               rows={5}
             />
+            <p className="text-xs text-slate-400 mt-1">
+              保存すると「履歴」の詳細から、LINE連携済みの患者さんへそのまま一斉配信できます（コピペ不要）。
+            </p>
             <RegenBar channel="line" />
           </ResultCard>
 

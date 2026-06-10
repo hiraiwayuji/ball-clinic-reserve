@@ -3,6 +3,7 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { createClient } from "@/lib/supabase/server";
 import { checkAdminAuth } from "@/app/actions/auth";
+import { getLineAccessToken, getOwnerLineTargets } from "@/lib/admin-notify";
 import { revalidatePath } from "next/cache";
 import {
   profileFromRow,
@@ -237,6 +238,40 @@ function materialsBlock(materials: Material[]): string {
     .join("\n")}`;
 }
 
+/**
+ * 効果学習: 過去に反応が良かった投稿（metricsScore 上位）の傾向をプロンプトに渡す。
+ * 反応の記録がない院では空文字（プロンプトに何も足さない）。
+ */
+async function topPostsBlock(clinicId: string): Promise<string> {
+  try {
+    const supabase = await createClient();
+    const { data } = await supabase
+      .from("ai_marketing_posts")
+      .select("category, theme, instagram_text, metrics")
+      .eq("clinic_id", clinicId)
+      .not("metrics", "is", null)
+      .order("created_at", { ascending: false })
+      .limit(30);
+    const scored = (data ?? [])
+      .map((r) => ({
+        row: r as { category: string; theme: string | null; instagram_text: string | null; metrics: PostMetrics | null },
+        score: metricsScore((r as { metrics: PostMetrics | null }).metrics),
+      }))
+      .filter((x) => x.score >= 3)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 3);
+    if (scored.length === 0) return "";
+    const lines = scored.map(({ row, score }, i) => {
+      const m = row.metrics ?? {};
+      const head = (row.instagram_text ?? "").replace(/\s+/g, " ").slice(0, 60);
+      return `${i + 1}. カテゴリ:${row.category}／テーマ:${row.theme || "－"}（スコア${score}: いいね${m.likes || 0}・保存${m.saves || 0}・コメント${m.comments || 0}・予約${m.reservations || 0}）${head ? `\n   書き出し例:「${head}…」` : ""}`;
+    });
+    return `【この院で過去に反応が良かった投稿（雰囲気・切り口の参考にする。丸写しはしない）】\n${lines.join("\n")}`;
+  } catch {
+    return "";
+  }
+}
+
 // ── 生成 ────────────────────────────────────────────────────────────
 
 export async function generateMarketingPost(
@@ -253,12 +288,15 @@ export async function generateMarketingPost(
     .eq("clinic_id", clinicId)
     .maybeSingle();
   const profile = profileFromRow(profileRow as Record<string, unknown> | null);
+  const learning = await topPostsBlock(clinicId);
 
   const prompt = `あなたは接骨院の集客に強いSNSライターです。下記の院の情報と投稿内容をもとに、各SNS媒体向けの文章を日本語で作成してください。
 
 ${profileBlock(profile)}
 
 ${inputBlock(input)}
+
+${learning}
 
 ${OUTPUT_RULES.replace("${area}", profile.area_name)}
 
@@ -616,6 +654,35 @@ export async function suggestPostIdeas(
     const recentCats = (recent ?? []).map((r) => (r as { category: string }).category);
     const recentLine = recentCats.length ? `最近よく作ったカテゴリ（偏らないよう別の切り口も）: ${recentCats.join("、")}` : "";
 
+    // 時事ネタ・天気（external_health_signals: 県単位の共通データ。取れなくても提案は続行）
+    let signalsLine = "";
+    try {
+      const { data: signals } = await supabase
+        .from("external_health_signals")
+        .select("signal_type, summary, observed_for")
+        .order("observed_for", { ascending: false })
+        .limit(8);
+      const seenTypes = new Set<string>();
+      const picked = (signals ?? [])
+        .filter((s) => {
+          const t = (s as { signal_type: string }).signal_type;
+          if (seenTypes.has(t)) return false;
+          seenTypes.add(t);
+          return true;
+        })
+        .slice(0, 4)
+        .map((s) => (s as { summary: string | null }).summary)
+        .filter(Boolean);
+      if (picked.length) {
+        signalsLine = `今日の天気・時事（体調や運動と絡めてネタに活かす）:\n${picked.map((s) => `・${s}`).join("\n")}`;
+      }
+    } catch {
+      // 時事ネタの取得失敗は無視
+    }
+
+    // 効果学習（反応が良かった投稿の傾向に寄せたネタも混ぜる）
+    const learning = await topPostsBlock(clinicId);
+
     const model = genAI.getGenerativeModel({
       model: GEMINI_MODEL,
       generationConfig: { responseMimeType: "application/json" },
@@ -626,6 +693,8 @@ ${profileBlock(profile)}
 
 今日の日付: ${todayStr}
 ${recentLine}
+${signalsLine}
+${learning}
 
 【守ること】季節・行事・天気・新学期や大会シーズンなど時季性も意識する。院の強みを活かす。医療広告ガイドラインを守る。category は次から選ぶ: ${POST_CATEGORIES.join("、")}。audience は次から（不要なら空）: ${AUDIENCES.join("、")}。
 
@@ -1126,4 +1195,124 @@ export async function deleteMarketingPost(
   if (error) return { success: false, error: error.message };
   revalidatePath("/admin/marketing/ai-posts");
   return { success: true };
+}
+
+// ── LINE一斉配信（生成した LINE 配信文をコピペなしでそのまま患者へ）──────
+
+async function pushLineText(token: string, to: string, text: string): Promise<boolean> {
+  try {
+    const res = await fetch("https://api.line.me/v2/bot/message/push", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ to, messages: [{ type: "text", text }] }),
+    });
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      console.error(`[ai-marketing] LINE push failed (${res.status}): ${body}`);
+    }
+    return res.ok;
+  } catch (err) {
+    console.error("[ai-marketing] LINE push error:", err);
+    return false;
+  }
+}
+
+/** 配信先（LINE連携済みの患者）の人数。配信前の確認ダイアログで表示する。 */
+export async function getLineBroadcastInfo(): Promise<{ success: boolean; count: number; error?: string }> {
+  const { clinicId } = await checkAdminAuth();
+  const supabase = await createClient();
+  const { count, error } = await supabase
+    .from("customers")
+    .select("id", { count: "exact", head: true })
+    .eq("clinic_id", clinicId)
+    .not("line_user_id", "is", null);
+  if (error) return { success: false, count: 0, error: error.message };
+  return { success: true, count: count ?? 0 };
+}
+
+/**
+ * 保存済み投稿の LINE 配信文を一斉配信する。
+ * test=true なら管理者（admin_notification_targets）の LINE にだけ試し送り。
+ */
+export async function broadcastPostLineText(
+  postId: string,
+  options: { test?: boolean } = {},
+): Promise<{ success: boolean; sent: number; sentAt?: string; error?: string }> {
+  const { clinicId } = await checkAdminAuth();
+  const supabase = await createClient();
+
+  const { data: post } = await supabase
+    .from("ai_marketing_posts")
+    .select("id, line_text")
+    .eq("clinic_id", clinicId)
+    .eq("id", postId)
+    .maybeSingle();
+  const text = ((post as { line_text: string | null } | null)?.line_text ?? "").trim();
+  if (!text) return { success: false, sent: 0, error: "LINE配信文がありません" };
+
+  const token = await getLineAccessToken();
+  if (!token) {
+    return { success: false, sent: 0, error: "LINEトークンが取得できません。LINE設定（Channel ID/Secret）を確認してください。" };
+  }
+
+  // 試し送り: 管理者のLINEにだけ送る（患者には届かない）
+  if (options.test) {
+    const owners = await getOwnerLineTargets(clinicId);
+    if (owners.length === 0) {
+      return { success: false, sent: 0, error: "試し送り先（管理者のLINE）が登録されていません" };
+    }
+    let sent = 0;
+    for (const to of owners) {
+      if (await pushLineText(token, to, `【テスト送信・患者さんには届いていません】\n\n${text}`)) sent++;
+    }
+    if (sent === 0) return { success: false, sent: 0, error: "テスト送信に失敗しました" };
+    return { success: true, sent };
+  }
+
+  const { data: customers, error } = await supabase
+    .from("customers")
+    .select("name, line_user_id")
+    .eq("clinic_id", clinicId)
+    .not("line_user_id", "is", null);
+  if (error) return { success: false, sent: 0, error: "配信先の取得に失敗しました" };
+
+  const targets = (customers ?? []) as { name: string | null; line_user_id: string }[];
+  let sent = 0;
+  if (text.includes("{name}")) {
+    // 名前差し込みあり: 1人ずつ送る
+    for (const c of targets) {
+      if (await pushLineText(token, c.line_user_id, text.replace(/{name}/g, c.name ?? ""))) sent++;
+    }
+  } else {
+    // 全員同文: multicast（最大500人/回）でまとめて送る（タイムアウト回避）
+    const ids = Array.from(new Set(targets.map((c) => c.line_user_id)));
+    for (let i = 0; i < ids.length; i += 500) {
+      const chunk = ids.slice(i, i + 500);
+      try {
+        const res = await fetch("https://api.line.me/v2/bot/message/multicast", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ to: chunk, messages: [{ type: "text", text }] }),
+        });
+        if (res.ok) {
+          sent += chunk.length;
+        } else {
+          const body = await res.text().catch(() => "");
+          console.error(`[ai-marketing] LINE multicast failed (${res.status}): ${body}`);
+        }
+      } catch (err) {
+        console.error("[ai-marketing] LINE multicast error:", err);
+      }
+    }
+  }
+
+  const sentAt = new Date().toISOString();
+  await supabase
+    .from("ai_marketing_posts")
+    .update({ line_sent_at: sentAt, line_sent_count: sent, updated_at: sentAt })
+    .eq("clinic_id", clinicId)
+    .eq("id", postId);
+
+  revalidatePath("/admin/marketing/ai-posts");
+  return { success: true, sent, sentAt };
 }

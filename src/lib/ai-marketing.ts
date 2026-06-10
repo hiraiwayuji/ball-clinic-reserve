@@ -328,6 +328,8 @@ export type SavedPost = {
   scheduled_date: string | null;
   posted_date: string | null;
   metrics: PostMetrics | null;
+  line_sent_at: string | null;
+  line_sent_count: number | null;
   created_at: string;
   updated_at: string;
 };

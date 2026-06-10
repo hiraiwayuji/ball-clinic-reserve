@@ -20,7 +20,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Loader2, Search, Trash2, Instagram, MapPin, MessageCircle, FileText, Images, Eye, Paperclip, BarChart3 } from "lucide-react";
+import { Loader2, Search, Trash2, Instagram, MapPin, MessageCircle, FileText, Images, Eye, Paperclip, BarChart3, Send, CheckCircle2 } from "lucide-react";
 import { toast } from "sonner";
 import CopyButton from "./CopyButton";
 import OpenInstagramButton from "./OpenInstagramButton";
@@ -43,6 +43,8 @@ import {
   updateMarketingPostDates,
   updateMarketingPostMetrics,
   deleteMarketingPost,
+  getLineBroadcastInfo,
+  broadcastPostLineText,
   type ListFilters,
 } from "@/app/actions/ai-marketing";
 
@@ -189,6 +191,16 @@ export default function PostHistory({ refreshKey }: Props) {
                     <span className={`text-xs px-2 py-0.5 rounded-full ${STATUS_BADGE[p.status]}`}>
                       {STATUS_LABELS[p.status]}
                     </span>
+                    {p.scheduled_date && !p.posted_date && (
+                      <span className="text-xs px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200">
+                        予定 {new Date(`${p.scheduled_date}T00:00:00`).toLocaleDateString("ja-JP", { month: "numeric", day: "numeric" })}
+                      </span>
+                    )}
+                    {p.line_sent_at && (
+                      <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+                        LINE配信済み
+                      </span>
+                    )}
                     {p.audience && <span className="text-xs text-slate-400">{p.audience}</span>}
                   </div>
                   <div className="text-sm text-slate-700 truncate mt-1">
@@ -248,7 +260,16 @@ export default function PostHistory({ refreshKey }: Props) {
                   <DetailBlock icon={<MapPin className="w-4 h-4 text-green-600" />} title="Googleビジネス文" text={detail.google_text} />
                 )}
                 {detail.line_text && (
-                  <DetailBlock icon={<MessageCircle className="w-4 h-4 text-emerald-600" />} title="LINE配信文" text={detail.line_text} />
+                  <div className="space-y-2">
+                    <DetailBlock icon={<MessageCircle className="w-4 h-4 text-emerald-600" />} title="LINE配信文" text={detail.line_text} />
+                    <LineBroadcastSection
+                      post={detail}
+                      onSent={(sentAt, count) => {
+                        setDetail((d) => (d ? { ...d, line_sent_at: sentAt, line_sent_count: count } : d));
+                        setPosts((p) => p.map((x) => (x.id === detail.id ? { ...x, line_sent_at: sentAt, line_sent_count: count } : x)));
+                      }}
+                    />
+                  </div>
                 )}
                 {detail.blog?.body && (
                   <DetailBlock icon={<FileText className="w-4 h-4 text-orange-600" />} title="ブログ案" text={blogToPlainText(detail.blog)} />
@@ -407,6 +428,110 @@ function MetricsEditor({ post, onSaved }: { post: SavedPost; onSaved: (m: PostMe
         反応を記録
       </Button>
     </div>
+  );
+}
+
+/** LINE配信文をコピペなしでそのまま患者へ一斉配信するセクション（試し送り→本番配信の2段階） */
+function LineBroadcastSection({ post, onSent }: { post: SavedPost; onSent: (sentAt: string, count: number) => void }) {
+  const [open, setOpen] = useState(false);
+  const [count, setCount] = useState<number | null>(null);
+  const [testing, setTesting] = useState(false);
+  const [sending, setSending] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    setCount(null);
+    getLineBroadcastInfo().then((r) => setCount(r.success ? r.count : 0));
+  }, [open]);
+
+  async function handleTest() {
+    setTesting(true);
+    try {
+      const res = await broadcastPostLineText(post.id, { test: true });
+      if (res.success) toast.success("管理者のLINEに試し送りしました。スマホでご確認ください");
+      else toast.error(res.error || "試し送りに失敗しました");
+    } finally {
+      setTesting(false);
+    }
+  }
+
+  async function handleSend() {
+    setSending(true);
+    try {
+      const res = await broadcastPostLineText(post.id);
+      if (res.success) {
+        toast.success(`${res.sent}名の患者さんへ配信しました`);
+        if (res.sentAt) onSent(res.sentAt, res.sent);
+        setOpen(false);
+      } else {
+        toast.error(res.error || "配信に失敗しました");
+      }
+    } finally {
+      setSending(false);
+    }
+  }
+
+  return (
+    <>
+      <div className="flex items-center gap-2 flex-wrap">
+        <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700" onClick={() => setOpen(true)}>
+          <Send className="w-3.5 h-3.5" /> LINEで一斉配信
+        </Button>
+        {post.line_sent_at && (
+          <span className="inline-flex items-center gap-1 text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full">
+            <CheckCircle2 className="w-3 h-3" />
+            配信済み {new Date(post.line_sent_at).toLocaleDateString("ja-JP", { month: "numeric", day: "numeric" })}
+            {post.line_sent_count != null && `・${post.line_sent_count}名`}
+          </span>
+        )}
+      </div>
+
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-base">
+              <Send className="w-4 h-4 text-emerald-600" /> LINEで一斉配信
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="rounded-md border border-slate-200 bg-slate-50 p-3 max-h-48 overflow-y-auto">
+              <p className="text-sm text-slate-700 whitespace-pre-wrap">{post.line_text}</p>
+            </div>
+            <div className="text-sm text-slate-600">
+              配信先: LINE連携済みの患者さん{" "}
+              {count === null ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin inline" />
+              ) : (
+                <span className="font-bold text-slate-900">{count}名</span>
+              )}
+            </div>
+            {post.line_sent_at && (
+              <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md p-2">
+                この投稿は既に配信済みです。もう一度配信すると同じ方に再度届きます。
+              </p>
+            )}
+            <p className="text-xs text-slate-500">
+              まずは「自分に試し送り」でスマホでの見え方を確認するのがおすすめです。
+            </p>
+            <div className="flex gap-2 justify-end pt-1">
+              <Button size="sm" variant="outline" onClick={handleTest} disabled={testing || sending}>
+                {testing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Eye className="w-3.5 h-3.5" />}
+                自分に試し送り
+              </Button>
+              <Button
+                size="sm"
+                className="bg-emerald-600 hover:bg-emerald-700"
+                onClick={handleSend}
+                disabled={sending || testing || count === null || count === 0}
+              >
+                {sending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+                {count ? `${count}名に配信する` : "配信する"}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
 
