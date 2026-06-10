@@ -135,7 +135,7 @@ export default function AdminWeeklyGridPage() {
         const supabase = createClient();
         const { data: aptData } = await supabase
           .from("appointments")
-          .select(`id, start_time, end_time, memo, is_first_visit, status, customer_id, series_id, clinic_id, course_id, course_name, staff_id, staff_name, room_id, room_name, department, party_size, customers(name, phone, medical_record_number)`)
+          .select(`id, start_time, end_time, memo, is_first_visit, status, customer_id, series_id, clinic_id, course_id, course_name, staff_id, staff_name, room_id, room_name, department, party_size, customers(name, phone, medical_record_number, birth_date)`)
           .eq("clinic_id", clinicId)
           .gte("start_time", weekStart.toISOString())
           .lt("start_time", weekEnd.toISOString())
@@ -178,6 +178,14 @@ export default function AdminWeeklyGridPage() {
       .subscribe();
     return () => { supabase.removeChannel(channel); };
   }, []);
+
+  // 予約日が患者の誕生日なら true（受付での声かけ用 🎂 バッジ）
+  const isBirthdayOnDate = (birthDate: string | null | undefined, date: Date): boolean => {
+    if (!birthDate) return false;
+    const b = new Date(birthDate);
+    if (isNaN(b.getTime())) return false;
+    return b.getMonth() === date.getMonth() && b.getDate() === date.getDate();
+  };
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -465,6 +473,11 @@ export default function AdminWeeklyGridPage() {
                             {apt.is_first_visit && (
                               <span className="text-[9px] font-black bg-amber-500 text-white px-1.5 py-0.5 rounded-full leading-none">
                                 初診
+                              </span>
+                            )}
+                            {isBirthdayOnDate(cust?.birth_date, startTime) && (
+                              <span className="text-[9px] font-black bg-pink-500 text-white px-1.5 py-0.5 rounded-full leading-none">
+                                🎂 誕生日
                               </span>
                             )}
                           </div>
@@ -932,7 +945,10 @@ export default function AdminWeeklyGridPage() {
                                 }}
                               >
                                 <div className="font-bold flex items-center justify-between">
-                                  <span className="truncate">{name}</span>
+                                  <span className="truncate">
+                                    {isBirthdayOnDate(cust?.birth_date, startTime) && "🎂"}
+                                    {name}
+                                  </span>
                                   {isFirst && (
                                     <span className="bg-amber-500 text-white text-[9px] px-1 rounded">初</span>
                                   )}
@@ -1039,6 +1055,9 @@ export default function AdminWeeklyGridPage() {
                                     )}
                                     {apt.is_first_visit && (
                                       <span className="text-[10px] font-black bg-amber-500 text-white px-2 py-0.5 rounded-full">初診</span>
+                                    )}
+                                    {isBirthdayOnDate(cust?.birth_date, startTime) && (
+                                      <span className="text-[10px] font-black bg-pink-500 text-white px-2 py-0.5 rounded-full">🎂 誕生日</span>
                                     )}
                                     <Badge variant="outline" className={`text-xs py-0 h-5 ${getStatusColor(apt.status)}`}>
                                       {getStatusText(apt.status)}

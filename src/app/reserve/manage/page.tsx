@@ -46,6 +46,8 @@ function ManageContent() {
   const [bookedTimes, setBookedTimes] = useState<string[]>([]);
   const [loadingSlots, setLoadingSlots] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  // キャンセル確認ダイアログの対象予約
+  const [cancelTarget, setCancelTarget] = useState<MyReservation | null>(null);
 
   const reload = useCallback(async () => {
     const res = await getMyUpcomingReservations();
@@ -99,7 +101,7 @@ function ManageContent() {
   };
 
   const doCancel = async (r: MyReservation) => {
-    if (!confirm(`${fmtDateTime(r.startTime)} のご予約をキャンセルします。よろしいですか？`)) return;
+    setCancelTarget(null);
     setBusyId(r.id);
     try {
       const res = await cancelMyReservation(r.id);
@@ -226,7 +228,7 @@ function ManageContent() {
                         <Clock className="w-4 h-4" /> 時間を変更
                       </button>
                       <button
-                        onClick={() => doCancel(r)}
+                        onClick={() => setCancelTarget(r)}
                         disabled={busyId === r.id}
                         className="flex-1 h-11 rounded-xl bg-rose-600/20 hover:bg-rose-600/40 border border-rose-500/40 text-rose-200 text-sm font-bold inline-flex items-center justify-center gap-1.5"
                       >
@@ -246,6 +248,36 @@ function ManageContent() {
           </Link>
         </div>
       </div>
+
+      {cancelTarget && (
+        <div className="fixed inset-0 bg-black/70 flex items-end sm:items-center justify-center px-4 pb-6 sm:pb-0 z-50" onClick={() => setCancelTarget(null)}>
+          <div
+            className="w-full max-w-sm bg-zinc-900 border border-zinc-700 rounded-2xl p-5 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <p className="font-black text-base mb-1">ご予約をキャンセルしますか？</p>
+            <p className="text-sm text-zinc-300 mb-1">{fmtDateTime(cancelTarget.startTime)}</p>
+            <p className="text-xs text-zinc-400 mb-4">
+              {cancelTarget.courseName ?? "施術"}
+              {cancelTarget.staffName ? `／${cancelTarget.staffName}` : ""}
+            </p>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setCancelTarget(null)}
+                className="flex-1 h-11 rounded-xl bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-sm font-bold"
+              >
+                戻る
+              </button>
+              <button
+                onClick={() => doCancel(cancelTarget)}
+                className="flex-1 h-11 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-sm font-bold"
+              >
+                キャンセルする
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {toast && (
         <div className="fixed inset-x-0 bottom-6 flex justify-center px-4 z-50" onClick={() => setToast(null)}>

@@ -305,6 +305,7 @@ export async function createManualReservation(formData: FormData) {
         clinic_id: clinicId,
       };
       if (medicalRecordNumber) insertData.medical_record_number = medicalRecordNumber;
+      // tenant-isolation-ignore: insertData に clinic_id: clinicId を含む（変数経由のため検知不可）
       const { data: newCustomer, error: customerErr } = await supabase
         .from("customers")
         .insert([insertData])

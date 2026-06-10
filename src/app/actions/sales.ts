@@ -519,6 +519,7 @@ export async function bulkAddCashSales(rows: Array<{
       ];
     });
 
+    // tenant-isolation-ignore: insertRows の各行に clinic_id: clinicId を含む（変数経由のため検知不可）
     const { error } = await supabase.from("cash_sales").insert(insertRows);
     if (error) throw error;
     revalidatePath("/admin/sales");

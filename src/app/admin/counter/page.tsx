@@ -98,6 +98,16 @@ const CHECKIN_STEPS: {
   },
 ];
 
+// 予約日が患者の誕生日なら true（受付での声かけ用 🎂 バッジ）
+function isBirthdayToday(apt: Appointment): boolean {
+  const birthDate = apt.customers?.birth_date;
+  if (!birthDate) return false;
+  const b = new Date(birthDate);
+  if (isNaN(b.getTime())) return false;
+  const d = parseISO(apt.start_time);
+  return b.getMonth() === d.getMonth() && b.getDate() === d.getDate();
+}
+
 function getStep(status: CheckinStatus) {
   return CHECKIN_STEPS.find(s => s.value === status) ?? CHECKIN_STEPS[0];
 }
@@ -268,6 +278,9 @@ function AppointmentCard({
             )}
             {apt.is_first_visit && (
               <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-rose-500 text-white uppercase tracking-wide">初診</span>
+            )}
+            {isBirthdayToday(apt) && (
+              <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-pink-500 text-white">🎂 誕生日</span>
             )}
             {apt.course_name && (
               <span className="text-xs font-medium text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-900/30 px-2 py-0.5 rounded-full border border-emerald-200 dark:border-emerald-700/50">
