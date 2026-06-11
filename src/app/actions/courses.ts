@@ -463,6 +463,49 @@ export async function getCourseRequiredStaffSchedule(courseId: string): Promise<
   };
 }
 
+// ── 患者側：出勤日制スタッフ（さみ・ヘッドスパ等）の出勤スケジュール一覧 ──
+// 予約フォームの指名欄で「その日お休みのスタッフを出さない」ために使う。
+// schedule_based でない常勤スタッフはこのマップに含まれない（＝常に指名可）。
+export async function getPublicStaffSchedules(): Promise<
+  Record<string, { weekdays: number[]; dates: StaffBookingDate[] }>
+> {
+  try {
+    const { createClient: createAdminClient } = await import("@supabase/supabase-js");
+    const DEFAULT_CLINIC_ID = PUBLIC_CLINIC_ID;
+    const admin = createAdminClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
+    const { data: staff } = await admin
+      .from("reservation_staff")
+      .select("id, booking_weekdays")
+      .eq("clinic_id", DEFAULT_CLINIC_ID)
+      .eq("is_active", true)
+      .eq("schedule_based_booking", true);
+    if (!staff || staff.length === 0) return {};
+    const ids = staff.map((s) => s.id as string);
+    const { data: dates } = await admin
+      .from("staff_booking_dates")
+      .select("staff_id, date, available")
+      .eq("clinic_id", DEFAULT_CLINIC_ID)
+      .in("staff_id", ids);
+    const out: Record<string, { weekdays: number[]; dates: StaffBookingDate[] }> = {};
+    for (const s of staff) {
+      out[s.id as string] = {
+        weekdays: String(s.booking_weekdays ?? "")
+          .split(",").map((x) => x.trim()).filter(Boolean).map(Number).filter((n) => n >= 0 && n <= 6),
+        dates: (dates ?? [])
+          .filter((d: { staff_id: string }) => d.staff_id === s.id)
+          .map((d: { date: string; available: boolean }) => ({
+            date: String(d.date).slice(0, 10),
+            available: !!d.available,
+          })),
+      };
+    }
+    return out;
+  } catch (e) {
+    console.error("getPublicStaffSchedules failed", e);
+    return {};
+  }
+}
+
 // ─────────────────────────────────────────────────────────
 // メニュー別の「最短の空き日」（メニュー一覧カードの空きバッジ用）
 // ─────────────────────────────────────────────────────────

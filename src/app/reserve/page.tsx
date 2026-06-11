@@ -15,10 +15,10 @@ import { CalendarIcon, ArrowLeft, CheckCircle2, Phone, MapPin, MessageCircle, X 
 import { createClient } from "@/lib/supabase/client";
 import { createReservation, getDailyAvailability, getAutoCourseSelection } from "@/app/actions/reserve";
 import { getClinicHolidays, type ClinicHoliday } from "@/app/actions/holidays";
-import { getActiveCourses, getActiveStaff, getActiveRooms, getCourseRequiredStaffSchedule, type ReservationCourse, type ReservationStaff, type ReservationRoom } from "@/app/actions/courses";
+import { getActiveCourses, getActiveStaff, getActiveRooms, getCourseRequiredStaffSchedule, getPublicStaffSchedules, type ReservationCourse, type ReservationStaff, type ReservationRoom } from "@/app/actions/courses";
 import { isStaffAvailableOn, type StaffSchedule } from "@/lib/staff-availability";
 import { useSearchParams } from "next/navigation";
-import { getTimeSlots, isDateWithinAllowedRange } from "@/lib/time-slots";
+import { getTimeSlots, isDateWithinAllowedRange, isTimeSlotWithinTwoHours } from "@/lib/time-slots";
 import { useClinicSlotDuration } from "@/lib/use-clinic-slot-duration";
 import { useClinicSchedule } from "@/lib/use-clinic-schedule";
 import { toast } from "sonner";
@@ -105,6 +105,9 @@ function ReserveContent() {
   const [autoCourseNote, setAutoCourseNote] = useState<string | null>(null);
   // 担当固定コース（さみ整体など）。選ぶとそのスタッフの出勤日だけ予約可・担当を自動設定。
   const [requiredStaff, setRequiredStaff] = useState<{ staffId: string; staffName: string; schedule: StaffSchedule } | null>(null);
+  // 出勤日制スタッフ（さみ・ヘッドスパ等）の出勤スケジュール。
+  // 選択日に出勤していないスタッフは指名欄に出さない（休みの担当を選べてしまう事故防止）。
+  const [staffSchedules, setStaffSchedules] = useState<Record<string, StaffSchedule>>({});
 
   // 営業時間・休診日（DB＝院ごと。ハードコード禁止）
   const [hoursLines, setHoursLines] = useState<string[]>([]);
@@ -134,6 +137,7 @@ function ReserveContent() {
     });
     getActiveStaff().then(setStaffList);
     getActiveRooms().then(setRooms);
+    getPublicStaffSchedules().then(setStaffSchedules).catch(() => setStaffSchedules({}));
 
     // 家族選択がある場合は customer 情報を優先プリフィル
     let appliedFamily = false;
@@ -246,6 +250,15 @@ function ReserveContent() {
       setTime("");
     }
   }, [requiredStaff, date]);
+
+  // 指名済みスタッフが選択日に出勤していなければ指名を解除（休みの担当を指名したままにしない）
+  useEffect(() => {
+    if (!selectedStaffId || requiredStaff) return;
+    const sch = staffSchedules[selectedStaffId];
+    if (sch && date && !isStaffAvailableOn(date, sch)) {
+      setSelectedStaffId("");
+    }
+  }, [date, staffSchedules, selectedStaffId, requiredStaff]);
 
   // アンケートが必要になったら、その案内まで自動でスクロールして気づいてもらう
   useEffect(() => {
@@ -576,6 +589,17 @@ function ReserveContent() {
     return i === -1 ? steps.length - 1 : i;
   })();
 
+  // 指名欄に出すスタッフ：出勤日制（さみ・ヘッドスパ等）は選択日に出勤している人だけ。
+  // 休みの担当を選べてしまうと「指名したのに受けられない」事故になるため表示自体しない。
+  const visibleStaff = staffList.filter((s) => {
+    const sch = staffSchedules[s.id];
+    if (!sch || !date) return true;
+    return isStaffAvailableOn(date, sch);
+  });
+  const restingStaffNames = staffList
+    .filter((s) => !visibleStaff.some((v) => v.id === s.id))
+    .map((s) => s.name);
+
   // 申し込みボタンの「あと何が足りないか」（日時はこの画面では必ず選択済み）
   const missingFields: string[] = [];
   if (courses.length > 0 && !selectedCourseId) missingFields.push("施術コースの選択");
@@ -709,9 +733,39 @@ function ReserveContent() {
                           />
                         </SelectTrigger>
                         <SelectContent className="bg-slate-900 border-white/10 text-white">
-                          {(date && (courses.length === 0 || selectedCourseId) ? getTimeSlots(date, { slotMinutes, schedule }) : []).map((t) => (
-                            <SelectItem key={t} value={t} className="bg-slate-900 text-white focus:bg-slate-800">{t}</SelectItem>
-                          ))}
+                          {(() => {
+                            if (!date || (courses.length > 0 && !selectedCourseId)) return null;
+                            const allSlots = getTimeSlots(date, { slotMinutes, schedule });
+                            const selCourse = courses.find(c => c.id === selectedCourseId);
+                            const requiredSteps = Math.max(1, Math.ceil((selCourse?.duration_minutes ?? slotMinutes) / slotMinutes));
+                            // コースの施術時間ぶんの連続枠が確保できるか（カレンダー画面と同じ判定）
+                            const canFit = (slot: string): boolean => {
+                              const idx = allSlots.indexOf(slot);
+                              if (idx < 0) return false;
+                              for (let i = 0; i < requiredSteps; i++) {
+                                const next = allSlots[idx + i];
+                                if (!next) return false;
+                                if (bookedTimes.includes(next)) return false;
+                              }
+                              return true;
+                            };
+                            return allSlots.map((t) => {
+                              const isBooked = bookedTimes.includes(t);
+                              const tooClose = isTimeSlotWithinTwoHours(date, t);
+                              const noFit = !isBooked && !tooClose && !canFit(t);
+                              const label = isBooked ? `${t}（予約済）` : tooClose ? `${t}（要電話）` : noFit ? `${t}（枠不足）` : t;
+                              return (
+                                <SelectItem
+                                  key={t}
+                                  value={t}
+                                  disabled={isBooked || tooClose || noFit}
+                                  className="bg-slate-900 text-white focus:bg-slate-800 data-[disabled]:opacity-40"
+                                >
+                                  {label}
+                                </SelectItem>
+                              );
+                            });
+                          })()}
                         </SelectContent>
                       </Select>
                       {courses.length > 0 && !selectedCourseId && (
@@ -886,33 +940,48 @@ function ReserveContent() {
                       {reserveFlow === "menu_first" ? "② スタッフ指名" : "スタッフ指名"}
                       <span className="text-sm font-normal text-blue-100/80">（任意）</span>
                     </h2>
-                    <div className="flex flex-wrap gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setSelectedStaffId("")}
-                        className={`px-4 py-2.5 rounded-xl font-semibold text-sm border transition-all ${
-                          selectedStaffId === ""
-                            ? "bg-blue-600 border-blue-500 text-white"
-                            : "bg-white/5 border-white/10 text-blue-100/85 hover:bg-white/10"
-                        }`}
-                      >
-                        指名なし
-                      </button>
-                      {staffList.map(staff => (
-                        <button
-                          key={staff.id}
-                          type="button"
-                          onClick={() => setSelectedStaffId(staff.id)}
-                          className={`px-4 py-2.5 rounded-xl font-semibold text-sm border transition-all ${
-                            selectedStaffId === staff.id
-                              ? "bg-blue-600 border-blue-500 text-white"
-                              : "bg-white/5 border-white/10 text-blue-100/85 hover:bg-white/10"
-                          }`}
-                        >
-                          {staff.name}
-                        </button>
-                      ))}
-                    </div>
+                    {requiredStaff ? (
+                      // 担当固定メニュー（さみ整体・ヘッドスパ等）は指名ボタンを出さず自動設定を案内
+                      <div className="p-4 rounded-2xl border border-emerald-500/40 bg-emerald-500/10 text-sm text-emerald-100">
+                        このメニューの担当は <span className="font-bold text-white">{requiredStaff.staffName}</span> さんです。
+                        自動で設定されるので、選ぶ操作はいりません。
+                      </div>
+                    ) : (
+                      <>
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setSelectedStaffId("")}
+                            className={`px-4 py-2.5 rounded-xl font-semibold text-sm border transition-all ${
+                              selectedStaffId === ""
+                                ? "bg-blue-600 border-blue-500 text-white"
+                                : "bg-white/5 border-white/10 text-blue-100/85 hover:bg-white/10"
+                            }`}
+                          >
+                            指名なし
+                          </button>
+                          {visibleStaff.map(staff => (
+                            <button
+                              key={staff.id}
+                              type="button"
+                              onClick={() => setSelectedStaffId(staff.id)}
+                              className={`px-4 py-2.5 rounded-xl font-semibold text-sm border transition-all ${
+                                selectedStaffId === staff.id
+                                  ? "bg-blue-600 border-blue-500 text-white"
+                                  : "bg-white/5 border-white/10 text-blue-100/85 hover:bg-white/10"
+                              }`}
+                            >
+                              {staff.name}
+                            </button>
+                          ))}
+                        </div>
+                        {restingStaffNames.length > 0 && (
+                          <p className="text-xs text-blue-100/60">
+                            ※ {restingStaffNames.join("・")} はこの日はお休みのため、出勤日のみ指名できます
+                          </p>
+                        )}
+                      </>
+                    )}
                   </section>
                 )}
 

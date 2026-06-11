@@ -495,6 +495,7 @@ export async function createReservation(formData: FormData) {
 
       // ── 担当固定コース（さみ整体など）の出勤日チェック＋担当の自動確定 ──
       // required_staff_id 付きコースは、そのスタッフが出勤している日だけ予約可。
+      let staffViaRequiredCourse = false;
       if (courseId) {
         const { data: courseRow } = await adminDb
           .from("reservation_courses")
@@ -546,6 +547,39 @@ export async function createReservation(formData: FormData) {
             // （院長＝1人/水素＝1台/ヘッドスパ＝1人/さみ＝1人）。
             staffId = reqStaff.id as string;
             staffName = (reqStaff.name as string) ?? staffName;
+            staffViaRequiredCourse = true;
+          }
+        }
+      }
+
+      // ── 指名スタッフの出勤日チェック ──
+      // 出勤日制スタッフ（さみ・ヘッドスパ等）を休みの日に指名した予約をサーバ側でも弾く
+      // （フロントは出勤日以外を指名欄に出さないが、古い画面・直接送信の抜け道対策）。
+      if (staffId && !staffViaRequiredCourse) {
+        const { data: st } = await adminDb
+          .from("reservation_staff")
+          .select("name, schedule_based_booking, booking_weekdays")
+          .eq("id", staffId)
+          .eq("clinic_id", PUBLIC_CLINIC_ID)
+          .maybeSingle();
+        if (!st) {
+          // 自院に存在しない指名IDは無視して「指名なし」として続行
+          staffId = null;
+          staffName = null;
+        } else if (st.schedule_based_booking) {
+          const weekdays = String(st.booking_weekdays ?? "")
+            .split(",").map((s) => s.trim()).filter(Boolean).map(Number);
+          const { data: ovr } = await adminDb
+            .from("staff_booking_dates")
+            .select("available")
+            .eq("clinic_id", PUBLIC_CLINIC_ID)
+            .eq("staff_id", staffId)
+            .eq("date", rawDate)
+            .maybeSingle();
+          const wd = new Date(`${rawDate}T00:00:00`).getDay();
+          const available = ovr ? !!ovr.available : weekdays.includes(wd);
+          if (!available) {
+            return { success: false, error: `${st.name ?? "ご指名の担当"}さんはその日はお休みです。指名なしにするか、別の日をお選びください。` };
           }
         }
       }
