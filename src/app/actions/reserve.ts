@@ -306,13 +306,38 @@ export async function getMonthlyAvailability(year: number, month: number): Promi
   }
 }
 
+// メニュー未選択の呼び出しに返す「終日ふさがり」リスト（5分刻みの全時刻）。
+// どの slotMinutes 設定（15/20/30分）のグリッドでも includes() が必ずヒットする。
+const ALL_DAY_BLOCKED: string[] = (() => {
+  const out: string[] = [];
+  for (let h = 0; h < 24; h++) {
+    for (let m = 0; m < 60; m += 5) {
+      out.push(`${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`);
+    }
+  }
+  return out;
+})();
+
 // 指定日の予約状況（埋まっている時間帯）を取得するアクション
 // courseId を渡すと、そのコースの担当(レーン)の空きで判定する（レーンが空いていれば予約可）。
-// courseId 無し / 担当未設定のコースは、その日の定員(プール)で判定する。
-export async function getDailyAvailability(dateStr: string, courseId?: string | null) {
+// 担当未設定のコースは、その日の定員(プール)で判定する。
+//
+// 🚨 courseId 無しでは空き判定をしない（fail-closed＝全枠ふさがりを返す）。
+// メニュー未選択だと定員プール判定になり、ボール枠が埋まっていても さみ/水素 等の
+// 別レーンが空いていれば「◯空き」に見えてしまい、ダブルブッキングの温床になるため。
+// 例外は予約変更（コース無しの旧予約）だけで、opts.allowWithoutCourse で明示する。
+export async function getDailyAvailability(
+  dateStr: string,
+  courseId?: string | null,
+  opts?: { allowWithoutCourse?: boolean },
+) {
   noStore();
   const supabase = getAdminSupabase() || await getSupabase();
   if (!supabase) return [];
+
+  if (!courseId && !opts?.allowWithoutCourse) {
+    return ALL_DAY_BLOCKED;
+  }
 
   try {
     const startOfDay = `${dateStr}T00:00:00+09:00`;
@@ -323,10 +348,12 @@ export async function getDailyAvailability(dateStr: string, courseId?: string | 
     if (courseId) {
       const { data: c } = await supabase
         .from("reservation_courses")
-        .select("required_staff_id")
+        .select("id, required_staff_id")
         .eq("id", courseId)
         .eq("clinic_id", DEFAULT_CLINIC_ID)
         .maybeSingle();
+      // 自院に存在しない courseId（他院IDや無効値）も fail-closed
+      if (!c) return ALL_DAY_BLOCKED;
       requiredStaffId = (c?.required_staff_id as string | null) ?? null;
     }
 
@@ -334,7 +361,7 @@ export async function getDailyAvailability(dateStr: string, courseId?: string | 
 
     const { data, error } = await supabase
       .from("appointments")
-      .select("start_time, end_time, staff_id")
+      .select("start_time, end_time, staff_id, status")
       .eq("clinic_id", DEFAULT_CLINIC_ID)
       .gte("start_time", startOfDay)
       .lte("start_time", endOfDay)
@@ -347,9 +374,15 @@ export async function getDailyAvailability(dateStr: string, courseId?: string | 
 
     // 取得した予約日時の開始・終了から、各30分枠ごとの予約数をカウント
     const slotCounts: Record<string, number> = {};
-    (data ?? []).forEach((app: { start_time: string, end_time?: string, staff_id?: string | null }) => {
-      // コース担当が指定されている場合は、そのレーンの予約のみを数える
-      if (requiredStaffId && app.staff_id !== requiredStaffId) return;
+    (data ?? []).forEach((app: { start_time: string, end_time?: string, staff_id?: string | null, status?: string }) => {
+      // コース担当が指定されている場合は、そのレーンの予約を数える。
+      // 担当未設定の実予約（pending/confirmed）はどのレーンを使うか確定していないため、
+      // 安全側に倒して全レーンの埋まり扱いにする（キャンセル待ち waiting は時間帯の希望
+      // 登録であって枠を持たないので除外）。
+      if (requiredStaffId && app.staff_id !== requiredStaffId) {
+        const isUnassignedRealBooking = !app.staff_id && app.status !== "waiting";
+        if (!isUnassignedRealBooking) return;
+      }
       const start = new Date(app.start_time);
       const end = app.end_time ? new Date(app.end_time) : new Date(start.getTime() + 30 * 60000);
 
@@ -403,8 +436,8 @@ export async function createReservation(formData: FormData) {
     const symptoms = formData.get("symptoms") as string;
     const isWaitlistIntent = formData.get("isWaitlistIntent") === "true";
     const courseId = (formData.get("courseId") as string) || null;
-    const courseName = (formData.get("courseName") as string) || null;
-    const courseDurationStr = formData.get("courseDurationMinutes") as string | null;
+    let courseName = (formData.get("courseName") as string) || null;
+    let courseDurationStr = formData.get("courseDurationMinutes") as string | null;
     let staffId = (formData.get("staffId") as string) || null;
     let staffName = (formData.get("staffName") as string) || null;
     const roomId = (formData.get("roomId") as string) || null;
@@ -419,6 +452,27 @@ export async function createReservation(formData: FormData) {
 
     if (isFirstVisit && !phone) {
       return { success: false, error: "初診の場合は電話番号が必須です" };
+    }
+
+    // ── メニュー必須（フロントの抜け道対策としてサーバ側でも二重チェック） ──
+    // メニュー未選択だと所要時間が分からず、レーン判定もできないまま
+    // 「埋まっている時間への仮予約」が通ってしまう。コースを運用している院では必須。
+    if (!courseId) {
+      const checkDb = getAdminSupabase();
+      if (checkDb) {
+        const { count: activeCourseCount } = await checkDb
+          .from("reservation_courses")
+          .select("id", { count: "exact", head: true })
+          .eq("clinic_id", DEFAULT_CLINIC_ID)
+          .eq("is_active", true);
+        if ((activeCourseCount ?? 0) > 0) {
+          return {
+            success: false,
+            error: "施術メニューが選択されていません。お手数ですが、メニューを選んでからお申し込みください。",
+            requiresCourse: true,
+          };
+        }
+      }
     }
 
     // 予約可能期間（院ごと clinic_settings.booking_horizon_days）のチェック
@@ -444,10 +498,23 @@ export async function createReservation(formData: FormData) {
       if (courseId) {
         const { data: courseRow } = await adminDb
           .from("reservation_courses")
-          .select("required_staff_id")
+          .select("required_staff_id, name, duration_minutes, is_active")
           .eq("id", courseId)
           .eq("clinic_id", PUBLIC_CLINIC_ID)
           .maybeSingle();
+        // 自院に実在する有効コースかをサーバ側で検証（他院IDや停止済みコースを弾く）
+        if (!courseRow || courseRow.is_active === false) {
+          return {
+            success: false,
+            error: "選択されたメニューが見つかりませんでした。お手数ですが、メニューを選び直してください。",
+            requiresCourse: true,
+          };
+        }
+        // コース名・所要時間はクライアント申告ではなく DB の正値を使う
+        courseName = (courseRow.name as string) ?? courseName;
+        if (courseRow.duration_minutes != null) {
+          courseDurationStr = String(courseRow.duration_minutes);
+        }
         const reqStaffId = (courseRow?.required_staff_id as string | null) ?? null;
         if (reqStaffId) {
           const { data: reqStaff } = await adminDb
@@ -743,6 +810,21 @@ export async function createReservation(formData: FormData) {
         if (staffConflict && staffConflict.length > 0) {
           return { success: false, error: "ご指名のスタッフはその時間帯に別のご予約が入っています。他の担当者または時間帯をお選びください。" };
         }
+        // 担当未設定の実予約（旧データ・メニュー無しで入った仮予約等）は
+        // どのレーンを使うか確定していないため、安全側に倒して重複対象に含める
+        // （キャンセル待ち waiting は時間帯の希望登録なので除外）。
+        const { data: unassignedConflict } = await adminDb
+          .from("appointments")
+          .select("id")
+          .eq("clinic_id", DEFAULT_CLINIC_ID)
+          .is("staff_id", null)
+          .in("status", ["pending", "confirmed"])
+          .lt("start_time", endDateTimeStr)
+          .gt("end_time", startDateTimeStr)
+          .limit(1);
+        if (unassignedConflict && unassignedConflict.length > 0) {
+          return { success: false, error: "申し訳ありません。その時間帯はすでにご予約が入っています。お手数ですが、別のお時間をお選びください。" };
+        }
       }
 
       const { error: appointmentErr, data: appointmentData } = await adminDb
@@ -958,6 +1040,122 @@ export async function createReservation(formData: FormData) {
   } catch (err) {
     console.error(err);
     return { success: false, error: "エラーが発生しました。お手数ですが、お電話またはLINEにてご予約ください。" };
+  }
+}
+
+// ── メニュー自動選択（新規の方・操作が分からない方のための補助） ──
+// 患者情報（生年月日 or 年齢区分）から
+//   高校生以下 → 「保険施術…」 / それより上・大人 → 「部分施術…」
+// を自動選択する。患者を特定できない・年齢が分からない・該当コースが一意でない
+// 場合は null を返し、フロントは通常どおり「メニュー選択必須」のままにする。
+function judgeAgeBasis(birthDate: string | null, ageGroup: string | null): "minor" | "adult" | null {
+  if (birthDate && /^\d{4}-\d{2}-\d{2}/.test(birthDate)) {
+    const [by, bm, bd] = birthDate.slice(0, 10).split("-").map(Number);
+    // 学年基準（4/1 区切り）: 今年度の 4/1 時点で 17 歳以下なら高校生以下（高3 は 4/1 時点で 17 歳）
+    const nowJst = new Date(Date.now() + 9 * 3600000);
+    const y = nowJst.getUTCFullYear();
+    const m = nowJst.getUTCMonth() + 1;
+    const fiscalYear = m >= 4 ? y : y - 1;
+    let ageOnApril1 = fiscalYear - by;
+    if (bm > 4 || (bm === 4 && bd > 1)) ageOnApril1 -= 1;
+    return ageOnApril1 <= 17 ? "minor" : "adult";
+  }
+  if (ageGroup) {
+    return /(19歳以下|18歳以下|高校|中学|小学|未就学|10代)/.test(ageGroup) ? "minor" : "adult";
+  }
+  return null;
+}
+
+export async function getAutoCourseSelection(input: {
+  customerId?: string | null;
+  name?: string | null;
+  phone?: string | null;
+}): Promise<{ courseId: string; courseName: string; durationMinutes: number; basis: "minor" | "adult" } | null> {
+  noStore();
+  try {
+    const adminDb = getAdminSupabase();
+    if (!adminDb) return null;
+
+    let customer: { name?: string; birth_date: string | null; age_group: string | null } | null = null;
+
+    // ① LINE 家族選択経由: cookie の line_user_id と customer の紐付けを検証してから使う
+    if (input.customerId) {
+      const lineUid = await getLineUidFromCookie();
+      if (lineUid) {
+        const { data: link } = await adminDb
+          .from("customer_line_links")
+          .select("customer_id")
+          .eq("line_user_id", lineUid)
+          .eq("customer_id", input.customerId)
+          .eq("clinic_id", DEFAULT_CLINIC_ID)
+          .maybeSingle();
+        if (link) {
+          const { data } = await adminDb
+            .from("customers")
+            .select("birth_date, age_group")
+            .eq("id", input.customerId)
+            .eq("clinic_id", DEFAULT_CLINIC_ID)
+            .maybeSingle();
+          customer = data ?? null;
+        }
+      }
+    }
+
+    // ② 電話番号（前回入力 or アンケート登録直後）で特定。名前も来ていれば突き合わせる
+    if (!customer && input.phone) {
+      const phone = String(input.phone).trim().replace(/[-\s]/g, "");
+      if (phone) {
+        const { data } = await adminDb
+          .from("customers")
+          .select("name, birth_date, age_group")
+          .eq("clinic_id", DEFAULT_CLINIC_ID)
+          .eq("phone", phone)
+          .maybeSingle();
+        if (
+          data &&
+          (!input.name || normalizeNameForMatch(data.name as string) === normalizeNameForMatch(input.name))
+        ) {
+          customer = data;
+        }
+      }
+    }
+
+    // ③ 名前のみ: 正規化一致がちょうど1人のときだけ採用（同姓同名は自動選択しない）
+    if (!customer && input.name) {
+      const target = normalizeNameForMatch(input.name);
+      const { data: list } = await adminDb
+        .from("customers")
+        .select("name, birth_date, age_group")
+        .eq("clinic_id", DEFAULT_CLINIC_ID)
+        .eq("name", input.name);
+      const hits = (list ?? []).filter((c) => normalizeNameForMatch(c.name as string) === target);
+      if (hits.length === 1) customer = hits[0];
+    }
+
+    if (!customer) return null;
+
+    const basis = judgeAgeBasis(customer.birth_date ?? null, customer.age_group ?? null);
+    if (!basis) return null;
+
+    const prefix = basis === "minor" ? "保険施術" : "部分施術";
+    const { data: courses } = await adminDb
+      .from("reservation_courses")
+      .select("id, name, duration_minutes")
+      .eq("clinic_id", DEFAULT_CLINIC_ID)
+      .eq("is_active", true)
+      .ilike("name", `${prefix}%`);
+    // 候補が一意のときだけ自動選択（「保険施術（初診）/（再診）」のように複数ある院では患者に選んでもらう）
+    if (!courses || courses.length !== 1) return null;
+
+    return {
+      courseId: courses[0].id as string,
+      courseName: courses[0].name as string,
+      durationMinutes: Number(courses[0].duration_minutes ?? 30) || 30,
+      basis,
+    };
+  } catch (e) {
+    console.error("getAutoCourseSelection failed", e);
+    return null;
   }
 }
 

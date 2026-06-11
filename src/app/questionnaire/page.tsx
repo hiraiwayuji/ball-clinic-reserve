@@ -5,7 +5,7 @@ import ClinicWordmark from "@/components/ClinicWordmark";
 import Link from "next/link";
 import { CheckCircle2, MessageCircle, ArrowLeft, ChevronRight } from "lucide-react";
 import { submitQuestionnaire } from "@/app/actions/questionnaire";
-import { createReservation } from "@/app/actions/reserve";
+import { createReservation, getAutoCourseSelection } from "@/app/actions/reserve";
 import { getPublicClinicSettings } from "@/app/actions/publicSettings";
 import { toast } from "sonner";
 import { CLINIC_CONFIG } from "@/lib/clinic-config";
@@ -141,6 +141,19 @@ export default function QuestionnairePage() {
       fd.append("courseId", b.courseId);
       if (b.courseName) fd.append("courseName", b.courseName);
       if (b.courseDurationMinutes) fd.append("courseDurationMinutes", String(b.courseDurationMinutes));
+    } else {
+      // メニュー未選択のまま引き継がれた場合（旧リンク等）は、いまアンケートで登録した
+      // 患者情報（生年月日・年齢区分）からメニューを自動選択して補完する。
+      // 高校生以下=保険施術 / 大人=部分施術。補完できなければサーバ側が
+      // 「メニュー未選択」として弾き、カレンダーから選び直してもらう。
+      try {
+        const auto = await getAutoCourseSelection({ name: b.name, phone: registeredPhone || b.phone });
+        if (auto) {
+          fd.append("courseId", auto.courseId);
+          fd.append("courseName", auto.courseName);
+          fd.append("courseDurationMinutes", String(auto.durationMinutes));
+        }
+      } catch {}
     }
     if (b.staffId) {
       fd.append("staffId", b.staffId);

@@ -6,7 +6,7 @@ import { useSearchParams, useRouter } from "next/navigation";
 import { format, isSameMonth, isSameDay, isToday, isPast, startOfDay, startOfMonth, endOfMonth, eachDayOfInterval, startOfWeek, endOfWeek } from "date-fns";
 import { ja } from "date-fns/locale";
 import { ChevronLeft, ChevronRight, ArrowLeft, Clock, CalendarDays, X, CheckCircle2, AlertCircle, Sparkles, Phone, MessageCircle } from "lucide-react";
-import { createWaitlistReservation, getDailyAvailability } from "@/app/actions/reserve";
+import { createWaitlistReservation, getDailyAvailability, getAutoCourseSelection } from "@/app/actions/reserve";
 import { getClinicHolidays, type ClinicHoliday } from "@/app/actions/holidays";
 import { getActiveCourses, getActiveStaff, getCourseRequiredStaffSchedule, getCoursesAvailability, type ReservationCourse } from "@/app/actions/courses";
 import { getBlockedTimesForCurrentClinic } from "@/app/actions/staff-schedule";
@@ -150,6 +150,14 @@ function ReserveCalendarContent() {
   const router = useRouter();
   const courseIdParam = searchParams.get("courseId");
 
+  // ── メニュー未選択ゲート ──
+  // courseId 無しでは空き状況を出さない（メニュー未選択だと定員プール判定になり、
+  // 埋まっている時間まで「◯空き」に見えてダブルブッキングの温床になるため）。
+  // 患者情報（LINE家族・前回入力）があれば年齢からメニューを自動選択し、
+  // なければメニュー選択ページへ誘導する。
+  const [menuGate, setMenuGate] = useState<"checking" | "ok" | "required">(courseIdParam ? "ok" : "checking");
+  const [autoSelectedNote, setAutoSelectedNote] = useState<string | null>(null);
+
   const [selectedCourse, setSelectedCourse] = useState<ReservationCourse | null>(null);
   // スタッフ(レーン)タブ：担当ごとに「そのスタッフのメニュー」を切り替えるための一覧
   type Lane = { staffId: string; staffName: string; courses: ReservationCourse[]; schedule: StaffSchedule | null };
@@ -203,7 +211,7 @@ function ReserveCalendarContent() {
     // 直接Supabaseからデータを取得（マルチテナント漏洩対策で clinic_id フィルタ必須・
     // customers JOIN は他院の患者名漏洩リスクのため取得しない）
     const [ { data: aptData }, { data: holidayData } ] = await Promise.all([
-      supabase.from("appointments").select("start_time, end_time, staff_id")
+      supabase.from("appointments").select("start_time, end_time, staff_id, status")
         .eq("clinic_id", PUBLIC_CLINIC_ID)
         .gte("start_time", startOfMonthUTC)
         .lte("start_time", endOfMonthUTC)
@@ -215,9 +223,13 @@ function ReserveCalendarContent() {
     const counts: Record<string, number> = {};
     if (aptData) {
       const stepMs = slotMinutes * 60000;
-      aptData.forEach((app: { start_time: string; end_time?: string | null; staff_id?: string | null }) => {
-        // コースに担当(レーン)がある場合は、そのレーンの予約だけを数える
-        if (requiredStaffId && app.staff_id !== requiredStaffId) return;
+      aptData.forEach((app: { start_time: string; end_time?: string | null; staff_id?: string | null; status?: string }) => {
+        // コースに担当(レーン)がある場合は、そのレーンの予約を数える。
+        // 担当未設定の実予約（pending/confirmed）は全レーンの埋まり扱い（サーバ側と同じ基準）。
+        if (requiredStaffId && app.staff_id !== requiredStaffId) {
+          const isUnassignedRealBooking = !app.staff_id && app.status !== "waiting";
+          if (!isUnassignedRealBooking) return;
+        }
         const dStart = new Date(app.start_time);
         const dEnd = app.end_time ? new Date(app.end_time) : new Date(dStart.getTime() + stepMs);
         let current = dStart.getTime();
@@ -253,6 +265,45 @@ function ReserveCalendarContent() {
   useEffect(() => {
     setCurrentMonth(new Date(new Date().getFullYear(), new Date().getMonth(), 1));
   }, []);
+
+  // メニュー未選択で来た場合：患者情報からの自動選択を試み、できなければメニュー選択へ誘導
+  useEffect(() => {
+    if (courseIdParam) { setMenuGate("ok"); return; }
+    let mounted = true;
+    (async () => {
+      let input: { customerId?: string; name?: string | null; phone?: string | null } | null = null;
+      try {
+        const selectedId = localStorage.getItem("ballClinic_selectedCustomerId");
+        if (selectedId) input = { customerId: selectedId };
+      } catch {}
+      if (!input) {
+        try {
+          const savedName = localStorage.getItem("ballClinic_savedName");
+          const savedPhone = localStorage.getItem("ballClinic_savedPhone");
+          if (savedName || savedPhone) input = { name: savedName, phone: savedPhone };
+        } catch {}
+      }
+      if (input) {
+        try {
+          const auto = await getAutoCourseSelection(input);
+          if (!mounted) return;
+          if (auto) {
+            setAutoSelectedNote(
+              `ご登録情報にあわせて「${auto.courseName}」を自動選択しました。違うメニューをご希望の場合は「変更」から選び直せます。`,
+            );
+            const params = new URLSearchParams(Array.from(searchParams.entries()));
+            params.set("courseId", auto.courseId);
+            router.replace(`/reserve/calendar?${params.toString()}`, { scroll: false });
+            setMenuGate("ok");
+            return;
+          }
+        } catch {}
+      }
+      if (mounted) setMenuGate("required");
+    })();
+    return () => { mounted = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [courseIdParam]);
 
   // courseId から該当コースを取得
   useEffect(() => {
@@ -458,6 +509,61 @@ function ReserveCalendarContent() {
     }
   };
 
+  // ── メニュー未選択ゲートの表示 ──
+  // 自動選択を確認中はスピナー、自動選択できなければメニュー選択へ誘導する。
+  // この間は空き状況の計算・表示は一切行わない（誤った「◯空き」を見せないため）。
+  if (menuGate !== "ok") {
+    return (
+      <div className="min-h-screen bg-slate-900 text-white" data-dark-page style={{ backgroundColor: '#0f172a', color: 'white' }}>
+        <div className="sticky top-0 z-20 bg-slate-900/95 border-b border-zinc-800">
+          <div className="max-w-2xl mx-auto px-4 py-3 flex items-center gap-3">
+            <Link href="/reserve" className="w-9 h-9 flex items-center justify-center rounded-xl bg-zinc-800 hover:bg-zinc-700 transition shrink-0">
+              <ArrowLeft className="w-4 h-4 text-zinc-300" />
+            </Link>
+            <div className="flex-1 min-w-0">
+              <p className="text-xs text-zinc-300 font-bold">{CLINIC_CONFIG.nameShort}</p>
+              <h1 className="text-sm font-black text-white truncate">予約空き状況カレンダー</h1>
+            </div>
+          </div>
+        </div>
+        {menuGate === "checking" ? (
+          <div className="flex items-center justify-center py-32">
+            <div className="flex flex-col items-center gap-3">
+              <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+              <p className="text-zinc-300 text-sm font-bold">メニューを確認しています...</p>
+            </div>
+          </div>
+        ) : (
+          <div className="max-w-2xl mx-auto px-4 py-12">
+            <div className="bg-zinc-900 border border-zinc-800 rounded-3xl p-8 text-center space-y-5">
+              <div className="w-16 h-16 bg-blue-600/20 border border-blue-500/40 rounded-full flex items-center justify-center mx-auto">
+                <Sparkles className="w-8 h-8 text-blue-300" />
+              </div>
+              <h2 className="text-xl font-black text-white leading-snug">
+                先に施術メニューを
+                <br />
+                お選びください
+              </h2>
+              <p className="text-zinc-300 text-sm leading-relaxed">
+                メニューによって施術時間が違うため、
+                <br />
+                メニューを選んでいただくと
+                <br />
+                正しい空き状況をご案内できます。
+              </p>
+              <Link
+                href="/reserve/menu"
+                className="flex items-center justify-center gap-2 w-full h-14 rounded-2xl bg-blue-600 hover:bg-blue-500 active:scale-95 text-white text-base font-black shadow-xl shadow-blue-950 transition-all"
+              >
+                メニューを選ぶ
+              </Link>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
   // カレンダーグリッド生成
   if (!currentMonth) {
     return (
@@ -541,6 +647,11 @@ function ReserveCalendarContent() {
             <p className="text-[11px] text-blue-200/60 mt-2.5 ml-13">
               ※ {selectedCourse.duration_minutes}分の連続枠が確保できる時間のみ「◯ 空き」表示しています
             </p>
+            {autoSelectedNote && (
+              <p className="text-[11px] text-emerald-200/90 mt-1.5 ml-13">
+                ✨ {autoSelectedNote}
+              </p>
+            )}
           </div>
         )}
 

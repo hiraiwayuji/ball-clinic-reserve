@@ -13,7 +13,7 @@ import { ja } from "date-fns/locale";
 import { CalendarIcon, ArrowLeft, CheckCircle2, Phone, MapPin, MessageCircle, X } from "lucide-react";
 
 import { createClient } from "@/lib/supabase/client";
-import { createReservation, getDailyAvailability } from "@/app/actions/reserve";
+import { createReservation, getDailyAvailability, getAutoCourseSelection } from "@/app/actions/reserve";
 import { getClinicHolidays, type ClinicHoliday } from "@/app/actions/holidays";
 import { getActiveCourses, getActiveStaff, getActiveRooms, getCourseRequiredStaffSchedule, type ReservationCourse, type ReservationStaff, type ReservationRoom } from "@/app/actions/courses";
 import { isStaffAvailableOn, type StaffSchedule } from "@/lib/staff-availability";
@@ -99,6 +99,9 @@ function ReserveContent() {
   const [selectedFamilyMember, setSelectedFamilyMember] = useState<LinkedCustomer | null>(null);
   // 予約フロー：datetime_first (既存) / menu_first (からだ等の治療院系UX)
   const [reserveFlow, setReserveFlow] = useState<"datetime_first" | "menu_first">("datetime_first");
+  // メニュー自動選択（高校生以下=保険施術 / 大人=部分施術）の案内文。一度だけ試す。
+  const autoCourseTriedRef = useRef(false);
+  const [autoCourseNote, setAutoCourseNote] = useState<string | null>(null);
   // 担当固定コース（さみ整体など）。選ぶとそのスタッフの出勤日だけ予約可・担当を自動設定。
   const [requiredStaff, setRequiredStaff] = useState<{ staffId: string; staffName: string; schedule: StaffSchedule } | null>(null);
 
@@ -159,7 +162,8 @@ function ReserveContent() {
   }, [initialCourseId]);
 
   useEffect(() => {
-    if (date) {
+    // メニュー未選択では空き状況を取得しない（サーバ側も fail-closed で全枠ふさがりを返す）
+    if (date && selectedCourseId) {
       const fetchAvailability = async () => {
         const dateStr = format(date, "yyyy-MM-dd");
         const times = await getDailyAvailability(dateStr, selectedCourseId);
@@ -176,7 +180,7 @@ function ReserveContent() {
     const channel = supabase
       .channel("reserve-form-realtime")
       .on("postgres_changes", { event: "*", schema: "public", table: "appointments" }, () => {
-        if (date) {
+        if (date && selectedCourseId) {
           const dateStr = format(date, "yyyy-MM-dd");
           getDailyAvailability(dateStr, selectedCourseId).then(setBookedTimes);
         }
@@ -184,6 +188,36 @@ function ReserveContent() {
       .subscribe();
     return () => { supabase.removeChannel(channel); };
   }, [date, selectedCourseId]);
+
+  // 患者情報があればメニューを自動選択（高校生以下=保険施術 / 大人=部分施術）。
+  // 患者情報が無い・特定できない場合は自動選択せず、メニュー選択必須のまま。
+  useEffect(() => {
+    if (autoCourseTriedRef.current) return;
+    if (initialCourseId || selectedCourseId || courses.length === 0) return;
+    let input: { customerId?: string; name?: string | null; phone?: string | null } | null = null;
+    if (selectedFamilyMember) {
+      input = { customerId: selectedFamilyMember.customer_id };
+    } else {
+      try {
+        const savedName = localStorage.getItem("ballClinic_savedName");
+        const savedPhone = localStorage.getItem("ballClinic_savedPhone");
+        if (savedName || savedPhone) input = { name: savedName, phone: savedPhone };
+      } catch {}
+    }
+    if (!input) return;
+    autoCourseTriedRef.current = true;
+    let cancelled = false;
+    getAutoCourseSelection(input)
+      .then((auto) => {
+        if (cancelled || !auto) return;
+        setSelectedCourseId((prev) => prev || auto.courseId);
+        setAutoCourseNote(
+          `ご登録情報にあわせて「${auto.courseName}」を自動選択しました。違う場合は他のメニューをお選びください。`,
+        );
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [courses, selectedFamilyMember, initialCourseId, selectedCourseId]);
 
   // 担当固定コース（さみ整体など）を選んだら、そのスタッフの出勤日スケジュールを取得し
   // 担当を自動でそのスタッフに設定する。固定でないコースなら解除。
@@ -222,6 +256,12 @@ function ReserveContent() {
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!date || !time) return;
+
+    // メニュー必須（サーバ側でも二重チェックしているが、フロントでも先に止める）
+    if (courses.length > 0 && !selectedCourseId) {
+      toast.error("施術メニューを選択してください");
+      return;
+    }
 
     if (!name.trim()) {
       toast.error("お名前を入力してください");
@@ -537,6 +577,7 @@ function ReserveContent() {
 
   // 申し込みボタンの「あと何が足りないか」（日時はこの画面では必ず選択済み）
   const missingFields: string[] = [];
+  if (courses.length > 0 && !selectedCourseId) missingFields.push("施術コースの選択");
   if (!visitType) missingFields.push("初診・再診の選択");
   if (!name.trim()) missingFields.push("お名前");
   if (visitType === "new" && !phone) missingFields.push("電話番号");
@@ -655,16 +696,28 @@ function ReserveContent() {
                     </div>
                     <div className="space-y-2">
                       <Label className="text-blue-100/85 font-bold text-xs uppercase">来院時間</Label>
-                      <Select value={time} onValueChange={(val) => setTime(val || "")}>
-                        <SelectTrigger className="w-full h-14 bg-slate-900 border-white/10 rounded-2xl px-4 text-white">
-                          <SelectValue placeholder="時間を選択" />
+                      {/* メニュー未選択では時間を選べない（所要時間が決まらず空き判定ができないため） */}
+                      <Select
+                        value={time}
+                        onValueChange={(val) => setTime(val || "")}
+                        disabled={courses.length > 0 && !selectedCourseId}
+                      >
+                        <SelectTrigger className="w-full h-14 bg-slate-900 border-white/10 rounded-2xl px-4 text-white disabled:opacity-60">
+                          <SelectValue
+                            placeholder={courses.length > 0 && !selectedCourseId ? "先にメニューを選択してください" : "時間を選択"}
+                          />
                         </SelectTrigger>
                         <SelectContent className="bg-slate-900 border-white/10 text-white">
-                          {(date ? getTimeSlots(date, { slotMinutes, schedule }) : []).map((t) => (
+                          {(date && (courses.length === 0 || selectedCourseId) ? getTimeSlots(date, { slotMinutes, schedule }) : []).map((t) => (
                             <SelectItem key={t} value={t} className="bg-slate-900 text-white focus:bg-slate-800">{t}</SelectItem>
                           ))}
                         </SelectContent>
                       </Select>
+                      {courses.length > 0 && !selectedCourseId && (
+                        <p className="text-xs text-amber-300 font-bold">
+                          メニューを選択すると時間を選べるようになります
+                        </p>
+                      )}
                     </div>
                   </div>
                 </section>
@@ -674,7 +727,11 @@ function ReserveContent() {
                   <section className={`space-y-4 ${reserveFlow === "menu_first" ? "order-1" : "order-2"}`}>
                     <h2 className="text-xl font-bold text-white tracking-tight">
                       {reserveFlow === "menu_first" ? "① 施術コース" : "施術コース"}
+                      <span className="ml-2 text-sm font-normal text-amber-300">（必須）</span>
                     </h2>
+                    {autoCourseNote && selectedCourseId && (
+                      <p className="text-xs text-emerald-300 font-bold">✨ {autoCourseNote}</p>
+                    )}
                     {(() => {
                       const sel = courses.find(c => c.id === selectedCourseId);
                       // メニューから選んで来た（courseLocked）＆選択済み → 確認だけ表示

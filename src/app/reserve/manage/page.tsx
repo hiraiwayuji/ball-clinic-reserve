@@ -80,7 +80,8 @@ function ManageContent() {
     if (!dateStr) { setBookedTimes([]); return; }
     setLoadingSlots(true);
     try {
-      const booked = await getDailyAvailability(dateStr, r.courseId);
+      // 予約変更はコース無しの旧予約もあるため、コース無しでも従来のプール判定を許可する
+      const booked = await getDailyAvailability(dateStr, r.courseId, { allowWithoutCourse: true });
       setBookedTimes(booked);
     } catch { setBookedTimes([]); }
     setLoadingSlots(false);
