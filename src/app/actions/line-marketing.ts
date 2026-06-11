@@ -3,9 +3,56 @@
 import { createClient } from "@/lib/supabase/server";
 import { checkAdminAuth } from "@/app/actions/auth";
 import { getClinicSettings } from "./settings";
+import {
+  CAMPAIGN_INFO,
+  buildCampaignSamples,
+  reminderMessage,
+  birthdayMessage,
+  lotteryWinMessage,
+  lotteryLoseMessage,
+  womenDefaultMessage,
+  questionnaireMessage,
+  type CampaignKey,
+  type CampaignInfo,
+} from "@/lib/marketing-templates";
 
 async function getSupabase() {
   return await createClient();
+}
+
+/**
+ * 配信文面に差し込む院名を取得する。
+ * 🚨「ボール接骨院」等のベタ書き禁止 — 他院でこの機能を使うと他院名で患者に届く事故になる。
+ */
+async function getClinicDisplayName(clinicId: string): Promise<string> {
+  try {
+    const supabase = await getSupabase();
+    const { data } = await supabase
+      .from("clinic_settings")
+      .select("clinic_name")
+      .eq("id", clinicId)
+      .maybeSingle();
+    const name = (data?.clinic_name as string | undefined)?.trim();
+    return name || "当院";
+  } catch {
+    return "当院";
+  }
+}
+
+/**
+ * 「内容・使い方を相談」ダイアログ用：各キャンペーンの説明と実際に届く文面サンプル。
+ * 文面はテンプレートモジュール共通なので「プレビュー＝実際の配信内容」になる。
+ */
+export async function getCampaignGuide(key: CampaignKey): Promise<{
+  info: CampaignInfo;
+  samples: { label: string; text: string }[];
+}> {
+  const { clinicId } = await checkAdminAuth();
+  const clinicName = await getClinicDisplayName(clinicId);
+  return {
+    info: CAMPAIGN_INFO[key],
+    samples: buildCampaignSamples(key, clinicName),
+  };
 }
 
 /**
@@ -51,6 +98,7 @@ async function getLineAccessToken() {
  */
 export async function sendAppointmentReminders(testLineId: string | null = null) {
   const { clinicId } = await checkAdminAuth();
+  const clinicName = await getClinicDisplayName(clinicId);
 
   // Use provided testLineId or fallback to environment variable
   const effectiveTestId = testLineId || process.env.TEST_LINE_USER_ID;
@@ -85,7 +133,7 @@ export async function sendAppointmentReminders(testLineId: string | null = null)
        // 時間のフォーマット
        const timeMatch = new Date(apt.start_time).toLocaleString("ja-JP", {timeZone: "Asia/Tokyo", hour: '2-digit', minute: '2-digit'});
        
-       const messageText = `${customer.name}様\n\nこんにちは！ボール接骨院です。\n本日 ${timeMatch} から予約を頂いております。\nお気を付けてお越しください！`;
+       const messageText = reminderMessage(clinicName, customer.name, timeMatch);
        
        debugLogs.push(`【宛先: ${customer.name}様】\n${messageText}`);
        
@@ -141,7 +189,7 @@ export async function sendAppointmentReminders(testLineId: string | null = null)
 
   if (sentTo.length === 0) {
     if (effectiveTestId) {
-      const dummyMsg = `テストユーザー様\n\nこんにちは！ボール接骨院です。\n本日 12:00 から予約を頂いております。(テスト配信)`;
+      const dummyMsg = `${reminderMessage(clinicName, "テストユーザー", "12:00")}\n(テスト配信)`;
       debugLogs.push(`【テスト送信】\n${dummyMsg}`);
       
       const channelToken = await getLineAccessToken() || process.env.LINE_CHANNEL_ACCESS_TOKEN;
@@ -187,23 +235,13 @@ export async function sendAppointmentReminders(testLineId: string | null = null)
  */
 export async function sendBirthdayCoupons(month: number, testLineId: string | null = null) {
   const { clinicId } = await checkAdminAuth();
+  const clinicName = await getClinicDisplayName(clinicId);
   const effectiveTestId = testLineId || process.env.TEST_LINE_USER_ID || null;
   const channelToken = await getLineAccessToken() || process.env.LINE_CHANNEL_ACCESS_TOKEN;
 
   // テストモード
   if (effectiveTestId) {
-    const msg =
-      `🎂【テスト送信】テストユーザー様、お誕生月おめでとうございます！\n\n` +
-      `いつもボール接骨院をご利用いただきありがとうございます😊\n\n` +
-      `今月のお誕生月にちなんで\n` +
-      `━━━━━━━━━━\n` +
-      `　誕生月割引クーポン 💝\n` +
-      `　　施術料金 500円OFF\n` +
-      `━━━━━━━━━━\n` +
-      `をプレゼントします！\n\n` +
-      `有効期限：今月末まで\n` +
-      `ご来院時にスタッフへこのメッセージをご提示ください📱\n\n` +
-      `素敵な誕生月をお過ごしください🌸\nボール接骨院`;
+    const msg = `【テスト送信】\n${birthdayMessage(clinicName, "テストユーザー")}`;
 
     if (channelToken) {
       await fetch("https://api.line.me/v2/bot/message/push", {
@@ -241,18 +279,7 @@ export async function sendBirthdayCoupons(month: number, testLineId: string | nu
   for (const customer of birthdayCustomers) {
     if (!customer.line_user_id) { skipped.push(customer.name); continue; }
 
-    const msg =
-      `🎂 ${customer.name}様、お誕生月おめでとうございます！\n\n` +
-      `いつもボール接骨院をご利用いただきありがとうございます😊\n\n` +
-      `今月のお誕生月にちなんで\n` +
-      `━━━━━━━━━━\n` +
-      `　誕生月割引クーポン 💝\n` +
-      `　　施術料金 500円OFF\n` +
-      `━━━━━━━━━━\n` +
-      `をプレゼントします！\n\n` +
-      `有効期限：今月末まで\n` +
-      `ご来院時にスタッフへこのメッセージをご提示ください📱\n\n` +
-      `素敵な誕生月をお過ごしください🌸\nボール接骨院`;
+    const msg = birthdayMessage(clinicName, customer.name);
 
     debugLogs.push(`【${customer.name}様】\n${msg}`);
 
@@ -392,6 +419,7 @@ export async function sendSegmentedCampaign(options: {
  */
 export async function sendWomenOnlyCampaign(campaignMessage: string, testLineId: string | null = null) {
   const { clinicId } = await checkAdminAuth();
+  const clinicName = await getClinicDisplayName(clinicId);
   const effectiveTestId = testLineId || process.env.TEST_LINE_USER_ID || null;
   const channelToken = await getLineAccessToken() || process.env.LINE_CHANNEL_ACCESS_TOKEN;
 
@@ -399,7 +427,7 @@ export async function sendWomenOnlyCampaign(campaignMessage: string, testLineId:
   if (effectiveTestId) {
     const msg = campaignMessage
       ? campaignMessage.replace("{name}", "テストユーザー")
-      : `テストユーザー様\n\n【テスト送信】女性限定キャンペーンのお知らせです！\n\nボール接骨院では女性患者様限定の特別キャンペーンを実施中です✨\n\n詳しくはスタッフまでお気軽にお問い合わせください😊\nボール接骨院`;
+      : `【テスト送信】\n${womenDefaultMessage(clinicName, "テストユーザー")}`;
 
     if (channelToken) {
       await fetch("https://api.line.me/v2/bot/message/push", {
@@ -429,7 +457,7 @@ export async function sendWomenOnlyCampaign(campaignMessage: string, testLineId:
 
     const msg = campaignMessage
       ? campaignMessage.replace("{name}", customer.name)
-      : `${customer.name}様\n\n女性限定キャンペーンのお知らせです！\n\nボール接骨院では女性患者様限定の特別キャンペーンを実施中です✨\n\n詳しくはスタッフまでお気軽にお問い合わせください😊\nボール接骨院`;
+      : womenDefaultMessage(clinicName, customer.name);
 
     debugLogs.push(`【${customer.name}様】\n${msg}`);
 
@@ -465,24 +493,14 @@ export async function sendWomenOnlyCampaign(campaignMessage: string, testLineId:
  */
 export async function runMonthlyLottery(testLineId: string | null = null) {
   const { clinicId } = await checkAdminAuth();
+  const clinicName = await getClinicDisplayName(clinicId);
   const effectiveTestId = testLineId || process.env.TEST_LINE_USER_ID || null;
 
   const channelToken = await getLineAccessToken() || process.env.LINE_CHANNEL_ACCESS_TOKEN;
 
   // テストモード：実際の患者データを使わず、指定IDに当選メッセージを1通送信して返す
   if (effectiveTestId) {
-    const winMsg =
-      `🎉【テスト送信】やったー！当たり！！\n\n` +
-      `いつもボール接骨院をご利用いただきありがとうございます😊\n\n` +
-      `今月の来院者限定抽選で【当選】しました🎊\n\n` +
-      `次回ご来院時に施術料金から\n` +
-      `━━━━━━━━━━\n` +
-      `　　500円引き 🙌\n` +
-      `━━━━━━━━━━\n` +
-      `させていただきます！\n\n` +
-      `有効期限は今月末まで。\n` +
-      `スタッフにこのメッセージを見せてください📱\n\n` +
-      `また身体のメンテナンス、お待ちしてます💪\nボール接骨院`;
+    const winMsg = `【テスト送信】\n${lotteryWinMessage(clinicName)}`;
 
     if (channelToken) {
       await fetch("https://api.line.me/v2/bot/message/push", {
@@ -542,18 +560,7 @@ export async function runMonthlyLottery(testLineId: string | null = null) {
 
     if (isWinner) {
       winners.push(customer.name);
-      const winMsg =
-        `🎉 やったー！当たり！！\n\n` +
-        `いつもボール接骨院をご利用いただきありがとうございます😊\n\n` +
-        `今月の来院者限定抽選で【当選】しました🎊\n\n` +
-        `次回ご来院時に施術料金から\n` +
-        `━━━━━━━━━━\n` +
-        `　　500円引き 🙌\n` +
-        `━━━━━━━━━━\n` +
-        `させていただきます！\n\n` +
-        `有効期限は今月末まで。\n` +
-        `スタッフにこのメッセージを見せてください📱\n\n` +
-        `また身体のメンテナンス、お待ちしてます💪\nボール接骨院`;
+      const winMsg = lotteryWinMessage(clinicName);
 
       if (channelToken) {
         try {
@@ -574,13 +581,7 @@ export async function runMonthlyLottery(testLineId: string | null = null) {
       }
     } else {
       losers.push(customer.name);
-      const loseMsg =
-        `いつもボール接骨院へのご来院ありがとうございます！\n\n` +
-        `今月の来院者限定抽選の結果は…\n\n` +
-        `残念、今回はハズレでした😭\n\n` +
-        `でも来月またチャレンジできますよ！\n` +
-        `身体のケア、引き続き一緒に頑張りましょう💪\n\n` +
-        `またのご来院をお待ちしています🙏\nボール接骨院`;
+      const loseMsg = lotteryLoseMessage(clinicName);
 
       if (channelToken) {
         try {
@@ -634,16 +635,11 @@ export async function runMonthlyLottery(testLineId: string | null = null) {
  */
 export async function sendWelcomeQuestionnaire(testLineId: string | null = null) {
   const { clinicId } = await checkAdminAuth();
+  const clinicName = await getClinicDisplayName(clinicId);
   const effectiveTestId = testLineId || process.env.TEST_LINE_USER_ID || null;
   const channelToken = await getLineAccessToken() || process.env.LINE_CHANNEL_ACCESS_TOKEN;
 
-  const questionnaireMsg =
-    `ご来院ありがとうございます！ボール接骨院です🌱\n\n` +
-    `カルテ作成のため、簡単なアンケートにご協力をお願いします。\n\n` +
-    `▼ お答えいただける方はこちらから\n` +
-    `（スタッフが次回ご来院時にご案内します）\n\n` +
-    `・お名前\n・生年月日\n・ご住所（市区町村まで）\n・性別\n\n` +
-    `お手数をおかけしますが、よろしくお願いします🙏\nボール接骨院`;
+  const questionnaireMsg = questionnaireMessage(clinicName);
 
   // テストモード
   if (effectiveTestId) {

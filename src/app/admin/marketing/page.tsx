@@ -12,7 +12,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { sendAppointmentReminders, sendBirthdayCoupons, runMonthlyLottery, sendWelcomeQuestionnaire, sendWomenOnlyCampaign, getMarketingStats, sendSegmentedCampaign, sendReferralMessage } from "@/app/actions/line-marketing";
+import { sendAppointmentReminders, sendBirthdayCoupons, runMonthlyLottery, sendWelcomeQuestionnaire, sendWomenOnlyCampaign, getMarketingStats, sendSegmentedCampaign, sendReferralMessage, getCampaignGuide } from "@/app/actions/line-marketing";
+import { consultCampaign } from "@/app/actions/ai-marketing";
+import type { CampaignKey, CampaignInfo } from "@/lib/marketing-templates";
 import { updateClinicSettings, getClinicSettings } from "@/app/actions/settings";
 import Link from "next/link";
 import { Clock } from "lucide-react";
@@ -35,6 +37,46 @@ export default function MarketingDashboardPage() {
   const [autoRemindEnabled, setAutoRemindEnabled] = useState(false);
   const [autoRemindTime, setAutoRemindTime] = useState("08:00");
   const [savingRemindSettings, setSavingRemindSettings] = useState(false);
+
+  // 「内容・使い方を相談」ダイアログ（どんな文面が届くか＋AIへの相談）
+  const [consultKey, setConsultKey] = useState<CampaignKey | null>(null);
+  const [consultGuide, setConsultGuide] = useState<{ info: CampaignInfo; samples: { label: string; text: string }[] } | null>(null);
+  const [consultMsgs, setConsultMsgs] = useState<{ role: "user" | "ai"; text: string }[]>([]);
+  const [consultInput, setConsultInput] = useState("");
+  const [consultLoading, setConsultLoading] = useState(false);
+
+  const openConsult = (key: CampaignKey) => {
+    setConsultKey(key);
+    setConsultGuide(null);
+    setConsultMsgs([]);
+    setConsultInput("");
+    getCampaignGuide(key).then(setConsultGuide).catch(() => {});
+  };
+
+  const handleConsultSend = async (presetQuestion?: string) => {
+    const q = (presetQuestion ?? consultInput).trim();
+    if (!consultKey || !q || consultLoading) return;
+    const history = consultMsgs;
+    setConsultMsgs((m) => [...m, { role: "user", text: q }]);
+    setConsultInput("");
+    setConsultLoading(true);
+    try {
+      const context = consultGuide
+        ? `だれに届く: ${consultGuide.info.who}\n動き: ${consultGuide.info.how}\n\n実際に届く文面:\n${consultGuide.samples.map((s) => `[${s.label}]\n${s.text}`).join("\n\n")}`
+        : "";
+      const res = await consultCampaign({
+        campaignTitle: consultGuide?.info.title ?? "",
+        campaignContext: context,
+        question: q,
+        history,
+      });
+      setConsultMsgs((m) => [...m, { role: "ai", text: res.success ? (res.answer ?? "") : `⚠ ${res.error ?? "エラーが発生しました"}` }]);
+    } catch {
+      setConsultMsgs((m) => [...m, { role: "ai", text: "⚠ エラーが発生しました。もう一度お試しください" }]);
+    } finally {
+      setConsultLoading(false);
+    }
+  };
 
   // 初回読み込み
   useEffect(() => {
@@ -94,6 +136,17 @@ export default function MarketingDashboardPage() {
   };
 
   const nowStr = () => new Date().toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" });
+
+  // 各カード下の「内容・使い方を相談」リンク
+  const ConsultButton = ({ k }: { k: CampaignKey }) => (
+    <button
+      type="button"
+      onClick={() => openConsult(k)}
+      className="w-full text-[11px] font-bold text-slate-400 dark:text-slate-500 hover:text-blue-600 dark:hover:text-blue-300 transition py-1"
+    >
+      ❓ どんな内容が届く？（内容・使い方を相談）
+    </button>
+  );
 
   /** 配信前プレビューダイアログを表示し、確認後にコールバックを実行 */
   const showPreview = (label: string, count: string, defaultMessage: string, onConfirm: (msg: string, time: string) => void) => {
@@ -359,6 +412,113 @@ export default function MarketingDashboardPage() {
         </div>
       )}
 
+      {/* 内容・使い方の相談ダイアログ（実際に届く文面＋AI相談） */}
+      {consultKey && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm animate-in fade-in p-4"
+          onClick={() => setConsultKey(null)}
+        >
+          <div
+            className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl max-w-lg w-full max-h-[85vh] overflow-y-auto p-6 space-y-4 border border-slate-200 dark:border-slate-700"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-2">
+              <div>
+                <p className="font-black text-slate-900 dark:text-white">
+                  ❓ {consultGuide?.info.title ?? "この配信"}の内容・使い方
+                </p>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                  実際に届く文面の確認と、AIへの相談ができます
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setConsultKey(null)}
+                className="text-slate-400 hover:text-slate-600 text-xl leading-none shrink-0"
+              >×</button>
+            </div>
+
+            {!consultGuide ? (
+              <div className="flex items-center justify-center py-8 text-slate-400">
+                <Loader2 className="w-5 h-5 animate-spin mr-2" />読み込み中...
+              </div>
+            ) : (
+              <>
+                {/* 仕組みの説明 */}
+                <div className="bg-slate-50 dark:bg-slate-800 rounded-xl p-3.5 space-y-2 text-xs text-slate-700 dark:text-slate-200">
+                  <p><span className="font-bold text-slate-500 dark:text-slate-400">だれに届く：</span>{consultGuide.info.who}</p>
+                  <p><span className="font-bold text-slate-500 dark:text-slate-400">どう動く：</span>{consultGuide.info.how}</p>
+                  <p className="text-blue-700 dark:text-blue-300"><span className="font-bold">💡 コツ：</span>{consultGuide.info.tips}</p>
+                </div>
+
+                {/* 実際に届く文面 */}
+                <div className="space-y-2">
+                  <p className="text-xs font-bold text-slate-600 dark:text-slate-300">📱 実際に届く文面</p>
+                  {consultGuide.samples.map((s, i) => (
+                    <div key={i} className="rounded-xl border border-green-200 dark:border-green-800 overflow-hidden">
+                      <p className="text-[10px] font-bold bg-green-50 dark:bg-green-950 text-green-700 dark:text-green-300 px-3 py-1.5">{s.label}</p>
+                      <pre className="text-[11px] leading-relaxed whitespace-pre-wrap p-3 bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-100 font-sans">{s.text}</pre>
+                    </div>
+                  ))}
+                </div>
+
+                {/* AI 相談 */}
+                <div className="space-y-2 border-t border-slate-200 dark:border-slate-700 pt-3">
+                  <p className="text-xs font-bold text-slate-600 dark:text-slate-300">🤖 AIに相談する</p>
+                  {consultMsgs.length === 0 && (
+                    <div className="flex flex-wrap gap-1.5">
+                      {["どんな内容を配信すればいい？", "おすすめの配信頻度は？", "もっと反応が良くなる文面を作って"].map((q) => (
+                        <button
+                          key={q}
+                          type="button"
+                          onClick={() => handleConsultSend(q)}
+                          disabled={consultLoading}
+                          className="text-[11px] font-bold bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 rounded-full px-3 py-1.5 hover:bg-blue-100 dark:hover:bg-blue-900 transition disabled:opacity-50"
+                        >
+                          {q}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {consultMsgs.map((m, i) => (
+                    <div key={i} className={`text-xs rounded-xl p-3 whitespace-pre-wrap leading-relaxed ${
+                      m.role === "user"
+                        ? "bg-blue-50 dark:bg-blue-950 text-blue-900 dark:text-blue-100 ml-6"
+                        : "bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-100 mr-2"
+                    }`}>
+                      {m.role === "user" ? "🙋 " : "🤖 "}{m.text}
+                    </div>
+                  ))}
+                  {consultLoading && (
+                    <div className="flex items-center gap-2 text-xs text-slate-400 px-1">
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />考え中...
+                    </div>
+                  )}
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={consultInput}
+                      onChange={(e) => setConsultInput(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter" && !e.nativeEvent.isComposing) handleConsultSend(); }}
+                      placeholder="例: 学生向けの文面にしたい"
+                      className="flex-1 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-xs bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100"
+                    />
+                    <Button
+                      type="button"
+                      onClick={() => handleConsultSend()}
+                      disabled={consultLoading || !consultInput.trim()}
+                      className="bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold px-4"
+                    >
+                      送信
+                    </Button>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
       {actionResult && (
         <div className={`p-4 rounded-lg flex items-start gap-3 shadow-sm animate-in fade-in slide-in-from-top-2 ${actionResult.type === "error" ? "bg-rose-50 border border-rose-200 text-rose-800" : actionResult.wasTestMode ? "bg-amber-50 border border-amber-200 text-amber-800" : "bg-green-50 border border-green-200 text-green-800"}`}>
           {actionResult.type === "error" ? (
@@ -402,11 +562,12 @@ export default function MarketingDashboardPage() {
           <CardContent className="text-[11px] bg-slate-50 dark:bg-slate-800/50 p-3 mx-4 rounded text-slate-500 dark:text-slate-400 flex-grow">
             「ご来院ありがとうございます！カルテ作成のためアンケートにご回答をお願いします🌱」
           </CardContent>
-          <CardFooter className="pt-4 mt-auto">
+          <CardFooter className="pt-4 mt-auto flex flex-col gap-1">
             <Button className="w-full bg-purple-600 text-xs py-2" onClick={handleSendQuestionnaire} disabled={loadingAction !== null}>
               {loadingAction === "questionnaire" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ClipboardList className="mr-2 h-4 w-4 text-[10px]" />}
               {loadingAction === "questionnaire" ? "送信中..." : "アンケート配信"}
             </Button>
+            <ConsultButton k="questionnaire" />
           </CardFooter>
         </Card>
 
@@ -474,11 +635,12 @@ export default function MarketingDashboardPage() {
               )}
             </div>
           </CardContent>
-          <CardFooter className="pt-2 mt-auto">
+          <CardFooter className="pt-2 mt-auto flex flex-col gap-1">
             <Button className="w-full bg-blue-600 hover:bg-blue-500 text-white text-xs py-2 font-bold" onClick={handleSendReminders} disabled={loadingAction !== null}>
               {loadingAction === "reminders" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <MessageCircle className="mr-2 h-4 w-4" />}
               {loadingAction === "reminders" ? "送信中..." : "今すぐリマインド配信"}
             </Button>
+            <ConsultButton k="reminder" />
           </CardFooter>
         </Card>
 
@@ -506,11 +668,12 @@ export default function MarketingDashboardPage() {
               {stats && <Badge variant="secondary" className="text-[10px] bg-rose-50 text-rose-700">対象: {stats.birthdayThisMonth}名</Badge>}
             </div>
           </CardContent>
-          <CardFooter className="pt-4 mt-auto">
+          <CardFooter className="pt-4 mt-auto flex flex-col gap-1">
             <Button className="w-full bg-rose-500 text-xs py-2" onClick={handleSendBirthday} disabled={loadingAction !== null}>
               {loadingAction === "birthday" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Gift className="mr-2 h-4 w-4 text-[10px]" />}
               {loadingAction === "birthday" ? "送信中..." : "クーポンを一斉配信"}
             </Button>
+            <ConsultButton k="birthday" />
           </CardFooter>
         </Card>
 
@@ -528,11 +691,12 @@ export default function MarketingDashboardPage() {
           <CardContent className="text-[11px] bg-slate-50 dark:bg-slate-800/50 p-3 mx-4 rounded text-amber-700 dark:text-amber-400 flex-grow">
             来院履歴のある患者様を対象に今月の抽選を行います。
           </CardContent>
-          <CardFooter className="pt-4 mt-auto">
+          <CardFooter className="pt-4 mt-auto flex flex-col gap-1">
             <Button variant="outline" className="w-full border-amber-500 text-amber-700 text-xs py-2" onClick={handleRunLottery} disabled={loadingAction !== null}>
               {loadingAction === "lottery" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Trophy className="mr-2 h-4 w-4 text-[10px]" />}
               {loadingAction === "lottery" ? "処理中..." : "今月の抽選を実施"}
             </Button>
+            <ConsultButton k="lottery" />
           </CardFooter>
         </Card>
 
@@ -555,11 +719,12 @@ export default function MarketingDashboardPage() {
               className="w-full h-24 border border-slate-200 dark:border-slate-800 rounded p-2 text-[10px] resize-none bg-white dark:bg-slate-950 text-slate-900 dark:text-slate-100"
             />
           </CardContent>
-          <CardFooter className="pt-4 mt-auto">
+          <CardFooter className="pt-4 mt-auto flex flex-col gap-1">
             <Button className="w-full bg-pink-500 text-xs py-2" onClick={handleSendWomenCampaign} disabled={loadingAction !== null}>
               {loadingAction === "women" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4 text-[10px]" />}
               {loadingAction === "women" ? "送信中..." : `女性(${stats?.women || 0}名)へ`}
             </Button>
+            <ConsultButton k="women" />
           </CardFooter>
         </Card>
 
@@ -589,11 +754,12 @@ export default function MarketingDashboardPage() {
                className="w-full h-12 border border-slate-200 dark:border-slate-800 rounded p-2 text-[10px] resize-none bg-white dark:bg-slate-950 text-slate-900 dark:text-slate-100"
              />
           </CardContent>
-          <CardFooter className="pt-4 mt-auto">
+          <CardFooter className="pt-4 mt-auto flex flex-col gap-1">
             <Button className="w-full bg-blue-600 hover:bg-blue-500 text-white text-xs py-2 font-bold" onClick={handleSendAreaCampaign} disabled={loadingAction !== null || !selectedCity}>
               {loadingAction === "area" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <MapPin className="mr-2 h-4 w-4" />}
               {loadingAction === "area" ? "送信中..." : selectedCity ? `${selectedCity}の患者様へ` : "エリア選択"}
             </Button>
+            <ConsultButton k="area" />
           </CardFooter>
         </Card>
 

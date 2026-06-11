@@ -66,6 +66,65 @@ export async function getMarketingAccess(): Promise<{ plan: "free" | "premium"; 
 
 const PREMIUM_REQUIRED_MSG = "この機能はプレミアムプラン限定です。アップグレードでご利用いただけます。";
 
+// ── LINE販促キャンペーンの相談（SNS・LINE・販促の「内容・使い方を相談」ボタン）──
+// 「どんな内容が配信されるのか」「どんな内容を配信していいのか」を
+// PC・販促に不慣れな先生がそのまま聞ける窓口。プラン制限なし（標準機能のガイドのため）。
+export async function consultCampaign(input: {
+  campaignTitle: string;
+  campaignContext: string;
+  question: string;
+  history?: { role: "user" | "ai"; text: string }[];
+}): Promise<{ success: boolean; answer?: string; error?: string }> {
+  const { clinicId } = await checkAdminAuth();
+  const genAI = getGenAI();
+  if (!genAI) return { success: false, error: "AI設定（GEMINI_API_KEY）が見つかりません" };
+
+  const question = (input.question ?? "").trim().slice(0, 1000);
+  if (!question) return { success: false, error: "質問を入力してください" };
+
+  try {
+    const supabase = await createClient();
+    const { data: cs } = await supabase
+      .from("clinic_settings")
+      .select("clinic_name")
+      .eq("id", clinicId)
+      .maybeSingle();
+    const clinicName = (cs?.clinic_name as string | undefined)?.trim() || "当院";
+
+    const historyBlock = (input.history ?? [])
+      .slice(-6)
+      .map((h) => `${h.role === "user" ? "先生" : "アドバイザー"}: ${h.text}`)
+      .join("\n");
+
+    const prompt = `あなたは接骨院・整体院のLINE販促にくわしい、やさしいアドバイザーです。
+相手はPCや販促に不慣れな院長先生です。専門用語を避けて、短く具体的に答えてください。
+
+【院名】${clinicName}
+【相談対象の配信機能】${input.campaignTitle}
+【この機能の仕組みと、実際に患者さんに届く文面】
+${input.campaignContext.slice(0, 4000)}
+
+${historyBlock ? `【これまでのやり取り】\n${historyBlock}\n` : ""}
+【先生からの質問】
+${question}
+
+回答ルール:
+- 3〜6文くらいで、やさしい言葉で
+- 配信文面の提案を求められたら、そのままコピペで使える文面を1つ「---」で囲んで提示する
+- 「いつ・誰に・どのくらいの頻度で送るといいか」も聞かれたら具体的に
+- 医療広告で問題になる表現（治る保証・誇大な効果・ビフォーアフターの断定など）は提案しない`;
+
+    const model = genAI.getGenerativeModel({ model: GEMINI_MODEL });
+    const result = await model.generateContent(prompt);
+    const answer = result.response.text().trim();
+    if (!answer) return { success: false, error: "回答を生成できませんでした。もう一度お試しください" };
+    return { success: true, answer };
+  } catch (e: any) {
+    console.error("consultCampaign failed", e);
+    return { success: false, error: "AIへの相談でエラーが発生しました。時間をおいてお試しください" };
+  }
+}
+
 // ── プロファイル（院設定）────────────────────────────────────────────
 
 export async function getMarketingProfile(): Promise<MarketingProfile> {
@@ -101,6 +160,7 @@ export async function saveMarketingProfile(
       sns_accounts: input.sns_accounts ?? {},
       line_link: input.line_link?.trim() || null,
       reserve_url: input.reserve_url?.trim() || null,
+      reference_style: input.reference_style?.trim() || null,
       updated_at: new Date().toISOString(),
     },
     { onConflict: "clinic_id" },
@@ -131,6 +191,17 @@ ${p.line_link ? `LINE導線: ${p.line_link}` : ""}
 - 使ってよい表現の例: ${ALLOWED_PHRASES.join("、")}
 - 効果には個人差がある前提で書く。治療効果を保証・断定しない。
 - 症例紹介でも患者名・学校名・顔がわかる情報・特定できる個人情報は出さない。`;
+}
+
+/** 参考にしたい雰囲気・作風（院の既定＋今回の参考）。丸写し防止の注意つき。 */
+function referenceBlock(profile: MarketingProfile, reference?: string): string {
+  const ownStyle = profile.reference_style?.trim();
+  const thisTime = reference?.trim();
+  if (!ownStyle && !thisTime) return "";
+  return `【参考にしたい雰囲気・作風】
+${ownStyle ? `・院のお手本の雰囲気: ${ownStyle}` : ""}
+${thisTime ? `・今回の参考（投稿の文章や、参考画像から読み取った特徴）:\n${thisTime}` : ""}
+※あくまで「雰囲気・構成・テンション」の参考です。文章はオリジナルで作り、丸写しや特定アカウントの模倣はしないでください。医療広告ガイドラインは引き続き厳守。`;
 }
 
 function inputBlock(input: PostInput): string {
@@ -276,6 +347,7 @@ async function topPostsBlock(clinicId: string): Promise<string> {
 
 export async function generateMarketingPost(
   input: PostInput,
+  reference?: string,
 ): Promise<{ success: boolean; post?: GeneratedPost; warnings?: string[]; error?: string }> {
   const { clinicId } = await checkAdminAuth();
   const genAI = getGenAI();
@@ -295,6 +367,8 @@ export async function generateMarketingPost(
 ${profileBlock(profile)}
 
 ${inputBlock(input)}
+
+${referenceBlock(profile, reference)}
 
 ${learning}
 
@@ -815,6 +889,33 @@ export async function generateAiImage(
   } catch (err) {
     console.error("[ai-marketing] generateAiImage error:", err);
     return { success: false, error: "画像の生成に失敗しました。少し時間をおいて再度お試しください。" };
+  }
+}
+
+/** 参考にしたい投稿のスクショから、文体・構成・雰囲気の特徴を読み取る。プレミアム限定。 */
+export async function analyzeReferenceStyle(
+  imageUrl: string,
+): Promise<{ success: boolean; style?: string; error?: string }> {
+  const { clinicId } = await checkAdminAuth();
+  if (await getPlan(clinicId) !== "premium") return { success: false, error: PREMIUM_REQUIRED_MSG };
+  const genAI = getGenAI();
+  if (!genAI) return { success: false, error: "AIのAPIキーが未設定です（GEMINI_API_KEY）" };
+  try {
+    const resp = await fetch(imageUrl);
+    if (!resp.ok) return { success: false, error: "画像の取得に失敗しました" };
+    const mime = resp.headers.get("content-type") || "image/jpeg";
+    if (!mime.startsWith("image/")) return { success: false, error: "画像ファイルではありません" };
+    const base64 = Buffer.from(await resp.arrayBuffer()).toString("base64");
+    const model = genAI.getGenerativeModel({ model: GEMINI_MODEL });
+    const prompt = `これは「参考にしたいSNS投稿」のスクリーンショットです。この投稿の【雰囲気・文体・構成】の特徴を、箇条書きで日本語でまとめてください（後で別の投稿を作るときの“参考メモ”にします）。
+観点の例: テンション（やさしい/熱い等）、語り口（です・ます/フランク）、絵文字の量、文の長さ、構成（フック→本文→締め 等）、ハッシュタグの付け方。
+※具体的な本文の丸写しはせず、あくまで「作風の特徴」だけを書いてください。前置き不要、箇条書きのみ。`;
+    const result = await model.generateContent([{ inlineData: { mimeType: mime, data: base64 } }, prompt]);
+    const style = result.response.text().trim();
+    return { success: true, style };
+  } catch (err) {
+    console.error("[ai-marketing] analyzeReferenceStyle error:", err);
+    return { success: false, error: "参考画像の読み取りに失敗しました" };
   }
 }
 
