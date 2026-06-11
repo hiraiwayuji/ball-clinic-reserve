@@ -1066,6 +1066,34 @@ function judgeAgeBasis(birthDate: string | null, ageGroup: string | null): "mino
   return null;
 }
 
+// メニュー選択ゲート用：年齢別おすすめメニュー（高校生以下=保険施術 / 大人=部分施術）。
+// 該当コースが一意に決まる院だけ値を返す（無い院はフロントでボタン非表示にする）。
+export async function getRecommendedCourses(): Promise<{
+  minor: { courseId: string; courseName: string } | null;
+  adult: { courseId: string; courseName: string } | null;
+}> {
+  noStore();
+  const empty = { minor: null, adult: null };
+  try {
+    const adminDb = getAdminSupabase();
+    if (!adminDb) return empty;
+    const find = async (prefix: string) => {
+      const { data } = await adminDb
+        .from("reservation_courses")
+        .select("id, name")
+        .eq("clinic_id", DEFAULT_CLINIC_ID)
+        .eq("is_active", true)
+        .ilike("name", `${prefix}%`);
+      if (!data || data.length !== 1) return null;
+      return { courseId: data[0].id as string, courseName: data[0].name as string };
+    };
+    return { minor: await find("保険施術"), adult: await find("部分施術") };
+  } catch (e) {
+    console.error("getRecommendedCourses failed", e);
+    return empty;
+  }
+}
+
 export async function getAutoCourseSelection(input: {
   customerId?: string | null;
   name?: string | null;

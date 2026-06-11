@@ -209,15 +209,17 @@ export default function TodayTimelineWidget() {
     router.push(`/admin/sales?${params.toString()}`);
   };
 
-  // スタッフ未指定の予約があれば仮想列を末尾に追加
-  const staffWithUnassigned = useMemo(() => {
+  // スタッフ行（「未指定」という担当は存在しないので仮想列は作らない。
+  // 担当未設定の予約は先頭スタッフ＝院のメイン担当（ボール/院長）の行に表示する）
+  const staffRows = useMemo(() => {
     if (!data) return [];
-    const hasUnassigned = data.appointments.some(a => !a.staff_id);
     const rows: { id: string; name: string; monthly_visit_target?: number | null }[] =
       data.staff.map(s => ({ id: s.id, name: s.name, monthly_visit_target: s.monthly_visit_target ?? null }));
-    if (hasUnassigned) rows.push({ id: UNASSIGNED_KEY, name: "未指定" });
     return rows;
   }, [data]);
+
+  // 担当未設定の予約を表示するデフォルト行（先頭スタッフ＝sort_order 最小のメイン担当）
+  const defaultStaffId = data?.staff[0]?.id ?? null;
 
   // 時間軸の刻みリスト（営業終了時刻のラベルも末尾に含める）
   const timeMarks = useMemo(() => {
@@ -238,13 +240,14 @@ export default function TodayTimelineWidget() {
   }, [data]);
 
   // 予約をスタッフごとにグループ化（メイン担当 + 追加担当 additional_staff すべての行に表示）
+  // 担当未設定はデフォルト行（先頭スタッフ）に表示する
   const aptsByStaff = useMemo(() => {
     const map = new Map<string, TimelineAppointment[]>();
     if (!data) return map;
     for (const a of data.appointments) {
       // この予約を表示すべき staff_id のセット（重複防止）
       const targetIds = new Set<string>();
-      targetIds.add(a.staff_id ?? UNASSIGNED_KEY);
+      targetIds.add(a.staff_id ?? defaultStaffId ?? UNASSIGNED_KEY);
       for (const add of a.additional_staff ?? []) {
         if (add?.staff_id) targetIds.add(add.staff_id);
       }
@@ -254,7 +257,7 @@ export default function TodayTimelineWidget() {
       }
     }
     return map;
-  }, [data]);
+  }, [data, defaultStaffId]);
 
   if (!date) return null;
 
@@ -314,9 +317,11 @@ export default function TodayTimelineWidget() {
               </div>
 
               {/* スタッフ行 */}
-              {staffWithUnassigned.map((s) => {
+              {staffRows.map((s) => {
                 const apts = aptsByStaff.get(s.id) ?? [];
-                const monthCount = data.staffMonthCounts?.[s.id] ?? 0;
+                // 担当未設定分の実績はデフォルト行（先頭スタッフ）に合算する
+                const monthCount = (data.staffMonthCounts?.[s.id] ?? 0)
+                  + (s.id === defaultStaffId ? (data.staffMonthCounts?.[UNASSIGNED_KEY] ?? 0) : 0);
                 const target = s.monthly_visit_target ?? 0;
                 // 達成率に応じてバッジ色を切替: 100%以上=緑、80%以上=青、それ未満=スレート
                 const achievementBadge = target > 0
@@ -397,11 +402,18 @@ export default function TodayTimelineWidget() {
                       if (endMin <= scheduleStart || startMin >= scheduleEnd) return null;
                       const clippedStart = Math.max(startMin, scheduleStart);
                       const clippedEnd = Math.min(endMin, scheduleEnd);
-                      const totalCols = timeMarks.length;
-                      const colStart = ((clippedStart - scheduleStart) / data.slotMinutes); // 0-index
-                      const colSpan = Math.max(1, Math.round((clippedEnd - clippedStart) / data.slotMinutes));
+                      // 列位置は小数になり得る（例: 17:50 開始は 30分刻みだと 11.67 列目）。
+                      // CSS grid の列番号に小数を渡すと無効値になり末尾へ飛ぶため、
+                      // 整数列に乗せたうえで margin-left / width のパーセントで分単位の位置を再現する。
+                      const startCol = (clippedStart - scheduleStart) / data.slotMinutes; // 0-index・小数可
+                      const endCol = (clippedEnd - scheduleStart) / data.slotMinutes;
+                      const gridStartIdx = Math.floor(startCol);
+                      const gridEndIdx = Math.max(gridStartIdx + 1, Math.ceil(endCol));
+                      const colSpan = gridEndIdx - gridStartIdx;
+                      const offsetFrac = startCol - gridStartIdx;                 // 開始位置のズレ（列単位）
+                      const widthCols = Math.max(endCol - startCol, 0.5);         // 視認性のため最低半列分
                       // CSS grid 上での位置: 1列目がスタッフ名なので +2
-                      const gridColStart = colStart + 2;
+                      const gridColStart = gridStartIdx + 2;
                       const cls = statusColor(a.status, a.checkin_status, a.is_first_visit);
                       return (
                         <button
@@ -413,10 +425,15 @@ export default function TodayTimelineWidget() {
                             gridColumn: `${gridColStart} / span ${colSpan}`,
                             gridRow: (laneOf.get(a.id) ?? 0) + 1,
                             alignSelf: "stretch",
+                            marginLeft: `${(offsetFrac / colSpan) * 100}%`,
+                            width: `${Math.min((widthCols / colSpan) * 100, 100)}%`,
                           }}
                           title={`${fmtTime(a.start_time)} ${a.customer_name ?? ""}${a.medical_record_number ? ` (No.${a.medical_record_number})` : ""} ${a.course_name ?? ""}`}
                         >
                           <div className="truncate font-semibold">
+                            {!a.staff_id && (
+                              <span className="mr-0.5 text-[9px] font-bold text-rose-500" title="担当未設定（予約変更から担当を設定できます）">●</span>
+                            )}
                             {a.customer_name ?? "(顧客名なし)"}
                             {a.medical_record_number && (
                               <span className="ml-1 text-[9px] font-bold opacity-70 tabular-nums">No.{a.medical_record_number}</span>

@@ -6,7 +6,7 @@ import { useSearchParams, useRouter } from "next/navigation";
 import { format, isSameMonth, isSameDay, isToday, isPast, startOfDay, startOfMonth, endOfMonth, eachDayOfInterval, startOfWeek, endOfWeek } from "date-fns";
 import { ja } from "date-fns/locale";
 import { ChevronLeft, ChevronRight, ArrowLeft, Clock, CalendarDays, X, CheckCircle2, AlertCircle, Sparkles, Phone, MessageCircle } from "lucide-react";
-import { createWaitlistReservation, getDailyAvailability, getAutoCourseSelection } from "@/app/actions/reserve";
+import { createWaitlistReservation, getDailyAvailability, getAutoCourseSelection, getRecommendedCourses } from "@/app/actions/reserve";
 import { getClinicHolidays, type ClinicHoliday } from "@/app/actions/holidays";
 import { getActiveCourses, getActiveStaff, getCourseRequiredStaffSchedule, getCoursesAvailability, type ReservationCourse } from "@/app/actions/courses";
 import { getBlockedTimesForCurrentClinic } from "@/app/actions/staff-schedule";
@@ -157,6 +157,11 @@ function ReserveCalendarContent() {
   // なければメニュー選択ページへ誘導する。
   const [menuGate, setMenuGate] = useState<"checking" | "ok" | "required">(courseIdParam ? "ok" : "checking");
   const [autoSelectedNote, setAutoSelectedNote] = useState<string | null>(null);
+  // ゲート画面の「高校生以下→保険施術 / 大人→部分施術」おすすめボタン（一意に決まる院のみ）
+  const [recommended, setRecommended] = useState<{
+    minor: { courseId: string; courseName: string } | null;
+    adult: { courseId: string; courseName: string } | null;
+  } | null>(null);
 
   const [selectedCourse, setSelectedCourse] = useState<ReservationCourse | null>(null);
   // スタッフ(レーン)タブ：担当ごとに「そのスタッフのメニュー」を切り替えるための一覧
@@ -304,6 +309,16 @@ function ReserveCalendarContent() {
     return () => { mounted = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [courseIdParam]);
+
+  // ゲート表示になったら、年齢別おすすめメニュー（あれば）を取得してボタンで案内する
+  useEffect(() => {
+    if (menuGate !== "required") return;
+    let mounted = true;
+    getRecommendedCourses()
+      .then((r) => { if (mounted) setRecommended(r); })
+      .catch(() => { if (mounted) setRecommended({ minor: null, adult: null }); });
+    return () => { mounted = false; };
+  }, [menuGate]);
 
   // courseId から該当コースを取得
   useEffect(() => {
@@ -551,12 +566,59 @@ function ReserveCalendarContent() {
                 <br />
                 正しい空き状況をご案内できます。
               </p>
+
+              {/* 年齢別のおすすめ（保険施術/部分施術が一意に決まる院のみ表示） */}
+              {(recommended?.minor || recommended?.adult) && (
+                <div className="space-y-2.5 text-left">
+                  <p className="text-[11px] text-zinc-400 font-bold text-center">
+                    多くの方はこちらのメニューです
+                  </p>
+                  {recommended.minor && (
+                    <Link
+                      href={`/reserve/calendar?courseId=${recommended.minor.courseId}`}
+                      className="flex items-center justify-between gap-3 w-full p-4 rounded-2xl bg-emerald-600/15 border border-emerald-500/40 hover:bg-emerald-600/25 active:scale-[0.99] transition"
+                    >
+                      <div className="min-w-0">
+                        <p className="text-[11px] text-emerald-300 font-bold">高校生以下の方</p>
+                        <p className="text-white font-black text-sm mt-0.5 truncate">{recommended.minor.courseName}</p>
+                      </div>
+                      <span className="shrink-0 text-emerald-300 font-black">→</span>
+                    </Link>
+                  )}
+                  {recommended.adult && (
+                    <Link
+                      href={`/reserve/calendar?courseId=${recommended.adult.courseId}`}
+                      className="flex items-center justify-between gap-3 w-full p-4 rounded-2xl bg-blue-600/15 border border-blue-500/40 hover:bg-blue-600/25 active:scale-[0.99] transition"
+                    >
+                      <div className="min-w-0">
+                        <p className="text-[11px] text-blue-300 font-bold">大人の方</p>
+                        <p className="text-white font-black text-sm mt-0.5 truncate">{recommended.adult.courseName}</p>
+                      </div>
+                      <span className="shrink-0 text-blue-300 font-black">→</span>
+                    </Link>
+                  )}
+                </div>
+              )}
+
               <Link
                 href="/reserve/menu"
                 className="flex items-center justify-center gap-2 w-full h-14 rounded-2xl bg-blue-600 hover:bg-blue-500 active:scale-95 text-white text-base font-black shadow-xl shadow-blue-950 transition-all"
               >
-                メニューを選ぶ
+                すべてのメニューから選ぶ
               </Link>
+
+              {/* メニューに迷ったら LINE でお問い合わせ */}
+              {process.env.NEXT_PUBLIC_LINE_OFFICIAL_ACCOUNT_URL && (
+                <a
+                  href={process.env.NEXT_PUBLIC_LINE_OFFICIAL_ACCOUNT_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center justify-center gap-2 w-full h-12 rounded-2xl bg-green-600/15 border border-green-500/40 hover:bg-green-600/25 text-green-300 text-sm font-black transition"
+                >
+                  <MessageCircle className="w-4 h-4" />
+                  メニューに迷ったらLINEでお問い合わせ
+                </a>
+              )}
             </div>
           </div>
         )}

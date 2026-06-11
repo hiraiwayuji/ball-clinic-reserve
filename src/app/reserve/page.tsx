@@ -68,8 +68,9 @@ function ReserveContent() {
   const [staffList, setStaffList] = useState<ReservationStaff[]>([]);
   const [rooms, setRooms] = useState<ReservationRoom[]>([]);
   const [selectedCourseId, setSelectedCourseId] = useState<string>("");
-  // メニューからコースを選んで来た場合(courseId付き)は、フォームで再選択させず「確認」だけ出す。
-  const [courseLocked, setCourseLocked] = useState<boolean>(!!initialCourseId);
+  // コースが決まっている間は一覧を出さず確認カードだけ表示する（長い一覧で迷わせない）。
+  // 「他のメニューを見る」を押したときだけ一覧を開く。
+  const [courseListOpen, setCourseListOpen] = useState<boolean>(false);
   const [selectedStaffId, setSelectedStaffId] = useState<string>("");
   const [selectedRoomId, setSelectedRoomId] = useState<string>("");
   // 「水素を追加」：施術の直後30分に水素予約も入れる（ボールのみ・水素コースがある院で表示）
@@ -734,23 +735,27 @@ function ReserveContent() {
                     )}
                     {(() => {
                       const sel = courses.find(c => c.id === selectedCourseId);
-                      // メニューから選んで来た（courseLocked）＆選択済み → 確認だけ表示
-                      if (courseLocked && sel) {
+                      // コースが決まっている（メニューから選択・自動選択どちらも）→ 確認カードだけ表示。
+                      // 長い一覧は出さず、「他のメニューを見る」を押したときだけ開く。
+                      if (sel && !courseListOpen) {
                         return (
-                          <div className="flex items-center justify-between gap-3 p-4 rounded-2xl border border-blue-500 bg-blue-600/20">
-                            <div className="min-w-0">
-                              <p className="text-[11px] text-blue-200/70 font-bold">選択中のコース</p>
-                              <p className="font-bold text-white text-sm mt-0.5">{sel.name}</p>
-                              <p className="text-xs text-blue-100/80 mt-0.5">
-                                {sel.duration_minutes}分{sel.price != null ? ` / ¥${sel.price.toLocaleString()}` : ""}
-                              </p>
+                          <div className="space-y-2">
+                            <div className="flex items-center justify-between gap-3 p-4 rounded-2xl border border-blue-500 bg-blue-600/20">
+                              <div className="min-w-0">
+                                <p className="text-[11px] text-blue-200/70 font-bold">選択中のコース</p>
+                                <p className="font-bold text-white text-sm mt-0.5">{sel.name}</p>
+                                <p className="text-xs text-blue-100/80 mt-0.5">
+                                  {sel.duration_minutes}分{sel.price != null ? ` / ¥${sel.price.toLocaleString()}` : ""}
+                                </p>
+                              </div>
+                              <span className="shrink-0 text-emerald-300 text-xs font-bold">✓ 選択済み</span>
                             </div>
                             <button
                               type="button"
-                              onClick={() => setCourseLocked(false)}
-                              className="shrink-0 text-xs font-bold text-blue-100 bg-white/10 hover:bg-white/20 border border-white/20 rounded-lg px-3 py-2"
+                              onClick={() => setCourseListOpen(true)}
+                              className="w-full text-center text-xs font-bold text-blue-200/80 hover:text-white bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl py-2.5 transition"
                             >
-                              変更する
+                              他のメニューを見る ▾
                             </button>
                           </div>
                         );
@@ -763,7 +768,15 @@ function ReserveContent() {
                           <button
                             key={course.id}
                             type="button"
-                            onClick={() => setSelectedCourseId(isSelected ? "" : course.id)}
+                            onClick={() => {
+                              if (isSelected) {
+                                setSelectedCourseId("");
+                              } else {
+                                setSelectedCourseId(course.id);
+                                // 選んだら一覧を閉じて確認カードに戻す（下まで長くしない）
+                                setCourseListOpen(false);
+                              }
+                            }}
                             className={`w-full text-left p-4 rounded-2xl border transition-all ${
                               isSelected
                                 ? "bg-blue-600 border-blue-500 text-white"
@@ -793,6 +806,15 @@ function ReserveContent() {
                           </button>
                         );
                       })}
+                      {/* メニューに迷ったら LINE へ */}
+                      <a
+                        href={LINE_URL}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-center text-xs text-blue-200/70 hover:text-white underline underline-offset-2 py-1"
+                      >
+                        メニューに迷ったらLINEでお問い合わせください
+                      </a>
                     </div>
                       );
                     })()}
