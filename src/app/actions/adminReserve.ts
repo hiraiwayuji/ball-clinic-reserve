@@ -1436,3 +1436,190 @@ export async function bulkCreateManualReservations(reservations: any[]) {
     return { success: false, error: err?.message ?? "予期せぬエラーが発生しました" };
   }
 }
+
+// ─────────────────────────────────────────────────────────
+// キャンセルの仕分け（毎日のしめ作業）
+//   無断・未確認 (unexcused) / 連絡あり・院承諾済み (approved) /
+//   施術+水素などセット解除 (set_removed＝キャンセル・未来院に数えない)
+// ─────────────────────────────────────────────────────────
+
+export type UnclassifiedCancellation = {
+  id: string;
+  start_time: string;
+  course_name: string | null;
+  customer_id: string | null;
+  customer_name: string | null;
+  no_show: boolean;
+};
+
+/** 直近30日の「未仕分け」キャンセル一覧（status=cancelled かつ cancel_kind 未設定） */
+export async function getUnclassifiedCancellations(): Promise<UnclassifiedCancellation[]> {
+  try {
+    const { clinicId } = await checkAdminAuth();
+    const supabase = getAdminSupabase();
+    if (!supabase) return [];
+    const since = new Date(Date.now() - 30 * 86400000).toISOString();
+    const { data } = await supabase
+      .from("appointments")
+      .select("id, start_time, course_name, no_show, customer_id, customers(name)")
+      .eq("clinic_id", clinicId)
+      .eq("status", "cancelled")
+      .is("cancel_kind", null)
+      .gte("start_time", since)
+      .order("start_time", { ascending: false })
+      .limit(50);
+    return (data ?? []).map((a: any) => ({
+      id: a.id,
+      start_time: a.start_time,
+      course_name: a.course_name ?? null,
+      customer_id: a.customer_id ?? null,
+      customer_name: (Array.isArray(a.customers) ? a.customers[0]?.name : a.customers?.name) ?? null,
+      no_show: !!a.no_show,
+    }));
+  } catch (err) {
+    console.error("getUnclassifiedCancellations error:", err);
+    return [];
+  }
+}
+
+/**
+ * キャンセルを仕分ける。
+ * kind='unexcused' のときは院の運用設定（noshow_block_*）に従い、
+ * 期間内の無断回数が規定以上ならオンライン予約を期限付きで自動停止する。
+ */
+export async function classifyCancellation(
+  appointmentId: string,
+  kind: "unexcused" | "approved" | "set_removed",
+): Promise<{ success: boolean; error?: string; blockedUntil?: string | null; customerName?: string | null }> {
+  try {
+    const auth = await checkAdminAuth();
+    const supabase = getAdminSupabase();
+    if (!supabase) return { success: false, error: "サーバー設定エラー" };
+
+    const { data: apt } = await supabase
+      .from("appointments")
+      .select("id, customer_id, start_time, status, no_show, cancel_kind, customers(name)")
+      .eq("id", appointmentId)
+      .eq("clinic_id", auth.clinicId)
+      .maybeSingle();
+    if (!apt) return { success: false, error: "予約が見つかりません" };
+
+    // 仕分けに合わせて no_show も正規化する（無断のみ未来院フラグON）
+    const { error } = await supabase
+      .from("appointments")
+      .update({ cancel_kind: kind, no_show: kind === "unexcused" })
+      .eq("id", appointmentId)
+      .eq("clinic_id", auth.clinicId);
+    if (error) return { success: false, error: error.message };
+
+    await writeAudit({
+      clinicId: auth.clinicId,
+      actorUserId: auth.userId,
+      actorEmail: auth.email,
+      actorRole: auth.role,
+      actionType: "appointment.cancel_classify",
+      targetTable: "appointments",
+      targetId: appointmentId,
+      before: { no_show: apt.no_show, cancel_kind: apt.cancel_kind },
+      after: { cancel_kind: kind, no_show: kind === "unexcused" },
+    });
+
+    const customerName =
+      (Array.isArray(apt.customers) ? (apt.customers[0] as any)?.name : (apt.customers as any)?.name) ?? null;
+    let blockedUntil: string | null = null;
+
+    // ── 無断キャンセル制限（院ごとの運用設定。使わない院は enabled=false のまま） ──
+    if (kind === "unexcused" && apt.customer_id) {
+      const { data: cs } = await supabase
+        .from("clinic_settings")
+        .select("noshow_block_enabled, noshow_block_threshold, noshow_block_window_days, noshow_block_days")
+        .eq("id", auth.clinicId)
+        .maybeSingle();
+      if (cs?.noshow_block_enabled) {
+        const windowDays = Number(cs.noshow_block_window_days ?? 90) || 90;
+        const threshold = Number(cs.noshow_block_threshold ?? 3) || 3;
+        const blockDays = Number(cs.noshow_block_days ?? 30) || 30;
+        const since = new Date(Date.now() - windowDays * 86400000).toISOString();
+        const { data: recent } = await supabase
+          .from("appointments")
+          .select("id, no_show, cancel_kind")
+          .eq("clinic_id", auth.clinicId)
+          .eq("customer_id", apt.customer_id)
+          .eq("status", "cancelled")
+          .gte("start_time", since);
+        const unexcusedCount = (recent ?? []).filter(
+          (r: any) => r.cancel_kind === "unexcused" || (r.no_show === true && r.cancel_kind == null),
+        ).length;
+        if (unexcusedCount >= threshold) {
+          const until = new Date(Date.now() + blockDays * 86400000).toISOString();
+          await supabase
+            .from("customers")
+            .update({ booking_suspended_until: until })
+            .eq("id", apt.customer_id)
+            .eq("clinic_id", auth.clinicId);
+          blockedUntil = until;
+          await writeAudit({
+            clinicId: auth.clinicId,
+            actorUserId: auth.userId,
+            actorEmail: auth.email,
+            actorRole: auth.role,
+            actionType: "customer.noshow_auto_block",
+            targetTable: "customers",
+            targetId: apt.customer_id,
+            before: null,
+            after: { booking_suspended_until: until, unexcusedCount, threshold },
+          });
+        }
+      }
+    }
+
+    revalidatePath("/admin/dashboard");
+    revalidatePath("/admin/customers");
+    return { success: true, blockedUntil, customerName };
+  } catch (err) {
+    console.error("classifyCancellation error:", err);
+    return { success: false, error: "予期せぬエラーが発生しました" };
+  }
+}
+
+/**
+ * 未仕分けキャンセルのうち「未来院マークが付いていないもの」を一括で承諾済みにする。
+ * 初回導入時に過去分が大量に並ぶのを一掃するための補助。
+ * 未来院マーク付き（no_show=true）は無断の可能性が高いため一括対象にせず、個別に仕分けてもらう。
+ */
+export async function classifyRemainingAsApproved(): Promise<{ success: boolean; count: number; error?: string }> {
+  try {
+    const auth = await checkAdminAuth();
+    const supabase = getAdminSupabase();
+    if (!supabase) return { success: false, count: 0, error: "サーバー設定エラー" };
+    const since = new Date(Date.now() - 30 * 86400000).toISOString();
+    const { data, error } = await supabase
+      .from("appointments")
+      .update({ cancel_kind: "approved" })
+      .eq("clinic_id", auth.clinicId)
+      .eq("status", "cancelled")
+      .is("cancel_kind", null)
+      .not("no_show", "is", true)
+      .gte("start_time", since)
+      .select("id");
+    if (error) return { success: false, count: 0, error: error.message };
+    const count = data?.length ?? 0;
+    await writeAudit({
+      clinicId: auth.clinicId,
+      actorUserId: auth.userId,
+      actorEmail: auth.email,
+      actorRole: auth.role,
+      actionType: "appointment.cancel_classify_bulk",
+      targetTable: "appointments",
+      targetId: null,
+      before: null,
+      after: { cancel_kind: "approved", count },
+    });
+    revalidatePath("/admin/dashboard");
+    revalidatePath("/admin/customers");
+    return { success: true, count };
+  } catch (err) {
+    console.error("classifyRemainingAsApproved error:", err);
+    return { success: false, count: 0, error: "予期せぬエラーが発生しました" };
+  }
+}

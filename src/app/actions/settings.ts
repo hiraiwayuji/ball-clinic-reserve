@@ -104,6 +104,13 @@ export type ClinicSettings = {
   addon_course_id?: string | null;
   // Googleクチコミ投稿リンク（★直行）。設定すると「口コミお願い」LINEを送れる。
   google_review_url?: string | null;
+  // ── 無断キャンセル制限（院ごとの運用設定。使わない院は enabled=false のまま）──
+  // 期間内（noshow_block_window_days 日）に無断キャンセルが noshow_block_threshold 回に達したら、
+  // その患者のオンライン予約を noshow_block_days 日間 自動停止する（customers.booking_suspended_until）。
+  noshow_block_enabled?: boolean | null;
+  noshow_block_threshold?: number | null;
+  noshow_block_window_days?: number | null;
+  noshow_block_days?: number | null;
   // 窓口日計表モードの金額カラム定義（JSONB）。専用 getter/setter で更新するため
   // settingsData には載せない（updateClinicSettings 経由では更新しない）。NULL ならデフォルト6列。
   tally_columns?: TallyColumn[] | null;
@@ -264,6 +271,11 @@ export async function updateClinicSettings(
     sales_input_mode: settings.sales_input_mode ?? "per_patient",
     addon_course_id: settings.addon_course_id ?? null,
     google_review_url: settings.google_review_url ?? null,
+    // 無断キャンセル制限（undefined のときはキー自体送らない＝部分更新で消えないように）
+    noshow_block_enabled: settings.noshow_block_enabled,
+    noshow_block_threshold: settings.noshow_block_threshold,
+    noshow_block_window_days: settings.noshow_block_window_days,
+    noshow_block_days: settings.noshow_block_days,
   };
 
   const targetData = {

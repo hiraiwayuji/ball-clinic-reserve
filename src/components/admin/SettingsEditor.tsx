@@ -158,6 +158,58 @@ export default function SettingsEditor({ initialSettings }: { initialSettings: C
                 </p>
               </div>
 
+              {/* 無断キャンセル制限（オンライン予約の自動停止） */}
+              <div className="border-t pt-4 mt-2 space-y-3">
+                <Label className="font-bold">無断キャンセルの自動予約停止</Label>
+                <label className="flex items-center gap-2 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={settings?.noshow_block_enabled ?? false}
+                    onChange={(e) => updateField("noshow_block_enabled", e.target.checked)}
+                    className="w-4 h-4 accent-rose-500"
+                  />
+                  <span className="text-sm">
+                    無断キャンセルが続いた患者さんのオンライン予約を一定期間停止する
+                  </span>
+                </label>
+                {(settings?.noshow_block_enabled ?? false) && (
+                  <div className="grid grid-cols-3 gap-3">
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">対象期間（日）</Label>
+                      <Input
+                        type="number"
+                        min={7}
+                        value={settings?.noshow_block_window_days ?? 90}
+                        onChange={(e) => updateField("noshow_block_window_days", parseInt(e.target.value, 10) || 90)}
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">無断回数（回以上）</Label>
+                      <Input
+                        type="number"
+                        min={1}
+                        value={settings?.noshow_block_threshold ?? 3}
+                        onChange={(e) => updateField("noshow_block_threshold", parseInt(e.target.value, 10) || 3)}
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">停止期間（日）</Label>
+                      <Input
+                        type="number"
+                        min={1}
+                        value={settings?.noshow_block_days ?? 30}
+                        onChange={(e) => updateField("noshow_block_days", parseInt(e.target.value, 10) || 30)}
+                      />
+                    </div>
+                  </div>
+                )}
+                <p className="text-xs text-slate-500 leading-relaxed">
+                  ダッシュボードの「キャンセルの仕分け」で<span className="font-bold">「無断・未確認」</span>にした回数が対象です。<br />
+                  例: 90日以内に無断3回 → 30日間オンライン予約停止（お電話での予約は通常どおり可能）。<br />
+                  停止は顧客管理ページからいつでも解除できます。
+                </p>
+              </div>
+
               {/* 営業時間（予約スロット範囲） */}
               <div className="border-t pt-4 mt-2 space-y-3">
                 <Label className="font-bold">公開予約時間（患者向け予約画面）</Label>

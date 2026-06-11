@@ -16,6 +16,8 @@ type CustomerWithStats = {
   noShowCount: number;
   lastVisit: string | null;
   booking_suspended: boolean;
+  /** 無断キャンセル制限による期限付きオンライン予約停止（期限内なら停止中） */
+  booking_suspended_until: string | null;
   line_user_id: string | null;
   line_display_name: string | null;
   birth_month: number | null;
@@ -35,6 +37,7 @@ type AppointmentRow = {
   start_time: string;
   status: string | null;
   no_show?: boolean | null;
+  cancel_kind?: string | null;
 };
 
 type CustomerRow = Omit<CustomerWithStats, "appointmentCount" | "cancelCount" | "lastVisit"> & {
@@ -65,6 +68,7 @@ export async function getCustomers(): Promise<CustomerWithStats[]> {
         phone,
         created_at,
         booking_suspended,
+        booking_suspended_until,
         line_user_id,
         line_display_name,
         birth_month,
@@ -81,7 +85,8 @@ export async function getCustomers(): Promise<CustomerWithStats[]> {
           id,
           start_time,
           status,
-          no_show
+          no_show,
+          cancel_kind
         )
       `)
       .eq("clinic_id", clinicId)
@@ -135,9 +140,19 @@ export async function getCustomers(): Promise<CustomerWithStats[]> {
 
     const formattedCustomers: CustomerWithStats[] = customerRows.map((c) => {
       const appointments = c.appointments || [];
-      const cancelled = appointments.filter((a) => a.status === "cancelled");
+      // セット解除（施術+水素の片割れ削除など cancel_kind='set_removed'）は
+      // ドタキャンではないので、キャンセル回数にも未来院にも数えない。
+      const cancelled = appointments.filter(
+        (a) => a.status === "cancelled" && a.cancel_kind !== "set_removed",
+      );
       const active = appointments.filter((a) => a.status !== "cancelled");
-      const noShow = appointments.filter((a) => a.no_show === true);
+      // 未来院（赤バッジ）＝無断・未確認のみ。
+      // 仕分け済み: cancel_kind='unexcused'。未仕分け: 従来どおり no_show フラグで判定。
+      const noShow = appointments.filter(
+        (a) =>
+          a.cancel_kind === "unexcused" ||
+          (a.no_show === true && (a.cancel_kind == null || a.cancel_kind === undefined)),
+      );
 
       let lastVisit = null;
       if (active.length > 0) {
@@ -157,6 +172,7 @@ export async function getCustomers(): Promise<CustomerWithStats[]> {
         noShowCount: noShow.length,
         lastVisit,
         booking_suspended: c.booking_suspended ?? false,
+        booking_suspended_until: c.booking_suspended_until ?? null,
         line_user_id: c.line_user_id ?? null,
         line_display_name: c.line_display_name ?? null,
         birth_month: c.birth_month ?? null,
@@ -725,6 +741,25 @@ export async function refreshLineDisplayNames(
 
   if (updated > 0) revalidatePath("/admin/customers");
   return { ok: true, updated, total: targets.length };
+}
+
+/** 無断キャンセル制限による期限付き自動停止を解除する */
+export async function clearAutoSuspension(customerId: string) {
+  const { clinicId } = await checkAdminAuth();
+
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) throw new Error("Supabase env missing");
+
+  const supabase = createAdminClient(url, key);
+  const { error } = await supabase
+    .from("customers")
+    .update({ booking_suspended_until: null })
+    .eq("id", customerId)
+    .eq("clinic_id", clinicId);
+
+  if (error) throw new Error(error.message);
+  revalidatePath("/admin/customers");
 }
 
 export async function toggleBookingSuspension(customerId: string, suspend: boolean) {

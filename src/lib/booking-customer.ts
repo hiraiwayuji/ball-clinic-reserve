@@ -18,6 +18,23 @@ export function normalizeNameForMatch(value: string): string {
     .toLowerCase();
 }
 
+/**
+ * オンライン予約を止めるべき顧客か。
+ * - booking_suspended: 手動の無期限停止（従来どおり）
+ * - booking_suspended_until: 無断キャンセル制限による期限付き自動停止（期限が過ぎれば自動解除扱い）
+ */
+export function isBookingSuspendedNow(cust: {
+  booking_suspended?: boolean | null;
+  booking_suspended_until?: string | null;
+}): boolean {
+  if (cust.booking_suspended) return true;
+  if (cust.booking_suspended_until) {
+    const until = new Date(cust.booking_suspended_until).getTime();
+    if (Number.isFinite(until) && until > Date.now()) return true;
+  }
+  return false;
+}
+
 export type ResolveCustomerParams = {
   clinicId: string;
   name: string;
@@ -57,12 +74,12 @@ export async function resolveBookingCustomer(
     if (link) {
       const { data: cust } = await adminDb
         .from("customers")
-        .select("id, name, booking_suspended")
+        .select("id, name, booking_suspended, booking_suspended_until")
         .eq("id", requestedCustomerId)
         .eq("clinic_id", clinicId)
         .maybeSingle();
       if (cust) {
-        if (cust.booking_suspended) {
+        if (isBookingSuspendedNow(cust)) {
           return { ok: false, error: "現在、オンライン予約のご利用が停止されています。お電話またはLINEにてお問い合わせください。" };
         }
         customerId = cust.id;
@@ -74,13 +91,13 @@ export async function resolveBookingCustomer(
   if (!customerId && phone) {
     const { data: existing } = await adminDb
       .from("customers")
-      .select("id, name, booking_suspended, line_user_id")
+      .select("id, name, booking_suspended, booking_suspended_until, line_user_id")
       .eq("clinic_id", clinicId)
       .eq("phone", phone)
       .maybeSingle();
 
     if (existing) {
-      if (existing.booking_suspended) {
+      if (isBookingSuspendedNow(existing)) {
         return { ok: false, error: "現在、オンライン予約のご利用が停止されています。お電話またはLINEにてお問い合わせください。" };
       }
       customerId = existing.id;
@@ -98,7 +115,7 @@ export async function resolveBookingCustomer(
     // ── 電話番号なし（再診・名前のみ）→ 氏名 + clinic_id で照合 ──
     let { data: existingList } = await adminDb
       .from("customers")
-      .select("id, name, booking_suspended, line_user_id")
+      .select("id, name, booking_suspended, booking_suspended_until, line_user_id")
       .eq("name", name)
       .eq("clinic_id", clinicId)
       .order("created_at", { ascending: false });
@@ -108,7 +125,7 @@ export async function resolveBookingCustomer(
       const target = normalizeNameForMatch(name);
       const { data: clinicCustomers } = await adminDb
         .from("customers")
-        .select("id, name, booking_suspended, line_user_id")
+        .select("id, name, booking_suspended, booking_suspended_until, line_user_id")
         .eq("clinic_id", clinicId);
       existingList = (clinicCustomers ?? []).filter(
         (c) => normalizeNameForMatch(c.name as string) === target,
@@ -131,7 +148,7 @@ export async function resolveBookingCustomer(
     }
 
     const existing = existingList[0];
-    if (existing.booking_suspended) {
+    if (isBookingSuspendedNow(existing)) {
       return { ok: false, error: "現在、オンライン予約のご利用が停止されています。お電話またはLINEにてお問い合わせください。" };
     }
     customerId = existing.id;

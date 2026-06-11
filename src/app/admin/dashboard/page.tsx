@@ -4,6 +4,7 @@ import OwnerSecretaryWidget from "@/components/admin/OwnerSecretaryWidget";
 import StaffSecretaryWidget from "@/components/admin/StaffSecretaryWidget";
 import TodayTimelineWidget from "@/components/admin/TodayTimelineWidget";
 import StaffTargetProgressWidget from "@/components/admin/StaffTargetProgressWidget";
+import CancelReviewWidget from "@/components/admin/CancelReviewWidget";
 import DashboardClient from "./DashboardClient";
 
 export default async function DashboardPage({
@@ -29,6 +30,9 @@ export default async function DashboardPage({
 
       {/* 予約タイムテーブル（clinic_settings.view_type='timeline' の院は最上位に配置） */}
       {viewType === "timeline" && <TodayTimelineWidget />}
+
+      {/* 毎日のしめ作業：キャンセルの仕分け（無断 / 承諾済み / セット解除） */}
+      <CancelReviewWidget />
 
       {/* スタッフごとの月間目標達成率（目標が1人以上設定されている場合のみ表示） */}
       {role === "owner" && <StaffTargetProgressWidget />}

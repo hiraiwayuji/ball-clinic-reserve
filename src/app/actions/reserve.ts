@@ -3,7 +3,7 @@
 import { PUBLIC_CLINIC_ID } from "@/lib/default-clinic-id";
 import { pushLineToOwners, sendEmailToOwners } from "@/lib/admin-notify";
 import { getLineUidFromCookie } from "@/app/actions/family-line";
-import { resolveBookingCustomer } from "@/lib/booking-customer";
+import { resolveBookingCustomer, isBookingSuspendedNow } from "@/lib/booking-customer";
 import { detectClinicMisconfig, CLINIC_MISCONFIG_USER_MESSAGE } from "@/lib/clinic-guard";
 
 async function notifyOwner(
@@ -600,12 +600,12 @@ export async function createReservation(formData: FormData) {
           if (link) {
             const { data: cust } = await adminDb
               .from("customers")
-              .select("id, name, booking_suspended")
+              .select("id, name, booking_suspended, booking_suspended_until")
               .eq("id", requestedCustomerId)
               .eq("clinic_id", PUBLIC_CLINIC_ID)
               .maybeSingle();
             if (cust) {
-              if (cust.booking_suspended) {
+              if (isBookingSuspendedNow(cust)) {
                 return { success: false, error: "現在、オンライン予約のご利用が停止されています。お電話またはLINEにてお問い合わせください。" };
               }
               customerId = cust.id;
@@ -620,13 +620,13 @@ export async function createReservation(formData: FormData) {
       if (!customerId && phone) {
         const { data: existing } = await adminDb
           .from("customers")
-          .select("id, name, booking_suspended, line_user_id")
+          .select("id, name, booking_suspended, booking_suspended_until, line_user_id")
           .eq("clinic_id", PUBLIC_CLINIC_ID)
           .eq("phone", phone)
           .maybeSingle();
 
         if (existing) {
-          if (existing.booking_suspended) {
+          if (isBookingSuspendedNow(existing)) {
             return { success: false, error: "現在、オンライン予約のご利用が停止されています。お電話またはLINEにてお問い合わせください。" };
           }
           customerId = existing.id;
@@ -647,7 +647,7 @@ export async function createReservation(formData: FormData) {
         // （「山内 颯人」と「山内颯人」で別人扱いになる事故を防ぐ）。
         let { data: existingList } = await adminDb
           .from("customers")
-          .select("id, name, booking_suspended, line_user_id")
+          .select("id, name, booking_suspended, booking_suspended_until, line_user_id")
           .eq("name", name)
           .eq("clinic_id", PUBLIC_CLINIC_ID)
           .order("created_at", { ascending: false });
@@ -657,7 +657,7 @@ export async function createReservation(formData: FormData) {
           const target = normalizeNameForMatch(name);
           const { data: clinicCustomers } = await adminDb
             .from("customers")
-            .select("id, name, booking_suspended, line_user_id")
+            .select("id, name, booking_suspended, booking_suspended_until, line_user_id")
             .eq("clinic_id", PUBLIC_CLINIC_ID);
           existingList = (clinicCustomers ?? []).filter(
             (c) => normalizeNameForMatch(c.name as string) === target,
@@ -682,7 +682,7 @@ export async function createReservation(formData: FormData) {
         }
 
         const existing = existingList[0];
-        if (existing.booking_suspended) {
+        if (isBookingSuspendedNow(existing)) {
           return { success: false, error: "現在、オンライン予約のご利用が停止されています。お電話またはLINEにてお問い合わせください。" };
         }
         // LINE未紐づけ かつ 顧客DB登録済み → 予約は通す（スタッフが手動管理）

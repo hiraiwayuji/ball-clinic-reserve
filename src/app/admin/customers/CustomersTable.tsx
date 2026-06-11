@@ -13,7 +13,7 @@ import {
 } from "@/components/ui/dialog";
 import { SuspendToggle } from "./SuspendToggle";
 import { LinkLineDialog } from "./LinkLineDialog";
-import { updateCustomerInfo, mergeCustomers, sendDormantLinePush, getMonthlyVisitStats, refreshLineDisplayNames, type MonthlyVisitStat } from "@/app/actions/adminCustomers";
+import { updateCustomerInfo, mergeCustomers, sendDormantLinePush, getMonthlyVisitStats, refreshLineDisplayNames, clearAutoSuspension, type MonthlyVisitStat } from "@/app/actions/adminCustomers";
 import { QuestionnaireDialog } from "./QuestionnaireDialog";
 import {
   Search, Pencil, Check, X, Loader2, ClipboardList,
@@ -34,6 +34,7 @@ export type Customer = {
   noShowCount: number;
   lastVisit: string | null;
   booking_suspended: boolean;
+  booking_suspended_until: string | null;
   line_user_id: string | null;
   line_display_name: string | null;
   birth_month: number | null;
@@ -559,7 +560,12 @@ function EditableRow({
         </TableCell>
 
         <TableCell>
-          <SuspendToggle customerId={customer.id} suspended={customer.booking_suspended} />
+          <div className="flex flex-col items-start gap-1">
+            <SuspendToggle customerId={customer.id} suspended={customer.booking_suspended} />
+            {customer.booking_suspended_until && new Date(customer.booking_suspended_until) > new Date() && (
+              <AutoSuspendBadge customerId={customer.id} until={customer.booking_suspended_until} />
+            )}
+          </div>
         </TableCell>
       </TableRow>
 
@@ -572,6 +578,38 @@ function EditableRow({
         onMergeComplete={() => window.location.reload()}
       />
     </>
+  );
+}
+
+// 無断キャンセル制限による期限付き自動停止の表示＋ワンクリック解除
+function AutoSuspendBadge({ customerId, until }: { customerId: string; until: string }) {
+  const [busy, setBusy] = useState(false);
+  const untilLabel = new Date(until).toLocaleDateString("ja-JP", { timeZone: "Asia/Tokyo", month: "numeric", day: "numeric" });
+  return (
+    <div className="flex items-center gap-1">
+      <span
+        className="text-[10px] font-bold bg-rose-100 text-rose-700 px-1.5 py-0.5 rounded-full whitespace-nowrap"
+        title="無断キャンセルが規定回数に達したため、オンライン予約を自動停止中です"
+      >
+        ⏸ 自動停止中（〜{untilLabel}）
+      </span>
+      <button
+        type="button"
+        disabled={busy}
+        onClick={async () => {
+          setBusy(true);
+          try {
+            await clearAutoSuspension(customerId);
+            window.location.reload();
+          } catch {
+            setBusy(false);
+          }
+        }}
+        className="text-[10px] font-bold text-slate-400 hover:text-blue-600 underline underline-offset-2 disabled:opacity-50"
+      >
+        解除
+      </button>
+    </div>
   );
 }
 
