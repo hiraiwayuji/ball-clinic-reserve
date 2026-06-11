@@ -1040,6 +1040,76 @@ export async function createReservation(formData: FormData) {
         }
       }
 
+      // ── 汎用「追加メニュー」（is_bookable_addon。からだの鍼など）を施術の直後に順次予約 ──
+      // 本予約の終了時刻から続けて、選ばれた追加メニューを連続で配置する（ボール水素を汎用化した考え方）。
+      const addonResults: { name: string; added: boolean; time: string | null; error: string | null }[] = [];
+      const addonCourseIds = String(formData.get("addonCourseIds") ?? "")
+        .split(",").map((s) => s.trim()).filter(Boolean);
+      if (addonCourseIds.length > 0 && !isCapacityFull) {
+        let cursorIso = endDateTimeStr; // 本予約の終了直後から積み上げる
+        for (const addonId of addonCourseIds) {
+          if (addonId === courseId) continue; // 本メニューと同じものは追加しない
+          try {
+            const { data: addon } = await adminDb
+              .from("reservation_courses")
+              .select("id, name, duration_minutes, required_staff_id, is_active, is_bookable_addon")
+              .eq("id", addonId)
+              .eq("clinic_id", DEFAULT_CLINIC_ID)
+              .maybeSingle();
+            // 自院に実在し・有効で・追加メニュー指定のものだけ受け付ける（不正IDは無視）
+            if (!addon || addon.is_active === false || !addon.is_bookable_addon) continue;
+            const aDur = Number(addon.duration_minutes ?? 30) || 30;
+            const aStartIso = cursorIso;
+            const aStart = new Date(aStartIso);
+            const aEndIso = new Date(aStart.getTime() + aDur * 60000).toISOString();
+            const aStaffId = (addon.required_staff_id as string | null) ?? null;
+            const aHHMM = new Intl.DateTimeFormat("ja-JP", { timeZone: "Asia/Tokyo", hour: "2-digit", minute: "2-digit", hour12: false }).format(aStart);
+            const businessSlots = getTimeSlots(new Date(`${rawDate}T00:00:00`));
+            const inHours = businessSlots.includes(aHHMM);
+            // 空き判定: 専用レーン(required_staff)があればそのレーン、無ければその日の定員で
+            let free = true;
+            if (aStaffId) {
+              const { data: conf } = await adminDb
+                .from("appointments").select("id")
+                .eq("clinic_id", DEFAULT_CLINIC_ID).eq("staff_id", aStaffId)
+                .neq("status", "cancelled").lt("start_time", aEndIso).gt("end_time", aStartIso).limit(1);
+              free = !(conf && conf.length > 0);
+            } else {
+              const { data: overlap } = await adminDb
+                .from("appointments").select("id")
+                .eq("clinic_id", DEFAULT_CLINIC_ID).neq("status", "cancelled")
+                .lt("start_time", aEndIso).gt("end_time", aStartIso);
+              free = (overlap?.length ?? 0) < dayCapacity;
+            }
+            if (inHours && free) {
+              const { error: aErr } = await adminDb.from("appointments").insert([{
+                customer_id: customerId,
+                start_time: aStartIso,
+                end_time: aEndIso,
+                memo: `【${addon.name} 追加】施術後に続けて`,
+                is_first_visit: false,
+                status: "pending",
+                clinic_id: DEFAULT_CLINIC_ID,
+                course_id: addon.id,
+                course_name: addon.name,
+                ...(aStaffId ? { staff_id: aStaffId, staff_name: addon.name } : {}),
+              }]);
+              if (!aErr) {
+                addonResults.push({ name: addon.name as string, added: true, time: aHHMM, error: null });
+                cursorIso = aEndIso; // 次の追加メニューはこの終了時刻から続ける
+              } else {
+                console.error("addon insert error", aErr);
+                addonResults.push({ name: addon.name as string, added: false, time: null, error: "同じ時間にすでにご予約の可能性があります" });
+              }
+            } else {
+              addonResults.push({ name: addon.name as string, added: false, time: null, error: "ご希望の時間に空きがありませんでした" });
+            }
+          } catch (e) {
+            console.error("addon add failed", e);
+          }
+        }
+      }
+
         await notifyOwner(name, phone, rawDate, time, visitType, symptoms, reservationNumber, isCapacityFull, courseName, staffName);
         // 水素を追加した場合はオーナーにも知らせる
         if (hydrogenAdded && hydrogenTime) {
@@ -1055,6 +1125,15 @@ export async function createReservation(formData: FormData) {
             `💆【ヘッドスパ 追加・¥2000セット】${name}様 ${rawDate} ${headspaTime}〜（実費施術の直後）`,
           );
         }
+        // 汎用「追加メニュー」を追加した分もオーナーに知らせる
+        for (const ar of addonResults) {
+          if (ar.added) {
+            await pushLineToOwners(
+              PUBLIC_CLINIC_ID,
+              `➕【${ar.name} 追加】${name}様 ${rawDate} ${ar.time ?? ""}〜（施術の直後）`,
+            );
+          }
+        }
         // 別日の既存予約がある状態で、ご本人が「院に確認済み」として追加予約した場合はオーナーに注意喚起
         if (hasOtherDayDuplicate && confirmedExisting) {
           await pushLineToOwners(
@@ -1062,7 +1141,7 @@ export async function createReservation(formData: FormData) {
             `⚠️【複数予約の確認】${name}様は既存のご予約（${otherDayInfo}）がある状態で、ご本人が「院に確認済み」として追加予約を取られました。\n新規: ${rawDate} ${time}\n予約番号: ${reservationNumber}`,
           );
         }
-  return { success: true, isWaiting: isCapacityFull, reservationNumber, lineLinked, phoneLast4, hydrogenAdded, hydrogenTime, hydrogenError, headspaAdded, headspaTime, headspaError };
+  return { success: true, isWaiting: isCapacityFull, reservationNumber, lineLinked, phoneLast4, hydrogenAdded, hydrogenTime, hydrogenError, headspaAdded, headspaTime, headspaError, addonResults };
     } else {
       // SupabaseのURLが設定されていない場合の動作保証（デモ用）
       console.log("Supabase URL not configured. Simulating successful reservation.");

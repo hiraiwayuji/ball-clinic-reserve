@@ -28,6 +28,7 @@ type PendingBooking = {
   staffName?: string;
   roomId?: string;
   roomName?: string;
+  addonCourseIds?: string[];
 };
 
 // "2026-06-10" → "6月10日（火）" のような表示にする（引き継ぎ確認の見出し用）。
@@ -162,6 +163,9 @@ export default function QuestionnairePage() {
     if (b.roomId) {
       fd.append("roomId", b.roomId);
       if (b.roomName) fd.append("roomName", b.roomName);
+    }
+    if (b.addonCourseIds && b.addonCourseIds.length > 0) {
+      fd.append("addonCourseIds", b.addonCourseIds.join(","));
     }
     return await createReservation(fd);
   };
