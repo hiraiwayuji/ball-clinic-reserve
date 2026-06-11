@@ -21,6 +21,7 @@ import { useSearchParams } from "next/navigation";
 import { getTimeSlots, isDateWithinAllowedRange, isTimeSlotWithinTwoHours } from "@/lib/time-slots";
 import { useClinicSlotDuration } from "@/lib/use-clinic-slot-duration";
 import { useClinicSchedule } from "@/lib/use-clinic-schedule";
+import { courseShortPrice } from "@/lib/course-price";
 import { toast } from "sonner";
 import { CLINIC_CONFIG } from "@/lib/clinic-config";
 import ReserveLandingPage from "./ReserveLandingPage";
@@ -80,6 +81,9 @@ function ReserveContent() {
   // 「ヘッドスパを追加」：実費施術の直後にヘッドスパ(¥2000セット)を入れる
   const [addHeadspa, setAddHeadspa] = useState(false);
   const [headspaResult, setHeadspaResult] = useState<{ added: boolean; time: string | null; error: string | null } | null>(null);
+  // 汎用「追加メニュー」（is_bookable_addon のコース。からだの鍼など）。施術の直後に続けて予約する。
+  const [selectedAddonIds, setSelectedAddonIds] = useState<string[]>([]);
+  const [addonResults, setAddonResults] = useState<{ name: string; added: boolean; time: string | null; error: string | null }[] | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
   const [isWaitingResult, setIsWaitingResult] = useState(false);
@@ -251,6 +255,9 @@ function ReserveContent() {
     }
   }, [requiredStaff, date]);
 
+  // メニューを変えたら「追加メニュー」の選択はリセット（前のメニューの追加が残らないように）
+  useEffect(() => { setSelectedAddonIds([]); }, [selectedCourseId]);
+
   // 指名済みスタッフが選択日に出勤していなければ指名を解除（休みの担当を指名したままにしない）
   useEffect(() => {
     if (!selectedStaffId || requiredStaff) return;
@@ -328,6 +335,10 @@ function ReserveContent() {
           formData.append("addHeadspa", "true");
         }
       }
+      // 汎用「追加メニュー」（is_bookable_addon。からだの鍼など）
+      if (selectedAddonIds.length > 0) {
+        formData.append("addonCourseIds", selectedAddonIds.join(","));
+      }
       if (selectedStaffId) {
         const staff = staffList.find(s => s.id === selectedStaffId);
         if (staff) {
@@ -374,6 +385,7 @@ function ReserveContent() {
         } else {
           setHeadspaResult(null);
         }
+        setAddonResults(Array.isArray(rh.addonResults) && rh.addonResults.length > 0 ? rh.addonResults : null);
       }
       setIsSuccess(true);
       // LINE未連携の人には、完了後に「下4桁を送って連携してください」ポップアップを出す
@@ -409,6 +421,7 @@ function ReserveContent() {
           staffName: staff?.name ?? "",
           roomId: room?.id ?? "",
           roomName: room?.name ?? "",
+          addonCourseIds: selectedAddonIds,
         };
         sessionStorage.setItem(PENDING_BOOKING_KEY, JSON.stringify(booking));
       } catch {}
@@ -477,6 +490,17 @@ function ReserveContent() {
               </div>
             )
           )}
+          {addonResults && addonResults.map((ar, i) => (
+            ar.added ? (
+              <div key={i} className="mb-6 mx-auto max-w-sm rounded-2xl bg-emerald-500/15 border border-emerald-400/30 px-4 py-3 text-emerald-100 text-sm font-bold">
+                ✅ {ar.name}も追加しました{ar.time ? `（${ar.time}〜・施術の直後）` : ""}
+              </div>
+            ) : (
+              <div key={i} className="mb-6 mx-auto max-w-sm rounded-2xl bg-amber-500/15 border border-amber-400/30 px-4 py-3 text-amber-100 text-sm font-bold">
+                ⚠️ {ar.name}は{ar.error ?? "追加できませんでした"}。<br />施術のご予約は受け付けています。
+              </div>
+            )
+          ))}
           <div className="h-1 w-20 bg-emerald-500 mx-auto mb-6 rounded-full" />
           <div className="bg-white/5 border border-white/10 p-6 rounded-3xl mb-6 text-left space-y-3">
             <p className="text-white font-bold text-center mb-4 flex items-center justify-center gap-2">
@@ -799,7 +823,7 @@ function ReserveContent() {
                                 <p className="text-[11px] text-blue-200/70 font-bold">選択中のコース</p>
                                 <p className="font-bold text-white text-sm mt-0.5">{sel.name}</p>
                                 <p className="text-xs text-blue-100/80 mt-0.5">
-                                  {sel.duration_minutes}分{sel.price != null ? ` / ¥${sel.price.toLocaleString()}` : ""}
+                                  {sel.duration_minutes}分{courseShortPrice(sel) ? ` / ${courseShortPrice(sel)}` : ""}
                                 </p>
                               </div>
                               <span className="shrink-0 text-emerald-300 text-xs font-bold">✓ 選択済み</span>
@@ -850,9 +874,9 @@ function ReserveContent() {
                                 <span className={`text-sm font-bold ${isSelected ? "text-white" : "text-blue-300"}`}>
                                   {course.duration_minutes}分
                                 </span>
-                                {course.price != null && (
+                                {courseShortPrice(course) && (
                                   <p className={`text-xs ${isSelected ? "text-blue-100" : "text-blue-100/80"}`}>
-                                    ¥{course.price.toLocaleString()}
+                                    {courseShortPrice(course)}
                                   </p>
                                 )}
                               </div>
@@ -929,6 +953,46 @@ function ReserveContent() {
                           <span className={`absolute top-0.5 w-6 h-6 bg-white rounded-full transition-all ${addHeadspa ? "left-[1.6rem]" : "left-0.5"}`} />
                         </span>
                       </button>
+                    </section>
+                  );
+                })()}
+
+                {/* 一緒に追加できるメニュー（is_bookable_addon。からだの鍼など。ボール水素と同じ「施術直後に続けて」方式） */}
+                {(() => {
+                  const addonCandidates = courses.filter(c => c.is_bookable_addon && c.id !== selectedCourseId);
+                  if (!selectedCourseId || addonCandidates.length === 0) return null;
+                  return (
+                    <section className={`space-y-3 ${reserveFlow === "menu_first" ? "order-1" : "order-2"}`}>
+                      <h2 className="text-xl font-bold text-white tracking-tight">
+                        ＋ 一緒に追加できます <span className="text-sm font-normal text-blue-100/80">（任意）</span>
+                      </h2>
+                      <p className="text-xs text-blue-100/70 -mt-1">施術のあと、続けて受けられます。ご希望の方はお選びください。</p>
+                      <div className="grid gap-2">
+                        {addonCandidates.map(a => {
+                          const on = selectedAddonIds.includes(a.id);
+                          return (
+                            <button
+                              key={a.id}
+                              type="button"
+                              onClick={() => setSelectedAddonIds(prev => on ? prev.filter(x => x !== a.id) : [...prev, a.id])}
+                              aria-pressed={on}
+                              className={`w-full flex items-center justify-between gap-3 p-4 rounded-2xl border transition-all ${
+                                on ? "bg-emerald-600/25 border-emerald-400" : "bg-white/5 border-white/10 hover:bg-white/10"
+                              }`}
+                            >
+                              <div className="text-left min-w-0">
+                                <p className="font-bold text-white text-sm">{a.name}</p>
+                                <p className="text-xs text-blue-100/80 mt-0.5">
+                                  {a.duration_minutes}分{courseShortPrice(a) ? ` / ${courseShortPrice(a)}` : ""}
+                                </p>
+                              </div>
+                              <span className={`shrink-0 w-12 h-7 rounded-full relative transition-colors ${on ? "bg-emerald-400" : "bg-white/20"}`}>
+                                <span className={`absolute top-0.5 w-6 h-6 bg-white rounded-full transition-all ${on ? "left-[1.6rem]" : "left-0.5"}`} />
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
                     </section>
                   );
                 })()}

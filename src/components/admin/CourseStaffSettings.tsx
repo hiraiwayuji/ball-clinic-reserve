@@ -161,6 +161,8 @@ function CourseRow({
   const [isRepeatOnly, setIsRepeatOnly] = useState(course.is_repeat_only);
   const [regularPrice, setRegularPrice] = useState(course.regular_price?.toString() ?? "");
   const [firstVisitPrice, setFirstVisitPrice] = useState(course.first_visit_price?.toString() ?? "");
+  const [priceNote, setPriceNote] = useState(course.price_note ?? "");
+  const [isBookableAddon, setIsBookableAddon] = useState(course.is_bookable_addon ?? false);
   const [badgeLabel, setBadgeLabel] = useState(course.badge_label ?? "");
   const [sortOrder, setSortOrder] = useState((course.sort_order ?? 0).toString());
   const [category, setCategory] = useState<"jusei" | "shinkyu" | "seitai" | "">(
@@ -187,6 +189,8 @@ function CourseRow({
       is_repeat_only: isRepeatOnly,
       regular_price: regularPrice ? Number(regularPrice) : null,
       first_visit_price: firstVisitPrice ? Number(firstVisitPrice) : null,
+      price_note: priceNote.trim() || null,
+      is_bookable_addon: isBookableAddon,
       badge_label: badgeLabel.trim() || null,
       category: category || null,
     });
@@ -273,9 +277,35 @@ function CourseRow({
           />
         </div>
         <div>
+          <Label className="text-xs text-slate-600 dark:text-slate-300">価格の幅表記（任意）</Label>
+          <Input
+            value={priceNote}
+            onChange={e => setPriceNote(e.target.value)}
+            className="h-9 mt-1"
+            placeholder="例: ¥1,700〜2,300（保険の負担割合で変わる場合）"
+          />
+          <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">
+            入力すると、患者の予約画面では金額の代わりにこの文字がそのまま表示されます（保険施術など金額が変わるメニュー向け）。
+          </p>
+        </div>
+        <div>
           <Label className="text-xs text-slate-600 dark:text-slate-300">説明</Label>
           <Input value={description} onChange={e => setDescription(e.target.value)} className="h-9 mt-1" placeholder="患者向け説明文" />
         </div>
+        <label className="flex items-start gap-2 text-sm text-slate-700 dark:text-slate-200 cursor-pointer border border-emerald-200 dark:border-emerald-800 bg-emerald-50/50 dark:bg-emerald-950/30 rounded-lg p-2.5">
+          <input
+            type="checkbox"
+            checked={isBookableAddon}
+            onChange={e => setIsBookableAddon(e.target.checked)}
+            className="w-4 h-4 accent-emerald-600 mt-0.5"
+          />
+          <span>
+            <span className="font-bold">予約時に「一緒に追加できるメニュー」として提案する</span>
+            <span className="block text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+              ONにすると、他のメニューを予約する患者さんに「＋このメニューも追加しますか？」と表示され、施術のあとに続けて予約できます（ボールの水素と同じ仕組み）。
+            </span>
+          </span>
+        </label>
         <div>
           <Label className="text-xs text-slate-600 dark:text-slate-300">表示順（小さい順に上から並ぶ）</Label>
           <Input

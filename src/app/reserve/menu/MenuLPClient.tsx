@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import type { ReservationCourse } from "@/app/actions/courses";
 import { getCoursesAvailability } from "@/app/actions/courses";
+import { coursePriceLabel } from "@/lib/course-price";
 import type { PublicClinicSettings, ThemeColor } from "@/app/actions/publicSettings";
 import { CLINIC_CONFIG } from "@/lib/clinic-config";
 import { getThemeClasses } from "@/lib/lp-theme";
@@ -320,21 +321,33 @@ function CouponCard({
 
           <div className="mt-auto flex items-end justify-between gap-2 pt-1">
             <div className="flex flex-col">
-              {hasDiscount && course.regular_price != null && (
-                <span className="text-[10px] text-zinc-500 line-through tabular-nums">
-                  通常 ¥{course.regular_price.toLocaleString()}
-                </span>
-              )}
-              {course.price != null ? (
-                <div className="flex items-baseline gap-1">
-                  <span className={`font-black tabular-nums ${hasDiscount ? "text-amber-400 text-xl" : "text-white text-lg"}`}>
-                    ¥{course.price.toLocaleString()}
-                  </span>
-                  <span className="text-[10px] text-zinc-500">税込</span>
-                </div>
-              ) : (
-                <span className="text-xs text-zinc-500 font-bold">料金 — 要相談</span>
-              )}
+              {(() => {
+                const pl = coursePriceLabel(course);
+                // 幅表記（price_note）は割引取り消し線・「税込」を付けずそのまま見せる
+                if (pl.isNote) {
+                  return (
+                    <span className="font-black tabular-nums text-white text-lg">{pl.text}</span>
+                  );
+                }
+                if (pl.text == null) {
+                  return <span className="text-xs text-zinc-500 font-bold">料金 — 要相談</span>;
+                }
+                return (
+                  <>
+                    {hasDiscount && course.regular_price != null && (
+                      <span className="text-[10px] text-zinc-500 line-through tabular-nums">
+                        通常 ¥{course.regular_price.toLocaleString()}
+                      </span>
+                    )}
+                    <div className="flex items-baseline gap-1">
+                      <span className={`font-black tabular-nums ${hasDiscount ? "text-amber-400 text-xl" : "text-white text-lg"}`}>
+                        {pl.text}
+                      </span>
+                      <span className="text-[10px] text-zinc-500">税込</span>
+                    </div>
+                  </>
+                );
+              })()}
             </div>
             <div className="flex items-center gap-1 text-[11px] text-zinc-400 bg-zinc-800 px-2 py-1 rounded-md font-bold">
               <Clock className="w-3 h-3" />
@@ -479,21 +492,32 @@ function CourseDetailModal({
 
               <div className="mt-4 flex items-end justify-between gap-3 flex-wrap">
                 <div className="flex flex-col">
-                  {hasDiscount && course.regular_price != null && (
-                    <span className="text-sm text-zinc-500 line-through tabular-nums">
-                      通常 ¥{course.regular_price.toLocaleString()}
-                    </span>
-                  )}
-                  {course.price != null ? (
-                    <div className="flex items-baseline gap-1">
-                      <span className={`font-black tabular-nums ${hasDiscount ? "text-amber-400 text-3xl sm:text-4xl" : "text-white text-2xl sm:text-3xl"}`}>
-                        ¥{course.price.toLocaleString()}
-                      </span>
-                      <span className="text-sm text-zinc-400 font-bold">税込</span>
-                    </div>
-                  ) : (
-                    <span className="text-base text-zinc-400 font-bold">料金 — 要相談</span>
-                  )}
+                  {(() => {
+                    const pl = coursePriceLabel(course);
+                    if (pl.isNote) {
+                      return (
+                        <span className="font-black tabular-nums text-white text-2xl sm:text-3xl">{pl.text}</span>
+                      );
+                    }
+                    if (pl.text == null) {
+                      return <span className="text-base text-zinc-400 font-bold">料金 — 要相談</span>;
+                    }
+                    return (
+                      <>
+                        {hasDiscount && course.regular_price != null && (
+                          <span className="text-sm text-zinc-500 line-through tabular-nums">
+                            通常 ¥{course.regular_price.toLocaleString()}
+                          </span>
+                        )}
+                        <div className="flex items-baseline gap-1">
+                          <span className={`font-black tabular-nums ${hasDiscount ? "text-amber-400 text-3xl sm:text-4xl" : "text-white text-2xl sm:text-3xl"}`}>
+                            {pl.text}
+                          </span>
+                          <span className="text-sm text-zinc-400 font-bold">税込</span>
+                        </div>
+                      </>
+                    );
+                  })()}
                 </div>
                 <div className="flex items-center gap-1.5 text-sm text-white bg-zinc-800 border border-zinc-700 px-3 py-2 rounded-lg font-bold">
                   <Clock className="w-4 h-4" />

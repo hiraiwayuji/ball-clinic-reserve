@@ -12,6 +12,11 @@ export type ReservationCourse = {
   price: number | null;
   /** 初診時の税込価格。NULL なら price をフォールバックに使う。 */
   first_visit_price: number | null;
+  /** 価格の自由表記（例: "¥1,700〜2,300"）。設定すると患者表示で price 数値の代わりにこれを出す。
+   *  保険施術など負担割合で金額が変わるメニューを「幅」で見せるのに使う。 */
+  price_note?: string | null;
+  /** 予約時に「一緒に追加できるメニュー」として提案するか（ボールの水素のような同時追加を汎用化）。 */
+  is_bookable_addon?: boolean;
   description: string | null;
   is_active: boolean;
   sort_order: number;
@@ -214,6 +219,8 @@ export async function saveCourse(course: Partial<ReservationCourse> & { name: st
     duration_minutes: course.duration_minutes,
     price: course.price ?? null,
     first_visit_price: course.first_visit_price ?? null,
+    price_note: course.price_note ?? null,
+    is_bookable_addon: course.is_bookable_addon ?? false,
     description: course.description ?? null,
     is_active: course.is_active ?? true,
     sort_order: course.sort_order ?? 0,

@@ -10,6 +10,7 @@ import { createWaitlistReservation, getDailyAvailability, getAutoCourseSelection
 import { getClinicHolidays, type ClinicHoliday } from "@/app/actions/holidays";
 import { getActiveCourses, getActiveStaff, getCourseRequiredStaffSchedule, getCoursesAvailability, type ReservationCourse } from "@/app/actions/courses";
 import { getBlockedTimesForCurrentClinic } from "@/app/actions/staff-schedule";
+import { courseShortPrice } from "@/lib/course-price";
 import { isStaffAvailableOn, type StaffSchedule } from "@/lib/staff-availability";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -692,9 +693,9 @@ function ReserveCalendarContent() {
                     <Clock className="w-3 h-3" />
                     {selectedCourse.duration_minutes}分
                   </span>
-                  {selectedCourse.price != null && (
+                  {courseShortPrice(selectedCourse) && (
                     <span className="text-[11px] text-blue-200 bg-blue-500/20 px-2 py-0.5 rounded-md font-bold tabular-nums">
-                      ¥{selectedCourse.price.toLocaleString()}
+                      {courseShortPrice(selectedCourse)}
                     </span>
                   )}
                 </div>
