@@ -339,6 +339,8 @@ function ReserveCalendarContent() {
       if (!mounted) return;
       const found = courses.find(c => c.id === courseIdParam) ?? null;
       setSelectedCourse(found);
+      // 実費アドオン（鍼灸など）は単体予約不可。施術メニュー選択ゲートへ誘導する。
+      if (found?.is_bookable_addon) setMenuGate("required");
     });
     // このコースの最短の空き日（予約・出勤日・所要時間を考慮）を取得して前向きに案内する
     setCourseNextDate(undefined);

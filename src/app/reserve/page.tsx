@@ -137,8 +137,12 @@ function ReserveContent() {
     getActiveCourses().then(list => {
       setCourses(list);
       // ?courseId=xxx で来た場合、該当コースを初期選択
-      if (initialCourseId && list.some(c => c.id === initialCourseId)) {
-        setSelectedCourseId(initialCourseId);
+      // ただし実費アドオン（is_bookable_addon）は単体では主メニューにできないので除外
+      if (initialCourseId) {
+        const target = list.find(c => c.id === initialCourseId);
+        if (target && !target.is_bookable_addon) {
+          setSelectedCourseId(initialCourseId);
+        }
       }
     });
     getActiveStaff().then(setStaffList);
@@ -810,6 +814,16 @@ function ReserveContent() {
                       {reserveFlow === "menu_first" ? "① 施術コース" : "施術コース"}
                       <span className="ml-2 text-sm font-normal text-amber-300">（必須）</span>
                     </h2>
+                    {/* ロック対象（追加メニュー）がある院は「まず土台メニューを選ぶ」案内を出す。
+                        からだ：保険施術・経絡・トータルリメイク・じっくり 等を選ぶと鍼灸などが選べる。 */}
+                    {courses.some(c => c.is_bookable_addon) && (
+                      <div className="rounded-xl border border-amber-400/40 bg-amber-500/10 p-3 text-sm text-amber-100">
+                        <p className="font-bold text-white">まず、こちらの施術メニューから1つお選びください。</p>
+                        <p className="mt-1 text-amber-100/90 leading-relaxed">
+                          鍼灸などの実費メニューは「追加メニュー」です。先に上の施術メニューを選ぶと、続けてお選びいただけます。
+                        </p>
+                      </div>
+                    )}
                     {autoCourseNote && selectedCourseId && (
                       <p className="text-xs text-emerald-300 font-bold">✨ {autoCourseNote}</p>
                     )}
@@ -842,7 +856,8 @@ function ReserveContent() {
                       }
                       return (
                     <div className="grid gap-3">
-                      {courses.map(course => {
+                      {/* 土台メニューのみ（is_bookable_addon=実費アドオンは下の「追加メニュー」へ） */}
+                      {courses.filter(c => !c.is_bookable_addon).map(course => {
                         const isSelected = selectedCourseId === course.id;
                         return (
                           <button
@@ -959,16 +974,25 @@ function ReserveContent() {
                   );
                 })()}
 
-                {/* 一緒に追加できるメニュー（is_bookable_addon。からだの鍼など。ボール水素と同じ「施術直後に続けて」方式） */}
+                {/* 追加メニュー（is_bookable_addon。からだの鍼など。ボール水素と同じ「施術直後に続けて」方式）。
+                    土台メニューを選ぶまでは押せない（グレー＋鍵）。全メニューは見えたままにする。 */}
                 {(() => {
-                  const addonCandidates = courses.filter(c => c.is_bookable_addon && c.id !== selectedCourseId);
-                  if (!selectedCourseId || addonCandidates.length === 0) return null;
+                  const allAddons = courses.filter(c => c.is_bookable_addon);
+                  if (allAddons.length === 0) return null;
+                  const baseSelected = !!selectedCourseId;
+                  const addonCandidates = allAddons.filter(c => c.id !== selectedCourseId);
                   return (
                     <section className={`space-y-3 ${reserveFlow === "menu_first" ? "order-1" : "order-2"}`}>
                       <h2 className="text-xl font-bold text-white tracking-tight">
-                        ＋ 一緒に追加できます <span className="text-sm font-normal text-blue-100/80">（任意）</span>
+                        ＋ 追加メニュー（鍼灸など） <span className="text-sm font-normal text-blue-100/80">（任意）</span>
                       </h2>
-                      <p className="text-xs text-blue-100/70 -mt-1">施術のあと、続けて受けられます。ご希望の方はお選びください。</p>
+                      {baseSelected ? (
+                        <p className="text-xs text-blue-100/70 -mt-1">施術のあと、続けて受けられます。ご希望の方はお選びください。</p>
+                      ) : (
+                        <div className="rounded-xl border border-white/10 bg-white/5 p-3 text-xs text-blue-100/80 -mt-1">
+                          🔒 まず上の施術メニューを1つお選びください。選ぶと、こちらの実費メニューが追加できるようになります。
+                        </div>
+                      )}
                       <div className="grid gap-2">
                         {addonCandidates.map(a => {
                           const on = selectedAddonIds.includes(a.id);
@@ -976,14 +1000,19 @@ function ReserveContent() {
                             <button
                               key={a.id}
                               type="button"
+                              disabled={!baseSelected}
                               onClick={() => setSelectedAddonIds(prev => on ? prev.filter(x => x !== a.id) : [...prev, a.id])}
                               aria-pressed={on}
                               className={`w-full flex items-center justify-between gap-3 p-4 rounded-2xl border transition-all ${
-                                on ? "bg-emerald-600/25 border-emerald-400" : "bg-white/5 border-white/10 hover:bg-white/10"
+                                !baseSelected
+                                  ? "bg-white/5 border-white/10 opacity-50 cursor-not-allowed"
+                                  : on ? "bg-emerald-600/25 border-emerald-400" : "bg-white/5 border-white/10 hover:bg-white/10"
                               }`}
                             >
                               <div className="text-left min-w-0">
-                                <p className="font-bold text-white text-sm">{a.name}</p>
+                                <p className="font-bold text-white text-sm">
+                                  {!baseSelected && <span className="mr-1">🔒</span>}{a.name}
+                                </p>
                                 <p className="text-xs text-blue-100/80 mt-0.5">
                                   {a.duration_minutes}分{courseShortPrice(a) ? ` / ${courseShortPrice(a)}` : ""}
                                 </p>

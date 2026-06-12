@@ -499,7 +499,7 @@ export async function createReservation(formData: FormData) {
       if (courseId) {
         const { data: courseRow } = await adminDb
           .from("reservation_courses")
-          .select("required_staff_id, name, duration_minutes, is_active")
+          .select("required_staff_id, name, duration_minutes, is_active, is_bookable_addon")
           .eq("id", courseId)
           .eq("clinic_id", PUBLIC_CLINIC_ID)
           .maybeSingle();
@@ -508,6 +508,15 @@ export async function createReservation(formData: FormData) {
           return {
             success: false,
             error: "選択されたメニューが見つかりませんでした。お手数ですが、メニューを選び直してください。",
+            requiresCourse: true,
+          };
+        }
+        // 実費アドオン（鍼灸など）は単体では予約不可。土台メニューを主に選んでもらう（fail-closed）。
+        // フロントは一覧に出さないが、直リンク・古い画面などの抜け道もサーバで塞ぐ。
+        if (courseRow.is_bookable_addon === true) {
+          return {
+            success: false,
+            error: "このメニューは単体ではご予約いただけません。まず施術メニュー（柔整・経絡・トータルリメイク・じっくり など）をお選びいただき、追加メニューとしてお選びください。",
             requiresCourse: true,
           };
         }

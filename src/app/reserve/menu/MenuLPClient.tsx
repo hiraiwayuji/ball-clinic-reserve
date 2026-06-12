@@ -305,6 +305,11 @@ function CouponCard({
             <h3 className="text-sm font-black text-white leading-snug line-clamp-2 flex-1">
               {course.name}
             </h3>
+            {course.is_bookable_addon && (
+              <span className="shrink-0 flex items-center gap-0.5 bg-amber-500/15 text-amber-300 text-[9px] font-bold px-1.5 py-0.5 rounded border border-amber-500/40">
+                ＋追加メニュー
+              </span>
+            )}
             {course.badge_label && (
               <span className={`shrink-0 flex items-center gap-0.5 ${theme.accentBgSoft} ${theme.accentText} text-[9px] font-bold px-1.5 py-0.5 rounded border ${theme.accentBorderSoft}`}>
                 <Star className="w-2.5 h-2.5" />
@@ -578,16 +583,35 @@ function CourseDetailModal({
 
         {/* 下部固定の予約CTA */}
         <div className="absolute bottom-0 left-0 right-0 bg-slate-900/95 backdrop-blur border-t border-zinc-800 p-4 pb-[calc(1rem+env(safe-area-inset-bottom))]">
-          <Link
-            href={`/reserve/calendar?courseId=${course.id}`}
-            className={`flex items-center justify-center gap-2 w-full h-14 rounded-2xl ${theme.ctaBg} ${theme.ctaHoverBg} active:scale-[0.99] text-white text-base font-black shadow-xl ${theme.ctaShadow} transition-all`}
-          >
-            <CalendarDays className="w-5 h-5" />
-            このメニューで予約する
-          </Link>
-          <p className="text-center text-[11px] text-zinc-500 mt-2">
-            タップすると空き時間カレンダーへ進みます
-          </p>
+          {course.is_bookable_addon ? (
+            // 追加メニュー（鍼灸など）は単体予約不可。施術メニューを先に選んでもらう。
+            <>
+              <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 mb-2 text-[13px] text-amber-100 leading-relaxed">
+                こちらは施術にプラスする「追加メニュー」です。まず施術メニュー（保険施術・経絡治療・院長トータルリメイク・じっくり全身調整 など）をご予約ください。ご予約の最後に、追加でお選びいただけます。
+              </div>
+              <button
+                type="button"
+                onClick={onClose}
+                className={`flex items-center justify-center gap-2 w-full h-14 rounded-2xl ${theme.ctaBg} ${theme.ctaHoverBg} active:scale-[0.99] text-white text-base font-black shadow-xl ${theme.ctaShadow} transition-all`}
+              >
+                <CalendarDays className="w-5 h-5" />
+                施術メニューを選ぶ
+              </button>
+            </>
+          ) : (
+            <>
+              <Link
+                href={`/reserve/calendar?courseId=${course.id}`}
+                className={`flex items-center justify-center gap-2 w-full h-14 rounded-2xl ${theme.ctaBg} ${theme.ctaHoverBg} active:scale-[0.99] text-white text-base font-black shadow-xl ${theme.ctaShadow} transition-all`}
+              >
+                <CalendarDays className="w-5 h-5" />
+                このメニューで予約する
+              </Link>
+              <p className="text-center text-[11px] text-zinc-500 mt-2">
+                タップすると空き時間カレンダーへ進みます
+              </p>
+            </>
+          )}
         </div>
       </div>
     </div>
