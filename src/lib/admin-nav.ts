@@ -36,7 +36,7 @@ const CLINIC_NAV_ITEMS: NavItem[] = [
   { href: "/admin/marketing", label: "SNS・LINE等", icon: MessageSquare, allow: ["owner", "admin"] },
   { href: "/admin/leaderboard", label: "ランキング", icon: Trophy, allow: ["owner", "admin", "staff"] },
   { href: "/admin/approvals", label: "承認", icon: ShieldCheck, allow: ["owner"] },
-  { href: "/admin/my-schedule", label: "私の休み希望", icon: CalendarOff, allow: ["owner", "admin", "staff"] },
+  { href: "/admin/my-schedule", label: "出勤調整", icon: CalendarOff, allow: ["owner"] },
   { href: "/admin/settings/staff-schedule", label: "スタッフ予定", icon: CalendarClock, allow: ["owner"] },
   { href: "/admin/settings/external-signals", label: "時事ネタ", icon: Newspaper, allow: ["owner", "admin"] },
   { href: "/admin/settings", label: "設定", icon: Settings, allow: ["owner"] },
