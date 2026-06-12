@@ -16,6 +16,7 @@ import { getTimelineForDate, type TimelineData, type TimelineAppointment } from 
 import { updateCheckinStatus, addAddonToAppointment, getAddonCourseInfo, sendReviewRequest, getReviewRequestConfig } from "@/app/actions/adminReserve";
 import { AddAppointmentDialog } from "@/components/admin/AddAppointmentDialog";
 import { EditAppointmentDialog } from "@/components/admin/EditAppointmentDialog";
+import { PendingReservationsButton } from "@/components/admin/PendingReservationsButton";
 
 // スタッフ未指定の予約をまとめる仮想列
 const UNASSIGNED_KEY = "__unassigned__";
@@ -46,7 +47,9 @@ function statusColor(status: string, checkin: string | null, isFirstVisit: boole
   return "bg-sky-50 border-sky-300 text-sky-900 dark:bg-sky-900/30 dark:text-sky-100";
 }
 
-export default function TodayTimelineWidget() {
+export default function TodayTimelineWidget({
+  showPendingButton = true,
+}: { showPendingButton?: boolean } = {}) {
   const router = useRouter();
   const [date, setDate] = useState<Date | null>(null);
   const [data, setData] = useState<TimelineData | null>(null);
@@ -269,16 +272,22 @@ export default function TodayTimelineWidget() {
             予約タイムテーブル ({format(date, "M/d (E)", { locale: ja })})
           </CardTitle>
         </div>
-        <div className="flex items-center gap-1">
-          <Button variant="outline" size="sm" onClick={goPrev} aria-label="前日">
-            <ChevronLeft className="w-4 h-4" />
-          </Button>
-          <Button variant="outline" size="sm" onClick={goToday}>
-            <RotateCcw className="w-3.5 h-3.5 mr-1" />今日
-          </Button>
-          <Button variant="outline" size="sm" onClick={goNext} aria-label="翌日">
-            <ChevronRight className="w-4 h-4" />
-          </Button>
+        <div className="flex items-center gap-2">
+          {/* 受付業務中でも仮予約が入ったらすぐ気づけるよう、タイムテーブル上にも件数を出す */}
+          {showPendingButton && (
+            <PendingReservationsButton onChanged={() => date && fetchData(date)} />
+          )}
+          <div className="flex items-center gap-1">
+            <Button variant="outline" size="sm" onClick={goPrev} aria-label="前日">
+              <ChevronLeft className="w-4 h-4" />
+            </Button>
+            <Button variant="outline" size="sm" onClick={goToday}>
+              <RotateCcw className="w-3.5 h-3.5 mr-1" />今日
+            </Button>
+            <Button variant="outline" size="sm" onClick={goNext} aria-label="翌日">
+              <ChevronRight className="w-4 h-4" />
+            </Button>
+          </div>
         </div>
       </CardHeader>
       <CardContent>

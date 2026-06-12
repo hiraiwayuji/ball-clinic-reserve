@@ -23,6 +23,7 @@ import { useClinicSchedule } from "@/lib/use-clinic-schedule";
 import { getMyClinicId } from "@/app/actions/auth";
 import { getClinicSettings } from "@/app/actions/settings";
 import TodayTimelineWidget from "@/components/admin/TodayTimelineWidget";
+import { PendingReservationsButton } from "@/components/admin/PendingReservationsButton";
 
 export default function AdminWeeklyGridPage() {
   const slotMinutes = useClinicSlotDuration();
@@ -268,6 +269,11 @@ export default function AdminWeeklyGridPage() {
             defaultDate={selectedAddDate}
             defaultTime={selectedAddTime}
             onSuccess={() => setRefreshKey(k => k + 1)}
+          />
+          {/* 仮予約（確認待ち）ボタン。件数バッジ付き。クリックで一覧→各行から確定できる。 */}
+          <PendingReservationsButton
+            clinicId={clinicId}
+            onChanged={() => setRefreshKey(k => k + 1)}
           />
           <div className="flex items-center gap-2 p-1.5 bg-slate-50 rounded-xl border border-slate-200">
             <Link href="/admin/waitlist">
@@ -712,7 +718,8 @@ export default function AdminWeeklyGridPage() {
             内部で日付ナビゲーション・データ取得・Realtime 更新を完結。 */}
         {viewMode === "timetable" && (
           <div className="flex-1 overflow-auto">
-            <TodayTimelineWidget />
+            {/* 予約画面のヘッダーに既に「仮予約」ボタンがあるので、ここでは重複表示しない */}
+            <TodayTimelineWidget showPendingButton={false} />
           </div>
         )}
 
