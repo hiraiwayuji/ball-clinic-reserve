@@ -26,4 +26,6 @@ export const CLINIC_CONFIG = {
   hoursClosed: process.env.NEXT_PUBLIC_CLINIC_HOURS_CLOSED ?? "※水・日・祝日は休診",
   /** AI 秘書がオーナーを呼ぶ呼びかけ名（ボール接骨院: "ぼーるくん"、からだ: "藤川先生" 等） */
   ownerNickname: process.env.NEXT_PUBLIC_CLINIC_OWNER_NICKNAME ?? "院長先生",
+  /** 患者向け予約ページのテーマ。"warm" でHP寄りの明るい暖色（からだ等）。既定は従来の濃紺ダーク。 */
+  reserveTheme: process.env.NEXT_PUBLIC_RESERVE_THEME ?? "dark",
 } as const;

@@ -182,3 +182,96 @@ html:has([data-dark-page]) {
 body:has([data-dark-page]) {
   background-color: #0f172a;
 }
+
+/* ============================================================
+   からだ等：HP寄りの「明るい暖色テーマ」
+   <html data-clinic-warm> のときだけ、患者向け予約ページ([data-dark-page])の
+   濃紺ダークをクリーム×オレンジに上書きする。他院・管理画面は無影響。
+   markup は触らず、ここで Tailwind ユーティリティを再マッピングする。
+   @layer utilities 内に置き、生成ユーティリティより後勝ち＋高詳細度で確実に勝たせる。
+   ============================================================ */
+@layer utilities {
+html[data-clinic-warm]:has([data-dark-page]),
+html[data-clinic-warm] body:has([data-dark-page]) {
+  background-color: #fbf6ee;
+}
+/* 背景面 */
+html[data-clinic-warm] [data-dark-page].bg-slate-900,
+html[data-clinic-warm] [data-dark-page] .bg-slate-900 { background-color: #fbf6ee !important; }
+html[data-clinic-warm] [data-dark-page] .bg-slate-800 { background-color: #f3e9d8 !important; }
+html[data-clinic-warm] [data-dark-page] .bg-white\/5 { background-color: #ffffff !important; }
+html[data-clinic-warm] [data-dark-page] .bg-white\/10 { background-color: #fff3e2 !important; }
+html[data-clinic-warm] [data-dark-page] .hover\:bg-white\/10:hover { background-color: #fde9d2 !important; }
+/* ヒーロー等のグラデーション → 暖色のフラット面に */
+html[data-clinic-warm] [data-dark-page] .bg-gradient-to-b,
+html[data-clinic-warm] [data-dark-page] .bg-gradient-to-br { background-image: none !important; background-color: #fff1dd !important; }
+/* 文字色 */
+html[data-clinic-warm] [data-dark-page] .text-white { color: #3a2c1d !important; }
+html[data-clinic-warm] [data-dark-page] .text-slate-200,
+html[data-clinic-warm] [data-dark-page] .text-slate-300 { color: #5a4a35 !important; }
+html[data-clinic-warm] [data-dark-page] .text-blue-100,
+html[data-clinic-warm] [data-dark-page] .text-blue-100\/80,
+html[data-clinic-warm] [data-dark-page] .text-blue-100\/70,
+html[data-clinic-warm] [data-dark-page] .text-blue-200,
+html[data-clinic-warm] [data-dark-page] .text-blue-200\/80,
+html[data-clinic-warm] [data-dark-page] .text-blue-200\/70 { color: #6b5b45 !important; }
+html[data-clinic-warm] [data-dark-page] .text-blue-300,
+html[data-clinic-warm] [data-dark-page] .text-blue-400 { color: #c06e00 !important; }
+/* 半透明の白文字（住所・補足など）も暖色のグレーブラウンに */
+html[data-clinic-warm] [data-dark-page] .text-white\/90,
+html[data-clinic-warm] [data-dark-page] .text-white\/80 { color: #4a3a28 !important; }
+html[data-clinic-warm] [data-dark-page] .text-white\/70,
+html[data-clinic-warm] [data-dark-page] .text-white\/60,
+html[data-clinic-warm] [data-dark-page] .text-white\/50,
+html[data-clinic-warm] [data-dark-page] .text-white\/40 { color: #8a7a60 !important; }
+/* 色付きボックス内の淡色文字（暗背景用）→ 明るい背景で読める濃色に */
+html[data-clinic-warm] [data-dark-page] .text-amber-100,
+html[data-clinic-warm] [data-dark-page] .text-amber-100\/90,
+html[data-clinic-warm] [data-dark-page] .text-amber-200,
+html[data-clinic-warm] [data-dark-page] .text-amber-300 { color: #8a5106 !important; }
+html[data-clinic-warm] [data-dark-page] .text-emerald-100,
+html[data-clinic-warm] [data-dark-page] .text-emerald-200,
+html[data-clinic-warm] [data-dark-page] .text-emerald-300 { color: #0a7a5a !important; }
+html[data-clinic-warm] [data-dark-page] .text-rose-200,
+html[data-clinic-warm] [data-dark-page] .text-rose-300 { color: #b4474f !important; }
+html[data-clinic-warm] [data-dark-page] .text-cyan-100,
+html[data-clinic-warm] [data-dark-page] .text-cyan-200,
+html[data-clinic-warm] [data-dark-page] .text-cyan-300 { color: #0e7490 !important; }
+/* 枠線 */
+html[data-clinic-warm] [data-dark-page] .border-white\/10 { border-color: #ece0cd !important; }
+html[data-clinic-warm] [data-dark-page] .border-white\/20 { border-color: #e3d4ba !important; }
+/* アクセント（青 → HPのオレンジ） */
+html[data-clinic-warm] [data-dark-page] .bg-blue-600 { background-color: #f08300 !important; }
+html[data-clinic-warm] [data-dark-page] .bg-blue-600\/20 { background-color: #ffe9cc !important; }
+html[data-clinic-warm] [data-dark-page] .hover\:bg-blue-700:hover,
+html[data-clinic-warm] [data-dark-page] .hover\:bg-blue-500:hover { background-color: #d97600 !important; }
+html[data-clinic-warm] [data-dark-page] .border-blue-500 { border-color: #f08300 !important; }
+html[data-clinic-warm] [data-dark-page] .text-blue-600 { color: #c06e00 !important; }
+html[data-clinic-warm] [data-dark-page] .ring-blue-500 { --tw-ring-color: #f08300 !important; }
+/* 入力欄（globals 既定の黒入力を白入力に戻す） */
+html[data-clinic-warm] [data-dark-page] input,
+html[data-clinic-warm] [data-dark-page] select,
+html[data-clinic-warm] [data-dark-page] option {
+  background-color: #ffffff !important;
+  color: #3a2c1d !important;
+  border-color: #e3d4ba !important;
+}
+/* メニューLP（MenuLPClient）は zinc 系パレット。これも暖色化する。 */
+html[data-clinic-warm] [data-dark-page] .bg-zinc-900 { background-color: #ffffff !important; }
+html[data-clinic-warm] [data-dark-page] .bg-zinc-800,
+html[data-clinic-warm] [data-dark-page] .bg-zinc-800\/40,
+html[data-clinic-warm] [data-dark-page] .bg-zinc-800\/60 { background-color: #f6ecdb !important; }
+html[data-clinic-warm] [data-dark-page] .border-zinc-800,
+html[data-clinic-warm] [data-dark-page] .border-zinc-700 { border-color: #e7d8c0 !important; }
+html[data-clinic-warm] [data-dark-page] .hover\:border-zinc-700:hover,
+html[data-clinic-warm] [data-dark-page] .hover\:border-zinc-600:hover { border-color: #d8c19c !important; }
+html[data-clinic-warm] [data-dark-page] .text-zinc-300 { color: #5a4a35 !important; }
+html[data-clinic-warm] [data-dark-page] .text-zinc-400,
+html[data-clinic-warm] [data-dark-page] .text-zinc-500,
+html[data-clinic-warm] [data-dark-page] .text-zinc-600 { color: #8a7a60 !important; }
+/* 不透明度付きの濃紺面（固定タブバー等） */
+html[data-clinic-warm] [data-dark-page] .bg-slate-900\/95,
+html[data-clinic-warm] [data-dark-page] .bg-slate-900\/90,
+html[data-clinic-warm] [data-dark-page] .bg-slate-900\/80 { background-color: #fbf6ee !important; }
+/* CTA等のオレンジ（theme.ctaBg が bg-blue系でなく orange系のとき）はそのまま活かす */
+}

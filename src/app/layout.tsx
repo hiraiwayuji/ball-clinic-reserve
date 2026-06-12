@@ -25,6 +25,7 @@ export const metadata: Metadata = isFamilyGift
     };
 
 import { ThemeProvider } from "@/components/ThemeProvider";
+import { CLINIC_CONFIG } from "@/lib/clinic-config";
 
 export default function RootLayout({
   children,
@@ -32,7 +33,11 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="ja" suppressHydrationWarning>
+    <html
+      lang="ja"
+      suppressHydrationWarning
+      data-clinic-warm={CLINIC_CONFIG.reserveTheme === "warm" ? "" : undefined}
+    >
       <head>
         <meta name="google" content="notranslate" />
         <link rel="manifest" href="/manifest.json" />
