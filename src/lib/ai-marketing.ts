@@ -296,6 +296,8 @@ export type MarketingProfile = {
   sns_accounts: Record<string, string>;
   line_link: string;
   reserve_url: string;
+  /** お手本にしたい投稿の雰囲気・作風（毎回の生成で参考にする。丸写しはしない） */
+  reference_style: string;
 };
 
 export type SavedPost = {
@@ -381,6 +383,7 @@ export const BALL_DEFAULT_PROFILE: MarketingProfile = {
   sns_accounts: {},
   line_link: "",
   reserve_url: "",
+  reference_style: "",
 };
 
 /** DB行（JSONB主体）→ 型付きプロファイル。未設定キーはボール既定値で補完。 */
@@ -406,6 +409,7 @@ export function profileFromRow(row: Record<string, unknown> | null): MarketingPr
         : {},
     line_link: str(row.line_link, ""),
     reserve_url: str(row.reserve_url, ""),
+    reference_style: str(row.reference_style, ""),
   };
 }
 
