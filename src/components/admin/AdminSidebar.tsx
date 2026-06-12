@@ -9,8 +9,8 @@ import { CLINIC_CONFIG } from "@/lib/clinic-config";
 import { isFamilyGift, APP_TITLE } from "@/lib/app-mode";
 import { logoutAction } from "@/app/actions/auth";
 
-const hasCustomLogo = CLINIC_CONFIG.logoSmallUrl !== "/images/logo-white.png";
-const isDefaultClinic = CLINIC_CONFIG.name === "ボール接骨院";
+const hasCustomLogo = !!CLINIC_CONFIG.logoSmallUrl && CLINIC_CONFIG.logoSmallUrl !== "/images/logo-white.png";
+const isDefaultClinic = CLINIC_CONFIG.isDefaultClinic;
 const showLogoIcon = hasCustomLogo || isDefaultClinic;
 
 type Props = {

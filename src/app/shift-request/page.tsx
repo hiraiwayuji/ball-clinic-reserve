@@ -9,9 +9,10 @@ import { ja } from "date-fns/locale";
 import { toast } from "sonner";
 import { Loader2, CalendarClock, ChevronLeft, ChevronRight, CheckCircle2, Clock } from "lucide-react";
 import {
-  listShiftStaff, getShiftRequest, submitShiftRequest, getShiftClinicName,
+  listShiftStaff, getShiftRequest, submitShiftRequest,
   type ShiftStaff, type ShiftDays,
 } from "@/app/actions/staff-shift-requests";
+import { CLINIC_CONFIG } from "@/lib/clinic-config";
 
 type Cell = "none" | "work" | "off";
 
@@ -24,7 +25,7 @@ const TIMES = (() => {
 })();
 
 export default function ShiftRequestPage() {
-  const [clinicName, setClinicName] = useState("");
+  const clinicName = CLINIC_CONFIG.name; // ビルド時固定（/ と同じ。実行時env依存にしない＝ボール混入防止）
   const [staffList, setStaffList] = useState<ShiftStaff[]>([]);
   const [staffId, setStaffId] = useState("");
   const [month, setMonth] = useState<Date | null>(null);
@@ -38,7 +39,6 @@ export default function ShiftRequestPage() {
   useEffect(() => {
     setMonth(addMonths(new Date(), 1)); // 既定：翌月
     listShiftStaff().then(setStaffList).catch(() => {});
-    getShiftClinicName().then(setClinicName).catch(() => {});
   }, []);
 
   const monthStr = useMemo(
