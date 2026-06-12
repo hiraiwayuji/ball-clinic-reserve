@@ -38,7 +38,7 @@ async function notifyOwner(
 import { createClient as createServerClient } from "@/lib/supabase/server";
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { getTimeSlots, isDateWithinAllowedRange, isTimeSlotWithinTwoHours } from "@/lib/time-slots";
-import { getBookingHorizonDays } from "@/app/actions/clinic-slot";
+import { getBookingHorizonDays, getCurrentSchedule, getCurrentSlotDuration } from "@/app/actions/clinic-slot";
 import { unstable_noStore as noStore } from "next/cache";
 
 async function getSupabase() {
@@ -885,6 +885,12 @@ export async function createReservation(formData: FormData) {
       
       const reservationNumber = appointmentData.id.split('-')[0].toUpperCase();
 
+      // 追加メニュー（水素・ヘッドスパ・汎用addon）の営業時間判定は、必ず院の実スケジュール
+      // （slot_duration_minutes と営業時間）で行う。引数なし getTimeSlots はボール既定
+      // （30分・平日12時開始）になり、20分枠・10時開始のからだ等で追加鍼が弾かれていた。
+      const clinicSlotMinutes = await getCurrentSlotDuration();
+      const clinicSchedule = await getCurrentSchedule();
+
       // ── 「水素を追加」：施術の直後30分に水素予約も入れる ──
       // 施術が確定（キャンセル待ちでない）のときだけ。水素レーンが空いていて営業時間内なら追加。
       let hydrogenAdded = false;
@@ -909,7 +915,7 @@ export async function createReservation(formData: FormData) {
             // 開始スロット(HH:mm JST)が営業時間内か
             const wHHMM = new Intl.DateTimeFormat("ja-JP", { timeZone: "Asia/Tokyo", hour: "2-digit", minute: "2-digit", hour12: false }).format(wStart);
             // 曜日判定はサーバ(UTC)でも JST の暦日と一致させる（+09:00 を付けると前日にズレるので付けない）
-            const businessSlots = getTimeSlots(new Date(`${rawDate}T00:00:00`));
+            const businessSlots = getTimeSlots(new Date(`${rawDate}T00:00:00`), { slotMinutes: clinicSlotMinutes, schedule: clinicSchedule });
             const inHours = businessSlots.includes(wHHMM);
             // 水素レーンが空いているか
             let laneFree = true;
@@ -999,7 +1005,7 @@ export async function createReservation(formData: FormData) {
               const hEndIso = new Date(hStart.getTime() + hDur * 60000).toISOString();
               const hHHMM = new Intl.DateTimeFormat("ja-JP", { timeZone: "Asia/Tokyo", hour: "2-digit", minute: "2-digit", hour12: false }).format(hStart);
               // 曜日判定はサーバ(UTC)でも JST の暦日と一致させる（+09:00 を付けると前日にズレる）
-              const businessSlots = getTimeSlots(new Date(`${rawDate}T00:00:00`));
+              const businessSlots = getTimeSlots(new Date(`${rawDate}T00:00:00`), { slotMinutes: clinicSlotMinutes, schedule: clinicSchedule });
               const inHours = businessSlots.includes(hHHMM);
               let laneFree = true;
               if (hStaffId) {
@@ -1063,8 +1069,16 @@ export async function createReservation(formData: FormData) {
             const aStart = new Date(aStartIso);
             const aEndIso = new Date(aStart.getTime() + aDur * 60000).toISOString();
             const aStaffId = (addon.required_staff_id as string | null) ?? null;
+            // 担当(レーン)の表示名は担当者名にする（コース名だと森藤先生の枠に「鍼灸 1部位」と出てしまう）
+            let aStaffName: string | null = null;
+            if (aStaffId) {
+              const { data: aStaffRow } = await adminDb
+                .from("reservation_staff").select("name")
+                .eq("id", aStaffId).eq("clinic_id", DEFAULT_CLINIC_ID).maybeSingle();
+              aStaffName = (aStaffRow?.name as string | null) ?? null;
+            }
             const aHHMM = new Intl.DateTimeFormat("ja-JP", { timeZone: "Asia/Tokyo", hour: "2-digit", minute: "2-digit", hour12: false }).format(aStart);
-            const businessSlots = getTimeSlots(new Date(`${rawDate}T00:00:00`));
+            const businessSlots = getTimeSlots(new Date(`${rawDate}T00:00:00`), { slotMinutes: clinicSlotMinutes, schedule: clinicSchedule });
             const inHours = businessSlots.includes(aHHMM);
             // 空き判定: 専用レーン(required_staff)があればそのレーン、無ければその日の定員で
             let free = true;
@@ -1092,7 +1106,7 @@ export async function createReservation(formData: FormData) {
                 clinic_id: DEFAULT_CLINIC_ID,
                 course_id: addon.id,
                 course_name: addon.name,
-                ...(aStaffId ? { staff_id: aStaffId, staff_name: addon.name } : {}),
+                ...(aStaffId ? { staff_id: aStaffId, staff_name: aStaffName ?? addon.name } : {}),
               }]);
               if (!aErr) {
                 addonResults.push({ name: addon.name as string, added: true, time: aHHMM, error: null });
