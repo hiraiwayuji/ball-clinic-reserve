@@ -18,7 +18,7 @@ import { getClinicHolidays, type ClinicHoliday } from "@/app/actions/holidays";
 import { getActiveCourses, getActiveStaff, getActiveRooms, getCourseRequiredStaffSchedule, getPublicStaffSchedules, type ReservationCourse, type ReservationStaff, type ReservationRoom } from "@/app/actions/courses";
 import { isStaffAvailableOn, type StaffSchedule } from "@/lib/staff-availability";
 import { useSearchParams } from "next/navigation";
-import { getTimeSlots, isDateWithinAllowedRange, isTimeSlotWithinTwoHours } from "@/lib/time-slots";
+import { getTimeSlots, isDateWithinAllowedRange, isTimeSlotWithinTwoHours, formatScheduleHoursLines, formatScheduleClosedDays } from "@/lib/time-slots";
 import { useClinicSlotDuration } from "@/lib/use-clinic-slot-duration";
 import { useClinicSchedule } from "@/lib/use-clinic-schedule";
 import { useClinicPatientCanPickStaff } from "@/lib/use-clinic-patient-staff";
@@ -125,11 +125,10 @@ function ReserveContent() {
       if (s?.public_reserve_flow === "menu_first") setReserveFlow("menu_first");
     });
     getPublicClinicHours().then(h => {
-      const lines = (h?.hours_lines && h.hours_lines.length > 0)
-        ? h.hours_lines
-        : [CLINIC_CONFIG.hoursLine1, ...(CLINIC_CONFIG.hoursLine2 ? [CLINIC_CONFIG.hoursLine2] : [])];
-      setHoursLines(lines);
-      setHoursClosed(h?.hours_closed || CLINIC_CONFIG.hoursClosed || "");
+      // DB の自由記入（hours_lines / hours_closed）を優先。未設定の場合の表示は
+      // 描画時に院の実営業時間（schedule）から自動生成する（ボール既定にはしない）。
+      setHoursLines(h?.hours_lines ?? []);
+      setHoursClosed(h?.hours_closed ?? "");
     }).catch(() => {});
   }, []);
 
@@ -1316,13 +1315,16 @@ function ReserveContent() {
                   アクセス / 営業日
                 </h3>
                 <div className="space-y-3 text-sm text-blue-100/85">
-                  {/* 営業時間・休診日は院ごと（DB clinic_settings 由来。ハードコード禁止） */}
-                  {hoursLines.map((line, i) => (
+                  {/* 営業時間・休診日は院ごと。DBの自由記入が無ければ実営業時間(schedule)から自動生成。ハードコード禁止 */}
+                  {(hoursLines.length > 0 ? hoursLines : formatScheduleHoursLines(schedule)).map((line, i) => (
                     <p key={i} className="border-b border-white/5 pb-2">{line}</p>
                   ))}
-                  {hoursClosed && (
-                    <p className="flex justify-between border-b border-white/5 pb-2"><span>休診</span><span className="text-rose-400 font-bold">{hoursClosed}</span></p>
-                  )}
+                  {(() => {
+                    const closed = hoursClosed || formatScheduleClosedDays(schedule);
+                    return closed ? (
+                      <p className="flex justify-between border-b border-white/5 pb-2"><span>休診</span><span className="text-rose-400 font-bold">{closed}</span></p>
+                    ) : null;
+                  })()}
                   <p className="flex justify-between"><span>{CLINIC_CONFIG.nameShort}</span><span className="text-white">{CLINIC_CONFIG.address}</span></p>
                 </div>
               </div>

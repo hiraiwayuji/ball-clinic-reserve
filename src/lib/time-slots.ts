@@ -74,6 +74,45 @@ export function buildSchedule(settings: {
   };
 }
 
+const DAY_JP = ["日", "月", "火", "水", "木", "金", "土"];
+
+/** 営業時間レンジを "10:00〜17:00"（昼休みあれば "10:00〜12:00 / 14:00〜17:00"）で整形。 */
+function formatRange(r: { start: string; end: string; breakStart?: string | null; breakEnd?: string | null }): string {
+  if (r.breakStart && r.breakEnd) return `${r.start}〜${r.breakStart} / ${r.breakEnd}〜${r.end}`;
+  return `${r.start}〜${r.end}`;
+}
+
+/**
+ * Schedule（院の実営業時間）から、予約画面フッター用の営業日行を自動生成する。
+ * clinic_settings.hours_lines（自由記入）が未設定の院でも、ボール既定にフォールバックせず
+ * 実際の営業時間を表示するためのもの。平日と土が同時間なら1行にまとめる。
+ */
+export function formatScheduleHoursLines(sched: Schedule): string[] {
+  const closed = new Set(sched.closedDays);
+  const weekdayOpen = [1, 2, 3, 4, 5].filter((d) => !closed.has(d)); // 月〜金の開院曜日
+  const satOpen = !closed.has(6);
+  const sameHours =
+    satOpen &&
+    sched.weekday.start === sched.saturday.start &&
+    sched.weekday.end === sched.saturday.end &&
+    (sched.weekday.breakStart || null) === (sched.saturday.breakStart || null) &&
+    (sched.weekday.breakEnd || null) === (sched.saturday.breakEnd || null);
+  const lines: string[] = [];
+  if (sameHours) {
+    const days = [...weekdayOpen, 6].map((d) => DAY_JP[d]).join("・");
+    lines.push(`${days}　${formatRange(sched.weekday)}`);
+  } else {
+    if (weekdayOpen.length > 0) lines.push(`${weekdayOpen.map((d) => DAY_JP[d]).join("・")}　${formatRange(sched.weekday)}`);
+    if (satOpen) lines.push(`土　${formatRange(sched.saturday)}`);
+  }
+  return lines;
+}
+
+/** Schedule の休診曜日を "日・水" のように整形。 */
+export function formatScheduleClosedDays(sched: Schedule): string {
+  return [...sched.closedDays].sort((a, b) => a - b).map((d) => DAY_JP[d]).join("・");
+}
+
 export type SlotMinutes = 15 | 20 | 30;
 
 /**
