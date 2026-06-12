@@ -21,6 +21,7 @@ import { useSearchParams } from "next/navigation";
 import { getTimeSlots, isDateWithinAllowedRange, isTimeSlotWithinTwoHours } from "@/lib/time-slots";
 import { useClinicSlotDuration } from "@/lib/use-clinic-slot-duration";
 import { useClinicSchedule } from "@/lib/use-clinic-schedule";
+import { useClinicPatientCanPickStaff } from "@/lib/use-clinic-patient-staff";
 import { courseShortPrice } from "@/lib/course-price";
 import { toast } from "sonner";
 import { CLINIC_CONFIG } from "@/lib/clinic-config";
@@ -43,6 +44,8 @@ const LINE_URL = process.env.NEXT_PUBLIC_LINE_OFFICIAL_ACCOUNT_URL ?? "https://l
 function ReserveContent() {
   const slotMinutes = useClinicSlotDuration();
   const schedule = useClinicSchedule();
+  // 患者が担当を選べる院か。false（からだ等）は指名ボタンを出さず、メニューの担当固定に任せる。
+  const canPickStaff = useClinicPatientCanPickStaff();
   const searchParams = useSearchParams();
   const initialDateStr = searchParams.get("date");
   const initialTime = searchParams.get("time");
@@ -997,8 +1000,8 @@ function ReserveContent() {
                   );
                 })()}
 
-                {/* 指名選択 */}
-                {staffList.length > 0 && (
+                {/* 指名選択（担当を選べない院では非表示。ただし担当固定メニューの案内は残す） */}
+                {staffList.length > 0 && (canPickStaff || requiredStaff) && (
                   <section className={`space-y-4 ${reserveFlow === "menu_first" ? "order-2" : "order-3"}`}>
                     <h2 className="text-xl font-bold text-white tracking-tight">
                       {reserveFlow === "menu_first" ? "② スタッフ指名" : "スタッフ指名"}

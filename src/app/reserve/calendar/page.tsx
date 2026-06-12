@@ -20,6 +20,7 @@ import { createClient } from "@/lib/supabase/client";
 import { getTimeSlots, getMaxSlots, isDateWithinAllowedRange, isTimeSlotWithinTwoHours, type SlotMinutes, type Schedule } from "@/lib/time-slots";
 import { useClinicSlotDuration } from "@/lib/use-clinic-slot-duration";
 import { useClinicSchedule } from "@/lib/use-clinic-schedule";
+import { useClinicPatientCanPickStaff } from "@/lib/use-clinic-patient-staff";
 import { CLINIC_CONFIG } from "@/lib/clinic-config";
 import { PUBLIC_CLINIC_ID } from "@/lib/default-clinic-id";
 
@@ -147,6 +148,9 @@ function CalendarLoading() {
 function ReserveCalendarContent() {
   const slotMinutes = useClinicSlotDuration();
   const schedule = useClinicSchedule();
+  // 患者が担当（スタッフ）を選べる院かどうか。false の院（からだ等）は担当切替タブを隠し、
+  // メニューの required_staff_id で担当が自動的に決まる運用にする。
+  const canPickStaff = useClinicPatientCanPickStaff();
   const searchParams = useSearchParams();
   const router = useRouter();
   const courseIdParam = searchParams.get("courseId");
@@ -888,6 +892,9 @@ function ReserveCalendarContent() {
 
             {/* スタッフ(レーン)タブ：押すとそのスタッフのメニューに切替＝空き時間も切り替わる */}
             {(() => {
+              // 患者が担当を選べない院（からだ等）は担当切替タブ自体を出さない。
+              // メニュー選択時の required_staff_id で担当は自動確定する。
+              if (!canPickStaff) return null;
               const dayLanes = lanes.filter(
                 (l) => !l.schedule || isStaffAvailableOn(selectedDate, l.schedule),
               );

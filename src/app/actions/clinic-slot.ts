@@ -186,3 +186,39 @@ export async function getCurrentExpenseOwnerOnly(): Promise<boolean> {
     return false;
   }
 }
+
+/**
+ * 患者のWeb予約画面で「担当（スタッフ）を選ぶ」操作を許可するか
+ * （clinic_settings.patient_can_pick_staff）。営業時間と同じ運用モード設定。
+ * false の院（例: からだ鍼灸整骨院）では、患者は担当を選べず、メニューの
+ * required_staff_id によって担当が自動で決まる（カレンダーの担当切替タブを隠す）。
+ *
+ * Fail-safe: 取得失敗時は true を返す（従来挙動＝担当タブ表示を維持）。
+ * settingsData には載せない（直接DBで運用・updateClinicSettings では更新しない）。
+ */
+export async function getCurrentPatientCanPickStaff(): Promise<boolean> {
+  try {
+    if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
+      return true;
+    }
+    const sb = createSupabaseClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL,
+      process.env.SUPABASE_SERVICE_ROLE_KEY,
+      { auth: { persistSession: false } },
+    );
+    const { data, error } = await sb
+      .from("clinic_settings")
+      .select("patient_can_pick_staff")
+      .eq("id", PUBLIC_CLINIC_ID)
+      .maybeSingle();
+    if (error) {
+      console.error("[getCurrentPatientCanPickStaff] supabase error, fallback to true:", error.message);
+      return true;
+    }
+    // 既定（NULL/カラム未追加）は true（従来挙動）。明示的に false の院だけ隠す。
+    return data?.patient_can_pick_staff !== false;
+  } catch (e: any) {
+    console.error("[getCurrentPatientCanPickStaff] unexpected error, fallback to true:", e?.message ?? e);
+    return true;
+  }
+}
