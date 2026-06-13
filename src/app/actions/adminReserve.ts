@@ -38,7 +38,7 @@ function maskName(name: string | null | undefined): string {
  * 「施術後に○○を追加」ボタン用のメニュー情報を返す（院ごとの設定 addon_course_id）。
  * 未設定なら null（ボタン非表示）。例: ボール=水素。
  */
-export async function getAddonCourseInfo(): Promise<{ courseId: string; name: string } | null> {
+export async function getAddonCourseInfo(): Promise<{ courseId: string; name: string; allowConcurrent: boolean } | null> {
   const { clinicId } = await checkAdminAuth();
   const supabase = getAdminSupabase();
   if (!supabase) return null;
@@ -51,12 +51,14 @@ export async function getAddonCourseInfo(): Promise<{ courseId: string; name: st
   if (!addonId) return null;
   const { data: c } = await supabase
     .from("reservation_courses")
-    .select("id, name")
+    .select("id, name, allow_concurrent")
     .eq("id", addonId)
     .eq("clinic_id", clinicId)
     .maybeSingle();
   if (!c) return null;
-  return { courseId: c.id as string, name: c.name as string };
+  // allow_concurrent=true（水素など）のメニューだけ「同時刻に追加」を許可。
+  // それ以外は施術と別に時間が要るので施術後のみ。
+  return { courseId: c.id as string, name: c.name as string, allowConcurrent: c.allow_concurrent === true };
 }
 
 /**
@@ -88,14 +90,18 @@ export async function addAddonToAppointment(appointmentId: string, timing: "afte
 
     const { data: addon } = await supabase
       .from("reservation_courses")
-      .select("id, name, duration_minutes, required_staff_id")
+      .select("id, name, duration_minutes, required_staff_id, allow_concurrent")
       .eq("id", addonId)
       .eq("clinic_id", clinicId)
       .maybeSingle();
     if (!addon) return { success: false, error: "追加メニューが見つかりませんでした" };
 
+    // 「同時刻」は allow_concurrent（水素など別の時間が要らないもの）だけ許可。
+    // それ以外は施術と時間が重ならないよう必ず施術後に回す。
+    const effectiveTiming: "after" | "same" =
+      timing === "same" && addon.allow_concurrent === true ? "same" : "after";
     const aDur = Number(addon.duration_minutes ?? 30) || 30;
-    const baseIso = timing === "same" ? apt.start_time : (apt.end_time ?? apt.start_time);
+    const baseIso = effectiveTiming === "same" ? apt.start_time : (apt.end_time ?? apt.start_time);
     const aStart = new Date(baseIso);
     const aStartIso = aStart.toISOString();
     const aEndIso = new Date(aStart.getTime() + aDur * 60000).toISOString();
@@ -122,7 +128,7 @@ export async function addAddonToAppointment(appointmentId: string, timing: "afte
       customer_id: apt.customer_id,
       start_time: aStartIso,
       end_time: aEndIso,
-      memo: timing === "same" ? `【${aName} 追加・同時刻】` : `【${aName} 追加・施術後】`,
+      memo: effectiveTiming === "same" ? `【${aName} 追加・同時刻】` : `【${aName} 追加・施術後】`,
       is_first_visit: false,
       status: "confirmed",
       clinic_id: clinicId,
@@ -432,14 +438,17 @@ export async function createManualReservation(formData: FormData) {
         const { data: addon } = addonId
           ? await supabase
               .from("reservation_courses")
-              .select("id, name, duration_minutes, required_staff_id")
+              .select("id, name, duration_minutes, required_staff_id, allow_concurrent")
               .eq("id", addonId)
               .eq("clinic_id", clinicId)
               .maybeSingle()
-          : { data: null as { id: string; name: string; duration_minutes: number | null; required_staff_id: string | null } | null };
+          : { data: null as { id: string; name: string; duration_minutes: number | null; required_staff_id: string | null; allow_concurrent: boolean | null } | null };
         if (addon && addon.id !== courseId) {
+          // 「同時刻」は allow_concurrent（水素など）だけ許可。それ以外は施術後に回す。
+          const effectiveTiming: "after" | "same" =
+            addonTiming === "same" && addon.allow_concurrent === true ? "same" : "after";
           const aDur = Number(addon.duration_minutes ?? 30) || 30;
-          const aBase = addonTiming === "same" ? baseDate : new Date(baseDate.getTime() + durationMinutes * 60 * 1000);
+          const aBase = effectiveTiming === "same" ? baseDate : new Date(baseDate.getTime() + durationMinutes * 60 * 1000);
           const aStartIso = aBase.toISOString();
           const aEndIso = new Date(aBase.getTime() + aDur * 60 * 1000).toISOString();
           const aStaffId = (addon.required_staff_id as string | null) ?? null;
@@ -462,7 +471,7 @@ export async function createManualReservation(formData: FormData) {
               customer_id: customerId,
               start_time: aStartIso,
               end_time: aEndIso,
-              memo: addonTiming === "same" ? `【${aName} 追加・同時刻】` : `【${aName} 追加・施術後】`,
+              memo: effectiveTiming === "same" ? `【${aName} 追加・同時刻】` : `【${aName} 追加・施術後】`,
               is_first_visit: false,
               status: "confirmed",
               clinic_id: clinicId,
@@ -474,6 +483,71 @@ export async function createManualReservation(formData: FormData) {
         }
       } catch (e) {
         console.error("manual addon add failed", e);
+      }
+    }
+
+    // ── ダブル施術：相方の施術を「主施術の直後に連続」で別レコード作成する ──
+    // 同時刻に2人で相乗りさせず、相方ぶんの時間をきちんと確保する（前後に時間が要るため）。
+    const doublePartnerStaffId = (formData.get("doublePartnerStaffId") as string) || "";
+    const doublePartnerCourseId = (formData.get("doublePartnerCourseId") as string) || "";
+    if (doublePartnerStaffId) {
+      try {
+        // 相方の担当名・コース（あれば所要時間もコースに合わせる）
+        const { data: pStaff } = await supabase
+          .from("reservation_staff")
+          .select("id, name")
+          .eq("id", doublePartnerStaffId)
+          .eq("clinic_id", clinicId)
+          .maybeSingle();
+        const { data: pCourse } = doublePartnerCourseId
+          ? await supabase
+              .from("reservation_courses")
+              .select("id, name, duration_minutes")
+              .eq("id", doublePartnerCourseId)
+              .eq("clinic_id", clinicId)
+              .maybeSingle()
+          : { data: null as { id: string; name: string; duration_minutes: number | null } | null };
+        const pDur = Number(pCourse?.duration_minutes ?? durationMinutes) || durationMinutes;
+        const pStaffName = (pStaff?.name as string | null) ?? null;
+        const pCourseName = (pCourse?.name as string | null) ?? pStaffName ?? "施術";
+
+        for (let i = 0; i < recurringWeeks; i++) {
+          const mainStart = new Date(baseDate.getTime() + i * 7 * 24 * 60 * 60 * 1000);
+          // 相方は「主施術が終わった直後」から開始（連続）
+          const pStart = new Date(mainStart.getTime() + durationMinutes * 60 * 1000);
+          const pStartIso = pStart.toISOString();
+          const pEndIso = new Date(pStart.getTime() + pDur * 60 * 1000).toISOString();
+
+          // 相方レーンの時間帯が空いているときだけ入れる（埋まっていればスキップ）
+          let laneFree = true;
+          const { data: conf } = await supabase
+            .from("appointments")
+            .select("id")
+            .eq("clinic_id", clinicId)
+            .eq("staff_id", doublePartnerStaffId)
+            .neq("status", "cancelled")
+            .lt("start_time", pEndIso)
+            .gt("end_time", pStartIso)
+            .limit(1);
+          laneFree = !(conf && conf.length > 0);
+          if (!laneFree) continue;
+
+          await supabase.from("appointments").insert([{
+            customer_id: customerId,
+            start_time: pStartIso,
+            end_time: pEndIso,
+            memo: "【ダブル施術・主施術の直後】",
+            is_first_visit: false,
+            status: "confirmed",
+            clinic_id: clinicId,
+            series_id: seriesId,
+            staff_id: doublePartnerStaffId,
+            staff_name: pStaffName ?? pCourseName,
+            ...(pCourse ? { course_id: pCourse.id, course_name: pCourseName } : { course_name: pCourseName }),
+          }]);
+        }
+      } catch (e) {
+        console.error("double treatment partner add failed", e);
       }
     }
 

@@ -74,7 +74,7 @@ export function EditAppointmentDialog({
   const [nextDefaultDate, setNextDefaultDate] = useState<Date | undefined>();
   const [nextDefaultTime, setNextDefaultTime] = useState<string>("");
   // 「施術後に○○を追加」用の設定メニュー
-  const [addonInfo, setAddonInfo] = useState<{ courseId: string; name: string } | null>(null);
+  const [addonInfo, setAddonInfo] = useState<{ courseId: string; name: string; allowConcurrent: boolean } | null>(null);
 
   // コース・スタッフ・個室マスタ
   const [courses, setCourses] = useState<ReservationCourse[]>([]);
@@ -683,15 +683,18 @@ export function EditAppointmentDialog({
                 >
                   ＋ 施術後に{addonInfo.name}
                 </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => handleAddAddon("same")}
-                  disabled={isSubmitting}
-                  className="flex-1 h-10 border-cyan-300 text-cyan-700 hover:bg-cyan-50 rounded-xl text-sm"
-                >
-                  ＋ 同時刻に{addonInfo.name}
-                </Button>
+                {/* 「同時刻」は水素のように別の時間が要らないメニューだけ */}
+                {addonInfo.allowConcurrent && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => handleAddAddon("same")}
+                    disabled={isSubmitting}
+                    className="flex-1 h-10 border-cyan-300 text-cyan-700 hover:bg-cyan-50 rounded-xl text-sm"
+                  >
+                    ＋ 同時刻に{addonInfo.name}
+                  </Button>
+                )}
               </div>
             )}
 

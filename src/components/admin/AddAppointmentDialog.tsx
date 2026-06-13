@@ -105,7 +105,7 @@ export function AddAppointmentDialog({
   // 施術後に○○を追加：設定された追加メニュー（after=施術後 / same=同時刻）
   const [addAddon, setAddAddon] = useState(false);
   const [addonTiming, setAddonTiming] = useState<"after" | "same">("after");
-  const [addonInfo, setAddonInfo] = useState<{ courseId: string; name: string } | null>(null);
+  const [addonInfo, setAddonInfo] = useState<{ courseId: string; name: string; allowConcurrent: boolean } | null>(null);
 
   // 患者サジェスト
   const [nameValue, setNameValue] = useState("");
@@ -210,25 +210,9 @@ export function AddAppointmentDialog({
   const isBallPrimary = !!(ballStaff && primaryStaffId === ballStaff.id);
   const canDouble = !!(samiStaff && ballStaff && (isSamiPrimary || isBallPrimary));
 
-  const toggleDouble = () => {
-    if (doubleOn) {
-      // OFF：相方を外す
-      setDoubleOn(false);
-      setAdditionalStaff([]);
-      setAdditionalCourses([]);
-      return;
-    }
-    if (isSamiPrimary && ballStaff) {
-      // さみ整体 → ボール担当をプラス
-      setAdditionalStaff([ballStaff.id]);
-      setAdditionalCourses([]);
-    } else if (isBallPrimary) {
-      // ボール担当施術 → さみ整体をプラス（担当も さみ）
-      setAdditionalCourses(samiCourse ? [samiCourse.id] : []);
-      setAdditionalStaff(samiStaff ? [samiStaff.id] : []);
-    }
-    setDoubleOn(true);
-  };
+  // ダブル施術は「相方の施術を主施術の直後に連続」で入れる（同時刻に相乗りさせない）。
+  // 相方の担当・コースは submit 時に算出してサーバへ渡す。
+  const toggleDouble = () => setDoubleOn((v) => !v);
 
   // 名前入力でデバウンス検索
   const handleNameChange = useCallback((value: string) => {
@@ -322,10 +306,22 @@ export function AddAppointmentDialog({
     if (resolvedCustomerId) formData.set("customerId", resolvedCustomerId);
     formData.set("additionalCourseIds", JSON.stringify(additionalCourses.filter(Boolean)));
     formData.set("additionalStaffIds", JSON.stringify(additionalStaff.filter(Boolean)));
+    // ダブル施術：相方の施術を「主施術の直後に連続」でサーバに作らせる（同時刻NG）
+    if (doubleOn && canDouble) {
+      if (isSamiPrimary && ballStaff) {
+        // さみ整体 → ボール施術を直後に
+        formData.set("doublePartnerStaffId", ballStaff.id);
+      } else if (isBallPrimary && samiStaff) {
+        // ボール施術 → さみ整体を直後に
+        formData.set("doublePartnerStaffId", samiStaff.id);
+        if (samiCourse) formData.set("doublePartnerCourseId", samiCourse.id);
+      }
+    }
     // 「施術後に○○を追加」（設定された追加メニューがあり、施術がそのメニュー自体でないとき）
     if (addAddon && addonInfo && courseId !== addonInfo.courseId) {
       formData.set("addAddon", "true");
-      formData.set("addonTiming", addonTiming);
+      // 「同時刻」は allowConcurrent（水素など）のときだけ。それ以外は施術後に固定。
+      formData.set("addonTiming", addonInfo.allowConcurrent ? addonTiming : "after");
     }
     formData.append("date", format(date, "yyyy-MM-dd"));
     formData.append("time", time);
@@ -733,8 +729,8 @@ export function AddAppointmentDialog({
                     }`}
                   >
                     {doubleOn
-                      ? "✓ ダブル施術 ON（同時に2人で施術）"
-                      : `＋ ダブル施術にする（${isSamiPrimary ? "ボール担当も同時" : "さみ整体も同時"}）`}
+                      ? "✓ ダブル施術 ON（主施術の直後に連続）"
+                      : `＋ ダブル施術にする（${isSamiPrimary ? "ボール施術を直後に" : "さみ整体を直後に"}）`}
                   </button>
                 )}
 
@@ -790,7 +786,9 @@ export function AddAppointmentDialog({
                   <span>＋ {addonInfo.name}を追加する</span>
                   <span className={`text-xs ${addAddon ? "text-white/90" : "text-cyan-500"}`}>{addAddon ? "ON" : "OFF"}</span>
                 </button>
-                {addAddon && (
+                {/* 「同時刻に追加」は水素のように別の時間が要らないメニュー(allowConcurrent)だけ。
+                    それ以外は施術後に時間を取るため選択肢を出さない。 */}
+                {addAddon && addonInfo.allowConcurrent && (
                   <div className="flex gap-2">
                     {([["after", "施術後に追加"], ["same", "同時刻に追加"]] as const).map(([val, label]) => (
                       <button

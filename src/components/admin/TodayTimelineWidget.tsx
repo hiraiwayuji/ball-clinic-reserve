@@ -57,7 +57,7 @@ export default function TodayTimelineWidget({
   const [error, setError] = useState<string | null>(null);
   const [selectedApt, setSelectedApt] = useState<TimelineAppointment | null>(null);
   // 「施術後に○○を追加」用：院ごとに設定された追加メニュー（未設定ならボタン非表示）
-  const [addonInfo, setAddonInfo] = useState<{ courseId: string; name: string } | null>(null);
+  const [addonInfo, setAddonInfo] = useState<{ courseId: string; name: string; allowConcurrent: boolean } | null>(null);
   // Googleクチコミ依頼が使えるか（設定URLがある院のみボタン表示）
   const [reviewEnabled, setReviewEnabled] = useState(false);
 
@@ -576,14 +576,17 @@ export default function TodayTimelineWidget({
                   >
                     ＋ 施術後に{addonInfo.name}
                   </Button>
-                  <Button
-                    onClick={() => handleAddAddon(selectedApt, "same")}
-                    disabled={actionLoading}
-                    variant="outline"
-                    className="flex-1 border-cyan-300 dark:border-cyan-700 text-cyan-700 dark:text-cyan-300 hover:bg-cyan-50 dark:hover:bg-cyan-950/50"
-                  >
-                    ＋ 同時刻に{addonInfo.name}
-                  </Button>
+                  {/* 「同時刻」は水素のように別の時間が要らないメニューだけ */}
+                  {addonInfo.allowConcurrent && (
+                    <Button
+                      onClick={() => handleAddAddon(selectedApt, "same")}
+                      disabled={actionLoading}
+                      variant="outline"
+                      className="flex-1 border-cyan-300 dark:border-cyan-700 text-cyan-700 dark:text-cyan-300 hover:bg-cyan-50 dark:hover:bg-cyan-950/50"
+                    >
+                      ＋ 同時刻に{addonInfo.name}
+                    </Button>
+                  )}
                 </div>
               )}
 
