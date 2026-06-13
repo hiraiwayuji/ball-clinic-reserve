@@ -151,6 +151,44 @@ export async function pushLineToCustomer(lineUserId: string, text: string): Prom
   }
 }
 
+/**
+ * 任意の宛先へメール送信（ベストエフォート）。
+ * RESEND_API_KEY 未設定なら何もしない。独自ドメイン(RESEND_FROM)未設定だと
+ * テスト送信元になり実宛先へ届かない場合がある点に注意（戻り値で送信可否を返す）。
+ */
+export async function sendEmailTo(
+  addresses: string[],
+  subject: string,
+  text: string,
+  fromLabel: string = "予約システム",
+): Promise<{ attempted: number; configured: boolean }> {
+  const resendKey = process.env.RESEND_API_KEY;
+  const list = Array.from(new Set(addresses.filter((a) => a && a.includes("@"))));
+  if (!resendKey || list.length === 0) return { attempted: 0, configured: !!resendKey };
+  const fromEnv = process.env.RESEND_FROM?.trim();
+  const fromValue = fromEnv
+    ? (fromEnv.includes("<") ? fromEnv : `${fromLabel} <${fromEnv}>`)
+    : `${fromLabel} <onboarding@resend.dev>`;
+  await Promise.all(
+    list.map(async (email) => {
+      try {
+        const res = await fetch("https://api.resend.com/emails", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${resendKey}` },
+          body: JSON.stringify({ from: fromValue, to: [email], subject, text }),
+        });
+        if (!res.ok) {
+          const errBody = await res.text().catch(() => "");
+          console.error(`[admin-notify] email send failed (${res.status}) to=${email}: ${errBody}`);
+        }
+      } catch (err) {
+        console.error(`[admin-notify] email send error to=${email}:`, err);
+      }
+    }),
+  );
+  return { attempted: list.length, configured: true };
+}
+
 export async function sendEmailToOwners(
   clinicId: string,
   subject: string,

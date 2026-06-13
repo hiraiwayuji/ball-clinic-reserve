@@ -10,7 +10,7 @@ import { toast } from "sonner";
 import {
   Loader2, CalendarClock, ChevronLeft, ChevronRight, AlertTriangle, Copy, Link2, CheckCircle2,
 } from "lucide-react";
-import { listShiftCoordination, type ShiftSubmission, type ShiftStaff } from "@/app/actions/staff-shift-requests";
+import { listShiftCoordination, getShiftAutoEnabled, setShiftAutoEnabled, type ShiftSubmission, type ShiftStaff } from "@/app/actions/staff-shift-requests";
 
 // display_color（名前）→ 実際の色
 const COLOR: Record<string, string> = {
@@ -27,11 +27,21 @@ export default function ShiftCoordinationPage() {
   const [unsubmitted, setUnsubmitted] = useState<ShiftStaff[]>([]);
   const [loading, setLoading] = useState(true);
   const [shiftUrl, setShiftUrl] = useState("");
+  const [autoEnabled, setAutoEnabled] = useState<boolean | null>(null);
 
   useEffect(() => {
     setMonth(addMonths(new Date(), 1));
     if (typeof window !== "undefined") setShiftUrl(`${window.location.origin}/shift-request`);
+    getShiftAutoEnabled().then(setAutoEnabled).catch(() => {});
   }, []);
+
+  const toggleAuto = async () => {
+    const next = !autoEnabled;
+    setAutoEnabled(next);
+    const r = await setShiftAutoEnabled(next);
+    if (!r.success) { setAutoEnabled(!next); toast.error(r.error ?? "切替に失敗しました"); }
+    else toast.success(next ? "自動運用をオンにしました" : "自動運用をオフにしました");
+  };
 
   const monthStr = useMemo(
     () => (month ? `${month.getFullYear()}-${String(month.getMonth() + 1).padStart(2, "0")}` : ""),
@@ -104,6 +114,23 @@ export default function ShiftCoordinationPage() {
         </div>
         <button onClick={copyLink} className="shrink-0 inline-flex items-center gap-1.5 h-9 px-3 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold">
           <Copy className="w-4 h-4" />リンクをコピー
+        </button>
+      </div>
+
+      {/* 自動運用トグル */}
+      <div className="flex items-center justify-between gap-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-3">
+        <div className="min-w-0">
+          <p className="text-sm font-bold text-slate-700 dark:text-slate-200">自動運用</p>
+          <p className="text-xs text-slate-500 dark:text-slate-400">毎月1日に翌月分の案内、締切（2週間前）が近づくと未提出の方へ自動リマインド＋院長へ報告します。</p>
+        </div>
+        <button
+          type="button"
+          onClick={toggleAuto}
+          disabled={autoEnabled === null}
+          aria-pressed={!!autoEnabled}
+          className={`shrink-0 w-14 h-8 rounded-full relative transition-colors disabled:opacity-50 ${autoEnabled ? "bg-emerald-500" : "bg-slate-300 dark:bg-slate-600"}`}
+        >
+          <span className={`absolute top-1 w-6 h-6 bg-white rounded-full transition-all ${autoEnabled ? "left-7" : "left-1"}`} />
         </button>
       </div>
 

@@ -187,3 +187,24 @@ export async function listShiftCoordination(month: string): Promise<{
   }
   return { success: true, submissions, unsubmitted };
 }
+
+/** 自動運用（1ヶ月前送信・締切リマインド）のON/OFF状態 */
+export async function getShiftAutoEnabled(): Promise<boolean> {
+  const { clinicId } = await checkAdminAuth();
+  const { createClient } = await import("@/lib/supabase/server");
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("clinic_settings").select("shift_request_enabled").eq("id", clinicId).maybeSingle();
+  return !!data?.shift_request_enabled;
+}
+
+/** 自動運用のON/OFF切替（オーナー） */
+export async function setShiftAutoEnabled(enabled: boolean): Promise<{ success: boolean; error?: string }> {
+  const { clinicId } = await checkAdminAuth();
+  const { createClient } = await import("@/lib/supabase/server");
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("clinic_settings").update({ shift_request_enabled: enabled }).eq("id", clinicId);
+  if (error) return { success: false, error: error.message };
+  return { success: true };
+}
