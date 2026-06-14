@@ -345,13 +345,29 @@ export function EditAppointmentDialog({
 
   const handleSendLine = async () => {
     if (!appointment) return;
+    // 仮予約のまま「LINE通知」を押す＝この予約を受け付ける意味なので、
+    // 先に予約確定してから送る。こうすると確認待ちリストから自動で消える。
+    const wasPending = appointment.status === "pending";
     setIsSubmitting(true);
     try {
+      if (wasPending) {
+        const confirmed = await updateAppointmentStatus(appointment.id, "confirmed");
+        if (!confirmed.success) {
+          toast.error(confirmed.error || "予約確定に失敗しました");
+          return;
+        }
+      }
       const result = await sendLineConfirmation(appointment.id);
       if (result.success) {
-        toast.success("LINEを送信しました");
+        toast.success(wasPending ? "予約を確定し、LINEを送信しました" : "LINEを送信しました");
       } else {
+        // LINE未連携などで送れなくても、確定は済んでいるのでリストからは消す
         toast.error(result.error || "LINE送信に失敗しました");
+      }
+      if (wasPending) {
+        // 確定済み＝処理済みなので一覧を更新して閉じる（確認待ちから外れる）
+        onSuccess?.();
+        onOpenChange(false);
       }
     } catch {
       toast.error("通信エラーが発生しました");
