@@ -16,7 +16,7 @@ import { createClient } from "@/lib/supabase/client";
 import { createReservation, getDailyAvailability, getAutoCourseSelection } from "@/app/actions/reserve";
 import { getClinicHolidays, type ClinicHoliday } from "@/app/actions/holidays";
 import { getActiveCourses, getActiveStaff, getActiveRooms, getCourseRequiredStaffSchedule, getPublicStaffSchedules, type ReservationCourse, type ReservationStaff, type ReservationRoom } from "@/app/actions/courses";
-import { isStaffAvailableOn, type StaffSchedule } from "@/lib/staff-availability";
+import { isStaffAvailableOn, filterSlotsByStaffSchedule, type StaffSchedule } from "@/lib/staff-availability";
 import { useSearchParams } from "next/navigation";
 import { getTimeSlots, isDateWithinAllowedRange, isTimeSlotWithinTwoHours, formatScheduleHoursLines, formatScheduleClosedDays } from "@/lib/time-slots";
 import { useClinicSlotDuration } from "@/lib/use-clinic-slot-duration";
@@ -243,7 +243,7 @@ function ReserveContent() {
       .then((res) => {
         if (cancelled) return;
         if (res) {
-          setRequiredStaff({ staffId: res.staffId, staffName: res.staffName, schedule: { weekdays: res.weekdays, dates: res.dates } });
+          setRequiredStaff({ staffId: res.staffId, staffName: res.staffName, schedule: { weekdays: res.weekdays, dates: res.dates, defaultStart: res.defaultStart, defaultEnd: res.defaultEnd } });
           setSelectedStaffId(res.staffId);
         } else {
           setRequiredStaff(null);
@@ -300,7 +300,9 @@ function ReserveContent() {
       return;
     }
 
-    const availableSlots = getTimeSlots(date, { slotMinutes, schedule });
+    // 担当固定（さみ・ヘッドスパ等）または指名スタッフの「出勤時間」内だけに絞る
+    const activeStaffSchedule = requiredStaff?.schedule ?? (selectedStaffId ? staffSchedules[selectedStaffId] : undefined);
+    const availableSlots = filterSlotsByStaffSchedule(getTimeSlots(date, { slotMinutes, schedule }), date, activeStaffSchedule);
     if (!availableSlots.includes(time)) {
       toast.error("選択された時間は予約できません。別の時間を選択してください");
       return;
@@ -765,7 +767,9 @@ function ReserveContent() {
                         <SelectContent className="bg-slate-900 border-white/10 text-white">
                           {(() => {
                             if (!date || (courses.length > 0 && !selectedCourseId)) return null;
-                            const allSlots = getTimeSlots(date, { slotMinutes, schedule });
+                            // 担当固定/指名スタッフの「出勤時間」内だけに絞る（さみ・ヘッドスパ等）
+                            const activeStaffSchedule = requiredStaff?.schedule ?? (selectedStaffId ? staffSchedules[selectedStaffId] : undefined);
+                            const allSlots = filterSlotsByStaffSchedule(getTimeSlots(date, { slotMinutes, schedule }), date, activeStaffSchedule);
                             const selCourse = courses.find(c => c.id === selectedCourseId);
                             const requiredSteps = Math.max(1, Math.ceil((selCourse?.duration_minutes ?? slotMinutes) / slotMinutes));
                             // コースの施術時間ぶんの連続枠が確保できるか（カレンダー画面と同じ判定）

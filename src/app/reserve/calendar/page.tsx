@@ -11,7 +11,7 @@ import { getClinicHolidays, type ClinicHoliday } from "@/app/actions/holidays";
 import { getActiveCourses, getActiveStaff, getCourseRequiredStaffSchedule, getCoursesAvailability, type ReservationCourse } from "@/app/actions/courses";
 import { getBlockedTimesForCurrentClinic } from "@/app/actions/staff-schedule";
 import { courseShortPrice } from "@/lib/course-price";
-import { isStaffAvailableOn, type StaffSchedule } from "@/lib/staff-availability";
+import { isStaffAvailableOn, filterSlotsByStaffSchedule, type StaffSchedule } from "@/lib/staff-availability";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -58,7 +58,8 @@ function getAvailabilityLevel(dateStr: string, bookedCount: number, date: Date, 
   if (!isDateWithinAllowedRange(date, false, schedule.bookingHorizonDays)) return "closed";
 
   // 実際に予約可能なスロット（2時間前制限にかかっていないもの）をカウントする
-  const allSlots = getTimeSlots(date, { slotMinutes, schedule });
+  // 担当固定（さみ・ヘッドスパ等）の出勤時間が設定されていれば、その時間帯だけを母数にする
+  const allSlots = filterSlotsByStaffSchedule(getTimeSlots(date, { slotMinutes, schedule }), date, staffSchedule);
   const totalSlots = allSlots.length;
 
   if (totalSlots === 0) return "closed";
@@ -352,7 +353,7 @@ function ReserveCalendarContent() {
     // 担当固定コースなら、そのスタッフの出勤日スケジュールを取得（さみ整体など）
     getCourseRequiredStaffSchedule(courseIdParam).then(res => {
       if (!mounted) return;
-      if (res) { setStaffSchedule({ weekdays: res.weekdays, dates: res.dates }); setStaffScheduleName(res.staffName); }
+      if (res) { setStaffSchedule({ weekdays: res.weekdays, dates: res.dates, defaultStart: res.defaultStart, defaultEnd: res.defaultEnd }); setStaffScheduleName(res.staffName); }
       else { setStaffSchedule(null); setStaffScheduleName(""); }
     }).catch(() => { if (mounted) { setStaffSchedule(null); setStaffScheduleName(""); } });
     return () => { mounted = false; };
@@ -382,7 +383,7 @@ function ReserveCalendarContent() {
           if (st.schedule_based_booking) {
             try {
               const r = await getCourseRequiredStaffSchedule(cs[0].id);
-              if (r) schedule = { weekdays: r.weekdays, dates: r.dates };
+              if (r) schedule = { weekdays: r.weekdays, dates: r.dates, defaultStart: r.defaultStart, defaultEnd: r.defaultEnd };
             } catch {}
           }
           laneList.push({ staffId: sid, staffName: st.name, courses: cs, schedule });
@@ -961,7 +962,7 @@ function ReserveCalendarContent() {
                   <p className="text-zinc-300 text-sm font-bold">時間を読み込み中...</p>
                 </div>
               ) : (() => {
-                const allSlots = getTimeSlots(selectedDate, { slotMinutes, schedule });
+                const allSlots = filterSlotsByStaffSchedule(getTimeSlots(selectedDate, { slotMinutes, schedule }), selectedDate, staffSchedule);
                 const slotDuration = selectedCourse?.duration_minutes ?? 30;
                 const requiredSteps = Math.max(1, Math.ceil(slotDuration / slotMinutes));
 
@@ -1060,7 +1061,7 @@ function ReserveCalendarContent() {
                   既に埋まっている時間帯にどうしても来たい患者の動線確保のため。
               */}
               {!loadingDay && (() => {
-                const allSlotsForCheck = getTimeSlots(selectedDate, { slotMinutes, schedule });
+                const allSlotsForCheck = filterSlotsByStaffSchedule(getTimeSlots(selectedDate, { slotMinutes, schedule }), selectedDate, staffSchedule);
                 const availableSlotsCount = allSlotsForCheck.filter(s =>
                   !dailySlots.includes(s) &&
                   !blockedSlots.includes(s) &&
@@ -1158,7 +1159,7 @@ function ReserveCalendarContent() {
                         onChange={e => setWaitlistStart(e.target.value)}
                         className="flex-1 bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-3 text-white text-sm font-bold focus:outline-none focus:border-amber-500"
                       >
-                        {getTimeSlots(selectedDate, { slotMinutes, schedule }).map(t => {
+                        {filterSlotsByStaffSchedule(getTimeSlots(selectedDate, { slotMinutes, schedule }), selectedDate, staffSchedule).map(t => {
                           const isTooClose = isTimeSlotWithinTwoHours(selectedDate, t);
                           return <option key={t} value={t} disabled={isTooClose}>{t}{isTooClose ? " (電話のみ)" : ""}</option>;
                         })}

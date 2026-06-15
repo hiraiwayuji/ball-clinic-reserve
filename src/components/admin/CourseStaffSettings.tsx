@@ -22,22 +22,32 @@ function StaffScheduleEditor({ staff, onChanged }: { staff: ReservationStaff; on
   const [weekdays, setWeekdays] = useState<number[]>(
     String(staff.booking_weekdays ?? "").split(",").map(s => s.trim()).filter(Boolean).map(Number),
   );
+  // 既定の出勤時間（全出勤日に適用。空欄なら院の営業時間どおり）
+  const toHHMM = (v: string | null | undefined) => (v ? String(v).slice(0, 5) : "");
+  const [defaultStart, setDefaultStart] = useState(toHHMM(staff.booking_start_time));
+  const [defaultEnd, setDefaultEnd] = useState(toHHMM(staff.booking_end_time));
   const [dates, setDates] = useState<StaffBookingDate[]>([]);
   const [newDate, setNewDate] = useState("");
+  const [newStart, setNewStart] = useState("");
+  const [newEnd, setNewEnd] = useState("");
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     getStaffBookingDates(staff.id).then(setDates).catch(() => {});
   }, [staff.id]);
 
-  const persistBase = async (next: { scheduleBased?: boolean; weekdays?: number[] }) => {
+  const persistBase = async (next: { scheduleBased?: boolean; weekdays?: number[]; defaultStart?: string; defaultEnd?: string }) => {
     const sb = next.scheduleBased ?? scheduleBased;
     const wd = next.weekdays ?? weekdays;
+    const ds = next.defaultStart ?? defaultStart;
+    const de = next.defaultEnd ?? defaultEnd;
     setBusy(true);
     const res = await saveStaff({
       id: staff.id, name: staff.name,
       schedule_based_booking: sb,
       booking_weekdays: wd.slice().sort((a, b) => a - b).join(","),
+      booking_start_time: ds || null,
+      booking_end_time: de || null,
     });
     setBusy(false);
     if (res.success) onChanged(); else toast.error(res.error ?? "保存に失敗しました");
@@ -49,14 +59,35 @@ function StaffScheduleEditor({ staff, onChanged }: { staff: ReservationStaff; on
     persistBase({ weekdays: next });
   };
 
+  // 既定の出勤時間を保存（両方空欄＝院の営業時間どおり。片方だけは不可）
+  const saveDefaultHours = (ds: string, de: string) => {
+    if ((ds && !de) || (!ds && de)) {
+      toast.error("出勤時間は開始・終了の両方を入れてください（両方空欄なら院の営業時間どおり）");
+      return;
+    }
+    if (ds && de && ds >= de) {
+      toast.error("出勤時間の終了は開始より後にしてください");
+      return;
+    }
+    persistBase({ defaultStart: ds, defaultEnd: de });
+  };
+
   const addDate = async (available: boolean) => {
     if (!newDate) return;
+    if (available && ((newStart && !newEnd) || (!newStart && newEnd))) {
+      toast.error("時間を入れる場合は開始・終了の両方を入れてください");
+      return;
+    }
+    if (available && newStart && newEnd && newStart >= newEnd) {
+      toast.error("時間の終了は開始より後にしてください");
+      return;
+    }
     setBusy(true);
-    const res = await setStaffBookingDate(staff.id, newDate, available);
+    const res = await setStaffBookingDate(staff.id, newDate, available, available ? newStart : "", available ? newEnd : "");
     setBusy(false);
     if (res.success) {
       setDates(await getStaffBookingDates(staff.id));
-      setNewDate("");
+      setNewDate(""); setNewStart(""); setNewEnd("");
       toast.success(available ? "出勤日を追加しました" : "休みに設定しました");
     } else toast.error(res.error ?? "保存に失敗しました");
   };
@@ -106,9 +137,48 @@ function StaffScheduleEditor({ staff, onChanged }: { staff: ReservationStaff; on
           </div>
 
           <div>
+            <Label className="text-xs text-slate-600 dark:text-slate-300 flex items-center gap-1">
+              <Clock className="w-3 h-3" /> 出勤時間（受付できる時間帯）
+            </Label>
+            <div className="flex flex-wrap items-center gap-2 mt-1">
+              <Input
+                type="time" step={600} value={defaultStart} disabled={busy}
+                onChange={(e) => setDefaultStart(e.target.value)}
+                onBlur={() => saveDefaultHours(defaultStart, defaultEnd)}
+                className="h-9 w-28"
+              />
+              <span className="text-slate-400 text-sm">〜</span>
+              <Input
+                type="time" step={600} value={defaultEnd} disabled={busy}
+                onChange={(e) => setDefaultEnd(e.target.value)}
+                onBlur={() => saveDefaultHours(defaultStart, defaultEnd)}
+                className="h-9 w-28"
+              />
+              {(defaultStart || defaultEnd) && (
+                <Button
+                  size="sm" variant="outline" disabled={busy}
+                  onClick={() => { setDefaultStart(""); setDefaultEnd(""); saveDefaultHours("", ""); }}
+                  className="h-9 text-xs"
+                >
+                  クリア（営業時間どおり）
+                </Button>
+              )}
+            </div>
+            <p className="text-[10px] text-slate-500 mt-1">
+              ※ ここに入れると、出勤日のうち <strong>この時間帯だけ</strong> 予約を受け付けます（例: 14:00〜18:00）。空欄なら院の営業時間どおりです。
+            </p>
+          </div>
+
+          <div>
             <Label className="text-xs text-slate-600 dark:text-slate-300">個別の日（不定期の出勤・お休み）</Label>
             <div className="flex flex-wrap items-center gap-2 mt-1">
               <Input type="date" value={newDate} onChange={(e) => setNewDate(e.target.value)} className="h-9 w-40" />
+              <span className="inline-flex items-center gap-1 text-[11px] text-slate-500">
+                <Clock className="w-3 h-3" />
+                <Input type="time" step={600} value={newStart} onChange={(e) => setNewStart(e.target.value)} className="h-9 w-24" placeholder="開始" />
+                〜
+                <Input type="time" step={600} value={newEnd} onChange={(e) => setNewEnd(e.target.value)} className="h-9 w-24" placeholder="終了" />
+              </span>
               <Button size="sm" disabled={busy || !newDate} onClick={() => addDate(true)} className="h-9 bg-emerald-600 hover:bg-emerald-700 text-white text-xs">＋出勤日にする</Button>
               <Button size="sm" variant="outline" disabled={busy || !newDate} onClick={() => addDate(false)} className="h-9 text-xs">この日は休み</Button>
             </div>
@@ -118,14 +188,14 @@ function StaffScheduleEditor({ staff, onChanged }: { staff: ReservationStaff; on
                   <span key={d.date} className={`inline-flex items-center gap-1 text-xs font-medium px-2 py-1 rounded-lg border ${
                     d.available ? "bg-emerald-50 border-emerald-200 text-emerald-700" : "bg-rose-50 border-rose-200 text-rose-700"
                   }`}>
-                    {d.date}（{d.available ? "出勤" : "休み"}）
+                    {d.date}（{d.available ? (d.start && d.end ? `出勤 ${d.start}〜${d.end}` : "出勤") : "休み"}）
                     <button type="button" onClick={() => removeDate(d.date)} className="hover:opacity-60" title="削除"><X className="w-3 h-3" /></button>
                   </span>
                 ))}
               </div>
             )}
             <p className="text-[10px] text-slate-500 mt-1">
-              ※ 曜日に無い日に出るとき「＋出勤日にする」。曜日の日に休むとき「この日は休み」。予約サイトに反映されます。
+              ※ 曜日に無い日に出るとき「＋出勤日にする」（時間を入れるとその日はその時間だけ。空欄なら既定の出勤時間）。曜日の日に休むとき「この日は休み」。予約サイトに反映されます。
             </p>
           </div>
         </>

@@ -38,6 +38,15 @@ async function notifyOwner(
 import { createClient as createServerClient } from "@/lib/supabase/server";
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { getTimeSlots, isDateWithinAllowedRange, isTimeSlotWithinTwoHours } from "@/lib/time-slots";
+import { isTimeWithinStaffHoursYmd, type StaffSchedule } from "@/lib/staff-availability";
+
+/** "HH:MM:SS"/"HH:MM"/null → "HH:MM"/null。スタッフ出勤時間（TIMEカラム）の正規化用 */
+function normStaffTime(v: string | null | undefined): string | null {
+  if (v == null) return null;
+  const t = String(v).trim();
+  if (!t) return null;
+  return t.length >= 5 ? t.slice(0, 5) : t;
+}
 import { getBookingHorizonDays, getCurrentSchedule, getCurrentSlotDuration } from "@/app/actions/clinic-slot";
 import { unstable_noStore as noStore } from "next/cache";
 
@@ -529,7 +538,7 @@ export async function createReservation(formData: FormData) {
         if (reqStaffId) {
           const { data: reqStaff } = await adminDb
             .from("reservation_staff")
-            .select("id, name, schedule_based_booking, booking_weekdays")
+            .select("id, name, schedule_based_booking, booking_weekdays, booking_start_time, booking_end_time")
             .eq("id", reqStaffId)
             .eq("clinic_id", PUBLIC_CLINIC_ID)
             .maybeSingle();
@@ -540,7 +549,7 @@ export async function createReservation(formData: FormData) {
                 .split(",").map((s) => s.trim()).filter(Boolean).map(Number);
               const { data: ovr } = await adminDb
                 .from("staff_booking_dates")
-                .select("available")
+                .select("available, start_time, end_time")
                 .eq("clinic_id", PUBLIC_CLINIC_ID)
                 .eq("staff_id", reqStaffId)
                 .eq("date", rawDate)
@@ -549,6 +558,15 @@ export async function createReservation(formData: FormData) {
               const available = ovr ? !!ovr.available : weekdays.includes(wd);
               if (!available) {
                 return { success: false, error: `${reqStaff.name ?? "担当"}さんはその日はご予約を受け付けていません。出勤日からお選びください。` };
+              }
+              // 出勤時間（時間帯）が設定されていれば、その時間外は弾く
+              const sched: StaffSchedule = {
+                weekdays, dates: ovr ? [{ date: rawDate, available: true, start: normStaffTime(ovr.start_time), end: normStaffTime(ovr.end_time) }] : [],
+                defaultStart: normStaffTime(reqStaff.booking_start_time as string | null),
+                defaultEnd: normStaffTime(reqStaff.booking_end_time as string | null),
+              };
+              if (!isTimeWithinStaffHoursYmd(rawDate, time, sched)) {
+                return { success: false, error: `${reqStaff.name ?? "担当"}さんのその日の受付時間外です。お手数ですが受付時間内の時間をお選びください。` };
               }
             }
             // 担当(レーン)をそのスタッフに確定（schedule有無に関わらず）。
@@ -567,7 +585,7 @@ export async function createReservation(formData: FormData) {
       if (staffId && !staffViaRequiredCourse) {
         const { data: st } = await adminDb
           .from("reservation_staff")
-          .select("name, schedule_based_booking, booking_weekdays")
+          .select("name, schedule_based_booking, booking_weekdays, booking_start_time, booking_end_time")
           .eq("id", staffId)
           .eq("clinic_id", PUBLIC_CLINIC_ID)
           .maybeSingle();
@@ -580,7 +598,7 @@ export async function createReservation(formData: FormData) {
             .split(",").map((s) => s.trim()).filter(Boolean).map(Number);
           const { data: ovr } = await adminDb
             .from("staff_booking_dates")
-            .select("available")
+            .select("available, start_time, end_time")
             .eq("clinic_id", PUBLIC_CLINIC_ID)
             .eq("staff_id", staffId)
             .eq("date", rawDate)
@@ -589,6 +607,15 @@ export async function createReservation(formData: FormData) {
           const available = ovr ? !!ovr.available : weekdays.includes(wd);
           if (!available) {
             return { success: false, error: `${st.name ?? "ご指名の担当"}さんはその日はお休みです。指名なしにするか、別の日をお選びください。` };
+          }
+          // 出勤時間（時間帯）が設定されていれば、その時間外は弾く
+          const sched: StaffSchedule = {
+            weekdays, dates: ovr ? [{ date: rawDate, available: true, start: normStaffTime(ovr.start_time), end: normStaffTime(ovr.end_time) }] : [],
+            defaultStart: normStaffTime(st.booking_start_time as string | null),
+            defaultEnd: normStaffTime(st.booking_end_time as string | null),
+          };
+          if (!isTimeWithinStaffHoursYmd(rawDate, time, sched)) {
+            return { success: false, error: `${st.name ?? "ご指名の担当"}さんのその日の受付時間外です。受付時間内の時間をお選びください。` };
           }
         }
       }
@@ -985,10 +1012,11 @@ export async function createReservation(formData: FormData) {
             const hStaffId = (hs.required_staff_id as string | null) ?? null;
             // ヘッドスパの出勤日チェック
             let staffOk = true;
+            let hsSched: StaffSchedule | null = null;
             if (hStaffId) {
               const { data: st } = await adminDb
                 .from("reservation_staff")
-                .select("schedule_based_booking, booking_weekdays")
+                .select("schedule_based_booking, booking_weekdays, booking_start_time, booking_end_time")
                 .eq("id", hStaffId)
                 .eq("clinic_id", DEFAULT_CLINIC_ID)
                 .maybeSingle();
@@ -996,13 +1024,18 @@ export async function createReservation(formData: FormData) {
                 const wds = String(st.booking_weekdays ?? "").split(",").map((s) => s.trim()).filter(Boolean).map(Number);
                 const { data: ovr } = await adminDb
                   .from("staff_booking_dates")
-                  .select("available")
+                  .select("available, start_time, end_time")
                   .eq("clinic_id", DEFAULT_CLINIC_ID)
                   .eq("staff_id", hStaffId)
                   .eq("date", rawDate)
                   .maybeSingle();
                 const wd = new Date(`${rawDate}T00:00:00`).getDay();
                 staffOk = ovr ? !!ovr.available : wds.includes(wd);
+                hsSched = {
+                  weekdays: wds, dates: ovr ? [{ date: rawDate, available: !!ovr.available, start: normStaffTime(ovr.start_time), end: normStaffTime(ovr.end_time) }] : [],
+                  defaultStart: normStaffTime(st.booking_start_time as string | null),
+                  defaultEnd: normStaffTime(st.booking_end_time as string | null),
+                };
               }
             }
             if (!staffOk) {
@@ -1015,7 +1048,8 @@ export async function createReservation(formData: FormData) {
               const hHHMM = new Intl.DateTimeFormat("ja-JP", { timeZone: "Asia/Tokyo", hour: "2-digit", minute: "2-digit", hour12: false }).format(hStart);
               // 曜日判定はサーバ(UTC)でも JST の暦日と一致させる（+09:00 を付けると前日にズレる）
               const businessSlots = getTimeSlots(new Date(`${rawDate}T00:00:00`), { slotMinutes: clinicSlotMinutes, schedule: clinicSchedule });
-              const inHours = businessSlots.includes(hHHMM);
+              // 院の営業時間内 かつ ヘッドスパの出勤時間内（出勤時間が設定されていれば）
+              const inHours = businessSlots.includes(hHHMM) && (!hsSched || isTimeWithinStaffHoursYmd(rawDate, hHHMM, hsSched));
               let laneFree = true;
               if (hStaffId) {
                 const { data: hConf } = await adminDb

@@ -67,9 +67,21 @@ export type ReservationStaff = {
   schedule_based_booking?: boolean;
   /** 毎週の出勤曜日（csv: 0=日,1=月,…,6=土）。schedule_based_booking 時に使用 */
   booking_weekdays?: string | null;
+  /** 既定の出勤開始時刻 "HH:MM(:SS)"（schedule_based 時。NULL=院の営業時間どおり） */
+  booking_start_time?: string | null;
+  /** 既定の出勤終了時刻 "HH:MM(:SS)"（schedule_based 時。NULL=院の営業時間どおり） */
+  booking_end_time?: string | null;
   /** オンライン予約の対象スタッフか（予約サイトのレーン/担当に出すか） */
   available_for_online_booking?: boolean | null;
 };
+
+/** "HH:MM:SS" / "HH:MM" / 空 → "HH:MM" / null に正規化（TIME カラム保存・表示用） */
+function normalizeTimeHHMM(v: string | null | undefined): string | null {
+  if (v == null) return null;
+  const t = String(v).trim();
+  if (!t) return null;
+  return t.length >= 5 ? t.slice(0, 5) : t;
+}
 
 // ── コース取得（管理側：全件） ──
 export async function getCourses(): Promise<ReservationCourse[]> {
@@ -339,6 +351,8 @@ export async function saveStaff(staff: Partial<ReservationStaff> & { name: strin
   // 出勤日ベース予約（さみ等）
   if (staff.schedule_based_booking !== undefined) payload.schedule_based_booking = !!staff.schedule_based_booking;
   if (staff.booking_weekdays !== undefined) payload.booking_weekdays = staff.booking_weekdays || null;
+  if (staff.booking_start_time !== undefined) payload.booking_start_time = normalizeTimeHHMM(staff.booking_start_time);
+  if (staff.booking_end_time !== undefined) payload.booking_end_time = normalizeTimeHHMM(staff.booking_end_time);
 
   if (staff.id) {
     const { error } = await supabase
@@ -379,7 +393,7 @@ export async function deleteStaff(id: string) {
 // ─────────────────────────────────────────────────────────
 // スタッフ出勤日（schedule_based_booking 用：さみ整体など）
 // ─────────────────────────────────────────────────────────
-export type StaffBookingDate = { date: string; available: boolean };
+export type StaffBookingDate = { date: string; available: boolean; start?: string | null; end?: string | null };
 
 // 管理側：個別の出勤日／例外休を取得
 export async function getStaffBookingDates(staffId: string): Promise<StaffBookingDate[]> {
@@ -388,25 +402,45 @@ export async function getStaffBookingDates(staffId: string): Promise<StaffBookin
   const supabase = await createClient();
   const { data } = await supabase
     .from("staff_booking_dates")
-    .select("date, available")
+    .select("date, available, start_time, end_time")
     .eq("clinic_id", clinicId)
     .eq("staff_id", staffId)
     .order("date");
-  return (data ?? []).map((d: { date: string; available: boolean }) => ({
+  return (data ?? []).map((d: { date: string; available: boolean; start_time?: string | null; end_time?: string | null }) => ({
     date: String(d.date).slice(0, 10),
     available: !!d.available,
+    start: normalizeTimeHHMM(d.start_time),
+    end: normalizeTimeHHMM(d.end_time),
   }));
 }
 
 // 管理側：個別日を登録/更新（available=true 出勤追加 / false 例外休）
-export async function setStaffBookingDate(staffId: string, date: string, available: boolean) {
+// start/end は任意の出勤時間上書き（"HH:MM" or 空）。未指定なら既定の出勤時間に従う。
+export async function setStaffBookingDate(
+  staffId: string,
+  date: string,
+  available: boolean,
+  start?: string | null,
+  end?: string | null,
+) {
   const { clinicId } = await checkAdminAuth();
   const { createClient } = await import("@/lib/supabase/server");
   const supabase = await createClient();
   // tenant-isolation-ignore: clinic_id を明示設定済み
   const { error } = await supabase
     .from("staff_booking_dates")
-    .upsert({ clinic_id: clinicId, staff_id: staffId, date, available }, { onConflict: "staff_id,date" });
+    .upsert(
+      {
+        clinic_id: clinicId,
+        staff_id: staffId,
+        date,
+        available,
+        // 休み(available=false)なら時間は無意味なので必ず NULL に
+        start_time: available ? normalizeTimeHHMM(start) : null,
+        end_time: available ? normalizeTimeHHMM(end) : null,
+      },
+      { onConflict: "staff_id,date" },
+    );
   if (error) return { success: false, error: error.message };
   revalidatePath("/admin/settings");
   return { success: true };
@@ -431,7 +465,7 @@ export async function removeStaffBookingDate(staffId: string, date: string) {
 // 患者予約フロー用：コースに担当固定があり、そのスタッフが出勤日ベースなら
 // 出勤曜日・個別日を返す。無ければ null（＝日付制限なし）。
 export async function getCourseRequiredStaffSchedule(courseId: string): Promise<
-  { staffId: string; staffName: string; weekdays: number[]; dates: StaffBookingDate[] } | null
+  { staffId: string; staffName: string; weekdays: number[]; dates: StaffBookingDate[]; defaultStart: string | null; defaultEnd: string | null } | null
 > {
   if (!courseId) return null;
   const { createClient: createAdminClient } = await import("@supabase/supabase-js");
@@ -447,7 +481,7 @@ export async function getCourseRequiredStaffSchedule(courseId: string): Promise<
   if (!staffId) return null;
   const { data: staff } = await admin
     .from("reservation_staff")
-    .select("id, name, schedule_based_booking, booking_weekdays")
+    .select("id, name, schedule_based_booking, booking_weekdays, booking_start_time, booking_end_time")
     .eq("id", staffId)
     .eq("clinic_id", DEFAULT_CLINIC_ID)
     .maybeSingle();
@@ -456,16 +490,20 @@ export async function getCourseRequiredStaffSchedule(courseId: string): Promise<
     .split(",").map((s) => s.trim()).filter(Boolean).map(Number).filter((n) => n >= 0 && n <= 6);
   const { data: dates } = await admin
     .from("staff_booking_dates")
-    .select("date, available")
+    .select("date, available, start_time, end_time")
     .eq("clinic_id", DEFAULT_CLINIC_ID)
     .eq("staff_id", staffId);
   return {
     staffId: staff.id as string,
     staffName: staff.name as string,
     weekdays,
-    dates: (dates ?? []).map((d: { date: string; available: boolean }) => ({
+    defaultStart: normalizeTimeHHMM(staff.booking_start_time as string | null),
+    defaultEnd: normalizeTimeHHMM(staff.booking_end_time as string | null),
+    dates: (dates ?? []).map((d: { date: string; available: boolean; start_time?: string | null; end_time?: string | null }) => ({
       date: String(d.date).slice(0, 10),
       available: !!d.available,
+      start: normalizeTimeHHMM(d.start_time),
+      end: normalizeTimeHHMM(d.end_time),
     })),
   };
 }
@@ -474,7 +512,7 @@ export async function getCourseRequiredStaffSchedule(courseId: string): Promise<
 // 予約フォームの指名欄で「その日お休みのスタッフを出さない」ために使う。
 // schedule_based でない常勤スタッフはこのマップに含まれない（＝常に指名可）。
 export async function getPublicStaffSchedules(): Promise<
-  Record<string, { weekdays: number[]; dates: StaffBookingDate[] }>
+  Record<string, { weekdays: number[]; dates: StaffBookingDate[]; defaultStart: string | null; defaultEnd: string | null }>
 > {
   try {
     const { createClient: createAdminClient } = await import("@supabase/supabase-js");
@@ -482,7 +520,7 @@ export async function getPublicStaffSchedules(): Promise<
     const admin = createAdminClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
     const { data: staff } = await admin
       .from("reservation_staff")
-      .select("id, booking_weekdays")
+      .select("id, booking_weekdays, booking_start_time, booking_end_time")
       .eq("clinic_id", DEFAULT_CLINIC_ID)
       .eq("is_active", true)
       .eq("schedule_based_booking", true);
@@ -490,19 +528,23 @@ export async function getPublicStaffSchedules(): Promise<
     const ids = staff.map((s) => s.id as string);
     const { data: dates } = await admin
       .from("staff_booking_dates")
-      .select("staff_id, date, available")
+      .select("staff_id, date, available, start_time, end_time")
       .eq("clinic_id", DEFAULT_CLINIC_ID)
       .in("staff_id", ids);
-    const out: Record<string, { weekdays: number[]; dates: StaffBookingDate[] }> = {};
+    const out: Record<string, { weekdays: number[]; dates: StaffBookingDate[]; defaultStart: string | null; defaultEnd: string | null }> = {};
     for (const s of staff) {
       out[s.id as string] = {
         weekdays: String(s.booking_weekdays ?? "")
           .split(",").map((x) => x.trim()).filter(Boolean).map(Number).filter((n) => n >= 0 && n <= 6),
+        defaultStart: normalizeTimeHHMM((s as { booking_start_time?: string | null }).booking_start_time),
+        defaultEnd: normalizeTimeHHMM((s as { booking_end_time?: string | null }).booking_end_time),
         dates: (dates ?? [])
           .filter((d: { staff_id: string }) => d.staff_id === s.id)
-          .map((d: { date: string; available: boolean }) => ({
+          .map((d: { date: string; available: boolean; start_time?: string | null; end_time?: string | null }) => ({
             date: String(d.date).slice(0, 10),
             available: !!d.available,
+            start: normalizeTimeHHMM(d.start_time),
+            end: normalizeTimeHHMM(d.end_time),
           })),
       };
     }
@@ -521,7 +563,7 @@ export type CourseAvailability = { courseId: string; nextDate: string | null }; 
 export async function getCoursesAvailability(): Promise<CourseAvailability[]> {
   const { createClient: createAdminClient } = await import("@supabase/supabase-js");
   const { buildSchedule, getTimeSlots, isTimeSlotWithinTwoHours } = await import("@/lib/time-slots");
-  const { isStaffAvailableOnYmd } = await import("@/lib/staff-availability");
+  const { isStaffAvailableOnYmd, filterSlotsByStaffSchedule } = await import("@/lib/staff-availability");
   const DEFAULT_CLINIC_ID = PUBLIC_CLINIC_ID;
   try {
     const admin = createAdminClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
@@ -570,20 +612,27 @@ export async function getCoursesAvailability(): Promise<CourseAvailability[]> {
 
     // 担当固定コースのスタッフ出勤スケジュールをまとめて取得
     const staffIds = Array.from(new Set(courses.map((c) => c.required_staff_id).filter(Boolean))) as string[];
-    const staffSched = new Map<string, { weekdays: number[]; dates: { date: string; available: boolean }[] }>();
+    const staffSched = new Map<string, import("@/lib/staff-availability").StaffSchedule>();
     if (staffIds.length > 0) {
       const { data: staffRows } = await admin
-        .from("reservation_staff").select("id, schedule_based_booking, booking_weekdays")
+        .from("reservation_staff").select("id, schedule_based_booking, booking_weekdays, booking_start_time, booking_end_time")
         .eq("clinic_id", DEFAULT_CLINIC_ID).in("id", staffIds);
       const { data: dateRows } = await admin
-        .from("staff_booking_dates").select("staff_id, date, available")
+        .from("staff_booking_dates").select("staff_id, date, available, start_time, end_time")
         .eq("clinic_id", DEFAULT_CLINIC_ID).in("staff_id", staffIds);
       for (const s of staffRows ?? []) {
         if (!(s as { schedule_based_booking?: boolean }).schedule_based_booking) continue;
         const weekdays = String((s as { booking_weekdays?: string }).booking_weekdays ?? "").split(",").map((x) => x.trim()).filter(Boolean).map(Number);
         const dates = (dateRows ?? []).filter((d: { staff_id: string }) => d.staff_id === (s as { id: string }).id)
-          .map((d: { date: string; available: boolean }) => ({ date: String(d.date).slice(0, 10), available: !!d.available }));
-        staffSched.set((s as { id: string }).id, { weekdays, dates });
+          .map((d: { date: string; available: boolean; start_time?: string | null; end_time?: string | null }) => ({
+            date: String(d.date).slice(0, 10), available: !!d.available,
+            start: normalizeTimeHHMM(d.start_time), end: normalizeTimeHHMM(d.end_time),
+          }));
+        staffSched.set((s as { id: string }).id, {
+          weekdays, dates,
+          defaultStart: normalizeTimeHHMM((s as { booking_start_time?: string | null }).booking_start_time),
+          defaultEnd: normalizeTimeHHMM((s as { booking_end_time?: string | null }).booking_end_time),
+        });
       }
     }
 
@@ -598,7 +647,8 @@ export async function getCoursesAvailability(): Promise<CourseAvailability[]> {
         const key = ymd(d);
         if (holidaySet.has(key)) continue;
         if (sched && !isStaffAvailableOnYmd(key, sched)) continue;
-        const slots = getTimeSlots(d, { slotMinutes, schedule });
+        let slots = getTimeSlots(d, { slotMinutes, schedule });
+        if (sched) slots = filterSlotsByStaffSchedule(slots, d, sched);
         if (slots.length === 0) continue;
         const booked = bookedByDate.get(key) ?? new Set<string>();
         for (let idx = 0; idx < slots.length; idx++) {
