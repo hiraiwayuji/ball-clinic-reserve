@@ -6,12 +6,12 @@ import { ja } from "date-fns/locale";
 import { toast } from "sonner";
 import {
   Loader2, Clock, ChevronLeft, ChevronRight, AlertTriangle, Copy, Link2,
-  Save, Coins, Settings2, CheckCircle2,
+  Save, Coins, Settings2, CheckCircle2, TrendingDown,
 } from "lucide-react";
 import {
-  getAttendanceSettings, setAttendanceSettings, listStaffWages, setStaffWage, listAttendance,
-  OVERTIME_REASONS,
-  type AttendanceConfig, type OwnerStaffWage, type AttendanceRecord,
+  getAttendanceSettings, setAttendanceSettings, listStaffWages, setStaffWage, getAttendanceReport,
+  JUDGMENT_LABEL,
+  type AttendanceConfig, type OwnerStaffWage, type AttendanceReportRecord, type AttendanceSummary, type AttendanceJudgment,
 } from "@/app/actions/attendance";
 
 const COLOR: Record<string, string> = {
@@ -21,7 +21,14 @@ const COLOR: Record<string, string> = {
   slate: "#64748b", gray: "#6b7280",
 };
 const colorOf = (c: string | null) => (c && COLOR[c]) || "#64748b";
-const reasonLabel = (t: string | null) => OVERTIME_REASONS.find((r) => r.value === t)?.label ?? "—";
+const yen = (n: number) => `¥${n.toLocaleString("ja-JP")}`;
+const JUDGMENT_STYLE: Record<AttendanceJudgment, string> = {
+  requested: "bg-sky-50 text-sky-700 border-sky-200",
+  reservation: "bg-emerald-50 text-emerald-700 border-emerald-200",
+  closing: "bg-indigo-50 text-indigo-700 border-indigo-200",
+  valid: "bg-slate-50 text-slate-600 border-slate-200",
+  wasteful: "bg-rose-50 text-rose-700 border-rose-300",
+};
 const TIMES = (() => {
   const out: string[] = [];
   for (let h = 17; h <= 23; h++) for (const m of [0, 15, 30, 45]) out.push(`${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`);
@@ -32,7 +39,8 @@ export default function AttendanceAdminPage() {
   const [month, setMonth] = useState(new Date());
   const [config, setConfig] = useState<AttendanceConfig | null>(null);
   const [wages, setWages] = useState<OwnerStaffWage[]>([]);
-  const [records, setRecords] = useState<AttendanceRecord[]>([]);
+  const [records, setRecords] = useState<AttendanceReportRecord[]>([]);
+  const [summary, setSummary] = useState<AttendanceSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [savingCfg, setSavingCfg] = useState(false);
   const [attendUrl, setAttendUrl] = useState("");
@@ -51,8 +59,8 @@ export default function AttendanceAdminPage() {
 
   useEffect(() => {
     setLoading(true);
-    listAttendance(monthStr)
-      .then((r) => setRecords(r.success ? r.records ?? [] : []))
+    getAttendanceReport(monthStr)
+      .then((r) => { setRecords(r.success ? r.records ?? [] : []); setSummary(r.success ? r.summary ?? null : null); })
       .finally(() => setLoading(false));
   }, [monthStr]);
 
@@ -78,16 +86,6 @@ export default function AttendanceAdminPage() {
     try { await navigator.clipboard.writeText(attendUrl); toast.success("打刻ページのリンクをコピーしました"); }
     catch { toast.error("コピーに失敗しました"); }
   };
-
-  // 残業の集計（見える化）
-  const overtimeRecords = records.filter((r) => r.isOvertime);
-  const overtimeByDate = useMemo(() => {
-    const m = new Map<string, number>();
-    for (const r of overtimeRecords) m.set(r.workDate, (m.get(r.workDate) ?? 0) + 1);
-    return m;
-  }, [overtimeRecords]);
-  // 「被り」=同じ日に2人以上が残業退社（依頼以外）
-  const overlapDays = [...overtimeByDate.entries()].filter(([, n]) => n >= 2).length;
 
   return (
     <div className="max-w-3xl mx-auto px-4 py-6 space-y-5">
@@ -198,10 +196,42 @@ export default function AttendanceAdminPage() {
 
       {/* サマリ */}
       <div className="grid grid-cols-3 gap-3">
-        <SummaryCard label="記録日数" value={`${new Set(records.map((r) => r.workDate)).size}`} tone="slate" />
-        <SummaryCard label="残業の退社" value={`${overtimeRecords.length}`} tone="amber" />
-        <SummaryCard label="被りの日" value={`${overlapDays}`} tone="rose" hint="2人以上が残業した日" />
+        <SummaryCard label="記録日数" value={`${summary?.recordDays ?? 0}`} tone="slate" />
+        <SummaryCard label="残業の退社" value={`${summary?.overtimeCount ?? 0}`} tone="amber" />
+        <SummaryCard label="ムダな被り" value={`${summary?.wastefulCount ?? 0}`} tone="rose" hint="依頼/予約/正当以外" />
       </div>
+
+      {/* コスト（Phase 3） */}
+      {summary && summary.wastefulCount > 0 && (
+        <div className="bg-white rounded-2xl border border-rose-200 p-4 shadow-sm space-y-3">
+          <div className="flex items-center gap-2 text-sm font-black text-rose-700">
+            <TrendingDown className="w-4 h-4" /> ムダな残業のコスト（今月）
+          </div>
+          <div className="grid grid-cols-3 gap-3 text-center">
+            <div className="rounded-xl bg-rose-50 border border-rose-200 p-3">
+              <div className="text-lg font-black text-rose-700">{yen(summary.wastefulFullYen)}</div>
+              <div className="text-[11px] font-bold text-rose-600/80 mt-0.5">満額で払うと</div>
+            </div>
+            <div className="rounded-xl bg-amber-50 border border-amber-200 p-3">
+              <div className="text-lg font-black text-amber-700">{yen(summary.wastefulSplitYen)}</div>
+              <div className="text-[11px] font-bold text-amber-600/80 mt-0.5">折半での支給額</div>
+            </div>
+            <div className="rounded-xl bg-emerald-50 border border-emerald-200 p-3">
+              <div className="text-lg font-black text-emerald-700">{yen(summary.savedYen)}</div>
+              <div className="text-[11px] font-bold text-emerald-600/80 mt-0.5">折半で抑えられる</div>
+            </div>
+          </div>
+          <p className="text-[11px] text-slate-500">
+            「ムダな被り」と判定された残業を、退社目標（{config?.workEndTarget ?? "20:00"}）からの超過時間×時給で計算しています。
+            予約の担当・院長の依頼・正当な理由・締め作業は除いています。
+          </p>
+          {summary.wageMissing && (
+            <p className="text-[11px] text-rose-600 flex items-center gap-1">
+              <AlertTriangle className="w-3 h-3" /> 時給が未設定のスタッフがいるため、金額は実際より少なく出ています。上の欄で時給をご入力ください。
+            </p>
+          )}
+        </div>
+      )}
 
       {/* 一覧 */}
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
@@ -217,12 +247,12 @@ export default function AttendanceAdminPage() {
                 <th className="text-left font-bold px-2 py-2">スタッフ</th>
                 <th className="text-center font-bold px-2 py-2">出勤</th>
                 <th className="text-center font-bold px-2 py-2">退勤</th>
-                <th className="text-left font-bold px-3 py-2">残業の理由</th>
+                <th className="text-left font-bold px-3 py-2">判定・理由</th>
               </tr>
             </thead>
             <tbody>
               {records.map((r) => (
-                <tr key={r.id} className={`border-b border-slate-50 ${r.isOvertime ? "bg-amber-50/60" : ""}`}>
+                <tr key={r.id} className={`border-b border-slate-50 ${r.judgment === "wasteful" ? "bg-rose-50/70" : r.isOvertime ? "bg-amber-50/50" : ""}`}>
                   <td className="px-3 py-2 whitespace-nowrap font-bold text-slate-700">{format(new Date(r.workDate), "M/d(E)", { locale: ja })}</td>
                   <td className="px-2 py-2">
                     <span className="inline-flex items-center gap-1.5">
@@ -233,11 +263,20 @@ export default function AttendanceAdminPage() {
                   <td className="px-2 py-2 text-center text-slate-600">{r.clockInAt ? format(new Date(r.clockInAt), "HH:mm") : "—"}</td>
                   <td className={`px-2 py-2 text-center font-bold ${r.isOvertime ? "text-amber-700" : "text-slate-600"}`}>{r.clockOutAt ? format(new Date(r.clockOutAt), "HH:mm") : "—"}</td>
                   <td className="px-3 py-2">
-                    {r.isOvertime ? (
-                      <span className="inline-flex items-center gap-1 text-xs text-amber-700">
-                        <AlertTriangle className="w-3 h-3" />
-                        {reasonLabel(r.reasonType)}{r.reasonNote ? `（${r.reasonNote}）` : ""}
-                      </span>
+                    {r.isOvertime && r.judgment ? (
+                      <div className="space-y-0.5">
+                        <span className={`inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-full border ${JUDGMENT_STYLE[r.judgment]}`}>
+                          {r.judgment === "wasteful" && <AlertTriangle className="w-3 h-3" />}
+                          {JUDGMENT_LABEL[r.judgment]}
+                        </span>
+                        {r.reasonNote && <span className="block text-[11px] text-slate-500">{r.reasonNote}</span>}
+                        {r.judgment === "wasteful" && (
+                          <span className="block text-[11px] text-rose-600">
+                            残業 {r.overtimeMinutes}分
+                            {r.fullPayYen != null ? ` ／ 満額${yen(r.fullPayYen)}・折半${yen(r.splitPayYen ?? 0)}` : "（時給未設定）"}
+                          </span>
+                        )}
+                      </div>
                     ) : (
                       <span className="text-xs text-slate-400 inline-flex items-center gap-1"><CheckCircle2 className="w-3 h-3" />定時</span>
                     )}
