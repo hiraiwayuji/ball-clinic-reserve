@@ -41,7 +41,15 @@ export default function RemindersWatcher() {
   // ポーリング
   useEffect(() => {
     let cancelled = false;
+    let inFlight = false;
     const poll = async () => {
+      // 裏タブ・非表示中はポーリングしない。触っていない間に認証更新（getUser）が
+      // 走り続けると、トークン回転が複数タブ・複数処理で競合し、Supabase の
+      // 乗っ取り検知でセッションごと失効＝強制ログアウトの原因になるため。
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+      // 前回のポーリングが終わるまで多重実行しない（Auth API が重い時の競合防止）。
+      if (inFlight) return;
+      inFlight = true;
       try {
         const fired = await listFiredReminders();
         if (cancelled) return;
@@ -54,13 +62,21 @@ export default function RemindersWatcher() {
       } catch (e) {
         // RLS/auth エラー時は静かに無視（ログインしてないページ等）
         console.warn("[RemindersWatcher] poll failed", e);
+      } finally {
+        inFlight = false;
       }
     };
     poll();
     const id = setInterval(poll, POLL_INTERVAL_MS);
+    // 裏に回していたタブが再表示されたら即ポーリング（止めていた間の取りこぼし防止）。
+    const onVisible = () => {
+      if (document.visibilityState === "visible") poll();
+    };
+    document.addEventListener("visibilitychange", onVisible);
     return () => {
       cancelled = true;
       clearInterval(id);
+      document.removeEventListener("visibilitychange", onVisible);
     };
   }, []);
 
