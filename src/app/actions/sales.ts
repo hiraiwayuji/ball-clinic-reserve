@@ -108,6 +108,13 @@ export type PendingSalePatient = {
   /** 今月この院で既に医療助成(hagukumi)の会計があるか。
    *  月600円ルールの患者で「今月初回=600円／2回目以降=0円」を出し分けるのに使う。 */
   hagukumiPaidThisMonth: boolean;
+  /** このコースが「実費施術とセットなら無料」コースか（水素など）。bulk画面で無料トグルを出す。 */
+  isFreeWithJihiCourse: boolean;
+  /** 自動判定で「今回は無料（¥0）」を提案するか。
+   *  free_with_jihi コース かつ 当日に実費施術あり かつ 保険施術なし のとき true。 */
+  suisoFreeSuggested: boolean;
+  /** 無料/通常を切り替えるための通常料金（コース価格。初診は first_visit_price）。 */
+  freeWithJihiNormalPrice: number | null;
 };
 
 function getJstDateString(date = new Date()) {
@@ -160,15 +167,34 @@ export async function getTodayPendingSales(dateStr?: string): Promise<{ success:
         .map((a) => a.course_id ?? null)
         .filter((id): id is string => !!id)
     ));
-    type CourseMasterRow = { id: string; name: string; price: number | null; first_visit_price: number | null };
+    type CourseMasterRow = { id: string; name: string; price: number | null; first_visit_price: number | null; free_with_jihi: boolean | null };
     let courseMaster: Map<string, CourseMasterRow> = new Map();
     if (courseIds.length > 0) {
       const { data: courseRows } = await supabase
         .from("reservation_courses")
-        .select("id, name, price, first_visit_price")
+        .select("id, name, price, first_visit_price, free_with_jihi")
         .eq("clinic_id", clinicId)
         .in("id", courseIds);
       courseMaster = new Map((courseRows ?? []).map((c) => [c.id as string, c as CourseMasterRow]));
+    }
+
+    // ── 水素など「実費とセットなら無料」コースの自動判定用に、患者ごとの当日施術の性質を集計 ──
+    // 保険施術 = コース価格が null（保険施術（高校生以下）・自賠責 等／窓口負担は手入力）。
+    // 実費施術 = free_with_jihi でない有料コース（部分施術・トレーニング・小中高実費 等）。
+    // ルール（ぼーるくん）: 水素は「保険施術の人だけ¥500、実費施術の人は無料」。
+    const custDayFlags = new Map<string, { hasHoken: boolean; hasOtherTreatment: boolean }>();
+    for (const apt of appointments as Array<{ course_id?: string | null; customers?: { name?: string } | { name?: string }[] | null }>) {
+      const nm = getAppointmentCustomerName(apt.customers ?? null);
+      if (!nm) continue;
+      const course = apt.course_id ? courseMaster.get(apt.course_id) ?? null : null;
+      const flags = custDayFlags.get(nm) ?? { hasHoken: false, hasOtherTreatment: false };
+      if (course) {
+        // 保険施術（価格 null）。free_with_jihi（水素）自体は除く。
+        if (!course.free_with_jihi && course.price == null) flags.hasHoken = true;
+        // 水素以外の施術が当日にあるか（無料判定は「実費施術のついで」のときだけ）
+        if (!course.free_with_jihi) flags.hasOtherTreatment = true;
+      }
+      custDayFlags.set(nm, flags);
     }
 
     // 指定日の既存売上を取得（名前で照合）
@@ -318,6 +344,24 @@ export async function getTodayPendingSales(dateStr?: string): Promise<{ success:
         amountSource = "empty";
       }
 
+      // ── 水素など「実費とセットなら無料」コースの自動判定 ──
+      // 同日に実費施術あり＆保険施術なし → 今回は無料（¥0・水素（無料）区分）を提案。
+      // 保険施術ありや、水素だけの来院（hasOtherTreatment=false）は通常料金のまま。
+      const isFreeWithJihiCourse = courseRow?.free_with_jihi === true;
+      const dayFlags = custDayFlags.get(customerName);
+      const suisoFreeSuggested =
+        isFreeWithJihiCourse &&
+        !!dayFlags?.hasOtherTreatment &&
+        !dayFlags?.hasHoken;
+      const freeWithJihiNormalPrice = isFreeWithJihiCourse ? reservedCoursePrice : null;
+      if (suisoFreeSuggested) {
+        // 無料を提案：金額0・区分は「水素（無料）」・メモはコース名（無料）
+        amountSource = "course";
+        initialAmount = "0";
+        initialMemo = reservedCourseName ? `${reservedCourseName}（無料）` : "水素（無料）";
+        predictedPaymentTypes = ["suiso_free"];
+      }
+
       pending.push({
         appointmentId: apt.id,
         customerId: custObj?.id ?? null,
@@ -337,6 +381,9 @@ export async function getTodayPendingSales(dateStr?: string): Promise<{ success:
         birthDate: custBirthDate,
         cityName: custCityName,
         hagukumiPaidThisMonth: hagukumiPaidNames.has(customerName),
+        isFreeWithJihiCourse,
+        suisoFreeSuggested,
+        freeWithJihiNormalPrice,
       });
     }
 

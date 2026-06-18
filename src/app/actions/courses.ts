@@ -17,6 +17,10 @@ export type ReservationCourse = {
   price_note?: string | null;
   /** 予約時に「一緒に追加できるメニュー」として提案するか（ボールの水素のような同時追加を汎用化）。 */
   is_bookable_addon?: boolean;
+  /** 実費施術とセットのときは無料にする付帯メニュー（保険施術のときは通常料金）。
+   *  true だと、同じ患者が同日に実費施術を受けていて保険施術が無いとき、
+   *  一括売上入力で「¥0（無料）」を自動提案する（ボールの水素：保険の人だけ¥500）。 */
+  free_with_jihi?: boolean;
   description: string | null;
   is_active: boolean;
   sort_order: number;
@@ -249,6 +253,10 @@ export async function saveCourse(course: Partial<ReservationCourse> & { name: st
   // 担当固定（さみ整体など）。undefined は触らない、null/空は解除。
   if (course.required_staff_id !== undefined) {
     payload.required_staff_id = course.required_staff_id || null;
+  }
+  // 実費とセットなら無料（水素）。undefined は触らない（部分更新のフラグ消失を防ぐ）。
+  if (course.free_with_jihi !== undefined) {
+    payload.free_with_jihi = course.free_with_jihi;
   }
 
   if (course.id) {

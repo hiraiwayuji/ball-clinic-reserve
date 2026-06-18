@@ -474,6 +474,26 @@ function DraftRowItem({
   // 明細モードの合計（フッター以外でも行内に出す）
   const splitTotal = row.lines.reduce((s, l) => s + (parseInt(l.amount || "0", 10) || 0), 0);
 
+  // ── 水素など「実費とセットなら無料」コースの 無料/通常 切替 ──
+  // 無料 = 金額0・区分「水素（無料）」。記録は残るが売上0。未来院にしないのがポイント。
+  const isFreeSuiso = row.paymentTypes.includes("suiso_free");
+  const suisoNormalPrice = row.freeWithJihiNormalPrice ?? row.reservedCoursePrice ?? 0;
+  const setFreeSuiso = () => onChange({
+    ...row,
+    lines: [],
+    editAmount: "0",
+    paymentTypes: ["suiso_free"],
+    editMemo: row.editMemo?.trim() ? row.editMemo : (row.reservedCourseName ? `${row.reservedCourseName}（無料）` : "水素（無料）"),
+    checked: true,
+  });
+  const setPaidSuiso = () => onChange({
+    ...row,
+    lines: [],
+    editAmount: String(suisoNormalPrice),
+    paymentTypes: row.paymentTypes.filter(k => k !== "suiso_free"),
+    checked: true,
+  });
+
   // その場で支払区分を追加
   const [addingCategory, setAddingCategory] = useState(false);
   const [newCategoryLabel, setNewCategoryLabel] = useState("");
@@ -662,6 +682,42 @@ function DraftRowItem({
           明細モード: 区分ごとに金額を分けて複数行入力。
           どちらでも「＋区分を追加」でその場でマスタに新区分を作れる。 */}
       <div className="mt-2 ml-8 space-y-2">
+        {/* 水素など「実費とセットなら無料」コース：無料/通常をワンタップで切替（未来院にしない） */}
+        {row.isFreeWithJihiCourse && (
+          <div className="rounded-lg border border-sky-200 dark:border-sky-800 bg-sky-50/70 dark:bg-sky-950/30 px-2.5 py-2 space-y-1.5">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-[11px] font-bold text-sky-700 dark:text-sky-300">水素の会計：</span>
+              <button
+                type="button"
+                onClick={setFreeSuiso}
+                className={`px-2.5 py-0.5 rounded-md text-[11px] font-bold border transition-all ${
+                  isFreeSuiso
+                    ? "bg-sky-600 text-white border-sky-600"
+                    : "bg-white dark:bg-slate-800 text-sky-700 dark:text-sky-300 border-sky-200 dark:border-sky-700 hover:bg-sky-50"
+                }`}
+              >
+                {isFreeSuiso && <span className="mr-0.5">✓</span>}無料で記録（¥0）
+              </button>
+              <button
+                type="button"
+                onClick={setPaidSuiso}
+                className={`px-2.5 py-0.5 rounded-md text-[11px] font-bold border transition-all ${
+                  !isFreeSuiso
+                    ? "bg-slate-700 text-white border-slate-700"
+                    : "bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-50"
+                }`}
+              >
+                {!isFreeSuiso && <span className="mr-0.5">✓</span>}通常料金（¥{suisoNormalPrice.toLocaleString()}）
+              </button>
+            </div>
+            <p className="text-[10px] text-sky-600/90 dark:text-sky-300/80 leading-snug">
+              {row.suisoFreeSuggested
+                ? "実費施術とセットのため「無料」を提案しています。"
+                : "保険施術ありのため「通常料金」にしています（必要なら無料に切替）。"}
+              無料でも「水素を吸入した」記録は残るので、未来院にしないでください。
+            </p>
+          </div>
+        )}
         {!splitMode ? (
           <div className="flex items-center gap-2 flex-wrap">
             <span className="text-[11px] font-bold text-emerald-600 dark:text-emerald-400">

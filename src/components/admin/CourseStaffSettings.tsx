@@ -233,6 +233,7 @@ function CourseRow({
   const [firstVisitPrice, setFirstVisitPrice] = useState(course.first_visit_price?.toString() ?? "");
   const [priceNote, setPriceNote] = useState(course.price_note ?? "");
   const [isBookableAddon, setIsBookableAddon] = useState(course.is_bookable_addon ?? false);
+  const [freeWithJihi, setFreeWithJihi] = useState(course.free_with_jihi ?? false);
   const [badgeLabel, setBadgeLabel] = useState(course.badge_label ?? "");
   const [sortOrder, setSortOrder] = useState((course.sort_order ?? 0).toString());
   const [category, setCategory] = useState<"jusei" | "shinkyu" | "seitai" | "">(
@@ -261,6 +262,7 @@ function CourseRow({
       first_visit_price: firstVisitPrice ? Number(firstVisitPrice) : null,
       price_note: priceNote.trim() || null,
       is_bookable_addon: isBookableAddon,
+      free_with_jihi: freeWithJihi,
       badge_label: badgeLabel.trim() || null,
       category: category || null,
     });
@@ -373,6 +375,20 @@ function CourseRow({
             <span className="font-bold">予約時に「一緒に追加できるメニュー」として提案する</span>
             <span className="block text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
               ONにすると、他のメニューを予約する患者さんに「＋このメニューも追加しますか？」と表示され、施術のあとに続けて予約できます（ボールの水素と同じ仕組み）。
+            </span>
+          </span>
+        </label>
+        <label className="flex items-start gap-2 text-sm text-slate-700 dark:text-slate-200 cursor-pointer border border-sky-200 dark:border-sky-800 bg-sky-50/50 dark:bg-sky-950/30 rounded-lg p-2.5">
+          <input
+            type="checkbox"
+            checked={freeWithJihi}
+            onChange={e => setFreeWithJihi(e.target.checked)}
+            className="w-4 h-4 accent-sky-600 mt-0.5"
+          />
+          <span>
+            <span className="font-bold">実費施術とセットのときは無料にする（保険施術のときは通常料金）</span>
+            <span className="block text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+              ONにすると、その日に実費施術（部分施術・トレーニング・小中高実費 等）を受けた患者さんは、一括売上入力でこのメニューが自動で「¥0（無料）」になります。保険施術の人は通常料金のまま。受付で「未来院」にせず、無料の記録だけ残せます（ボールの水素用）。
             </span>
           </span>
         </label>
