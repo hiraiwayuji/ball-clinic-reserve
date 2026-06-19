@@ -5,9 +5,13 @@ import { createClient } from "@/lib/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, Clock, Trash2, RefreshCw } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Loader2, Clock, Trash2, RefreshCw, Plus, X } from "lucide-react";
 import { toast } from "sonner";
 import { getMyClinicId } from "@/app/actions/auth";
+import { createWaitlistEntryByStaff } from "@/app/actions/adminReserve";
 
 interface WaitlistEntry {
   id: string;
@@ -29,6 +33,50 @@ export default function WaitlistPage() {
   const [groups, setGroups] = useState<WaitlistGroup[]>([]);
   const [loading, setLoading] = useState(true);
   const [cancelling, setCancelling] = useState<string | null>(null);
+
+  // 受付スタッフが手入力でキャンセル待ちを追加するフォーム
+  const [addOpen, setAddOpen] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [fName, setFName] = useState("");
+  const [fPhone, setFPhone] = useState("");
+  const [fDate, setFDate] = useState("");
+  const [fTime, setFTime] = useState("");
+  const [fVisitType, setFVisitType] = useState("return");
+  const [fNote, setFNote] = useState("");
+
+  const resetForm = () => {
+    setFName(""); setFPhone(""); setFDate(""); setFTime(""); setFVisitType("return"); setFNote("");
+  };
+
+  const handleAdd = async () => {
+    if (!fName.trim() || !fPhone.trim() || !fDate || !fTime) {
+      toast.error("氏名・電話番号・希望日・希望時間を入力してください");
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const fd = new FormData();
+      fd.set("name", fName);
+      fd.set("phone", fPhone);
+      fd.set("date", fDate);
+      fd.set("time", fTime);
+      fd.set("visitType", fVisitType);
+      fd.set("note", fNote);
+      const res = await createWaitlistEntryByStaff(fd);
+      if (res.success) {
+        toast.success("キャンセル待ちに追加しました");
+        setAddOpen(false);
+        resetForm();
+        fetchWaitlist();
+      } else {
+        toast.error(res.error || "追加に失敗しました");
+      }
+    } catch {
+      toast.error("通信エラーが発生しました");
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   const fetchWaitlist = async () => {
     setLoading(true);
@@ -108,11 +156,91 @@ export default function WaitlistPage() {
           <h1 className="text-3xl font-bold tracking-tight">キャンセル待ち管理</h1>
           <p className="text-slate-500 mt-1">時間帯ごとの待機順位を確認できます</p>
         </div>
-        <Button variant="outline" onClick={fetchWaitlist} disabled={loading}>
-          <RefreshCw className={`w-4 h-4 mr-2 ${loading ? "animate-spin" : ""}`} />
-          更新
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button onClick={() => setAddOpen(true)} className="bg-blue-600 hover:bg-blue-700">
+            <Plus className="w-4 h-4 mr-2" />
+            キャンセル待ちを追加
+          </Button>
+          <Button variant="outline" onClick={fetchWaitlist} disabled={loading}>
+            <RefreshCw className={`w-4 h-4 mr-2 ${loading ? "animate-spin" : ""}`} />
+            更新
+          </Button>
+        </div>
       </div>
+
+      {/* 受付スタッフが電話・直接受付のキャンセル待ちを手入力する */}
+      <Dialog open={addOpen} onOpenChange={(o) => { setAddOpen(o); if (!o) resetForm(); }}>
+        <DialogContent className="w-full max-w-md mx-auto rounded-2xl p-0 gap-0 overflow-hidden">
+          <DialogHeader className="px-5 pt-5 pb-4 border-b">
+            <div className="flex items-start justify-between gap-2">
+              <div>
+                <DialogTitle className="text-base font-bold">キャンセル待ちを追加</DialogTitle>
+                <p className="text-sm text-slate-500 mt-0.5">電話・直接受付の希望を登録します</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => { setAddOpen(false); resetForm(); }}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors shrink-0"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          </DialogHeader>
+
+          <div className="px-5 py-4 space-y-4">
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold text-slate-600">患者名 <span className="text-red-500">*</span></Label>
+              <Input value={fName} onChange={(e) => setFName(e.target.value)} placeholder="山田 太郎" className="h-11" />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold text-slate-600">電話番号 <span className="text-red-500">*</span></Label>
+              <Input value={fPhone} onChange={(e) => setFPhone(e.target.value)} type="tel" placeholder="090-0000-0000" className="h-11" />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label className="text-xs font-semibold text-slate-600">希望日 <span className="text-red-500">*</span></Label>
+                <Input value={fDate} onChange={(e) => setFDate(e.target.value)} type="date" className="h-11" />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs font-semibold text-slate-600">希望時間 <span className="text-red-500">*</span></Label>
+                <Input value={fTime} onChange={(e) => setFTime(e.target.value)} type="time" step={300} className="h-11" />
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold text-slate-600">初診 / 再診</Label>
+              <div className="flex gap-2">
+                {[["new", "初診"], ["return", "再診"]].map(([v, label]) => (
+                  <button
+                    key={v}
+                    type="button"
+                    onClick={() => setFVisitType(v)}
+                    className={`flex-1 h-11 rounded-lg border text-sm font-semibold transition-all ${
+                      fVisitType === v
+                        ? v === "new" ? "bg-amber-500 border-amber-500 text-white" : "bg-blue-600 border-blue-600 text-white"
+                        : "border-slate-200 text-slate-600 hover:bg-slate-50"
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold text-slate-600">メモ（任意）</Label>
+              <Input value={fNote} onChange={(e) => setFNote(e.target.value)} placeholder="例: 午前中希望 / 腰痛" className="h-11" />
+            </div>
+          </div>
+
+          <div className="px-5 pb-5 pt-3 border-t space-y-2">
+            <Button onClick={handleAdd} disabled={submitting} className="w-full h-11 bg-blue-600 hover:bg-blue-700 rounded-xl font-bold">
+              {submitting ? "登録中..." : "キャンセル待ちに追加する"}
+            </Button>
+            <Button variant="outline" onClick={() => { setAddOpen(false); resetForm(); }} className="w-full h-10 rounded-xl text-sm">
+              キャンセル
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {loading ? (
         <div className="flex justify-center py-20">

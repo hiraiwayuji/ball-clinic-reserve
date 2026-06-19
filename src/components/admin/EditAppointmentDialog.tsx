@@ -620,8 +620,9 @@ export function EditAppointmentDialog({
                 </Label>
                 <select value={staffId} onChange={(e) => setStaffId(e.target.value)} className={selectClass}>
                   <option value="">指定なし</option>
+                  {/* 受付スタッフ(show_in_timeline=false)は除外。ただし既にこの予約の担当なら表示を維持 */}
                   {staffList
-                    .filter(s => s.is_active || s.id === initialStaffId)
+                    .filter(s => (s.is_active && s.show_in_timeline !== false) || s.id === initialStaffId)
                     .map(s => (
                       <option key={s.id} value={s.id}>
                         {s.name}{!s.is_active ? "（非公開）" : ""}

@@ -815,7 +815,8 @@ export function AddAppointmentDialog({
                 </Label>
                 <select value={staffId} onChange={(e) => setStaffId(e.target.value)} className={selectClass}>
                   <option value="">指定なし</option>
-                  {staffList.filter(s => s.is_active).map(s => (
+                  {/* 受付スタッフ（show_in_timeline=false の受付助手等）は施術担当に出さない */}
+                  {staffList.filter(s => s.is_active && s.show_in_timeline !== false).map(s => (
                     <option key={s.id} value={s.id}>{s.name}</option>
                   ))}
                 </select>
@@ -834,7 +835,7 @@ export function AddAppointmentDialog({
                       className={`${selectClass} flex-1`}
                     >
                       <option value="">追加担当を選択</option>
-                      {staffList.filter(s => s.is_active).map(s => (
+                      {staffList.filter(s => s.is_active && s.show_in_timeline !== false).map(s => (
                         <option key={s.id} value={s.id}>{s.name}</option>
                       ))}
                     </select>

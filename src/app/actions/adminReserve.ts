@@ -200,6 +200,100 @@ export async function sendReviewRequest(appointmentId: string): Promise<{ succes
   return { success: true };
 }
 
+/**
+ * 受付スタッフが手入力でキャンセル待ちを登録する。
+ * 予約サイト経由の waiting（createWaitlistReservation）と同じく
+ * status="waiting" の appointment を作り、/admin/waitlist に並ぶ。
+ * 患者は customers に名寄せ（カルテ番号/電話+氏名/電話単独）or 新規作成。
+ */
+export async function createWaitlistEntryByStaff(formData: FormData) {
+  const { clinicId } = await checkAdminAuth();
+  try {
+    const rawDate = formData.get("date") as string;
+    const time = (formData.get("time") as string) || "";
+    const name = ((formData.get("name") as string) || "").trim();
+    const phone = ((formData.get("phone") as string) || "").trim();
+    const visitType = formData.get("visitType") as string;
+    const note = ((formData.get("note") as string) || "").trim();
+    const medicalRecordNumber = ((formData.get("medicalRecordNumber") as string) || "").trim() || null;
+
+    if (!rawDate || !time || !name || !phone) {
+      return { success: false, error: "氏名・電話番号・希望日・希望時間は必須です" };
+    }
+
+    const supabase = getAdminSupabase();
+    if (!supabase) {
+      return { success: false, error: "サーバー設定エラー（service role key 未設定）" };
+    }
+
+    // ── 顧客の名寄せ（createManualReservation と同じ優先順位） ──
+    let existing: { id: string } | null = null;
+    if (medicalRecordNumber) {
+      const { data } = await supabase
+        .from("customers").select("id")
+        .eq("medical_record_number", medicalRecordNumber).eq("clinic_id", clinicId).maybeSingle();
+      if (data) existing = data;
+    }
+    if (!existing) {
+      const { data } = await supabase
+        .from("customers").select("id")
+        .eq("phone", phone).eq("name", name).eq("clinic_id", clinicId).maybeSingle();
+      if (data) existing = data;
+    }
+    if (!existing) {
+      const { data: byPhone } = await supabase
+        .from("customers").select("id").eq("phone", phone).eq("clinic_id", clinicId);
+      if (byPhone && byPhone.length === 1) existing = { id: byPhone[0].id };
+    }
+
+    let customerId: string;
+    if (existing) {
+      customerId = existing.id;
+      const updateData: { name: string; medical_record_number?: string | null } = { name };
+      if (medicalRecordNumber) updateData.medical_record_number = medicalRecordNumber;
+      await supabase.from("customers").update(updateData).eq("id", customerId).eq("clinic_id", clinicId);
+    } else {
+      const insertData: { name: string; phone: string; clinic_id: string; medical_record_number?: string } = {
+        name, phone, clinic_id: clinicId,
+      };
+      if (medicalRecordNumber) insertData.medical_record_number = medicalRecordNumber;
+      // tenant-isolation-ignore: insertData に clinic_id: clinicId を含む（変数経由のため検知不可）
+      const { data: newCustomer, error: customerErr } = await supabase
+        .from("customers").insert([insertData]).select("id").single();
+      if (customerErr || !newCustomer) {
+        return { success: false, error: `顧客情報の登録に失敗しました: ${customerErr?.message ?? "不明なエラー"}` };
+      }
+      customerId = newCustomer.id;
+    }
+
+    // ── キャンセル待ち（waiting）を作成 ──
+    const startDateTime = `${rawDate}T${time}:00+09:00`;
+    const memo = `【キャンセル待ち・受付登録】${note ? ` ${note}` : ""}`.trim();
+    // tenant-isolation-ignore: insert 行に clinic_id を明示設定済み
+    const { error: aptErr } = await supabase
+      .from("appointments")
+      .insert([{
+        customer_id: customerId,
+        start_time: startDateTime,
+        end_time: startDateTime,
+        memo,
+        is_first_visit: visitType === "new",
+        status: "waiting",
+        clinic_id: clinicId,
+      }]);
+
+    if (aptErr) {
+      return { success: false, error: `キャンセル待ちの登録に失敗しました: ${aptErr.message}` };
+    }
+
+    revalidatePath("/admin/waitlist");
+    return { success: true };
+  } catch (err) {
+    console.error("[createWaitlistEntryByStaff]", err);
+    return { success: false, error: "エラーが発生しました" };
+  }
+}
+
 export async function createManualReservation(formData: FormData) {
   const { clinicId } = await checkAdminAuth();
   try {
