@@ -3,7 +3,7 @@
 import { useEffect, useState, useTransition } from "react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
-import { Sparkles, AlertTriangle, RefreshCcw, CalendarDays, Target, Clock, ArrowRight, ListTodo, X } from "lucide-react";
+import { Sparkles, AlertTriangle, RefreshCcw, CalendarDays, Target, Clock, ArrowRight, ListTodo, X, CheckCircle2 } from "lucide-react";
 import {
   generateOwnerBriefing,
   dismissAlertToTask,
@@ -15,6 +15,9 @@ import { getMedicalAidReviewReminder, markMedicalAidReviewed } from "@/app/actio
 import TeamTaskLoadPanel from "./TeamTaskLoadPanel";
 import { toast } from "sonner";
 import { HeartHandshake } from "lucide-react";
+
+// 別メニュー確認の手順
+type MultiMenuStep = "confirm" | "billing";
 
 const CATEGORY_META: Record<AlertCategory, { label: string; icon: typeof AlertTriangle; tone: string; toneBg: string }> = {
   urgent:    { label: "緊急",       icon: AlertTriangle, tone: "text-rose-700 dark:text-rose-300",     toneBg: "bg-rose-100 dark:bg-rose-900/40 border-rose-300" },
@@ -37,6 +40,7 @@ export default function OwnerSecretaryWidget() {
   });
   const [selectedAlert, setSelectedAlert] = useState<OwnerAlert | null>(null);
   const [dismissing, setDismissing] = useState(false);
+  const [multiMenuStep, setMultiMenuStep] = useState<MultiMenuStep>("confirm");
   // 年度替わりの「医療費助成 見直し」リマインド
   const [aidReminder, setAidReminder] = useState<{ needsReview: boolean; fiscalYear: number } | null>(null);
 
@@ -205,7 +209,7 @@ export default function OwnerSecretaryWidget() {
                           <li key={i}>
                             <button
                               type="button"
-                              onClick={() => clickable && setSelectedAlert(a)}
+                              onClick={() => { if (clickable) { setSelectedAlert(a); setMultiMenuStep("confirm"); } }}
                               className={`w-full text-left text-sm ${meta.tone} ${clickable ? "hover:bg-white/40 dark:hover:bg-black/20 rounded px-1 -mx-1 transition-colors cursor-pointer" : "cursor-default"}`}
                               disabled={!clickable}
                             >
@@ -267,6 +271,7 @@ export default function OwnerSecretaryWidget() {
             className="bg-white dark:bg-slate-900 rounded-xl shadow-xl max-w-md w-full p-5 space-y-4"
             onClick={(e) => e.stopPropagation()}
           >
+            {/* ヘッダー */}
             <div className="flex items-start justify-between gap-3">
               <div className="flex items-center gap-2 min-w-0">
                 {(() => {
@@ -283,42 +288,140 @@ export default function OwnerSecretaryWidget() {
               <button
                 type="button"
                 onClick={() => !dismissing && setSelectedAlert(null)}
-                className="text-slate-400 hover:text-slate-600 text-xl leading-none shrink-0"
+                className="text-slate-400 hover:text-slate-600 shrink-0"
                 disabled={dismissing}
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
-            <p className="text-sm text-slate-800 dark:text-slate-100 whitespace-pre-wrap leading-relaxed">
-              {selectedAlert.message}
-            </p>
-            <div className="grid grid-cols-1 gap-2 pt-2">
-              {selectedAlert.actionUrl && (
-                <Link
-                  href={selectedAlert.actionUrl}
-                  className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold transition-colors"
-                  onClick={() => setSelectedAlert(null)}
-                >
-                  <ArrowRight className="w-4 h-4" />
-                  解決ページへ移動
-                </Link>
-              )}
-              {selectedAlert.id && (
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={handleDismissToTask}
-                  disabled={dismissing}
-                  className="gap-2"
-                >
-                  <ListTodo className="w-4 h-4" />
-                  {dismissing ? "登録中..." : "今は解決しない（タスクに降格）"}
-                </Button>
-              )}
-              <p className="text-xs text-slate-500 dark:text-slate-400 text-center pt-1">
-                「タスクに降格」を選ぶと /admin/tasks に登録され、ここからは消えます
-              </p>
-            </div>
+
+            {/* 別メニュー確認フロー */}
+            {selectedAlert.multiMenuData ? (
+              <div className="space-y-4">
+                {multiMenuStep === "confirm" ? (
+                  <>
+                    <div className="rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 p-3 space-y-1">
+                      <p className="text-sm font-bold text-slate-800 dark:text-slate-100">
+                        {selectedAlert.multiMenuData.name}様
+                      </p>
+                      <p className="text-xs text-slate-500 dark:text-slate-400">{selectedAlert.multiMenuData.date}</p>
+                      {selectedAlert.multiMenuData.times.map((t, i) => (
+                        <p key={i} className="text-xs text-slate-700 dark:text-slate-300">
+                          {t}　{selectedAlert.multiMenuData!.courses[i] || "（メニュー不明）"}
+                        </p>
+                      ))}
+                    </div>
+                    <p className="text-sm font-bold text-slate-800 dark:text-slate-100">
+                      この2件は同一人物の別メニュー（ダブル施術・水素など）ですか？
+                    </p>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setMultiMenuStep("billing")}
+                        className="py-2.5 rounded-xl text-sm font-bold bg-blue-500 hover:bg-blue-600 text-white transition"
+                      >
+                        はい
+                      </button>
+                      <Link
+                        href={selectedAlert.actionUrl ?? "#"}
+                        onClick={() => setSelectedAlert(null)}
+                        className="py-2.5 rounded-xl text-sm font-bold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 hover:bg-slate-200 dark:hover:bg-slate-700 transition text-center"
+                      >
+                        いいえ（確認する）
+                      </Link>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-sm font-bold text-slate-800 dark:text-slate-100">
+                      水素・ダブル施術の分の会計は¥0ですか？
+                    </p>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                      確認後、売上記帳で¥0入力またはスキップしてください。
+                    </p>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          toast.success(`${selectedAlert.multiMenuData!.name}様を同一人物・別メニューとして処理しました。¥0で会計してください。`);
+                          setBriefing((prev) => {
+                            if (!prev?.alertsV2) return prev;
+                            return {
+                              ...prev,
+                              alertsV2: prev.alertsV2.filter((a) => a.id !== selectedAlert.id),
+                              alerts: prev.alerts.filter((m) => m !== selectedAlert.message),
+                            };
+                          });
+                          setSelectedAlert(null);
+                        }}
+                        className="py-2.5 rounded-xl text-sm font-bold bg-emerald-500 hover:bg-emerald-600 text-white transition"
+                      >
+                        はい（¥0）
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          toast.success(`${selectedAlert.multiMenuData!.name}様を同一人物・別メニューとして処理しました。通常通り会計してください。`);
+                          setBriefing((prev) => {
+                            if (!prev?.alertsV2) return prev;
+                            return {
+                              ...prev,
+                              alertsV2: prev.alertsV2.filter((a) => a.id !== selectedAlert.id),
+                              alerts: prev.alerts.filter((m) => m !== selectedAlert.message),
+                            };
+                          });
+                          setSelectedAlert(null);
+                        }}
+                        className="py-2.5 rounded-xl text-sm font-bold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 hover:bg-slate-200 dark:hover:bg-slate-700 transition"
+                      >
+                        いいえ（別途会計）
+                      </button>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setMultiMenuStep("confirm")}
+                      className="text-xs text-slate-400 hover:text-slate-600 w-full text-center"
+                    >
+                      ← 戻る
+                    </button>
+                  </>
+                )}
+              </div>
+            ) : (
+              /* 通常アラートの詳細 */
+              <>
+                <p className="text-sm text-slate-800 dark:text-slate-100 whitespace-pre-wrap leading-relaxed">
+                  {selectedAlert.message}
+                </p>
+                <div className="grid grid-cols-1 gap-2 pt-2">
+                  {selectedAlert.actionUrl && (
+                    <Link
+                      href={selectedAlert.actionUrl}
+                      className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold transition-colors"
+                      onClick={() => setSelectedAlert(null)}
+                    >
+                      <ArrowRight className="w-4 h-4" />
+                      解決ページへ移動
+                    </Link>
+                  )}
+                  {selectedAlert.id && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={handleDismissToTask}
+                      disabled={dismissing}
+                      className="gap-2"
+                    >
+                      <ListTodo className="w-4 h-4" />
+                      {dismissing ? "登録中..." : "今は解決しない（タスクに降格）"}
+                    </Button>
+                  )}
+                  <p className="text-xs text-slate-500 dark:text-slate-400 text-center pt-1">
+                    「タスクに降格」を選ぶと /admin/tasks に登録され、ここからは消えます
+                  </p>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}

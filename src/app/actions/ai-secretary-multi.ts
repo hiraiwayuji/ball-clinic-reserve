@@ -48,6 +48,14 @@ export type OwnerAlert = {
   id?: string;
   /** タップで遷移する解決ページの URL */
   actionUrl?: string;
+  /** 同日別メニュー確認フロー用のデータ */
+  multiMenuData?: {
+    name: string;
+    date: string;
+    ids: string[];
+    times: string[];   // "HH:mm" 形式
+    courses: string[]; // コース名
+  };
 };
 
 export type OwnerBriefing = {
@@ -103,7 +111,7 @@ export async function generateOwnerBriefing(): Promise<{ success: boolean; brief
     // 違和感検知: 今日〜2週間先の予約（顧客名・電話を結合）
     sb
       .from("appointments")
-      .select("id, start_time, customer_id, customers(id, name, phone)")
+      .select("id, start_time, customer_id, course_name, customers(id, name, phone)")
       .eq("clinic_id", auth.clinicId)
       .neq("status", "cancelled")
       .gte("start_time", `${todayStr}T00:00:00+09:00`)
@@ -163,26 +171,43 @@ export async function generateOwnerBriefing(): Promise<{ success: boolean; brief
   }
 
   // ── 違和感検知（予約・顧客の整合性チェック） ──
-  // 1) 同じ日に同じ顧客の予約が複数（重複疑い）
-  type ApptRow = { id: string; start_time: string; customer_id: string | null; customers: { id: string; name: string; phone: string | null } | { id: string; name: string; phone: string | null }[] | null };
+  // 1) 同じ日に同じ顧客の予約が複数
+  //    - 同時刻/近接（30分以内）→ 真の重複エラーとして緊急アラート
+  //    - 前後に分かれている（30分超）→ ダブル施術/水素など別メニューの可能性大 → 確認フローへ
+  type ApptRow = { id: string; start_time: string; customer_id: string | null; course_name?: string | null; customers: { id: string; name: string; phone: string | null } | { id: string; name: string; phone: string | null }[] | null };
   const upcoming: ApptRow[] = (upcomingRes.data ?? []) as any[];
   const pickCustomer = (c: ApptRow["customers"]) => Array.isArray(c) ? c[0] : c;
-  const sameDayMap = new Map<string, { name: string; date: string; ids: string[] }>();
+  const sameDayMap = new Map<string, { name: string; date: string; ids: string[]; times: number[]; timeStrs: string[]; courses: string[] }>();
   for (const a of upcoming) {
     const cust = pickCustomer(a.customers);
     if (!cust?.name) continue;
-    const dateKey = a.start_time.slice(0, 10); // YYYY-MM-DD（JST 想定で UTC 寄りでもザックリ把握）
+    const dateKey = a.start_time.slice(0, 10);
     const key = `${dateKey}|${cust.id ?? cust.name}`;
-    const cur = sameDayMap.get(key) ?? { name: cust.name, date: dateKey, ids: [] };
+    const cur = sameDayMap.get(key) ?? { name: cust.name, date: dateKey, ids: [], times: [], timeStrs: [], courses: [] };
     cur.ids.push(a.id);
+    cur.times.push(new Date(a.start_time).getTime());
+    // HH:mm（JST）
+    cur.timeStrs.push(new Date(a.start_time).toLocaleTimeString("ja-JP", { timeZone: "Asia/Tokyo", hour: "2-digit", minute: "2-digit", hour12: false }));
+    cur.courses.push(a.course_name ?? "");
     sameDayMap.set(key, cur);
   }
-  const duplicates = [...sameDayMap.values()].filter((v) => v.ids.length >= 2);
-  if (duplicates.length > 0) {
-    const head = duplicates.slice(0, 3);
-    const tail = duplicates.length > 3 ? `（他 ${duplicates.length - 3} 件）` : "";
-    // 最初の重複を actionUrl のターゲットにする
-    const first = duplicates[0];
+  const allDuplicates = [...sameDayMap.values()].filter((v) => v.ids.length >= 2);
+  const trueDuplicates = allDuplicates.filter((d) => {
+    // いずれか2件が30分以内 → 真の重複と判定
+    for (let i = 0; i < d.times.length; i++) {
+      for (let j = i + 1; j < d.times.length; j++) {
+        if (Math.abs(d.times[i] - d.times[j]) < 30 * 60 * 1000) return true;
+      }
+    }
+    return false;
+  });
+  const multiMenuCandidates = allDuplicates.filter((d) => !trueDuplicates.includes(d));
+
+  // 真の重複は緊急アラート
+  if (trueDuplicates.length > 0) {
+    const head = trueDuplicates.slice(0, 3);
+    const tail = trueDuplicates.length > 3 ? `（他 ${trueDuplicates.length - 3} 件）` : "";
+    const first = trueDuplicates[0];
     pushAlert(
       "urgent",
       `同じ日に同名の予約が重複しています。確認してください: ${head
@@ -193,6 +218,24 @@ export async function generateOwnerBriefing(): Promise<{ success: boolean; brief
         actionUrl: `/admin/appointments?date=${first.date}&q=${encodeURIComponent(first.name)}`,
       }
     );
+  }
+
+  // 別メニュー候補は確認フローアラート（緊急ではなく「今週」）
+  for (const d of multiMenuCandidates) {
+    const courseLabel = [...new Set(d.courses.filter(Boolean))].join("・") || "複数メニュー";
+    alertsV2.push({
+      category: "thisWeek",
+      message: `${d.date} ${d.name}様に同日で${d.ids.length}件の予約があります（${courseLabel}）。同一人物の別メニューですか？`,
+      id: `multi-menu-${d.date}-${d.name}`,
+      actionUrl: `/admin/appointments?date=${d.date}&q=${encodeURIComponent(d.name)}`,
+      multiMenuData: {
+        name: d.name,
+        date: d.date,
+        ids: d.ids,
+        times: d.timeStrs,
+        courses: d.courses,
+      },
+    });
   }
 
   // 2) 同一電話番号で別名義の顧客（家族予約 or 入力ミスの疑い）
