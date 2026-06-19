@@ -525,14 +525,27 @@ export default function CounterPage() {
 
   const isViewingToday = isToday(targetDate);
 
-  // 統計
-  const stats = {
-    total: appointments.length,
-    waiting: appointments.filter(a => a.checkin_status === null).length,
-    arrived: appointments.filter(a => a.checkin_status === "arrived").length,
-    inTreatment: appointments.filter(a => a.checkin_status === "in_treatment").length,
-    done: appointments.filter(a => a.checkin_status === "done").length,
-  };
+  // 統計（同一患者の複数メニューは1人としてカウント）
+  const STATUS_ORDER: (CheckinStatus | null)[] = [null, "arrived", "in_treatment", "done"];
+  const patientGroups = new Map<string, typeof appointments>();
+  for (const apt of appointments) {
+    const key = apt.customers?.id ?? `name:${apt.customers?.name ?? apt.id}`;
+    if (!patientGroups.has(key)) patientGroups.set(key, []);
+    patientGroups.get(key)!.push(apt);
+  }
+  const stats = { total: patientGroups.size, waiting: 0, arrived: 0, inTreatment: 0, done: 0 };
+  for (const apts of patientGroups.values()) {
+    // 全施術が完了して初めて「完了」扱い。1つでも前のステータスがあればそちらを優先
+    const minStatus = apts.reduce<CheckinStatus | null>((worst, a) => {
+      const wi = STATUS_ORDER.indexOf(worst);
+      const ai = STATUS_ORDER.indexOf(a.checkin_status);
+      return ai < wi ? a.checkin_status : worst;
+    }, "done");
+    if (minStatus === null) stats.waiting++;
+    else if (minStatus === "arrived") stats.arrived++;
+    else if (minStatus === "in_treatment") stats.inTreatment++;
+    else stats.done++;
+  }
 
   const allDone = stats.total > 0 && stats.done === stats.total;
   const [celebrationShown, setCelebrationShown] = useState(false);

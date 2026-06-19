@@ -444,19 +444,29 @@ export async function getMonthAnalytics(year: number, month: number): Promise<Mo
     byCategory[r.category] = (byCategory[r.category] ?? 0) + r.amount;
   });
 
-  // 来院数（予約ベース）
+  // 来院数（予約ベース・同一患者の複数メニューは1人扱い）
   const { data: apptRows } = await supabase
     .from("appointments")
-    .select("is_first_visit")
+    .select("is_first_visit, customer_id")
     .eq("clinic_id", clinicId)
     .gte("start_time", startTs)
     .lte("start_time", endTs)
     .neq("status", "cancelled");
   const visits = apptRows ?? [];
-  const newPatients = visits.filter((a) => a.is_first_visit).length;
+  // customer_id でユニーク化。nullは予約単位で1人ずつカウント
+  const seenIds = new Set<string>();
+  let totalVisits = 0;
+  let newPatients = 0;
+  for (const v of visits) {
+    if (v.customer_id) {
+      if (seenIds.has(v.customer_id)) continue;
+      seenIds.add(v.customer_id);
+    }
+    totalVisits++;
+    if (v.is_first_visit) newPatients++;
+  }
 
   const totalRevenue = cash + insurance + otherIncome;
-  const totalVisits = visits.length;
   const cashVisits = (cashRows ?? []).length;
 
   // 平均来院数の分母は「営業日数」: closed_weekdays に含まれず、
