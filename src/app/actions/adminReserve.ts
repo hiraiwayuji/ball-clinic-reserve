@@ -1791,3 +1791,53 @@ export async function classifyRemainingAsApproved(): Promise<{ success: boolean;
     return { success: false, count: 0, error: "予期せぬエラーが発生しました" };
   }
 }
+
+/** 指定IDのキャンセルをまとめて仕分け */
+export async function classifyByIds(
+  ids: string[],
+  kind: "unexcused" | "approved" | "set_removed",
+): Promise<{ success: boolean; count: number; blockedPatients?: { name: string; until: string }[]; error?: string }> {
+  if (!ids.length) return { success: true, count: 0 };
+  try {
+    const auth = await checkAdminAuth();
+    const supabase = getAdminSupabase();
+    if (!supabase) return { success: false, count: 0, error: "サーバー設定エラー" };
+    const { data, error } = await supabase
+      .from("appointments")
+      .update({ cancel_kind: kind })
+      .eq("clinic_id", auth.clinicId)
+      .in("id", ids)
+      .select("id, customer_id");
+    if (error) return { success: false, count: 0, error: error.message };
+    const count = data?.length ?? 0;
+    await writeAudit({
+      clinicId: auth.clinicId,
+      actorUserId: auth.userId,
+      actorEmail: auth.email,
+      actorRole: auth.role,
+      actionType: "appointment.cancel_classify_bulk",
+      targetTable: "appointments",
+      targetId: null,
+      before: null,
+      after: { cancel_kind: kind, ids, count },
+    });
+    revalidatePath("/admin/dashboard");
+    revalidatePath("/admin/customers");
+
+    // 無断の場合のみ自動停止チェック
+    const blockedPatients: { name: string; until: string }[] = [];
+    if (kind === "unexcused") {
+      const customerIds = [...new Set((data ?? []).map((r) => r.customer_id).filter(Boolean))];
+      for (const customerId of customerIds) {
+        const res = await classifyCancellation(ids[0], kind); // 個別チェック用に再利用
+        if (res.blockedUntil && res.customerName) {
+          blockedPatients.push({ name: res.customerName, until: res.blockedUntil });
+        }
+      }
+    }
+    return { success: true, count, blockedPatients };
+  } catch (err) {
+    console.error("classifyByIds error:", err);
+    return { success: false, count: 0, error: "予期せぬエラーが発生しました" };
+  }
+}
