@@ -13,6 +13,8 @@ import {
   type ShiftStaff, type ShiftDays,
 } from "@/app/actions/staff-shift-requests";
 import { CLINIC_CONFIG } from "@/lib/clinic-config";
+import { findConsecutiveSameWeekdayOffs } from "@/lib/shift-rules";
+import { AlertTriangle } from "lucide-react";
 
 type Cell = "none" | "work" | "off";
 
@@ -94,10 +96,18 @@ export default function ShiftRequestPage() {
   );
   const offCount = Object.values(days).filter((v) => !v.available).length;
 
+  // 同じ曜日を連続週で休み希望にしているか（→ 連絡事項に理由が必須）
+  const consecutiveOffDows = useMemo(() => findConsecutiveSameWeekdayOffs(days), [days]);
+  const needsReason = consecutiveOffDows.length > 0 && !note.trim();
+
   const handleSubmit = async () => {
     if (!staffId) { toast.error("お名前を選んでください"); return; }
     if (workDays.length === 0 && offCount === 0) {
       toast.error("出勤できる日を1日以上選んでください");
+      return;
+    }
+    if (needsReason) {
+      toast.error(`同じ曜日（${consecutiveOffDows.join("・")}）を続けてお休み希望にする場合は、連絡事項に理由をご記入ください。`);
       return;
     }
     setSubmitting(true);
@@ -240,15 +250,34 @@ export default function ShiftRequestPage() {
           </div>
         )}
 
+        {/* 同じ曜日の連続休み 注意 */}
+        {consecutiveOffDows.length > 0 && (
+          <div className={`rounded-2xl border p-4 flex items-start gap-2.5 ${needsReason ? "bg-amber-50 border-amber-300" : "bg-emerald-50 border-emerald-300"}`}>
+            <AlertTriangle className={`w-5 h-5 shrink-0 mt-0.5 ${needsReason ? "text-amber-500" : "text-emerald-500"}`} />
+            <div className="text-sm">
+              <p className={`font-bold ${needsReason ? "text-amber-800" : "text-emerald-800"}`}>
+                同じ曜日（{consecutiveOffDows.join("・")}）を続けてお休み希望にしています
+              </p>
+              <p className={`mt-0.5 ${needsReason ? "text-amber-700" : "text-emerald-700"}`}>
+                {needsReason
+                  ? "特別な理由がある場合のみ可能です。下の「連絡事項」に理由をご記入ください。"
+                  : "理由をご記入いただきありがとうございます。このまま提出できます。"}
+              </p>
+            </div>
+          </div>
+        )}
+
         {/* メモ */}
-        <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm">
+        <div className={`bg-white rounded-2xl border p-4 shadow-sm ${needsReason ? "border-amber-400 ring-1 ring-amber-300" : "border-slate-200"}`}>
           <label className="block">
-            <span className="text-xs font-bold text-slate-600">⑤ 連絡事項（任意）</span>
+            <span className="text-xs font-bold text-slate-600">
+              ⑤ 連絡事項{needsReason ? <span className="text-amber-600">（理由のご記入をお願いします）</span> : "（任意）"}
+            </span>
             <textarea
               value={note}
               onChange={(e) => setNote(e.target.value)}
               rows={2}
-              placeholder="例：第2土曜は午前のみ希望、など"
+              placeholder={needsReason ? "例：通院のため毎週○曜は休みたい、など" : "例：第2土曜は午前のみ希望、など"}
               className="mt-1.5 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm bg-white"
             />
           </label>
@@ -261,10 +290,10 @@ export default function ShiftRequestPage() {
           </div>
           <button
             onClick={handleSubmit}
-            disabled={submitting || !staffId}
+            disabled={submitting || !staffId || needsReason}
             className="w-full h-14 rounded-2xl bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-base font-black shadow-lg"
           >
-            {submitting ? "送信中..." : "この内容で提出する"}
+            {submitting ? "送信中..." : needsReason ? "連絡事項に理由をご記入ください" : "この内容で提出する"}
           </button>
         </div>
       </div>

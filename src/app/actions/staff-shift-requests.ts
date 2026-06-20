@@ -5,6 +5,7 @@ import { PUBLIC_CLINIC_ID } from "@/lib/default-clinic-id";
 import { CLINIC_CONFIG } from "@/lib/clinic-config";
 import { pushLineToOwners } from "@/lib/admin-notify";
 import { checkAdminAuth } from "@/app/actions/auth";
+import { findConsecutiveSameWeekdayOffs } from "@/lib/shift-rules";
 
 /**
  * スタッフ月次出勤希望（休み希望アンケート）。
@@ -79,6 +80,16 @@ export async function submitShiftRequest(input: {
   if (!staffId || !/^\d{4}-\d{2}$/.test(month)) {
     return { success: false, error: "入力が不正です" };
   }
+
+  // 休み希望ルール：同じ曜日を連続週で休む場合は、連絡事項に理由が必須
+  const consecutiveDows = findConsecutiveSameWeekdayOffs(days);
+  if (consecutiveDows.length > 0 && !(note && note.trim())) {
+    return {
+      success: false,
+      error: `同じ曜日（${consecutiveDows.join("・")}）を続けてお休み希望にする場合は、特別な理由が必要です。\n連絡事項に理由をご記入のうえ、もう一度送信してください。`,
+    };
+  }
+
   const db = admin();
 
   // staffId が自院の実在アクティブスタッフかを検証（共通リンクの最低限の防御）
