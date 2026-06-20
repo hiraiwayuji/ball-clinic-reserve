@@ -73,7 +73,6 @@ export default function OwnerSecretaryWidget() {
       });
       if (res.success) {
         toast.success("タスクに登録しました（/admin/tasks で確認できます）");
-        // ローカルで該当 alert を即時除外
         setBriefing(prev => {
           if (!prev?.alertsV2) return prev;
           return {
@@ -91,6 +90,17 @@ export default function OwnerSecretaryWidget() {
     }
   }
 
+  function dismissMultiMenu(a: OwnerAlert) {
+    setBriefing((prev) => {
+      if (!prev?.alertsV2) return prev;
+      return {
+        ...prev,
+        alertsV2: prev.alertsV2.filter((x) => x.id !== a.id),
+        alerts: prev.alerts.filter((m) => m !== a.message),
+      };
+    });
+  }
+
   function load() {
     setError(null);
     startTransition(async () => {
@@ -105,7 +115,6 @@ export default function OwnerSecretaryWidget() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // alertsV2 がある場合はカテゴリ別、ない場合は従来通り
   const grouped: Record<AlertCategory, OwnerAlert[]> = {
     urgent: [],
     thisWeek: [],
@@ -138,7 +147,7 @@ export default function OwnerSecretaryWidget() {
 
       {error && <p className="text-sm text-rose-600">{error}</p>}
 
-      {/* 年度替わりの医療費助成 見直しリマインド（4月以降・当年度未確認のとき） */}
+      {/* 年度替わりの医療費助成 見直しリマインド */}
       {aidReminder?.needsReview && (
         <div className="mb-4 flex items-start gap-3 rounded-xl border border-emerald-300 bg-emerald-50 dark:bg-emerald-900/20 dark:border-emerald-800 px-4 py-3">
           <HeartHandshake className="w-5 h-5 text-emerald-600 dark:text-emerald-300 shrink-0 mt-0.5" />
@@ -185,6 +194,10 @@ export default function OwnerSecretaryWidget() {
                 const VISIBLE = 3;
                 const visibleItems = isExpanded ? items : items.slice(0, VISIBLE);
                 const hiddenCount = items.length - visibleItems.length;
+
+                /* multiMenu が2件以上あれば一括ボタンを出す */
+                const multiItems = items.filter((a) => !!a.multiMenuData);
+
                 return (
                   <div key={cat} className={`rounded-xl border ${meta.toneBg}`}>
                     <button
@@ -204,46 +217,99 @@ export default function OwnerSecretaryWidget() {
                     </button>
 
                     {/* 別メニュー確認アラートが複数あるときの一括ボタン */}
-                    {(() => {
-                      const multiItems = items.filter((a) => !!a.multiMenuData);
-                      if (multiItems.length < 2) return null;
-                      return (
-                        <div className="px-3 pb-2">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setBriefing((prev) => {
-                                if (!prev?.alertsV2) return prev;
-                                const removeIds = new Set(multiItems.map((a) => a.id));
-                                return {
-                                  ...prev,
-                                  alertsV2: prev.alertsV2.filter((a) => !removeIds.has(a.id)),
-                                  alerts: prev.alerts.filter((m) => !multiItems.some((a) => a.message === m)),
-                                };
-                              });
-                              toast.success(`${multiItems.length}件をまとめて「同一人物・別メニュー」として処理しました`);
-                            }}
-                            className="w-full py-2 rounded-lg text-xs font-bold bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-700 hover:bg-amber-200 dark:hover:bg-amber-900/60 transition"
-                          >
-                            ✓ 上記 {multiItems.length}件をまとめて「同一人物・別メニュー」として処理する
-                          </button>
-                        </div>
-                      );
-                    })()}
+                    {multiItems.length >= 2 && (
+                      <div className="px-3 pb-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setBriefing((prev) => {
+                              if (!prev?.alertsV2) return prev;
+                              const removeIds = new Set(multiItems.map((a) => a.id));
+                              return {
+                                ...prev,
+                                alertsV2: prev.alertsV2.filter((a) => !removeIds.has(a.id)),
+                                alerts: prev.alerts.filter((m) => !multiItems.some((a) => a.message === m)),
+                              };
+                            });
+                            toast.success(`${multiItems.length}件をまとめて「同一人物・別メニュー」として処理しました`);
+                          }}
+                          className="w-full py-2 rounded-lg text-xs font-bold bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-700 hover:bg-amber-200 dark:hover:bg-amber-900/60 transition"
+                        >
+                          ✓ 上記 {multiItems.length}件をまとめて「同一人物・別メニュー」として処理する
+                        </button>
+                      </div>
+                    )}
 
-                    <ul className="px-3 pb-2 space-y-1">
+                    <ul className="px-3 pb-2 space-y-1.5">
                       {visibleItems.map((a, i) => {
-                        const clickable = !!a.id || !!a.actionUrl;
+                        /* --- 別メニュー確認: インラインで処理できるカード --- */
+                        if (a.multiMenuData) {
+                          const d = a.multiMenuData;
+                          return (
+                            <li key={i} className="rounded-lg border border-amber-200 dark:border-amber-700 bg-white/60 dark:bg-black/20 px-3 py-2 space-y-1.5">
+                              <p className={`text-sm font-bold ${meta.tone}`}>{d.name}様</p>
+                              <div className="space-y-0.5">
+                                {d.times.map((t, ti) => (
+                                  <p key={ti} className="text-xs text-slate-600 dark:text-slate-300">
+                                    {t}　{d.courses[ti] ?? "（メニュー不明）"}
+                                  </p>
+                                ))}
+                              </div>
+                              <div className="flex items-center gap-2 pt-0.5">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    dismissMultiMenu(a);
+                                    toast.success(`${d.name}様を同一人物・別メニューとして処理しました`);
+                                  }}
+                                  className="flex-1 py-1.5 rounded-lg text-xs font-bold bg-blue-500 hover:bg-blue-600 text-white transition"
+                                >
+                                  ✓ 同一人物（別メニュー）
+                                </button>
+                                {a.actionUrl && (
+                                  <Link
+                                    href={a.actionUrl}
+                                    className="px-2.5 py-1.5 rounded-lg text-xs font-bold bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:bg-slate-200 dark:hover:bg-slate-700 transition"
+                                  >
+                                    確認→
+                                  </Link>
+                                )}
+                              </div>
+                            </li>
+                          );
+                        }
+
+                        /* --- 通常アラート（actionUrl あり → インラインリンク） --- */
+                        if (a.actionUrl) {
+                          return (
+                            <li key={i} className="flex items-start gap-2">
+                              <span className={`flex-1 text-sm ${meta.tone} leading-snug`}>・{a.message}</span>
+                              <Link
+                                href={a.actionUrl}
+                                className={`shrink-0 inline-flex items-center gap-1 text-xs font-bold px-2 py-1 rounded-lg transition whitespace-nowrap ${
+                                  cat === "urgent"
+                                    ? "bg-rose-100 dark:bg-rose-900/40 text-rose-700 dark:text-rose-300 hover:bg-rose-200"
+                                    : "bg-sky-100 dark:bg-sky-900/40 text-sky-700 dark:text-sky-300 hover:bg-sky-200"
+                                }`}
+                              >
+                                確認 <ArrowRight className="w-3 h-3" />
+                              </Link>
+                            </li>
+                          );
+                        }
+
+                        /* --- 通常アラート（モーダルで詳細） --- */
+                        const hasAction = !!a.id;
                         return (
                           <li key={i}>
                             <button
                               type="button"
-                              onClick={() => { if (clickable) { setSelectedAlert(a); setMultiMenuStep("confirm"); } }}
-                              className={`w-full text-left text-sm ${meta.tone} ${clickable ? "hover:bg-white/40 dark:hover:bg-black/20 rounded px-1 -mx-1 transition-colors cursor-pointer" : "cursor-default"}`}
-                              disabled={!clickable}
+                              onClick={() => { if (hasAction) { setSelectedAlert(a); setMultiMenuStep("confirm"); } }}
+                              className={`w-full text-left text-sm ${meta.tone} ${hasAction ? "hover:bg-white/40 dark:hover:bg-black/20 rounded px-1 -mx-1 transition-colors cursor-pointer" : "cursor-default"}`}
+                              disabled={!hasAction}
                             >
                               ・{a.message}
-                              {clickable && <span className="ml-1 opacity-50 text-xs">›</span>}
+                              {hasAction && <span className="ml-1 opacity-50 text-xs">›</span>}
                             </button>
                           </li>
                         );
@@ -290,7 +356,7 @@ export default function OwnerSecretaryWidget() {
         </>
       )}
 
-      {/* アラート詳細モーダル */}
+      {/* アラート詳細モーダル（multiMenuData なし・actionUrl なしのアラート用） */}
       {selectedAlert && (
         <div
           className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4"
@@ -324,7 +390,7 @@ export default function OwnerSecretaryWidget() {
               </button>
             </div>
 
-            {/* 別メニュー確認フロー */}
+            {/* 別メニュー確認フロー（モーダルから開いた場合） */}
             {selectedAlert.multiMenuData ? (
               <div className="space-y-4">
                 {multiMenuStep === "confirm" ? (
@@ -373,14 +439,7 @@ export default function OwnerSecretaryWidget() {
                         type="button"
                         onClick={() => {
                           toast.success(`${selectedAlert.multiMenuData!.name}様を同一人物・別メニューとして処理しました。¥0で会計してください。`);
-                          setBriefing((prev) => {
-                            if (!prev?.alertsV2) return prev;
-                            return {
-                              ...prev,
-                              alertsV2: prev.alertsV2.filter((a) => a.id !== selectedAlert.id),
-                              alerts: prev.alerts.filter((m) => m !== selectedAlert.message),
-                            };
-                          });
+                          dismissMultiMenu(selectedAlert);
                           setSelectedAlert(null);
                         }}
                         className="py-2.5 rounded-xl text-sm font-bold bg-emerald-500 hover:bg-emerald-600 text-white transition"
@@ -391,14 +450,7 @@ export default function OwnerSecretaryWidget() {
                         type="button"
                         onClick={() => {
                           toast.success(`${selectedAlert.multiMenuData!.name}様を同一人物・別メニューとして処理しました。通常通り会計してください。`);
-                          setBriefing((prev) => {
-                            if (!prev?.alertsV2) return prev;
-                            return {
-                              ...prev,
-                              alertsV2: prev.alertsV2.filter((a) => a.id !== selectedAlert.id),
-                              alerts: prev.alerts.filter((m) => m !== selectedAlert.message),
-                            };
-                          });
+                          dismissMultiMenu(selectedAlert);
                           setSelectedAlert(null);
                         }}
                         className="py-2.5 rounded-xl text-sm font-bold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 hover:bg-slate-200 dark:hover:bg-slate-700 transition"
