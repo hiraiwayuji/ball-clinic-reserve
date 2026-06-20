@@ -717,8 +717,17 @@ function ReserveContent() {
                     {reserveFlow === "menu_first" ? "③ ご希望の日時" : "ご希望の日時"}
                   </h2>
                   {requiredStaff && (
-                    <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-2xl p-3 text-sm text-emerald-100">
-                      🗓 <span className="font-bold">{requiredStaff.staffName}</span>さんの出勤日のみご予約いただけます（出勤日だけ選べます）。
+                    <div className="bg-orange-500/15 border-2 border-orange-400/60 rounded-2xl p-4 flex items-start gap-3">
+                      <span className="text-2xl shrink-0">📅</span>
+                      <div>
+                        <p className="text-sm font-black text-orange-200">
+                          {requiredStaff.staffName} 先生の出勤日のみ予約できます
+                        </p>
+                        <p className="text-xs text-orange-300/80 mt-1 leading-relaxed">
+                          グレーアウトされた日は{requiredStaff.staffName}先生がお休みです。<br />
+                          オレンジ色のカレンダーで選べる日が出勤日です。
+                        </p>
+                      </div>
                     </div>
                   )}
                   <div className="grid md:grid-cols-2 gap-6">

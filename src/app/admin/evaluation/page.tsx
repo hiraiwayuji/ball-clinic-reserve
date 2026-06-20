@@ -764,19 +764,51 @@ export default function EvaluationPage() {
           </CardHeader>
           <CardContent className="pt-6">
             {/* 主要な人数 */}
-            <div className="flex flex-wrap items-end gap-x-8 gap-y-4 mb-6">
+            {/* ── のべ来院数 / 実患者数 ── */}
+            <div className="flex flex-wrap items-end gap-x-8 gap-y-4 mb-2">
               <div>
-                <div className="text-xs font-bold text-slate-500">全体の来院数（のべ）</div>
+                <div className="text-xs font-bold text-slate-500">のべ来院数</div>
                 <div className="text-4xl font-black text-slate-900">
                   {visitBreakdown.grossVisits.toLocaleString()}<span className="text-base font-bold text-slate-400 ml-1">件</span>
                 </div>
+                <div className="text-[11px] text-slate-400 mt-0.5">記帳した全件数</div>
               </div>
+              <div className="text-3xl font-bold text-slate-300 self-center">→</div>
               <div>
-                <div className="text-xs font-bold text-slate-500">実来院数（実際の人数）</div>
-                <div className="text-4xl font-black text-slate-700">
-                  {visitBreakdown.totalVisits.toLocaleString()}<span className="text-base font-bold text-slate-400 ml-1">人</span>
+                <div className="text-xs font-bold text-indigo-600">実患者数（月間ユニーク）</div>
+                <div className="text-4xl font-black text-indigo-700">
+                  {visitBreakdown.totalVisits.toLocaleString()}<span className="text-base font-bold text-indigo-300 ml-1">人</span>
+                </div>
+                <div className="text-[11px] text-slate-400 mt-0.5">
+                  同じ患者さんが何回来ても1人
                 </div>
               </div>
+              {visitBreakdown.totalVisits > 0 && (
+                <div className="flex gap-6 ml-2">
+                  <div>
+                    <div className="text-xs font-bold text-violet-600">リピーター</div>
+                    <div className="text-3xl font-black text-violet-700">
+                      {visitBreakdown.repeatPatients.toLocaleString()}<span className="text-sm font-bold text-violet-300 ml-1">人</span>
+                    </div>
+                    <div className="text-[11px] text-slate-400 mt-0.5">
+                      月2日以上来院・{visitBreakdown.totalVisits > 0 ? Math.round((visitBreakdown.repeatPatients / visitBreakdown.totalVisits) * 100) : 0}%
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-xs font-bold text-amber-600">新規（初診）</div>
+                    <div className="text-3xl font-black text-amber-700">
+                      {visitBreakdown.newVisits.toLocaleString()}<span className="text-sm font-bold text-amber-300 ml-1">人</span>
+                    </div>
+                    <div className="text-[11px] text-slate-400 mt-0.5">
+                      {visitBreakdown.totalVisits > 0 ? Math.round((visitBreakdown.newVisits / visitBreakdown.totalVisits) * 100) : 0}%
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* ── 保険・自費の内訳 ── */}
+            <div className="flex flex-wrap items-end gap-x-8 gap-y-4 mb-6 mt-4 pt-4 border-t border-slate-100">
               <div>
                 <div className="text-xs font-bold text-blue-600">保険の来院</div>
                 <div className="text-3xl font-black text-blue-700">
@@ -787,12 +819,6 @@ export default function EvaluationPage() {
                 <div className="text-xs font-bold text-emerald-600">自費（実費）の来院</div>
                 <div className="text-3xl font-black text-emerald-700">
                   {visitBreakdown.jihiVisits.toLocaleString()}<span className="text-sm font-bold text-emerald-300 ml-1">人</span>
-                </div>
-              </div>
-              <div>
-                <div className="text-xs font-bold text-amber-600">新規（初診）</div>
-                <div className="text-3xl font-black text-amber-700">
-                  {visitBreakdown.newVisits.toLocaleString()}<span className="text-sm font-bold text-amber-300 ml-1">人</span>
                 </div>
               </div>
             </div>
@@ -823,7 +849,7 @@ export default function EvaluationPage() {
               </p>
             )}
             <p className="mt-1 text-xs text-slate-400">
-              ※「全体の来院数（のべ）」は記帳した件数（＝1日平均来院数のもと）です。「実来院数」は同じ患者さんが同じ日に来た分を1人にまとめた実際の人数で、保険・自費の人数はこちらを基準にしています。すべて売上記帳から自動集計しています。
+              ※「のべ来院数」は記帳した全件数。「実患者数」は同じ患者さんが月に何回来ても1人としてカウントした月間ユニーク人数です。「リピーター」は月に2日以上来た患者さんの数。保険・自費の人数も実患者数ベースで集計しています。すべて売上記帳から自動集計しています。
             </p>
           </CardContent>
         </Card>

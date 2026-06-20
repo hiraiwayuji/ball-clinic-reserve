@@ -34,6 +34,8 @@ export type ReservationCourse = {
   category?: "jusei" | "shinkyu" | "seitai" | null;
   /** このスタッフが出勤している日だけ予約可（NULL=誰でも可）。予約時はこのスタッフを自動で担当に。 */
   required_staff_id?: string | null;
+  /** required_staff_id に対応するスタッフ名（getActiveCourses で自動付与）。DBカラムではない。 */
+  required_staff_name?: string | null;
   // ── 部門・席予約（カフェ等）。部門なし院では全て NULL/既定値で従来通り動く ──
   /** どの部門のメニューか（'サロン' | 'カフェ' 等）。NULL=部門なし院 */
   department?: string | null;
@@ -105,7 +107,6 @@ export async function getCourses(): Promise<ReservationCourse[]> {
 
 // ── コース取得（患者側：有効なもののみ） ──
 export async function getActiveCourses(): Promise<ReservationCourse[]> {
-  const { createClient } = await import("@/lib/supabase/server");
   const { createClient: createAdminClient } = await import("@supabase/supabase-js");
 
   const DEFAULT_CLINIC_ID = PUBLIC_CLINIC_ID;
@@ -115,15 +116,29 @@ export async function getActiveCourses(): Promise<ReservationCourse[]> {
     process.env.SUPABASE_SERVICE_ROLE_KEY!
   );
 
-  const { data } = await adminClient
-    .from("reservation_courses")
-    .select("*")
-    .eq("clinic_id", DEFAULT_CLINIC_ID)
-    .eq("is_active", true)
-    .order("sort_order")
-    .order("created_at");
+  const [{ data }, { data: staffData }] = await Promise.all([
+    adminClient
+      .from("reservation_courses")
+      .select("*")
+      .eq("clinic_id", DEFAULT_CLINIC_ID)
+      .eq("is_active", true)
+      .order("sort_order")
+      .order("created_at"),
+    adminClient
+      .from("reservation_staff")
+      .select("id, name")
+      .eq("clinic_id", DEFAULT_CLINIC_ID)
+      .eq("is_active", true),
+  ]);
 
-  return data ?? [];
+  const staffMap = new Map<string, string>(
+    (staffData ?? []).map((s: { id: string; name: string }) => [s.id, s.name])
+  );
+
+  return (data ?? []).map((c: ReservationCourse) => ({
+    ...c,
+    required_staff_name: c.required_staff_id ? (staffMap.get(c.required_staff_id) ?? null) : null,
+  }));
 }
 
 /**

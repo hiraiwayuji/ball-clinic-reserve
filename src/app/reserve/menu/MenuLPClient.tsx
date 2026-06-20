@@ -362,6 +362,21 @@ function CouponCard({
         </div>
       </div>
 
+      {/* 出勤日限定バナー（さみ先生・ヘッドスパ等） */}
+      {course.required_staff_id && (
+        <div className="mx-3 mb-2 -mt-1 flex items-center gap-2 bg-orange-500/15 border border-orange-500/40 rounded-xl px-3 py-2">
+          <CalendarDays className="w-4 h-4 text-orange-300 shrink-0" />
+          <div className="min-w-0">
+            <span className="text-[12px] font-black text-orange-200">
+              {course.required_staff_name ?? "担当"} 先生の出勤日のみ予約できます
+            </span>
+            <span className="block text-[10px] text-orange-300/80 mt-0.5">
+              カレンダーで出勤日（選択できる日）をご確認ください
+            </span>
+          </div>
+        </div>
+      )}
+
       {/* 空き状況バッジ（最短の空き日） */}
       {availabilityDate !== undefined && (
         <div className="px-3 pb-2 -mt-1">

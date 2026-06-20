@@ -14,13 +14,15 @@ async function getSupabase() {
 
 export type VisitCategoryCount = { id: string; label: string; count: number };
 export type VisitBreakdown = {
-  grossVisits: number;   // 全体の来院数（のべ・記帳行ベース＝従来の来院数）
-  totalVisits: number;   // 実来院数（患者×日で1来院）
-  newVisits: number;     // 新規（初診）の来院
-  hokenVisits: number;   // 保険を使った来院
-  jihiVisits: number;    // 自費（実費）を使った来院
-  bothVisits: number;    // 保険と自費を併用した来院
-  byCategory: VisitCategoryCount[]; // 区分ごとの来院数（併用は各区分に計上）
+  grossVisits: number;    // 全体の来院数（のべ・記帳行ベース＝従来の来院数）
+  totalVisits: number;    // 月間ユニーク患者数（同じ人が何回来ても1人）
+  dailyUniqueVisits: number; // 患者×日ユニーク（同日複数メニューを1来院にまとめたのべ）
+  newVisits: number;      // 新規（初診）患者数
+  repeatPatients: number; // リピーター（月に2日以上来た患者）数
+  hokenVisits: number;    // 保険を使った患者数
+  jihiVisits: number;     // 自費（実費）を使った患者数
+  bothVisits: number;     // 保険と自費を併用した患者数
+  byCategory: VisitCategoryCount[]; // 区分ごとの患者数（併用は各区分に計上）
 };
 
 // 表示順とラベル（全院共通の標準区分）
@@ -53,43 +55,55 @@ function buildVisitBreakdown(
   rows: Array<{ customer_name?: string | null; sale_date?: string | null; is_first_visit?: boolean | null; payment_type?: string | null; payment_types?: string[] | null }>,
   isTally: boolean,
 ): VisitBreakdown {
-  // 患者名×日付で1来院にまとめる（日計表は1患者が複数行になるため）
-  const groups = new Map<string, { buckets: Set<string>; isNew: boolean }>();
+  // ── ステップ1: 患者名×日付でまとめる（同日複数メニュー/日計表の複数行を1来院に）
+  const dayGroups = new Map<string, { name: string; buckets: Set<string>; isNew: boolean }>();
   for (const r of rows) {
     const name = String(r.customer_name ?? "").trim();
     if (!name) continue;
     const day = String(r.sale_date ?? "");
     const gk = `${day}__${name}`;
-    const g = groups.get(gk) ?? { buckets: new Set<string>(), isNew: false };
+    const g = dayGroups.get(gk) ?? { name, buckets: new Set<string>(), isNew: false };
     const keys: string[] = Array.isArray(r.payment_types) && r.payment_types.length
       ? r.payment_types
       : (r.payment_type ? [r.payment_type] : [""]);
     for (const k of keys) g.buckets.add(normalizeVisitCategory(String(k), isTally));
     if (r.is_first_visit) g.isNew = true;
-    groups.set(gk, g);
+    dayGroups.set(gk, g);
   }
 
+  // ── ステップ2: 患者名でさらまとめる（月間ユニーク患者＝何度来ても1人）
+  const patientGroups = new Map<string, { buckets: Set<string>; isNew: boolean; visitDays: number }>();
+  for (const g of dayGroups.values()) {
+    const p = patientGroups.get(g.name) ?? { buckets: new Set<string>(), isNew: false, visitDays: 0 };
+    for (const b of g.buckets) p.buckets.add(b);
+    if (g.isNew) p.isNew = true;
+    p.visitDays++;
+    patientGroups.set(g.name, p);
+  }
+
+  // ── ステップ3: 集計
   const catCount = new Map<string, number>();
-  let totalVisits = 0, newVisits = 0, hokenVisits = 0, jihiVisits = 0, bothVisits = 0;
-  for (const g of groups.values()) {
-    totalVisits++;
-    if (g.isNew) newVisits++;
-    const hasHoken = g.buckets.has("hoken");
-    const hasJihi = g.buckets.has("jihi");
+  let newVisits = 0, hokenVisits = 0, jihiVisits = 0, bothVisits = 0, repeatPatients = 0;
+  for (const p of patientGroups.values()) {
+    if (p.isNew) newVisits++;
+    if (p.visitDays >= 2) repeatPatients++;
+    const hasHoken = p.buckets.has("hoken");
+    const hasJihi = p.buckets.has("jihi");
     if (hasHoken) hokenVisits++;
     if (hasJihi) jihiVisits++;
     if (hasHoken && hasJihi) bothVisits++;
-    for (const b of g.buckets) catCount.set(b, (catCount.get(b) ?? 0) + 1);
+    for (const b of p.buckets) catCount.set(b, (catCount.get(b) ?? 0) + 1);
   }
 
   const byCategory: VisitCategoryCount[] = VISIT_CATEGORY_ORDER
     .filter((id) => (catCount.get(id) ?? 0) > 0)
     .map((id) => ({ id, label: VISIT_CATEGORY_LABEL[id], count: catCount.get(id)! }));
 
-  // 全体の来院数（のべ）は記帳行ベース（従来の来院数と同じ）
-  const grossVisits = rows.length;
+  const grossVisits = rows.length;           // 記帳行数（のべ）
+  const dailyUniqueVisits = dayGroups.size;  // 患者×日ユニーク（同日別メニューをまとめたのべ）
+  const totalVisits = patientGroups.size;    // 月間ユニーク患者数（実際の人数）
 
-  return { grossVisits, totalVisits, newVisits, hokenVisits, jihiVisits, bothVisits, byCategory };
+  return { grossVisits, totalVisits, dailyUniqueVisits, newVisits, repeatPatients, hokenVisits, jihiVisits, bothVisits, byCategory };
 }
 
 /**
