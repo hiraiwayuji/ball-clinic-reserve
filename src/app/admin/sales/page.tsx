@@ -520,6 +520,8 @@ function SalesPageInner() {
 
   const dailyTotalAmount = sales.reduce((sum, s) => sum + s.treatment_fee, 0);
   const newPatientCount = sales.filter(s => s.is_first_visit).length;
+  // 来院人数（同じ患者が水素・ダブル施術で複数行でも1人）
+  const uniquePatientCount = new Set(sales.map((s) => s.customer_name).filter(Boolean)).size;
   const bulkSalesHref = date ? `/admin/sales/bulk?date=${format(date, "yyyy-MM-dd")}` : "/admin/sales/bulk";
 
   if (!date) {
@@ -842,7 +844,10 @@ function SalesPageInner() {
           <CardHeader className="flex flex-row items-center justify-between">
             <div>
               <CardTitle>本日（{format(date, "M/d")}）の売上一覧</CardTitle>
-              <CardDescription>{sales.length} 件の記録があります</CardDescription>
+              <CardDescription>
+                <span className="text-lg font-black text-slate-800 dark:text-slate-100">{uniquePatientCount}人</span>
+                <span className="text-slate-400 ml-1.5 text-xs">来院（記録 {sales.length}件）</span>
+              </CardDescription>
             </div>
             <div className="flex gap-4 items-end">
               {newPatientCount > 0 && (
