@@ -153,6 +153,25 @@ export async function getMyStaffName(): Promise<string> {
   return user.email?.split("@")[0] ?? "スタッフ";
 }
 
+/** ログイン中ユーザーに対応する reservation_staff.id を返す（なければ null）。 */
+export async function getMyStaffId(): Promise<string | null> {
+  const { createClient } = await import("@/lib/supabase/server");
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user?.email) return null;
+
+  const expectedClinicId = process.env.NEXT_PUBLIC_CLINIC_ID;
+  if (!expectedClinicId) return null;
+
+  const { data } = await supabase
+    .from("reservation_staff")
+    .select("id")
+    .eq("clinic_id", expectedClinicId)
+    .eq("email", user.email)
+    .maybeSingle();
+  return (data?.id as string) ?? null;
+}
+
 /** クライアントコンポーネントからログイン中ユーザーの clinic_id を取得する（リダイレクトなし）。
  * このデプロイの clinic に紐付いていない場合は null を返す。 */
 export async function getMyClinicId(): Promise<string | null> {
