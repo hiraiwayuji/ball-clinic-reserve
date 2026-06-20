@@ -202,6 +202,35 @@ export default function OwnerSecretaryWidget() {
                       </span>
                       <span className={`text-xs ${meta.tone}`}>{isExpanded ? "折りたたむ" : items.length > VISIBLE ? `すべて表示 (+${items.length - VISIBLE})` : ""}</span>
                     </button>
+
+                    {/* 別メニュー確認アラートが複数あるときの一括ボタン */}
+                    {(() => {
+                      const multiItems = items.filter((a) => !!a.multiMenuData);
+                      if (multiItems.length < 2) return null;
+                      return (
+                        <div className="px-3 pb-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setBriefing((prev) => {
+                                if (!prev?.alertsV2) return prev;
+                                const removeIds = new Set(multiItems.map((a) => a.id));
+                                return {
+                                  ...prev,
+                                  alertsV2: prev.alertsV2.filter((a) => !removeIds.has(a.id)),
+                                  alerts: prev.alerts.filter((m) => !multiItems.some((a) => a.message === m)),
+                                };
+                              });
+                              toast.success(`${multiItems.length}件をまとめて「同一人物・別メニュー」として処理しました`);
+                            }}
+                            className="w-full py-2 rounded-lg text-xs font-bold bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-700 hover:bg-amber-200 dark:hover:bg-amber-900/60 transition"
+                          >
+                            ✓ 上記 {multiItems.length}件をまとめて「同一人物・別メニュー」として処理する
+                          </button>
+                        </div>
+                      );
+                    })()}
+
                     <ul className="px-3 pb-2 space-y-1">
                       {visibleItems.map((a, i) => {
                         const clickable = !!a.id || !!a.actionUrl;
