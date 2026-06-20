@@ -111,7 +111,7 @@ export async function generateOwnerBriefing(): Promise<{ success: boolean; brief
     // 違和感検知: 今日〜2週間先の予約（顧客名・電話を結合）
     sb
       .from("appointments")
-      .select("id, start_time, customer_id, course_name, customers(id, name, phone)")
+      .select("id, start_time, end_time, customer_id, course_name, staff_name, additional_staff, customers(id, name, phone)")
       .eq("clinic_id", auth.clinicId)
       .neq("status", "cancelled")
       .gte("start_time", `${todayStr}T00:00:00+09:00`)
@@ -236,6 +236,32 @@ export async function generateOwnerBriefing(): Promise<{ success: boolean; brief
         courses: d.courses,
       },
     });
+  }
+
+  // 1.5) 同一患者に複数スタッフが「同時刻」で設定されている予約
+  // 接骨院ルール：1患者に2名が同時に施術することはほぼない → 管理者が誤入力した可能性
+  type FullApptRow = { id: string; start_time: string; end_time?: string | null; customer_id: string | null; course_name?: string | null; staff_name?: string | null; additional_staff?: { staff_id: string; staff_name: string }[] | null; customers: { id: string; name: string; phone: string | null } | { id: string; name: string; phone: string | null }[] | null };
+  const upcomingFull = upcoming as unknown as FullApptRow[];
+  const simultaneousMultiStaff = upcomingFull.filter((a) => {
+    if (!a.additional_staff || a.additional_staff.length === 0) return false;
+    // end_time が start_time と同一か未設定（= 時間帯を分けていない）ならNG
+    // タイムテーブルでは _displayStart でずらすが DB 上の start_time は同じ → これが検知対象
+    return true; // additional_staff が存在する時点で「同時刻割当」と判断してアラート
+  });
+  for (const a of simultaneousMultiStaff) {
+    const cust = pickCustomer(a.customers);
+    if (!cust?.name) continue;
+    const dateLabel = new Date(a.start_time).toLocaleDateString("ja-JP", { timeZone: "Asia/Tokyo", month: "long", day: "numeric" });
+    const timeLabel = new Date(a.start_time).toLocaleTimeString("ja-JP", { timeZone: "Asia/Tokyo", hour: "2-digit", minute: "2-digit", hour12: false });
+    const staffList = [a.staff_name, ...(a.additional_staff ?? []).map((s) => s.staff_name)].filter(Boolean).join("・");
+    pushAlert(
+      "urgent",
+      `${cust.name}様（${dateLabel} ${timeLabel}）に複数担当（${staffList}）が同時刻で設定されています。施術が続く場合は時間帯を分けて入力してください。`,
+      {
+        id: `simultaneous-multi-staff-${a.id}`,
+        actionUrl: `/admin/appointments`,
+      },
+    );
   }
 
   // 2) 同一電話番号で別名義の顧客（家族予約 or 入力ミスの疑い）
