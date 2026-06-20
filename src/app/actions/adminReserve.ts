@@ -1044,6 +1044,82 @@ export async function updateCheckinStatus(
   }
 }
 
+// ── 初診受付チェックリスト ──────────────────────────────────────────────
+
+export type IntakeCheckKey =
+  | "explanation"   // 回答書の説明
+  | "personal_info" // レセコンに個人情報入力
+  | "injury_info"   // 負傷名・負傷原因入力
+  | "karte_print"   // カルテ印刷
+  | "insurance_confirm"; // 印刷物と保険証の確認
+
+export type IntakeCheckItem = { checked: boolean; by?: string; at?: string };
+export type IntakeChecklist = Partial<Record<IntakeCheckKey, IntakeCheckItem>>;
+
+/** 指定した項目にチェックを入れる（staffName = チェックした人）。チェック済みを再度押すと解除。 */
+export async function updateIntakeChecklistItem(
+  appointmentId: string,
+  key: IntakeCheckKey,
+  staffName: string,
+): Promise<{ success: boolean; error?: string; checklist?: IntakeChecklist }> {
+  try {
+    const { clinicId } = await checkAdminAuth();
+    const supabase = getAdminSupabase();
+    if (!supabase) return { success: false, error: "サーバー設定エラー" };
+
+    const { data: apt } = await supabase
+      .from("appointments")
+      .select("intake_checklist")
+      .eq("id", appointmentId)
+      .eq("clinic_id", clinicId)
+      .maybeSingle();
+
+    const current = ((apt?.intake_checklist ?? {}) as IntakeChecklist);
+    const wasChecked = current[key]?.checked === true;
+
+    const updated: IntakeChecklist = {
+      ...current,
+      [key]: wasChecked
+        ? { checked: false }
+        : { checked: true, by: staffName, at: new Date().toISOString() },
+    };
+
+    const { error } = await supabase
+      .from("appointments")
+      .update({ intake_checklist: updated })
+      .eq("id", appointmentId)
+      .eq("clinic_id", clinicId);
+
+    if (error) return { success: false, error: error.message };
+    return { success: true, checklist: updated };
+  } catch {
+    return { success: false, error: "チェックの保存に失敗しました" };
+  }
+}
+
+/** 保険証変更フラグをトグルする（ONにすると初診チェックリストが表示される）。 */
+export async function toggleInsuranceChanged(
+  appointmentId: string,
+  value: boolean,
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const { clinicId } = await checkAdminAuth();
+    const supabase = getAdminSupabase();
+    if (!supabase) return { success: false, error: "サーバー設定エラー" };
+
+    const { error } = await supabase
+      .from("appointments")
+      .update({ insurance_changed: value })
+      .eq("id", appointmentId)
+      .eq("clinic_id", clinicId);
+
+    if (error) return { success: false, error: error.message };
+    return { success: true };
+  } catch {
+    return { success: false, error: "更新に失敗しました" };
+  }
+}
+
 export async function markAppointmentNoShow(
   appointmentId: string,
 ): Promise<{ success: boolean; error?: string }> {
@@ -1181,7 +1257,8 @@ export async function getAppointmentsByDate(dateStr: string) {
       .from("appointments")
       .select(`
         id, start_time, end_time, status, checkin_status,
-        is_first_visit, memo, course_id, course_name, staff_id, staff_name, room_name,
+        is_first_visit, insurance_changed, intake_checklist,
+        memo, course_id, course_name, staff_id, staff_name, room_name,
         customers(id, name, phone, line_user_id, medical_record_number, birth_date, city_name)
       `)
       .eq("clinic_id", clinicId)

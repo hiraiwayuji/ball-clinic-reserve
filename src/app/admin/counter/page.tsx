@@ -8,8 +8,12 @@ import {
   getAppointmentsByDate,
   markAppointmentNoShow,
   updateCheckinStatus,
+  toggleInsuranceChanged,
   type CheckinStatus,
+  type IntakeChecklist,
 } from "@/app/actions/adminReserve";
+import { IntakeChecklistPanel } from "@/components/admin/IntakeChecklistPanel";
+import { getMyStaffName } from "@/app/actions/auth";
 import { getSalesPrediction, type SalesPrediction } from "@/app/actions/sales";
 import { createClient } from "@/lib/supabase/client";
 import { getMyClinicId } from "@/app/actions/auth";
@@ -42,6 +46,9 @@ type Appointment = {
   status: string;
   checkin_status: CheckinStatus;
   is_first_visit: boolean;
+  insurance_changed: boolean;
+  intake_checklist: import("@/app/actions/adminReserve").IntakeChecklist | null;
+  last_visit_days: number | null; // UI側で計算して付与
   memo: string | null;
   course_id: string | null;
   course_name: string | null;
@@ -125,10 +132,16 @@ function AppointmentCard({
   apt,
   onStatusChange,
   onRemove,
+  staffName,
+  onIntakeUpdate,
+  onRefresh,
 }: {
   apt: Appointment;
   onStatusChange: (id: string, status: CheckinStatus) => void;
   onRemove: (id: string) => void;
+  staffName: string;
+  onIntakeUpdate: (id: string, checklist: IntakeChecklist) => void;
+  onRefresh: () => void;
 }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
@@ -313,6 +326,55 @@ function AppointmentCard({
           <span className="hidden sm:inline">{step.shortLabel}</span>
         </div>
       </div>
+
+      {/* 初診・保険証変更・長期未来院チェックリスト */}
+      {(() => {
+        const isLongAbsence = (apt.last_visit_days ?? 0) > 90 && !apt.is_first_visit;
+        const trigger =
+          apt.is_first_visit       ? "first_visit" as const :
+          apt.insurance_changed    ? "insurance_changed" as const :
+          isLongAbsence            ? "long_absence" as const : null;
+
+        const showInsuranceBtn = !apt.is_first_visit && !isLongAbsence;
+
+        return (
+          <div className="mt-2 space-y-1">
+            {/* 保険証変更ボタン（初診・長期未来院以外に表示） */}
+            {showInsuranceBtn && (
+              <button
+                type="button"
+                onClick={async () => {
+                  const next = !apt.insurance_changed;
+                  const res = await toggleInsuranceChanged(apt.id, next);
+                  if (res.success) {
+                    onRefresh();
+                  } else {
+                    toast.error(res.error ?? "更新に失敗しました");
+                  }
+                }}
+                className={[
+                  "flex items-center gap-1 px-2.5 py-1 rounded-xl text-[11px] font-bold border transition-all",
+                  apt.insurance_changed
+                    ? "bg-amber-500 text-white border-amber-500"
+                    : "bg-white text-amber-600 border-amber-300 hover:bg-amber-50",
+                ].join(" ")}
+              >
+                🪪 {apt.insurance_changed ? "保険証変更あり（解除）" : "保険証変更あり"}
+              </button>
+            )}
+
+            {/* チェックリストパネル */}
+            {trigger && (
+              <IntakeChecklistPanel
+                appointmentId={apt.id}
+                initialChecklist={apt.intake_checklist}
+                staffName={staffName}
+                trigger={trigger}
+              />
+            )}
+          </div>
+        );
+      })()}
 
       {/* 下段：アクションボタン */}
       <div className="mt-3 flex items-center gap-2 flex-wrap">
@@ -522,6 +584,7 @@ export default function CounterPage() {
   const [currentTime, setCurrentTime] = useState<Date | null>(null);
   const [targetDate, setTargetDate] = useState<Date>(new Date());
   const [clinicId, setClinicId] = useState<string | null>(null);
+  const [staffName, setStaffName] = useState<string>("スタッフ");
   const [isClosingDay, startClosingDayTransition] = useTransition();
 
   const isViewingToday = isToday(targetDate);
@@ -573,6 +636,7 @@ export default function CounterPage() {
   useEffect(() => {
     setCurrentTime(new Date());
     getMyClinicId().then(setClinicId);
+    getMyStaffName().then(setStaffName);
     fetchAppointments();
 
     // 時計更新
@@ -777,6 +841,9 @@ export default function CounterPage() {
                   apt={apt}
                   onStatusChange={handleStatusChange}
                   onRemove={handleRemoveAppointment}
+                  staffName={staffName}
+                  onIntakeUpdate={(id, cl) => setAppointments(prev => prev.map(a => a.id === id ? { ...a, intake_checklist: cl } : a))}
+                  onRefresh={fetchAppointments}
                 />
               ))}
             </div>
@@ -798,6 +865,9 @@ export default function CounterPage() {
                     apt={apt}
                     onStatusChange={handleStatusChange}
                     onRemove={handleRemoveAppointment}
+                    staffName={staffName}
+                    onIntakeUpdate={(id, cl) => setAppointments(prev => prev.map(a => a.id === id ? { ...a, intake_checklist: cl } : a))}
+                    onRefresh={fetchAppointments}
                   />
                 ))}
               </div>

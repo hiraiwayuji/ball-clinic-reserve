@@ -130,6 +130,29 @@ export async function getMyRole(): Promise<ClinicRole | null> {
   return (data?.role as ClinicRole | undefined) ?? null;
 }
 
+/** ログイン中スタッフの表示名を返す（チェックリストの「誰がチェックしたか」用）。
+ * reservation_staff.auth_user_id が一致するレコードの name を優先し、なければメールアドレス。 */
+export async function getMyStaffName(): Promise<string> {
+  const { createClient } = await import("@/lib/supabase/server");
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return "スタッフ";
+
+  const expectedClinicId = process.env.NEXT_PUBLIC_CLINIC_ID;
+  if (expectedClinicId && user.email) {
+    const { data } = await supabase
+      .from("reservation_staff")
+      .select("name")
+      .eq("clinic_id", expectedClinicId)
+      .eq("email", user.email)
+      .maybeSingle();
+    if (data?.name) return data.name as string;
+  }
+
+  // メールの @ 前をフォールバック
+  return user.email?.split("@")[0] ?? "スタッフ";
+}
+
 /** クライアントコンポーネントからログイン中ユーザーの clinic_id を取得する（リダイレクトなし）。
  * このデプロイの clinic に紐付いていない場合は null を返す。 */
 export async function getMyClinicId(): Promise<string | null> {
