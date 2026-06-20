@@ -25,6 +25,7 @@ import {
   sendLineConfirmation,
   notifyWaitlistOpening,
   addAddonToAppointment,
+  addAdjacentAppointment,
   getAddonCourseInfo,
   type WaitlistCandidate,
 } from "@/app/actions/adminReserve";
@@ -75,6 +76,10 @@ export function EditAppointmentDialog({
   const [nextDefaultTime, setNextDefaultTime] = useState<string>("");
   // 「施術後に○○を追加」用の設定メニュー
   const [addonInfo, setAddonInfo] = useState<{ courseId: string; name: string; allowConcurrent: boolean } | null>(null);
+  // 直前・直後追加パネル
+  const [adjacentPanel, setAdjacentPanel] = useState<"before" | "after" | null>(null);
+  const [adjacentCourseId, setAdjacentCourseId] = useState<string>("");
+  const [adjacentStaffId, setAdjacentStaffId] = useState<string>("");
 
   // コース・スタッフ・個室マスタ
   const [courses, setCourses] = useState<ReservationCourse[]>([]);
@@ -427,6 +432,36 @@ export function EditAppointmentDialog({
     onOpenChange(false);
   };
 
+  // 直前・直後に任意コースを追加予約
+  const handleAddAdjacent = async () => {
+    if (!adjacentCourseId) { toast.error("コースを選んでください"); return; }
+    if (!adjacentPanel) return;
+    setIsSubmitting(true);
+    try {
+      const res = await addAdjacentAppointment(
+        appointment.id,
+        adjacentCourseId,
+        adjacentStaffId || null,
+        adjacentPanel,
+      );
+      if (res.success) {
+        const c = courses.find(c => c.id === adjacentCourseId);
+        toast.success(`${adjacentPanel === "before" ? "直前" : "直後"}に${c?.name ?? "メニュー"}を追加しました`);
+        setAdjacentPanel(null);
+        setAdjacentCourseId("");
+        setAdjacentStaffId("");
+        onSuccess?.();
+        onOpenChange(false);
+      } else {
+        toast.error(res.error ?? "追加に失敗しました");
+      }
+    } catch {
+      toast.error("通信エラーが発生しました");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   // 次回予約: この患者をプリフィルした新規予約フォームを開く（編集は閉じる）
   // 初期日時は「いま表示中の予約日時」を基準に1週間後の同じ曜日・同じ時刻にする。
   const handleNextAppointment = () => {
@@ -687,6 +722,90 @@ export function EditAppointmentDialog({
               <CalendarPlus className="w-4 h-4 mr-1.5" />
               次回予約を入れる
             </Button>
+
+            {/* 直前・直後に任意コースを追加 */}
+            {courses.length > 0 && (
+              <div className="space-y-2">
+                {/* トリガーボタン行 */}
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAdjacentPanel(adjacentPanel === "before" ? null : "before");
+                      setAdjacentCourseId("");
+                      setAdjacentStaffId("");
+                    }}
+                    className={`flex-1 h-9 rounded-xl border text-xs font-bold transition-all ${
+                      adjacentPanel === "before"
+                        ? "bg-violet-600 border-violet-600 text-white"
+                        : "border-violet-300 text-violet-700 hover:bg-violet-50"
+                    }`}
+                  >
+                    ← 直前に追加
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAdjacentPanel(adjacentPanel === "after" ? null : "after");
+                      setAdjacentCourseId("");
+                      setAdjacentStaffId("");
+                    }}
+                    className={`flex-1 h-9 rounded-xl border text-xs font-bold transition-all ${
+                      adjacentPanel === "after"
+                        ? "bg-violet-600 border-violet-600 text-white"
+                        : "border-violet-300 text-violet-700 hover:bg-violet-50"
+                    }`}
+                  >
+                    直後に追加 →
+                  </button>
+                </div>
+
+                {/* 展開パネル */}
+                {adjacentPanel && (
+                  <div className="rounded-xl border border-violet-200 bg-violet-50 p-3 space-y-2">
+                    <p className="text-[11px] font-bold text-violet-700">
+                      {adjacentPanel === "before" ? "直前に追加するメニュー" : "直後に追加するメニュー"}
+                    </p>
+                    <select
+                      value={adjacentCourseId}
+                      onChange={(e) => {
+                        setAdjacentCourseId(e.target.value);
+                        // コースに required_staff_id があれば自動セット
+                        const c = courses.find(c => c.id === e.target.value);
+                        if ((c as any)?.required_staff_id) setAdjacentStaffId((c as any).required_staff_id);
+                        else setAdjacentStaffId(staffId);
+                      }}
+                      className="w-full h-9 rounded-lg border border-violet-300 bg-white px-2 text-sm focus:outline-none focus:ring-1 focus:ring-violet-400"
+                    >
+                      <option value="">コースを選択</option>
+                      {courses.filter(c => c.is_active).map(c => (
+                        <option key={c.id} value={c.id}>
+                          {c.name}（{c.duration_minutes}分{c.price != null ? ` / ¥${c.price.toLocaleString()}` : ""}）
+                        </option>
+                      ))}
+                    </select>
+                    <select
+                      value={adjacentStaffId}
+                      onChange={(e) => setAdjacentStaffId(e.target.value)}
+                      className="w-full h-9 rounded-lg border border-violet-300 bg-white px-2 text-sm focus:outline-none focus:ring-1 focus:ring-violet-400"
+                    >
+                      <option value="">担当を選択（任意）</option>
+                      {staffList.filter(s => s.is_active && s.show_in_timeline !== false).map(s => (
+                        <option key={s.id} value={s.id}>{s.name}</option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={handleAddAdjacent}
+                      disabled={isSubmitting || !adjacentCourseId}
+                      className="w-full h-9 rounded-lg bg-violet-600 hover:bg-violet-700 disabled:opacity-50 text-white text-sm font-bold transition"
+                    >
+                      {isSubmitting ? "追加中..." : `${adjacentPanel === "before" ? "直前" : "直後"}に追加する`}
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* 施術後に○○を追加（設定 addon_course_id がある院のみ・追加メニュー自体には出さない） */}
             {addonInfo && appointment.course_id !== addonInfo.courseId && (

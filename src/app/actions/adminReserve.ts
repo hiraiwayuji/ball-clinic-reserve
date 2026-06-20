@@ -148,6 +148,81 @@ export async function addAddonToAppointment(appointmentId: string, timing: "afte
   }
 }
 
+/**
+ * 既存予約の直前・直後に任意のコースを追加予約として挿入する。
+ * direction: "before" = 現在開始時刻の直前、"after" = 現在終了時刻の直後
+ */
+export async function addAdjacentAppointment(
+  appointmentId: string,
+  courseId: string,
+  staffId: string | null,
+  direction: "before" | "after",
+): Promise<{ success: boolean; error?: string }> {
+  const { clinicId } = await checkAdminAuth();
+  const supabase = getAdminSupabase();
+  if (!supabase) return { success: false, error: "サーバー設定エラー" };
+  try {
+    // 元予約を取得
+    const { data: apt } = await supabase
+      .from("appointments")
+      .select("id, start_time, end_time, customer_id, is_first_visit, clinic_id")
+      .eq("id", appointmentId)
+      .eq("clinic_id", clinicId)
+      .maybeSingle();
+    if (!apt) return { success: false, error: "元の予約が見つかりませんでした" };
+
+    // コース情報を取得
+    const { data: course } = await supabase
+      .from("reservation_courses")
+      .select("id, name, duration_minutes, price")
+      .eq("id", courseId)
+      .eq("clinic_id", clinicId)
+      .maybeSingle();
+    if (!course) return { success: false, error: "コースが見つかりませんでした" };
+
+    const dur = Number(course.duration_minutes ?? 30) || 30;
+
+    let newStart: Date;
+    let newEnd: Date;
+    if (direction === "after") {
+      newStart = new Date(apt.end_time ?? apt.start_time);
+      newEnd = new Date(newStart.getTime() + dur * 60000);
+    } else {
+      newEnd = new Date(apt.start_time);
+      newStart = new Date(newEnd.getTime() - dur * 60000);
+    }
+
+    // スタッフ名を解決
+    let resolvedStaffName: string | null = null;
+    if (staffId) {
+      const { data: st } = await supabase
+        .from("reservation_staff")
+        .select("name")
+        .eq("id", staffId)
+        .eq("clinic_id", clinicId)
+        .maybeSingle();
+      resolvedStaffName = (st?.name as string) ?? null;
+    }
+
+    const { error } = await supabase.from("appointments").insert([{
+      customer_id: apt.customer_id,
+      start_time: newStart.toISOString(),
+      end_time: newEnd.toISOString(),
+      is_first_visit: false,
+      status: "confirmed",
+      clinic_id: clinicId,
+      course_id: course.id,
+      course_name: course.name as string,
+      ...(staffId ? { staff_id: staffId, staff_name: resolvedStaffName } : {}),
+    }]);
+    if (error) return { success: false, error: "追加に失敗しました" };
+    revalidatePath("/admin/dashboard");
+    return { success: true };
+  } catch {
+    return { success: false, error: "追加でエラーが発生しました" };
+  }
+}
+
 /** Googleクチコミ依頼が使えるか（設定URLがあるか）＋URLを返す。 */
 export async function getReviewRequestConfig(): Promise<{ enabled: boolean; url: string | null }> {
   const { clinicId } = await checkAdminAuth();
