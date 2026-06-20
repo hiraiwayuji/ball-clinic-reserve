@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
+import { realtimeGuard } from "@/lib/realtime-guard";
 import { getTimelineForDate, type TimelineData, type TimelineAppointment } from "@/app/actions/timeline";
 import { updateCheckinStatus, addAddonToAppointment, getAddonCourseInfo, sendReviewRequest, getReviewRequestConfig } from "@/app/actions/adminReserve";
 import { getStaffSchedulesForDate, upsertStaffScheduleForDate, type StaffDaySchedule } from "@/app/actions/staff-schedule";
@@ -161,7 +162,7 @@ export default function TodayTimelineWidget({
     if (!date) return;
     const sb = createClient();
     const ch = sb.channel("timeline-realtime")
-      .on("postgres_changes", { event: "*", schema: "public", table: "appointments" }, () => fetchData(date))
+      .on("postgres_changes", { event: "*", schema: "public", table: "appointments" }, realtimeGuard(() => fetchData(date)))
       .subscribe();
     return () => { sb.removeChannel(ch); };
   }, [date, fetchData]);

@@ -22,6 +22,7 @@ import { useClinicSlotDuration } from "@/lib/use-clinic-slot-duration";
 import { useClinicSchedule } from "@/lib/use-clinic-schedule";
 import { getMyClinicId } from "@/app/actions/auth";
 import { getClinicSettings } from "@/app/actions/settings";
+import { realtimeGuard } from "@/lib/realtime-guard";
 import TodayTimelineWidget from "@/components/admin/TodayTimelineWidget";
 import { PendingReservationsButton } from "@/components/admin/PendingReservationsButton";
 
@@ -168,14 +169,11 @@ export default function AdminWeeklyGridPage() {
 
   useEffect(() => {
     const supabase = createClient();
+    const guardedRefresh = realtimeGuard(() => setRefreshKey(k => k + 1));
     const channel = supabase
       .channel("admin-realtime")
-      .on("postgres_changes", { event: "*", schema: "public", table: "appointments" }, () => {
-        setRefreshKey(k => k + 1);
-      })
-      .on("postgres_changes", { event: "*", schema: "public", table: "clinic_holidays" }, () => {
-        setRefreshKey(k => k + 1);
-      })
+      .on("postgres_changes", { event: "*", schema: "public", table: "appointments" }, guardedRefresh)
+      .on("postgres_changes", { event: "*", schema: "public", table: "clinic_holidays" }, guardedRefresh)
       .subscribe();
     return () => { supabase.removeChannel(channel); };
   }, []);

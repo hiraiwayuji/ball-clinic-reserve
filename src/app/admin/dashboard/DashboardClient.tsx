@@ -18,6 +18,7 @@ import { PatientSearchPanel } from "@/components/admin/PatientSearchPanel";
 import { getUpcomingBirthdays } from "@/app/actions/admin-marketing-actions";
 import { Cake, Sparkles as SparklesIcon, Star } from "lucide-react";
 import AISecretaryBriefing from "@/components/admin/AISecretaryBriefing";
+import { realtimeGuard } from "@/lib/realtime-guard";
 
 type DashboardClientProps = {
   /** AI秘書 (ブリーフィングダイアログ) を表示するか。clinic_settings.ai_secretary_mode と role の組合せで決定 */
@@ -59,17 +60,13 @@ export default function DashboardClient({ aiSecretaryEnabled = true, canSeeExpen
     fetchData();
 
     const supabase = createClient();
+    // realtimeGuard: タブ非表示時はスキップ + 400ms debounce で同時多発を抑制
+    const guardedFetch = realtimeGuard(fetchData);
     const channel = supabase
       .channel("admin-dashboard-realtime")
-      .on("postgres_changes", { event: "*", schema: "public", table: "appointments" }, () => {
-        fetchData();
-      })
-      .on("postgres_changes", { event: "*", schema: "public", table: "cash_sales" }, () => {
-        fetchData();
-      })
-      .on("postgres_changes", { event: "*", schema: "public", table: "insurance_payments" }, () => {
-        fetchData();
-      })
+      .on("postgres_changes", { event: "*", schema: "public", table: "appointments" }, guardedFetch)
+      .on("postgres_changes", { event: "*", schema: "public", table: "cash_sales" }, guardedFetch)
+      .on("postgres_changes", { event: "*", schema: "public", table: "insurance_payments" }, guardedFetch)
       .subscribe();
 
     return () => { supabase.removeChannel(channel); };

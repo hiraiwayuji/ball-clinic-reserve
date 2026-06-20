@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/dialog";
 import { EditAppointmentDialog } from "@/components/admin/EditAppointmentDialog";
 import { getMyClinicId } from "@/app/actions/auth";
+import { realtimeGuard } from "@/lib/realtime-guard";
 
 const PENDING_SELECT =
   `id, start_time, end_time, memo, is_first_visit, status, customer_id, series_id, clinic_id, course_id, course_name, staff_id, staff_name, room_id, room_name, department, party_size, customers(name, phone, medical_record_number, birth_date)`;
@@ -87,9 +88,9 @@ export function PendingReservationsButton({
     const supabase = createClient();
     const channel = supabase
       .channel(`pending-reservations-${channelKey}`)
-      .on("postgres_changes", { event: "*", schema: "public", table: "appointments" }, () => {
+      .on("postgres_changes", { event: "*", schema: "public", table: "appointments" }, realtimeGuard(() => {
         setRefreshKey((k) => k + 1);
-      })
+      }))
       .subscribe();
     return () => { supabase.removeChannel(channel); };
   }, [channelKey]);

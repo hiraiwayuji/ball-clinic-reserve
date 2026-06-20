@@ -31,6 +31,7 @@ import { toast } from "sonner";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { recordAction, COUNTER_DONE_KEY, SALES_PAGE_KEY } from "@/lib/next-action";
+import { realtimeGuard } from "@/lib/realtime-guard";
 import DailyCompletionCelebration from "@/components/admin/DailyCompletionCelebration";
 import { AddAppointmentDialog } from "@/components/admin/AddAppointmentDialog";
 
@@ -588,7 +589,7 @@ export default function CounterPage() {
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "appointments" },
-        () => { fetchAppointments(); },
+        realtimeGuard(fetchAppointments),
       )
       .subscribe();
     return () => { supabase.removeChannel(channel); };
