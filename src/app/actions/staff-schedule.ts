@@ -441,7 +441,9 @@ export async function getBlockedTimesForDate(
   const sb = getServiceClient();
   if (!sb) return [];
 
-  const [{ data: staffData }, { data: overrideData }] = await Promise.all([
+  const dayOfWeek = new Date(`${dateStr}T12:00:00+09:00`).getDay();
+
+  const [{ data: staffData }, { data: overrideData }, { data: weeklyHoursData }] = await Promise.all([
     sb
       .from("reservation_staff")
       .select("id")
@@ -450,15 +452,35 @@ export async function getBlockedTimesForDate(
       .eq("available_for_online_booking", true),
     sb
       .from("staff_working_overrides")
-      .select("staff_id, start_time, end_time")
+      .select("staff_id, start_time, end_time, kind")
       .eq("clinic_id", clinicId)
       .eq("date", dateStr)
       .eq("blocks_booking", true),
+    // 週次デフォルトの休憩時間も取得（override がなければ週次 break を使う）
+    sb
+      .from("staff_working_hours")
+      .select("staff_id, break_start, break_end")
+      .eq("clinic_id", clinicId)
+      .eq("day_of_week", dayOfWeek),
   ]);
 
   const activeStaffIds = new Set((staffData ?? []).map((s: any) => s.id));
   const totalStaff = activeStaffIds.size;
   if (totalStaff === 0) return [];
+
+  // 週次休憩をマップ化（override break があれば上書き）
+  const weeklyBreakMap = new Map<string, { start: string; end: string }>();
+  for (const w of (weeklyHoursData ?? []) as any[]) {
+    if (w.break_start && w.break_end) {
+      weeklyBreakMap.set(w.staff_id, { start: w.break_start.slice(0, 5), end: w.break_end.slice(0, 5) });
+    }
+  }
+  // override の break レコードで上書き
+  for (const o of (overrideData ?? []) as any[]) {
+    if (o.kind === "break" && o.start_time && o.end_time) {
+      weeklyBreakMap.set(o.staff_id, { start: o.start_time.slice(0, 5), end: o.end_time.slice(0, 5) });
+    }
+  }
 
   // 30 分グリッドで集計
   const blockedSlots: string[] = [];
@@ -471,15 +493,14 @@ export async function getBlockedTimesForDate(
     const blockedStaff = new Set<string>();
     for (const o of (overrideData ?? []) as any[]) {
       if (!activeStaffIds.has(o.staff_id)) continue;
-      // 終日 override
-      if (!o.start_time || !o.end_time) {
-        blockedStaff.add(o.staff_id);
-        continue;
-      }
-      // 時間範囲チェック: slot が [start, end) に含まれるか
-      if (slot >= o.start_time && slot < o.end_time) {
-        blockedStaff.add(o.staff_id);
-      }
+      if (o.kind === "break") continue; // break は下で処理
+      if (!o.start_time || !o.end_time) { blockedStaff.add(o.staff_id); continue; }
+      if (slot >= o.start_time.slice(0, 5) && slot < o.end_time.slice(0, 5)) blockedStaff.add(o.staff_id);
+    }
+    // 週次 or override の休憩時間チェック
+    for (const [staffId, brk] of weeklyBreakMap.entries()) {
+      if (!activeStaffIds.has(staffId)) continue;
+      if (slot >= brk.start && slot < brk.end) blockedStaff.add(staffId);
     }
     if (blockedStaff.size >= totalStaff) blockedSlots.push(slot);
   }
@@ -925,8 +946,10 @@ export type StaffDaySchedule = {
   role: string | null;
   displayColor: string | null;
   showInTimeline: boolean;
-  startTime: string | null;  // "HH:MM"
-  endTime: string | null;    // "HH:MM"
+  startTime: string | null;   // "HH:MM"
+  endTime: string | null;     // "HH:MM"
+  breakStart: string | null;  // "HH:MM" 休憩開始
+  breakEnd: string | null;    // "HH:MM" 休憩終了
   source: "override" | "weekly" | "none";
   isOff: boolean;
 };
@@ -971,21 +994,39 @@ export async function getStaffSchedulesForDate(
   // 曜日: 0=日、6=土
   const dayOfWeek = new Date(dateStr).getDay();
 
-  // その曜日の週次勤務時間を一括取得
+  // その曜日の週次勤務時間を一括取得（休憩時間も含む）
   const { data: weeklyData } = await sb
     .from("staff_working_hours")
-    .select("staff_id, start_time, end_time")
+    .select("staff_id, start_time, end_time, break_start, break_end")
     .eq("clinic_id", auth.clinicId)
     .eq("day_of_week", dayOfWeek);
 
-  const weeklyMap = new Map<string, { start_time: string; end_time: string }>();
+  const weeklyMap = new Map<string, { start_time: string; end_time: string; break_start: string | null; break_end: string | null }>();
   for (const w of (weeklyData ?? []) as any[]) {
-    weeklyMap.set(w.staff_id, { start_time: w.start_time, end_time: w.end_time });
+    weeklyMap.set(w.staff_id, { start_time: w.start_time, end_time: w.end_time, break_start: w.break_start ?? null, break_end: w.break_end ?? null });
+  }
+
+  // 休憩オーバーライド（kind="break"）を別途取得
+  const breakOverrideMap = new Map<string, { start_time: string; end_time: string }>();
+  for (const o of (overrideData ?? []) as any[]) {
+    if (o.kind === "break" && o.start_time && o.end_time) {
+      breakOverrideMap.set(o.staff_id, { start_time: o.start_time, end_time: o.end_time });
+    }
   }
 
   const schedules: StaffDaySchedule[] = staffList.map((s) => {
+    // 休憩: breakOverride > weeklyDefault
+    const breakOverride = breakOverrideMap.get(s.id);
+    const weeklyBreak = weeklyMap.get(s.id);
+    const breakStart = breakOverride
+      ? breakOverride.start_time.slice(0, 5)
+      : (weeklyBreak?.break_start ? weeklyBreak.break_start.slice(0, 5) : null);
+    const breakEnd = breakOverride
+      ? breakOverride.end_time.slice(0, 5)
+      : (weeklyBreak?.break_end ? weeklyBreak.break_end.slice(0, 5) : null);
+
     const override = overrideMap.get(s.id);
-    if (override) {
+    if (override && override.kind !== "break") {
       const isOff = override.kind === "off" || override.kind === "leave";
       return {
         staffId: s.id,
@@ -995,6 +1036,8 @@ export async function getStaffSchedulesForDate(
         showInTimeline: s.show_in_timeline !== false,
         startTime: isOff ? null : (override.start_time ? override.start_time.slice(0, 5) : null),
         endTime: isOff ? null : (override.end_time ? override.end_time.slice(0, 5) : null),
+        breakStart,
+        breakEnd,
         source: "override",
         isOff,
       };
@@ -1009,6 +1052,8 @@ export async function getStaffSchedulesForDate(
         showInTimeline: s.show_in_timeline !== false,
         startTime: weekly.start_time.slice(0, 5),
         endTime: weekly.end_time.slice(0, 5),
+        breakStart,
+        breakEnd,
         source: "weekly",
         isOff: false,
       };
@@ -1021,6 +1066,8 @@ export async function getStaffSchedulesForDate(
       showInTimeline: s.show_in_timeline !== false,
       startTime: null,
       endTime: null,
+      breakStart,
+      breakEnd,
       source: "none",
       isOff: false,
     };
@@ -1035,6 +1082,8 @@ export async function upsertStaffScheduleForDate(
   startTime: string | null,
   endTime: string | null,
   isOff: boolean,
+  breakStart?: string | null,
+  breakEnd?: string | null,
 ): Promise<{ success: boolean; error?: string }> {
   const auth = await requireRole(["owner"]);
   const sb = getServiceClient();
@@ -1044,45 +1093,53 @@ export async function upsertStaffScheduleForDate(
   const start = isOff ? null : startTime;
   const end = isOff ? null : endTime;
 
-  // 既存レコードを確認
+  // 1) 勤務時間オーバーライド（kind=work/off）をupsert
   const { data: existing } = await sb
     .from("staff_working_overrides")
     .select("id")
     .eq("clinic_id", auth.clinicId)
     .eq("staff_id", staffId)
     .eq("date", dateStr)
+    .neq("kind", "break")
     .maybeSingle();
 
   if (existing?.id) {
     const { error } = await sb
       .from("staff_working_overrides")
-      .update({
-        kind,
-        start_time: start,
-        end_time: end,
-        blocks_booking: isOff,
-        status: "approved",
-        created_by_email: auth.email ?? null,
-      })
+      .update({ kind, start_time: start, end_time: end, blocks_booking: isOff, status: "approved", created_by_email: auth.email ?? null })
       .eq("id", existing.id)
       .eq("clinic_id", auth.clinicId);
     if (error) return { success: false, error: error.message };
   } else {
     const { error } = await sb
       .from("staff_working_overrides")
-      .insert({
-        clinic_id: auth.clinicId,
-        staff_id: staffId,
-        date: dateStr,
-        kind,
-        start_time: start,
-        end_time: end,
-        blocks_booking: isOff,
-        status: "approved",
-        created_by_email: auth.email ?? null,
-        note: null,
-      });
+      .insert({ clinic_id: auth.clinicId, staff_id: staffId, date: dateStr, kind, start_time: start, end_time: end, blocks_booking: isOff, status: "approved", created_by_email: auth.email ?? null, note: null });
     if (error) return { success: false, error: error.message };
+  }
+
+  // 2) 休憩時間オーバーライド（kind=break, blocks_booking=true）をupsert/delete
+  const { data: existingBreak } = await sb
+    .from("staff_working_overrides")
+    .select("id")
+    .eq("clinic_id", auth.clinicId)
+    .eq("staff_id", staffId)
+    .eq("date", dateStr)
+    .eq("kind", "break")
+    .maybeSingle();
+
+  if (breakStart && breakEnd && breakStart < breakEnd) {
+    // 休憩あり → upsert
+    if (existingBreak?.id) {
+      await sb.from("staff_working_overrides")
+        .update({ start_time: breakStart, end_time: breakEnd, blocks_booking: true, status: "approved", created_by_email: auth.email ?? null })
+        .eq("id", existingBreak.id).eq("clinic_id", auth.clinicId);
+    } else {
+      await sb.from("staff_working_overrides")
+        .insert({ clinic_id: auth.clinicId, staff_id: staffId, date: dateStr, kind: "break", start_time: breakStart, end_time: breakEnd, blocks_booking: true, status: "approved", created_by_email: auth.email ?? null, note: null });
+    }
+  } else if (existingBreak?.id) {
+    // 休憩クリア → 既存削除
+    await sb.from("staff_working_overrides").delete().eq("id", existingBreak.id).eq("clinic_id", auth.clinicId);
   }
 
   revalidatePath("/admin/dashboard");

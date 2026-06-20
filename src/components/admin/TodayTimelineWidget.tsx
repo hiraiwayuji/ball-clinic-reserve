@@ -97,8 +97,12 @@ export default function TodayTimelineWidget({
   const [editingStaffId, setEditingStaffId] = useState<string | null>(null);
   const [editStart, setEditStart] = useState<string>("");
   const [editEnd, setEditEnd] = useState<string>("");
+  const [editBreakStart, setEditBreakStart] = useState<string>("");
+  const [editBreakEnd, setEditBreakEnd] = useState<string>("");
   const [editIsOff, setEditIsOff] = useState<boolean>(false);
   const [scheduleLoading, setScheduleLoading] = useState(false);
+  // 受付AI調整メッセージ
+  const [receptionAiMsg, setReceptionAiMsg] = useState<string | null>(null);
 
   useEffect(() => { setDate(new Date()); }, []);
 
@@ -407,7 +411,27 @@ export default function TodayTimelineWidget({
                     <div className="px-2 py-0.5 text-[10px] font-semibold text-slate-500 dark:text-slate-400 sticky left-0 bg-slate-50 dark:bg-slate-800/30 z-10 border-r border-slate-200 dark:border-slate-700 flex items-center gap-1" style={{ gridRow: "1" }}>
                       受付
                       {!covered && (
-                        <span className="text-[9px] bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300 px-1 rounded font-bold">⚠ カバー不足</span>
+                        <>
+                          <span className="text-[9px] bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300 px-1 rounded font-bold">⚠ カバー不足</span>
+                          {userRole === "owner" && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const dateLabel = date ? format(date, "M月d日(E)", { locale: ja }) : "";
+                                const onDuty = receptionSchedules.filter((sc) => !sc.isOff && sc.startTime);
+                                const onDutyNames = onDuty.map((sc) => `${sc.staffName}（${sc.startTime}〜${sc.endTime}）`).join("、") || "なし";
+                                const offDuty = receptionSchedules.filter((sc) => sc.isOff || !sc.startTime);
+                                const msg = offDuty.length > 0
+                                  ? `${dateLabel}の受付担当がカバーできていません。\n\n現在出勤予定：${onDutyNames}\n\n${offDuty.map(sc => sc.staffName).join("さん、")}さん、${dateLabel}の受付に入れませんか？\n朝〜夕方（9時〜18時）が理想ですが、一部でも大丈夫です！`
+                                  : `${dateLabel}の受付が9〜18時をカバーできていません。\n現在出勤予定：${onDutyNames}\n\n受付の方、時間延長できる方はいませんか？`;
+                                setReceptionAiMsg(msg);
+                              }}
+                              className="text-[9px] bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300 px-1.5 py-0.5 rounded font-bold hover:bg-blue-200 dark:hover:bg-blue-900/60 transition"
+                            >
+                              AI調整
+                            </button>
+                          )}
+                        </>
                       )}
                     </div>
                     {receptionSchedules.map((sc) => {
@@ -514,6 +538,32 @@ export default function TodayTimelineWidget({
                         }}
                       />
                     )}
+                    {/* 休憩バンド（グレー帯） */}
+                    {(() => {
+                      if (!sched || sched.isOff || !sched.breakStart || !sched.breakEnd) return null;
+                      const brkStart = hmToMinutes(sched.breakStart);
+                      const brkEnd = hmToMinutes(sched.breakEnd);
+                      if (brkEnd <= brkStart) return null;
+                      const brkLeft = Math.max(0, ((brkStart - scheduleStart) / totalGridMinutes) * 100);
+                      const brkWidth = Math.min(
+                        100 - brkLeft,
+                        ((Math.min(brkEnd, scheduleEnd) - Math.max(brkStart, scheduleStart)) / totalGridMinutes) * 100,
+                      );
+                      if (brkWidth <= 0) return null;
+                      return (
+                        <div
+                          className="absolute top-0 bottom-0 pointer-events-none flex items-center justify-center"
+                          style={{
+                            left: `calc(140px + ${brkLeft}%)`,
+                            width: `${brkWidth}%`,
+                            backgroundColor: "rgba(100, 116, 139, 0.18)",
+                            zIndex: 1,
+                          }}
+                        >
+                          <span className="text-[8px] text-slate-500 dark:text-slate-400 font-semibold tracking-tight select-none">休憩</span>
+                        </div>
+                      );
+                    })()}
                     <div className="px-2 py-1 text-sm font-medium text-slate-800 dark:text-slate-100 flex flex-col gap-0.5 sticky left-0 bg-white dark:bg-slate-900 z-10 border-r border-slate-200 dark:border-slate-700" style={{ gridRow: "1 / -1" }}>
                       <div className="flex items-center justify-between gap-1">
                       {userRole === "owner" ? (
@@ -526,6 +576,8 @@ export default function TodayTimelineWidget({
                               setEditingStaffId(s.id);
                               setEditStart(sched?.startTime ?? "09:00");
                               setEditEnd(sched?.endTime ?? "18:00");
+                              setEditBreakStart(sched?.breakStart ?? "");
+                              setEditBreakEnd(sched?.breakEnd ?? "");
                               setEditIsOff(sched?.isOff ?? false);
                             }
                           }}
@@ -578,20 +630,19 @@ export default function TodayTimelineWidget({
                           </label>
                           {!editIsOff && (
                             <div className="flex flex-col gap-1.5 mb-2">
-                              <label className="text-[10px] text-slate-500 dark:text-slate-400">開始</label>
-                              <input
-                                type="time"
-                                value={editStart}
-                                onChange={(e) => setEditStart(e.target.value)}
-                                className="text-xs border border-slate-300 dark:border-slate-600 rounded px-1.5 py-1 bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100"
-                              />
-                              <label className="text-[10px] text-slate-500 dark:text-slate-400">終了</label>
-                              <input
-                                type="time"
-                                value={editEnd}
-                                onChange={(e) => setEditEnd(e.target.value)}
-                                className="text-xs border border-slate-300 dark:border-slate-600 rounded px-1.5 py-1 bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100"
-                              />
+                              <label className="text-[10px] text-slate-500 dark:text-slate-400">出勤</label>
+                              <div className="flex items-center gap-1">
+                                <input type="time" value={editStart} onChange={(e) => setEditStart(e.target.value)} className="flex-1 text-xs border border-slate-300 dark:border-slate-600 rounded px-1.5 py-1 bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100" />
+                                <span className="text-[10px] text-slate-400">〜</span>
+                                <input type="time" value={editEnd} onChange={(e) => setEditEnd(e.target.value)} className="flex-1 text-xs border border-slate-300 dark:border-slate-600 rounded px-1.5 py-1 bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100" />
+                              </div>
+                              <label className="text-[10px] text-orange-500 dark:text-orange-400 font-semibold mt-1">休憩（予約ブロック）</label>
+                              <div className="flex items-center gap-1">
+                                <input type="time" value={editBreakStart} onChange={(e) => setEditBreakStart(e.target.value)} className="flex-1 text-xs border border-orange-300 dark:border-orange-700 rounded px-1.5 py-1 bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100" placeholder="なし" />
+                                <span className="text-[10px] text-slate-400">〜</span>
+                                <input type="time" value={editBreakEnd} onChange={(e) => setEditBreakEnd(e.target.value)} className="flex-1 text-xs border border-orange-300 dark:border-orange-700 rounded px-1.5 py-1 bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100" placeholder="なし" />
+                              </div>
+                              <p className="text-[9px] text-orange-400">休憩中は患者さんの予約をブロックします</p>
                             </div>
                           )}
                           <div className="flex gap-1.5">
@@ -608,6 +659,8 @@ export default function TodayTimelineWidget({
                                     editIsOff ? null : editStart,
                                     editIsOff ? null : editEnd,
                                     editIsOff,
+                                    editBreakStart || null,
+                                    editBreakEnd || null,
                                   );
                                   if (res.success) {
                                     toast.success("勤務時間を更新しました");
@@ -942,6 +995,38 @@ export default function TodayTimelineWidget({
             if (date) fetchData(date);
           }}
         />
+      )}
+
+      {/* 受付AI調整メッセージ モーダル */}
+      {receptionAiMsg && (
+        <div
+          className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4"
+          onClick={() => setReceptionAiMsg(null)}
+        >
+          <div
+            className="bg-white dark:bg-slate-900 rounded-xl shadow-xl max-w-sm w-full p-5 space-y-3"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between">
+              <p className="text-sm font-bold text-slate-700 dark:text-slate-200">受付調整 LINE 下書き</p>
+              <button type="button" onClick={() => setReceptionAiMsg(null)} className="text-slate-400 hover:text-slate-600 text-xl leading-none">×</button>
+            </div>
+            <pre className="text-sm text-slate-700 dark:text-slate-300 whitespace-pre-wrap bg-slate-50 dark:bg-slate-800 rounded-lg p-3 border border-slate-200 dark:border-slate-700 leading-relaxed">
+              {receptionAiMsg}
+            </pre>
+            <button
+              type="button"
+              onClick={() => {
+                navigator.clipboard.writeText(receptionAiMsg);
+                toast.success("コピーしました");
+                setReceptionAiMsg(null);
+              }}
+              className="w-full py-2 rounded-lg bg-blue-500 hover:bg-blue-600 text-white text-sm font-bold transition"
+            >
+              コピーして閉じる
+            </button>
+          </div>
+        </div>
       )}
     </Card>
   );
