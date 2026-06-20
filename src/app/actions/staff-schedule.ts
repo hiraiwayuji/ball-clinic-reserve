@@ -916,6 +916,181 @@ export async function getTaskLoadByStaff(): Promise<{ success: boolean; rows?: T
 }
 
 // ─────────────────────────────────────────────────────────────────
+// タイムテーブル用：特定日のスタッフ勤務状況を一括取得
+// ─────────────────────────────────────────────────────────────────
+
+export type StaffDaySchedule = {
+  staffId: string;
+  staffName: string;
+  role: string | null;
+  displayColor: string | null;
+  showInTimeline: boolean;
+  startTime: string | null;  // "HH:MM"
+  endTime: string | null;    // "HH:MM"
+  source: "override" | "weekly" | "none";
+  isOff: boolean;
+};
+
+export async function getStaffSchedulesForDate(
+  dateStr: string,
+): Promise<{ success: boolean; schedules?: StaffDaySchedule[]; error?: string }> {
+  const auth = await checkAdminAuth();
+  const sb = getServiceClient();
+  if (!sb) return { success: false, error: "サーバー設定エラー" };
+
+  // 全スタッフを取得（show_in_timeline は reservation_staff の列）
+  const { data: staffData, error: staffError } = await sb
+    .from("reservation_staff")
+    .select("id, name, role, display_color, show_in_timeline")
+    .eq("clinic_id", auth.clinicId)
+    .eq("is_active", true)
+    .order("sort_order", { ascending: true });
+
+  if (staffError) return { success: false, error: staffError.message };
+
+  const staffList = (staffData ?? []) as {
+    id: string;
+    name: string;
+    role: string | null;
+    display_color: string | null;
+    show_in_timeline: boolean | null;
+  }[];
+
+  // その日の override を一括取得
+  const { data: overrideData } = await sb
+    .from("staff_working_overrides")
+    .select("staff_id, start_time, end_time, kind")
+    .eq("clinic_id", auth.clinicId)
+    .eq("date", dateStr);
+
+  const overrideMap = new Map<string, { start_time: string | null; end_time: string | null; kind: string }>();
+  for (const o of (overrideData ?? []) as any[]) {
+    overrideMap.set(o.staff_id, { start_time: o.start_time, end_time: o.end_time, kind: o.kind });
+  }
+
+  // 曜日: 0=日、6=土
+  const dayOfWeek = new Date(dateStr).getDay();
+
+  // その曜日の週次勤務時間を一括取得
+  const { data: weeklyData } = await sb
+    .from("staff_working_hours")
+    .select("staff_id, start_time, end_time")
+    .eq("clinic_id", auth.clinicId)
+    .eq("day_of_week", dayOfWeek);
+
+  const weeklyMap = new Map<string, { start_time: string; end_time: string }>();
+  for (const w of (weeklyData ?? []) as any[]) {
+    weeklyMap.set(w.staff_id, { start_time: w.start_time, end_time: w.end_time });
+  }
+
+  const schedules: StaffDaySchedule[] = staffList.map((s) => {
+    const override = overrideMap.get(s.id);
+    if (override) {
+      const isOff = override.kind === "off" || override.kind === "leave";
+      return {
+        staffId: s.id,
+        staffName: s.name,
+        role: s.role,
+        displayColor: s.display_color,
+        showInTimeline: s.show_in_timeline !== false,
+        startTime: isOff ? null : (override.start_time ? override.start_time.slice(0, 5) : null),
+        endTime: isOff ? null : (override.end_time ? override.end_time.slice(0, 5) : null),
+        source: "override",
+        isOff,
+      };
+    }
+    const weekly = weeklyMap.get(s.id);
+    if (weekly) {
+      return {
+        staffId: s.id,
+        staffName: s.name,
+        role: s.role,
+        displayColor: s.display_color,
+        showInTimeline: s.show_in_timeline !== false,
+        startTime: weekly.start_time.slice(0, 5),
+        endTime: weekly.end_time.slice(0, 5),
+        source: "weekly",
+        isOff: false,
+      };
+    }
+    return {
+      staffId: s.id,
+      staffName: s.name,
+      role: s.role,
+      displayColor: s.display_color,
+      showInTimeline: s.show_in_timeline !== false,
+      startTime: null,
+      endTime: null,
+      source: "none",
+      isOff: false,
+    };
+  });
+
+  return { success: true, schedules };
+}
+
+export async function upsertStaffScheduleForDate(
+  staffId: string,
+  dateStr: string,
+  startTime: string | null,
+  endTime: string | null,
+  isOff: boolean,
+): Promise<{ success: boolean; error?: string }> {
+  const auth = await requireRole(["owner"]);
+  const sb = getServiceClient();
+  if (!sb) return { success: false, error: "サーバー設定エラー" };
+
+  const kind = isOff ? "off" : "work";
+  const start = isOff ? null : startTime;
+  const end = isOff ? null : endTime;
+
+  // 既存レコードを確認
+  const { data: existing } = await sb
+    .from("staff_working_overrides")
+    .select("id")
+    .eq("clinic_id", auth.clinicId)
+    .eq("staff_id", staffId)
+    .eq("date", dateStr)
+    .maybeSingle();
+
+  if (existing?.id) {
+    const { error } = await sb
+      .from("staff_working_overrides")
+      .update({
+        kind,
+        start_time: start,
+        end_time: end,
+        blocks_booking: isOff,
+        status: "approved",
+        created_by_email: auth.email ?? null,
+      })
+      .eq("id", existing.id)
+      .eq("clinic_id", auth.clinicId);
+    if (error) return { success: false, error: error.message };
+  } else {
+    const { error } = await sb
+      .from("staff_working_overrides")
+      .insert({
+        clinic_id: auth.clinicId,
+        staff_id: staffId,
+        date: dateStr,
+        kind,
+        start_time: start,
+        end_time: end,
+        blocks_booking: isOff,
+        status: "approved",
+        created_by_email: auth.email ?? null,
+        note: null,
+      });
+    if (error) return { success: false, error: error.message };
+  }
+
+  revalidatePath("/admin/dashboard");
+  revalidatePath("/admin/settings/staff-schedule");
+  return { success: true };
+}
+
+// ─────────────────────────────────────────────────────────────────
 // CSV インポート（Phase 4 で UI 実装。Phase 1 では server action 本体のみ）
 // ─────────────────────────────────────────────────────────────────
 

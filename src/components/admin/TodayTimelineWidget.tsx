@@ -14,6 +14,9 @@ import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
 import { getTimelineForDate, type TimelineData, type TimelineAppointment } from "@/app/actions/timeline";
 import { updateCheckinStatus, addAddonToAppointment, getAddonCourseInfo, sendReviewRequest, getReviewRequestConfig } from "@/app/actions/adminReserve";
+import { getStaffSchedulesForDate, upsertStaffScheduleForDate, type StaffDaySchedule } from "@/app/actions/staff-schedule";
+import { getMyRole } from "@/app/actions/auth";
+import type { ClinicRole } from "@/app/actions/auth";
 import { AddAppointmentDialog } from "@/components/admin/AddAppointmentDialog";
 import { EditAppointmentDialog } from "@/components/admin/EditAppointmentDialog";
 import { PendingReservationsButton } from "@/components/admin/PendingReservationsButton";
@@ -87,7 +90,20 @@ export default function TodayTimelineWidget({
   // 受付・会計ボタンの非同期処理ロック
   const [actionLoading, setActionLoading] = useState(false);
 
+  // スタッフ勤務スケジュール
+  const [staffSchedules, setStaffSchedules] = useState<StaffDaySchedule[]>([]);
+  const [userRole, setUserRole] = useState<ClinicRole | null>(null);
+  // 勤務時間編集ポップアップ
+  const [editingStaffId, setEditingStaffId] = useState<string | null>(null);
+  const [editStart, setEditStart] = useState<string>("");
+  const [editEnd, setEditEnd] = useState<string>("");
+  const [editIsOff, setEditIsOff] = useState<boolean>(false);
+  const [scheduleLoading, setScheduleLoading] = useState(false);
+
   useEffect(() => { setDate(new Date()); }, []);
+
+  // ロール取得（owner のみスケジュール編集可）
+  useEffect(() => { getMyRole().then(setUserRole).catch(() => {}); }, []);
 
   // 追加メニュー設定を取得（「施術後に○○を追加」ボタンの表示・ラベル用）
   useEffect(() => { getAddonCourseInfo().then(setAddonInfo).catch(() => setAddonInfo(null)); }, []);
@@ -108,17 +124,28 @@ export default function TodayTimelineWidget({
     }
   };
 
+  const fetchSchedules = useCallback(async (d: Date) => {
+    const dateStr = format(d, "yyyy-MM-dd");
+    const res = await getStaffSchedulesForDate(dateStr);
+    if (res.success && res.schedules) {
+      setStaffSchedules(res.schedules);
+    }
+  }, []);
+
   const fetchData = useCallback(async (d: Date) => {
     setLoading(true);
     setError(null);
-    const res = await getTimelineForDate(format(d, "yyyy-MM-dd"));
+    const [res] = await Promise.all([
+      getTimelineForDate(format(d, "yyyy-MM-dd")),
+      fetchSchedules(d),
+    ]);
     if (res.success && res.data) {
       setData(res.data);
     } else {
       setError(res.error ?? "取得失敗");
     }
     setLoading(false);
-  }, []);
+  }, [fetchSchedules]);
 
   useEffect(() => {
     if (!date) return;
@@ -211,6 +238,12 @@ export default function TodayTimelineWidget({
     setSelectedApt(null);
     router.push(`/admin/sales?${params.toString()}`);
   };
+
+  // "HH:MM" → 分
+  function hmToMinutes(hm: string): number {
+    const [h, m] = hm.split(":").map(Number);
+    return (h || 0) * 60 + (m || 0);
+  }
 
   // スタッフ行（「未指定」という担当は存在しないので仮想列は作らない。
   // 担当未設定の予約は先頭スタッフ＝院のメイン担当（ボール/院長）の行に表示する）
@@ -352,6 +385,57 @@ export default function TodayTimelineWidget({
                 ))}
               </div>
 
+              {/* 受付スタッフ カバーストリップ */}
+              {(() => {
+                const receptionSchedules = staffSchedules.filter((sc) => sc.role === "reception");
+                if (receptionSchedules.length === 0) return null;
+                const scheduleStart = data.scheduleStartHour * 60;
+                const scheduleEnd = data.scheduleEndHour * 60;
+                const totalGridMinutes = scheduleEnd - scheduleStart;
+                // 9:00–18:00 がカバーされているか
+                const coverStart = 9 * 60;
+                const coverEnd = 18 * 60;
+                const covered = receptionSchedules.some((sc) => {
+                  if (sc.isOff || !sc.startTime || !sc.endTime) return false;
+                  return hmToMinutes(sc.startTime) <= coverStart && hmToMinutes(sc.endTime) >= coverEnd;
+                });
+                return (
+                  <div
+                    className="grid relative border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/30"
+                    style={{ gridTemplateColumns: `140px repeat(${timeMarks.length}, minmax(28px, 1fr))`, minHeight: "20px" }}
+                  >
+                    <div className="px-2 py-0.5 text-[10px] font-semibold text-slate-500 dark:text-slate-400 sticky left-0 bg-slate-50 dark:bg-slate-800/30 z-10 border-r border-slate-200 dark:border-slate-700 flex items-center gap-1" style={{ gridRow: "1" }}>
+                      受付
+                      {!covered && (
+                        <span className="text-[9px] bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300 px-1 rounded font-bold">⚠ カバー不足</span>
+                      )}
+                    </div>
+                    {receptionSchedules.map((sc) => {
+                      if (sc.isOff || !sc.startTime || !sc.endTime) return null;
+                      const sMin = hmToMinutes(sc.startTime);
+                      const eMin = hmToMinutes(sc.endTime);
+                      const left = Math.max(0, ((sMin - scheduleStart) / totalGridMinutes) * 100);
+                      const width = Math.min(100 - left, ((Math.min(eMin, scheduleEnd) - Math.max(sMin, scheduleStart)) / totalGridMinutes) * 100);
+                      if (width <= 0) return null;
+                      return (
+                        <div
+                          key={sc.staffId}
+                          className="absolute top-1 bottom-1 rounded"
+                          style={{
+                            left: `calc(140px + ${left}%)`,
+                            width: `${width}%`,
+                            backgroundColor: sc.displayColor ?? "#94a3b8",
+                            opacity: 0.5,
+                            zIndex: 1,
+                          }}
+                          title={`${sc.staffName} ${sc.startTime}–${sc.endTime}`}
+                        />
+                      );
+                    })}
+                  </div>
+                );
+              })()}
+
               {/* スタッフ行 */}
               {staffRows.map((s) => {
                 const apts = aptsByStaff.get(s.id) ?? [];
@@ -392,6 +476,22 @@ export default function TodayTimelineWidget({
                   laneOf.set(laneKey, lane);
                 }
                 const laneCount = Math.max(1, laneEnds.length);
+                const sched = staffSchedules.find((sc) => sc.staffId === s.id);
+                const schedStart = sched?.startTime ? hmToMinutes(sched.startTime) : null;
+                const schedEnd = sched?.endTime ? hmToMinutes(sched.endTime) : null;
+                const scheduleStart = data.scheduleStartHour * 60;
+                const scheduleEnd = data.scheduleEndHour * 60;
+                const totalGridMinutes = scheduleEnd - scheduleStart;
+                // 勤務時間バーの CSS left/width (%)
+                const barLeft = (schedStart !== null && totalGridMinutes > 0)
+                  ? Math.max(0, ((schedStart - scheduleStart) / totalGridMinutes) * 100)
+                  : null;
+                const barWidth = (schedStart !== null && schedEnd !== null && totalGridMinutes > 0)
+                  ? Math.min(100, ((Math.min(schedEnd, scheduleEnd) - Math.max(schedStart, scheduleStart)) / totalGridMinutes) * 100)
+                  : null;
+
+                const isEditing = editingStaffId === s.id;
+
                 return (
                   <div
                     key={s.id}
@@ -402,8 +502,41 @@ export default function TodayTimelineWidget({
                       minHeight: "48px",
                     }}
                   >
-                    <div className="px-2 py-1 text-sm font-medium text-slate-800 dark:text-slate-100 flex items-center justify-between gap-1 sticky left-0 bg-white dark:bg-slate-900 z-10 border-r border-slate-200 dark:border-slate-700" style={{ gridRow: "1 / -1" }}>
-                      <span className="truncate">{s.name}</span>
+                    {/* 勤務時間バー（予約バーの後ろ、z-index 低め） */}
+                    {barLeft !== null && barWidth !== null && !sched?.isOff && (
+                      <div
+                        className="absolute top-0 bottom-0 pointer-events-none"
+                        style={{
+                          left: `calc(140px + ${barLeft}%)`,
+                          width: `${barWidth}%`,
+                          backgroundColor: "rgba(220, 252, 231, 0.5)",
+                          zIndex: 0,
+                        }}
+                      />
+                    )}
+                    <div className="px-2 py-1 text-sm font-medium text-slate-800 dark:text-slate-100 flex flex-col gap-0.5 sticky left-0 bg-white dark:bg-slate-900 z-10 border-r border-slate-200 dark:border-slate-700" style={{ gridRow: "1 / -1" }}>
+                      <div className="flex items-center justify-between gap-1">
+                      {userRole === "owner" ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (isEditing) {
+                              setEditingStaffId(null);
+                            } else {
+                              setEditingStaffId(s.id);
+                              setEditStart(sched?.startTime ?? "09:00");
+                              setEditEnd(sched?.endTime ?? "18:00");
+                              setEditIsOff(sched?.isOff ?? false);
+                            }
+                          }}
+                          className="truncate text-left hover:text-blue-600 dark:hover:text-blue-400 underline-offset-2 hover:underline"
+                          title="クリックして勤務時間を編集"
+                        >
+                          {s.name}
+                        </button>
+                      ) : (
+                        <span className="truncate">{s.name}</span>
+                      )}
                       {(monthCount > 0 || target > 0) ? (
                         <span
                           className={`shrink-0 text-[10px] font-black px-1.5 py-0.5 rounded-full tabular-nums ${achievementBadge}`}
@@ -415,6 +548,91 @@ export default function TodayTimelineWidget({
                         </span>
                       ) : (
                         <span className="shrink-0 text-[10px] text-slate-300 dark:text-slate-600 tabular-nums">—</span>
+                      )}
+                      </div>
+                      {/* 勤務時間表示 */}
+                      {sched && !sched.isOff && sched.startTime && sched.endTime && (
+                        <span className="text-[9px] text-slate-400 dark:text-slate-500 tabular-nums">
+                          {sched.startTime}–{sched.endTime}
+                          {sched.source === "override" && " ✏"}
+                        </span>
+                      )}
+                      {sched?.isOff && (
+                        <span className="text-[9px] text-rose-400 font-semibold">休み</span>
+                      )}
+                      {/* 勤務時間編集ポップアップ（owner のみ） */}
+                      {isEditing && (
+                        <div
+                          className="absolute left-0 top-full z-30 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-600 rounded-lg shadow-lg p-3 w-52"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <div className="text-xs font-semibold text-slate-700 dark:text-slate-200 mb-2">{s.name} の勤務時間</div>
+                          <label className="flex items-center gap-2 mb-2 text-xs text-slate-600 dark:text-slate-300">
+                            <input
+                              type="checkbox"
+                              checked={editIsOff}
+                              onChange={(e) => setEditIsOff(e.target.checked)}
+                              className="w-3.5 h-3.5"
+                            />
+                            休み
+                          </label>
+                          {!editIsOff && (
+                            <div className="flex flex-col gap-1.5 mb-2">
+                              <label className="text-[10px] text-slate-500 dark:text-slate-400">開始</label>
+                              <input
+                                type="time"
+                                value={editStart}
+                                onChange={(e) => setEditStart(e.target.value)}
+                                className="text-xs border border-slate-300 dark:border-slate-600 rounded px-1.5 py-1 bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100"
+                              />
+                              <label className="text-[10px] text-slate-500 dark:text-slate-400">終了</label>
+                              <input
+                                type="time"
+                                value={editEnd}
+                                onChange={(e) => setEditEnd(e.target.value)}
+                                className="text-xs border border-slate-300 dark:border-slate-600 rounded px-1.5 py-1 bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100"
+                              />
+                            </div>
+                          )}
+                          <div className="flex gap-1.5">
+                            <button
+                              type="button"
+                              disabled={scheduleLoading}
+                              onClick={async () => {
+                                if (!date) return;
+                                setScheduleLoading(true);
+                                try {
+                                  const res = await upsertStaffScheduleForDate(
+                                    s.id,
+                                    format(date, "yyyy-MM-dd"),
+                                    editIsOff ? null : editStart,
+                                    editIsOff ? null : editEnd,
+                                    editIsOff,
+                                  );
+                                  if (res.success) {
+                                    toast.success("勤務時間を更新しました");
+                                    setEditingStaffId(null);
+                                    await fetchSchedules(date);
+                                  } else {
+                                    toast.error(res.error ?? "更新に失敗しました");
+                                  }
+                                } finally {
+                                  setScheduleLoading(false);
+                                }
+                              }}
+                              className="flex-1 text-[11px] bg-blue-600 hover:bg-blue-700 text-white rounded px-2 py-1 disabled:opacity-50"
+                            >
+                              {scheduleLoading ? "保存中…" : "保存"}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setEditingStaffId(null)}
+                              className="flex-1 text-[11px] border border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-300 rounded px-2 py-1 hover:bg-slate-50 dark:hover:bg-slate-700"
+                            >
+                              キャンセル
+                            </button>
+                          </div>
+                        </div>
                       )}
                     </div>
                     {/* グリッドセル（クリックで新規予約） */}
