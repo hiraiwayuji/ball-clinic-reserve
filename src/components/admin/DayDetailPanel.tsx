@@ -148,10 +148,16 @@ export function DayDetailPanel({ dateStr, onClose }: Props) {
                       />
                       {brkLeft && brkWidth && (
                         <div
-                          className="absolute top-1 bottom-1 rounded bg-slate-400/40 flex items-center justify-center"
-                          style={{ left: brkLeft, width: brkWidth }}
+                          className="absolute top-0.5 bottom-0.5 rounded border border-slate-400/70 flex items-center justify-center overflow-hidden"
+                          style={{
+                            left: brkLeft,
+                            width: brkWidth,
+                            backgroundColor: "rgba(248, 250, 252, 0.92)",
+                            backgroundImage:
+                              "repeating-linear-gradient(45deg, rgba(100,116,139,0.35) 0, rgba(100,116,139,0.35) 3px, transparent 3px, transparent 7px)",
+                          }}
                         >
-                          <span className="text-[8px] font-bold text-slate-500 select-none">休憩</span>
+                          <span className="text-[8px] font-black text-slate-600 select-none bg-white/80 rounded px-0.5 leading-none">休憩</span>
                         </div>
                       )}
                       <div

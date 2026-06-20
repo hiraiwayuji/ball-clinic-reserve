@@ -14,6 +14,7 @@ import {
 import {
   listShiftCoordination, getShiftAutoEnabled, setShiftAutoEnabled,
   getShiftPolicy, setShiftPolicy, generateShiftFromRequests, confirmShiftLeaves,
+  requestShiftDevAssist,
   type ShiftSubmission, type ShiftStaff, type ShiftChatMessage,
 } from "@/app/actions/staff-shift-requests";
 import {
@@ -125,6 +126,17 @@ export default function ShiftCoordinationPage() {
   };
 
   const latestDraft = chatMessages.filter((m) => m.role === "assistant").at(-1)?.content ?? null;
+
+  const [escalating, setEscalating] = useState(false);
+  const escalateToBoru = async () => {
+    const note = window.prompt("ぼーるくんに伝えたいこと（どんな出勤表にしたいか・AIで難しかった点など）を書いてください：", "");
+    if (note === null) return; // キャンセル
+    setEscalating(true);
+    const r = await requestShiftDevAssist(monthStr, note, chatMessages);
+    setEscalating(false);
+    if (r.success) toast.success("ぼーるくんに依頼しました。確認後に対応します🛠");
+    else toast.error(r.error ?? "依頼の送信に失敗しました");
+  };
 
   const confirmLeaves = async () => {
     if (!confirm(`${month && format(month, "yyyy年M月", { locale: ja })}の出勤調整を確定します。休み希望は予約ブロック、出勤時間は予約可能枠に反映します。よろしいですか？`)) return;
@@ -540,7 +552,14 @@ export default function ShiftCoordinationPage() {
             >
               {confirming ? "反映中..." : "この内容で確定（出勤時間・休み希望を予約に反映）"}
             </button>
-            <p className="text-[11px] text-slate-400 text-center">確定すると、休み希望の日が予約ブロックされ、出勤時間が予約可能枠として反映されます。</p>
+            <button
+              onClick={escalateToBoru}
+              disabled={escalating}
+              className="w-full h-10 rounded-xl border border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-300 text-sm font-bold hover:bg-slate-50 dark:hover:bg-slate-800/40 disabled:opacity-50"
+            >
+              {escalating ? "送信中..." : "🛠 うまくいかない…ぼーるくんに調整を依頼する"}
+            </button>
+            <p className="text-[11px] text-slate-400 text-center">確定すると、休み希望の日が予約ブロックされ、出勤時間が予約可能枠として反映されます。AIで難しければ「ぼーるくんに依頼」で調整作業を回せます。</p>
           </div>
         </DialogContent>
       </Dialog>

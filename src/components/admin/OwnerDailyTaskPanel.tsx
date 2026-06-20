@@ -7,7 +7,7 @@ import {
 import { toast } from "sonner";
 import {
   listDailyTasksForDate, generateDailyTasks, approveTask, approveAllTasksForDate,
-  toggleTaskDone, addManualTask, deleteTask,
+  toggleTaskDone, addManualTask, deleteTask, TASK_TEMPLATES,
   type DailyTask, type TaskKind, type TaskPriority,
 } from "@/app/actions/staff-daily-tasks";
 import { listActiveStaff, type StaffOption } from "@/app/actions/staff-schedule";
@@ -226,6 +226,18 @@ export default function OwnerDailyTaskPanel() {
                   <option value="high">優先</option>
                   <option value="low">低</option>
                 </select>
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {TASK_TEMPLATES.map((tpl) => (
+                  <button
+                    key={tpl.title}
+                    type="button"
+                    onClick={() => setAddTitle(tpl.title)}
+                    className="px-2.5 py-1 text-[11px] font-bold rounded-full border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
+                  >
+                    {tpl.title}
+                  </button>
+                ))}
               </div>
               <div className="flex gap-2">
                 <input

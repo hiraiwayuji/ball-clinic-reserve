@@ -216,6 +216,48 @@ export type ShiftChatMessage = {
   content: string;
 };
 
+/**
+ * AIで出勤表がうまく作れない時、調整作業をぼーるくん（開発側）へ回す。
+ * 月・方針・これまでのチャットのやりとりを記録し、後でぼーるくんが確認して対応する。
+ */
+export async function requestShiftDevAssist(
+  month: string,
+  note: string,
+  chatHistory?: ShiftChatMessage[],
+): Promise<{ success: boolean; error?: string }> {
+  const { clinicId, email } = await checkAdminAuth();
+  const { createClient } = await import("@/lib/supabase/server");
+  const supabase = await createClient();
+
+  const { data: settings } = await supabase
+    .from("clinic_settings").select("clinic_name, shift_policy").eq("id", clinicId).maybeSingle();
+
+  const { error } = await supabase.from("dev_assist_requests").insert({
+    clinic_id: clinicId,
+    kind: "shift",
+    title: `${month} の出勤表調整の依頼`,
+    payload: {
+      month,
+      note: note?.slice(0, 1000) ?? "",
+      clinic_name: settings?.clinic_name ?? null,
+      shift_policy: settings?.shift_policy ?? null,
+      chat: (chatHistory ?? []).slice(-12),
+    },
+    created_by_email: email ?? null,
+  });
+  if (error) return { success: false, error: error.message };
+
+  // 院長LINEにも控えを通知（ぼーるくんへ回したことが分かるように）
+  try {
+    await pushLineToOwners(
+      clinicId,
+      `🛠 出勤表の調整を「ぼーるくん」に依頼しました。\n対象：${month}\n${note ? `内容：${note.slice(0, 200)}\n` : ""}確認後に対応します。`,
+    );
+  } catch { /* 通知失敗は致命的でないため握りつぶす */ }
+
+  return { success: true };
+}
+
 export async function generateShiftFromRequests(
   month: string,
   extraInstruction?: string,

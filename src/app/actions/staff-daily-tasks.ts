@@ -15,6 +15,19 @@ function getServiceClient() {
 export type TaskKind = "manual" | "karte" | "morning" | "sns" | "cleaning" | "other";
 export type TaskPriority = "low" | "normal" | "high";
 
+/** この院でよく使う業務テンプレ（先生の自己追加・院長の手動追加の候補ボタンに使用）。 */
+export const TASK_TEMPLATES: { title: string; kind: TaskKind }[] = [
+  { title: "柔整書類の確認", kind: "karte" },
+  { title: "保険証の確認", kind: "karte" },
+  { title: "カルテ整理", kind: "karte" },
+  { title: "受付業務のお手伝い", kind: "other" },
+  { title: "ベッドメイキング", kind: "cleaning" },
+  { title: "細かい場所のお掃除", kind: "cleaning" },
+  { title: "トイレ掃除", kind: "cleaning" },
+  { title: "朝の掃除", kind: "cleaning" },
+  { title: "SNS投稿・ブログ下書き", kind: "sns" },
+];
+
 export type DailyTask = {
   id: string;
   staff_id: string | null;
@@ -152,11 +165,20 @@ export async function generateDailyTasks(
 【出勤する先生と本日の状況】
 ${staffLines}
 
-【提案してほしい業務の例】
-- カルテ作業・施術記録のまとめ
-- 予約の少ない時間帯でのSNS投稿・ブログ下書き
-- 院内清掃・物品補充・備品チェック
-- 予約が多い先生には負担の少ない短時間タスク、少ない先生には集客系タスク
+【この院で空き時間にやってほしい業務（この中から状況に合わせて選ぶ）】
+- 柔整書類の確認（レセプト提出を見据えた書類チェック）
+- 保険証の確認
+- カルテ作業・施術記録のまとめ・カルテ整理
+- 受付業務のお手伝い
+- ベッドメイキング
+- 細かい場所のお掃除
+- トイレ掃除
+- 予約の少ない時間帯のSNS投稿・ブログ下書き
+
+【割り当ての方針】
+- 「森藤」先生・「森川」先生には、柔整書類の確認や掃除などの業務を優先的に多めに割り当てる（評価を上げたいため）
+- 予約が多くて余裕のない先生にはタスクを少なめ（または0）に
+- kind は karte=書類/カルテ系, cleaning=掃除/ベッドメイキング系, other=受付お手伝い等, sns=SNS/ブログ
 ${extraInstruction ? `\n【院長からの追加指示】\n${extraInstruction}` : ""}
 
 # 出力（JSON配列のみ・前置き不要・マークダウンのコードフェンス不要）
@@ -229,6 +251,42 @@ ${extraInstruction ? `\n【院長からの追加指示】\n${extraInstruction}` 
   revalidatePath("/admin/dashboard");
   revalidatePath("/admin/tasks");
   return { success: true, created: rows.length };
+}
+
+/**
+ * 先生が自分でタスクを追加（「朝掃除した」「カルテ整理した」等の記録も可）。
+ * 自己追加は承認不要（approved=true）。done=true で「やった記録」として即完了登録もできる。
+ */
+export async function addMyTask(input: {
+  title: string;
+  task_kind?: TaskKind;
+  priority?: TaskPriority;
+  done?: boolean;
+  dateStr: string;
+}): Promise<{ success: boolean; error?: string }> {
+  const { clinicId, email } = await checkAdminAuth();
+  const staffId = await getMyStaffId();
+  const sb = getServiceClient();
+  if (!sb) return { success: false, error: "サーバー設定エラー" };
+  if (!staffId) return { success: false, error: "スタッフ情報が見つかりません（メール紐付けをご確認ください）" };
+  if (!input.title?.trim()) return { success: false, error: "業務名を入力してください" };
+
+  const { error } = await sb.from("staff_tasks").insert({
+    clinic_id: clinicId,
+    staff_id: staffId,
+    title: input.title.trim().slice(0, 60),
+    due_date: input.dateStr,
+    status: input.done ? "done" : "pending",
+    completed_at: input.done ? new Date().toISOString() : null,
+    priority: input.priority ?? "normal",
+    task_kind: input.task_kind ?? "other",
+    approved: true,
+    source: "manual",
+    created_by_email: email ?? null,
+  });
+  if (error) return { success: false, error: error.message };
+  revalidatePath("/admin/dashboard");
+  return { success: true };
 }
 
 /** 院長承認：1件を承認（先生に表示される）。 */
