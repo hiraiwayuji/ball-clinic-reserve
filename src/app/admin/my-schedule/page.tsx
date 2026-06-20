@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   format, addMonths, startOfMonth, endOfMonth, eachDayOfInterval,
   startOfWeek, addDays, isSameMonth,
@@ -9,21 +9,21 @@ import { ja } from "date-fns/locale";
 import { toast } from "sonner";
 import {
   Loader2, CalendarClock, ChevronLeft, ChevronRight, AlertTriangle, Copy, Link2, CheckCircle2,
+  Sparkles, RefreshCw, Wand2, Save, X, Send, Flower2, UserCheck,
 } from "lucide-react";
 import {
   listShiftCoordination, getShiftAutoEnabled, setShiftAutoEnabled,
   getShiftPolicy, setShiftPolicy, generateShiftFromRequests, confirmShiftLeaves,
-  type ShiftSubmission, type ShiftStaff,
+  type ShiftSubmission, type ShiftStaff, type ShiftChatMessage,
 } from "@/app/actions/staff-shift-requests";
 import {
-  getDayStaffSummary,
-  type DayStaffSummary,
+  listActiveStaff, createOverride, deleteOverride,
+  type StaffOption,
 } from "@/app/actions/staff-schedule";
-import { Sparkles, RefreshCw, Wand2, Save, X } from "lucide-react";
-import Link from "next/link";
+import { DayDetailPanel } from "@/components/admin/DayDetailPanel";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
-// display_color（名前）→ 実際の色
+// display_color 名 → HEX
 const COLOR: Record<string, string> = {
   blue: "#3b82f6", sky: "#0ea5e9", indigo: "#6366f1", violet: "#8b5cf6", purple: "#a855f7",
   pink: "#ec4899", rose: "#f43f5e", red: "#ef4444", orange: "#f97316", amber: "#f59e0b",
@@ -31,189 +31,6 @@ const COLOR: Record<string, string> = {
   slate: "#64748b", gray: "#6b7280",
 };
 const colorOf = (c: string | null) => (c && COLOR[c]) || "#64748b";
-
-// ── 日別詳細パネル ──────────────────────────────────────────────────
-
-
-function hmToMin(hm: string | null): number {
-  if (!hm) return 0;
-  const [h, m] = hm.split(":").map(Number);
-  return (h ?? 0) * 60 + (m ?? 0);
-}
-
-function DayDetailPanel({
-  dateStr,
-  onClose,
-}: {
-  dateStr: string;
-  onClose: () => void;
-}) {
-  const [summaries, setSummaries] = useState<DayStaffSummary[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    setLoading(true);
-    getDayStaffSummary(dateStr)
-      .then((r) => { if (r.success) setSummaries(r.summaries ?? []); })
-      .finally(() => setLoading(false));
-  }, [dateStr]);
-
-  const BAR_START = 8 * 60;  // 8:00
-  const BAR_END   = 20 * 60; // 20:00
-  const BAR_RANGE = BAR_END - BAR_START;
-
-  const pct = (min: number) =>
-    `${Math.max(0, Math.min(100, ((min - BAR_START) / BAR_RANGE) * 100)).toFixed(1)}%`;
-
-  const dateObj = new Date(dateStr + "T00:00:00+09:00");
-  const label = format(dateObj, "M月d日（E）", { locale: ja });
-
-  // タイムライン目盛
-  const marks = [8, 10, 12, 14, 16, 18, 20];
-
-  // 表示対象（受付除く）
-  const staff = summaries.filter((s) => s.showInTimeline !== false || s.role === "reception");
-
-  return (
-    <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-lg overflow-hidden">
-      {/* ヘッダ */}
-      <div className="flex items-center justify-between px-4 py-3 bg-slate-50 dark:bg-slate-800/60 border-b border-slate-200 dark:border-slate-700">
-        <div className="flex items-center gap-2">
-          <span className="text-sm font-black text-slate-800 dark:text-slate-100">{label} 出勤詳細</span>
-          <Link
-            href={`/admin/appointments?date=${dateStr}`}
-            className="text-[11px] text-blue-600 dark:text-blue-400 underline hover:no-underline"
-          >
-            予約表を開く →
-          </Link>
-        </div>
-        <button type="button" onClick={onClose} className="p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-200 dark:hover:bg-slate-700 transition">
-          <X className="w-4 h-4" />
-        </button>
-      </div>
-
-      {loading ? (
-        <div className="h-32 flex items-center justify-center">
-          <Loader2 className="w-5 h-5 animate-spin text-slate-300" />
-        </div>
-      ) : staff.length === 0 ? (
-        <p className="px-4 py-6 text-sm text-slate-400 text-center">スタッフ情報がありません</p>
-      ) : (
-        <div className="p-3 space-y-1.5 overflow-x-auto">
-          {/* 時間目盛り行 */}
-          <div className="flex">
-            <div className="w-24 shrink-0" />
-            <div className="flex-1 relative h-4">
-              {marks.map((h) => (
-                <span
-                  key={h}
-                  className="absolute text-[9px] text-slate-400 font-bold -translate-x-1/2"
-                  style={{ left: pct((h * 60) - 0) }}
-                >
-                  {h}時
-                </span>
-              ))}
-            </div>
-          </div>
-
-          {/* スタッフ行 */}
-          {staff.map((s) => {
-            const startMin = hmToMin(s.startTime);
-            const endMin   = hmToMin(s.endTime);
-            const brkStart = hmToMin(s.breakStart);
-            const brkEnd   = hmToMin(s.breakEnd);
-            const color    = (s.displayColor && COLOR[s.displayColor]) || "#64748b";
-
-            const barLeft  = pct(startMin);
-            const barWidth = s.startTime && s.endTime
-              ? `${Math.max(1, ((Math.min(endMin, BAR_END) - Math.max(startMin, BAR_START)) / BAR_RANGE) * 100).toFixed(1)}%`
-              : "0%";
-
-            const brkLeft  = brkStart > 0 ? pct(brkStart) : null;
-            const brkWidth = (brkStart > 0 && brkEnd > brkStart)
-              ? `${((brkEnd - brkStart) / BAR_RANGE * 100).toFixed(1)}%`
-              : null;
-
-            return (
-              <div key={s.staffId} className="flex items-center gap-2 min-h-[34px]">
-                {/* 名前 */}
-                <div className="w-24 shrink-0 flex items-center gap-1.5">
-                  <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: color }} />
-                  <span className="text-xs font-bold text-slate-700 dark:text-slate-200 truncate">
-                    {s.staffName}
-                  </span>
-                </div>
-
-                {/* バー */}
-                <div className="flex-1 relative h-7 bg-slate-100 dark:bg-slate-800 rounded-lg overflow-hidden">
-                  {/* 時間区切り線 */}
-                  {marks.map((h) => (
-                    <div
-                      key={h}
-                      className="absolute top-0 bottom-0 border-l border-slate-200 dark:border-slate-700 pointer-events-none"
-                      style={{ left: pct(h * 60) }}
-                    />
-                  ))}
-
-                  {s.isOff ? (
-                    <div className="absolute inset-0 flex items-center justify-center">
-                      <span className="text-[10px] font-bold text-slate-400">休み</span>
-                    </div>
-                  ) : s.startTime && s.endTime ? (
-                    <>
-                      {/* 勤務帯（緑） */}
-                      <div
-                        className="absolute top-1 bottom-1 rounded"
-                        style={{ left: barLeft, width: barWidth, background: color, opacity: 0.25 }}
-                      />
-                      <div
-                        className="absolute top-1.5 bottom-1.5 rounded"
-                        style={{ left: barLeft, width: barWidth, background: color, opacity: 0.55 }}
-                      />
-
-                      {/* 休憩帯（グレー） */}
-                      {brkLeft && brkWidth && (
-                        <div
-                          className="absolute top-1 bottom-1 rounded bg-slate-400/40 flex items-center justify-center"
-                          style={{ left: brkLeft, width: brkWidth }}
-                        >
-                          <span className="text-[8px] font-bold text-slate-500 select-none">休憩</span>
-                        </div>
-                      )}
-
-                      {/* 時刻ラベル */}
-                      <div
-                        className="absolute top-1/2 -translate-y-1/2 text-[9px] font-black text-white pointer-events-none"
-                        style={{ left: `calc(${barLeft} + 3px)` }}
-                      >
-                        {s.startTime}〜{s.endTime}
-                      </div>
-                    </>
-                  ) : (
-                    <div className="absolute inset-0 flex items-center justify-center">
-                      <span className="text-[10px] text-slate-400">未設定</span>
-                    </div>
-                  )}
-                </div>
-
-                {/* 予約件数 */}
-                {!s.isOff && (
-                  <div className={`shrink-0 w-10 text-center text-xs font-black rounded-full px-1.5 py-0.5 ${
-                    s.appointmentCount > 0
-                      ? "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300"
-                      : "text-slate-300"
-                  }`}>
-                    {s.appointmentCount > 0 ? `${s.appointmentCount}件` : "－"}
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </div>
-  );
-}
 
 // ────────────────────────────────────────────────────────────────────
 
@@ -226,10 +43,25 @@ export default function ShiftCoordinationPage() {
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [autoEnabled, setAutoEnabled] = useState<boolean | null>(null);
 
+  // スタッフ一覧（はなまる入力に使用）
+  const [staffList, setStaffList] = useState<StaffOption[]>([]);
+
+  // はなまるモード（カレンダーで直接スタッフ休みを追加）
+  const [hanamaruMode, setHanamaruMode] = useState(false);
+  const [hanamaruStaffId, setHanamaruStaffId] = useState<string>("");
+  const [hanamaruDates, setHanamaruDates] = useState<Set<string>>(new Set());
+  const [hanamaruSaving, setHanamaruSaving] = useState(false);
+
   useEffect(() => {
     setMonth(addMonths(new Date(), 1));
     if (typeof window !== "undefined") setShiftUrl(`${window.location.origin}/shift-request`);
     getShiftAutoEnabled().then(setAutoEnabled).catch(() => {});
+    listActiveStaff().then((r) => {
+      if (r.success && r.staff) {
+        setStaffList(r.staff);
+        if (r.staff.length > 0) setHanamaruStaffId(r.staff[0].id);
+      }
+    });
   }, []);
 
   const toggleAuto = async () => {
@@ -240,14 +72,15 @@ export default function ShiftCoordinationPage() {
     else toast.success(next ? "自動運用をオンにしました" : "自動運用をオフにしました");
   };
 
-  // ── Phase3: 軸・AI生成・確定 ──
+  // ── Phase3: 軸・AIチャット・確定 ──
   const [policy, setPolicy] = useState("");
   const [policySaving, setPolicySaving] = useState(false);
   const [draftOpen, setDraftOpen] = useState(false);
-  const [draft, setDraft] = useState<string | null>(null);
+  const [chatMessages, setChatMessages] = useState<ShiftChatMessage[]>([]);
+  const [chatInput, setChatInput] = useState("");
   const [generating, setGenerating] = useState(false);
-  const [extra, setExtra] = useState("");
   const [confirming, setConfirming] = useState(false);
+  const chatEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => { getShiftPolicy().then(setPolicy).catch(() => {}); }, []);
 
@@ -258,21 +91,47 @@ export default function ShiftCoordinationPage() {
     toast[r.success ? "success" : "error"](r.success ? "方針を保存しました" : (r.error ?? "保存失敗"));
   };
 
-  const genDraft = async (withExtra = false) => {
+  // AIに送信（初回 or 追加相談）
+  const sendChat = async (userMessage?: string) => {
     setGenerating(true);
     if (!draftOpen) setDraftOpen(true);
-    const r = await generateShiftFromRequests(monthStr, withExtra ? extra : undefined);
+
+    const newHistory: ShiftChatMessage[] = userMessage
+      ? [...chatMessages, { role: "user" as const, content: userMessage }]
+      : chatMessages;
+
+    if (userMessage) setChatMessages(newHistory);
+
+    const r = await generateShiftFromRequests(
+      monthStr,
+      userMessage || undefined,
+      chatMessages.length > 0 ? newHistory : undefined,
+    );
     setGenerating(false);
-    if (r.success) setDraft(r.draftMarkdown ?? "");
-    else { toast.error(r.error ?? "生成失敗"); if (!draft) setDraftOpen(false); }
+
+    if (r.success && r.draftMarkdown) {
+      const aiMsg: ShiftChatMessage = { role: "assistant", content: r.draftMarkdown };
+      setChatMessages((prev) => [...(userMessage ? prev : newHistory), aiMsg]);
+      setChatInput("");
+      setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior: "smooth" }), 100);
+    } else {
+      toast.error(r.error ?? "生成失敗");
+    }
   };
 
+  const firstDraft = () => {
+    setChatMessages([]);
+    sendChat();
+  };
+
+  const latestDraft = chatMessages.filter((m) => m.role === "assistant").at(-1)?.content ?? null;
+
   const confirmLeaves = async () => {
-    if (!confirm(`${month && format(month, "yyyy年M月", { locale: ja })}の「休み希望」の日を、予約に反映（その日は予約を受け付けない）します。よろしいですか？`)) return;
+    if (!confirm(`${month && format(month, "yyyy年M月", { locale: ja })}の出勤調整を確定します。休み希望は予約ブロック、出勤時間は予約可能枠に反映します。よろしいですか？`)) return;
     setConfirming(true);
     const r = await confirmShiftLeaves(monthStr);
     setConfirming(false);
-    if (r.success) toast.success(`確定しました（休み ${r.written ?? 0}件を予約ブロックに反映）`);
+    if (r.success) toast.success(`確定しました（休み ${r.written ?? 0}件を予約に反映）`);
     else toast.error(r.error ?? "確定に失敗しました");
   };
 
@@ -299,7 +158,7 @@ export default function ShiftCoordinationPage() {
     return eachDayOfInterval({ start: s, end: e });
   }, [month]);
 
-  // 日付 → その日に出勤可能なスタッフ（色チップ用）
+  // 日付 → 出勤可能スタッフ
   const availByDate = useMemo(() => {
     const m = new Map<string, { name: string; color: string; start?: string; end?: string }[]>();
     for (const sub of submissions) {
@@ -317,7 +176,41 @@ export default function ShiftCoordinationPage() {
     catch { toast.error("コピーできませんでした"); }
   };
 
+  // はなまる：日付クリック（追加/削除トグル）
+  const toggleHanamaru = (dateStr: string) => {
+    setHanamaruDates((prev) => {
+      const next = new Set(prev);
+      if (next.has(dateStr)) next.delete(dateStr);
+      else next.add(dateStr);
+      return next;
+    });
+  };
+
+  // はなまる：確定（override 書き込み）
+  const saveHanamaru = async () => {
+    if (!hanamaruStaffId || hanamaruDates.size === 0) return;
+    setHanamaruSaving(true);
+    let success = 0;
+    for (const date of Array.from(hanamaruDates)) {
+      const r = await createOverride({
+        staff_id: hanamaruStaffId,
+        date,
+        start_time: null,
+        end_time: null,
+        kind: "leave",
+        note: "はなまる休み",
+        blocks_booking: true,
+      });
+      if (r.success) success++;
+    }
+    setHanamaruSaving(false);
+    toast.success(`${success}日を休みとして登録しました`);
+    setHanamaruDates(new Set());
+    setHanamaruMode(false);
+  };
+
   const total = submissions.length + unsubmitted.length;
+  const hanamaruStaff = staffList.find((s) => s.id === hanamaruStaffId);
 
   return (
     <div className="container mx-auto py-6 max-w-5xl space-y-5">
@@ -387,11 +280,68 @@ export default function ShiftCoordinationPage() {
           <button onClick={savePolicy} disabled={policySaving} className="inline-flex items-center gap-1.5 h-10 px-4 rounded-xl border border-violet-300 text-violet-700 dark:text-violet-300 hover:bg-violet-100 dark:hover:bg-violet-900/40 text-sm font-bold disabled:opacity-50">
             <Save className="w-4 h-4" />{policySaving ? "保存中..." : "方針を保存"}
           </button>
-          <button onClick={() => genDraft(false)} disabled={generating} className="inline-flex items-center gap-1.5 h-10 px-4 rounded-xl bg-violet-600 hover:bg-violet-700 text-white text-sm font-black disabled:opacity-50">
+          <button onClick={firstDraft} disabled={generating} className="inline-flex items-center gap-1.5 h-10 px-4 rounded-xl bg-violet-600 hover:bg-violet-700 text-white text-sm font-black disabled:opacity-50">
             <Sparkles className="w-4 h-4" />AIで出勤表の案を作る
           </button>
         </div>
-        <p className="text-[11px] text-violet-600/80 dark:text-violet-300/70">提出済みの出勤希望と上の方針から、{month && format(month, "M月", { locale: ja })}の出勤表案をAIが作ります。確定すると「休み希望」の日が予約に反映されます。</p>
+        <p className="text-[11px] text-violet-600/80 dark:text-violet-300/70">提出済みの出勤希望と上の方針から、{month && format(month, "M月", { locale: ja })}の出勤表案をAIが作ります。確定すると出勤時間・休み希望が予約枠に反映されます。</p>
+      </div>
+
+      {/* はなまる直接入力バー */}
+      <div className={`rounded-2xl border p-4 transition-colors ${hanamaruMode ? "bg-rose-50 dark:bg-rose-950/20 border-rose-300 dark:border-rose-700" : "bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700"}`}>
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <div className="flex items-center gap-2">
+            <Flower2 className={`w-5 h-5 ${hanamaruMode ? "text-rose-500" : "text-slate-400"}`} />
+            <p className="text-sm font-bold text-slate-700 dark:text-slate-200">
+              {hanamaruMode ? "はなまる休み入力モード" : "はなまる（直接休み入力）"}
+            </p>
+            {hanamaruMode && hanamaruDates.size > 0 && (
+              <span className="text-xs font-bold text-rose-600 dark:text-rose-400">{hanamaruDates.size}日選択中</span>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            {hanamaruMode ? (
+              <>
+                <select
+                  value={hanamaruStaffId}
+                  onChange={(e) => setHanamaruStaffId(e.target.value)}
+                  className="h-8 rounded-lg border border-rose-300 bg-white dark:bg-slate-900 px-2 text-sm"
+                >
+                  {staffList.map((s) => (
+                    <option key={s.id} value={s.id}>{s.name}</option>
+                  ))}
+                </select>
+                <button
+                  onClick={saveHanamaru}
+                  disabled={hanamaruSaving || hanamaruDates.size === 0}
+                  className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-sm font-bold disabled:opacity-50"
+                >
+                  <UserCheck className="w-3.5 h-3.5" />
+                  {hanamaruSaving ? "保存中..." : "休みを確定"}
+                </button>
+                <button
+                  onClick={() => { setHanamaruMode(false); setHanamaruDates(new Set()); }}
+                  className="h-8 px-3 rounded-lg border border-slate-300 text-slate-600 text-sm hover:bg-slate-50"
+                >
+                  キャンセル
+                </button>
+              </>
+            ) : (
+              <button
+                onClick={() => setHanamaruMode(true)}
+                className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg border border-slate-300 text-slate-700 dark:text-slate-200 hover:bg-rose-50 dark:hover:bg-rose-900/20 text-sm"
+              >
+                <Flower2 className="w-3.5 h-3.5 text-rose-400" />
+                カレンダーで直接入力
+              </button>
+            )}
+          </div>
+        </div>
+        {hanamaruMode && (
+          <p className="mt-2 text-xs text-rose-600 dark:text-rose-400">
+            {hanamaruStaff?.name ?? ""}さんの休みにする日をカレンダーでタップしてください（もう一度タップで解除）
+          </p>
+        )}
       </div>
 
       {/* 未提出 */}
@@ -420,7 +370,7 @@ export default function ShiftCoordinationPage() {
         ) : null
       )}
 
-      {/* 凡例（提出者の色） */}
+      {/* 凡例 */}
       {submissions.length > 0 && (
         <div className="flex flex-wrap gap-2">
           {submissions.map((s) => (
@@ -432,7 +382,7 @@ export default function ShiftCoordinationPage() {
         </div>
       )}
 
-      {/* カレンダー：各日の出勤可能スタッフ */}
+      {/* カレンダー */}
       <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-700 p-3 md:p-5">
         {loading ? (
           <div className="h-48 grid place-items-center"><Loader2 className="w-6 h-6 animate-spin text-slate-300" /></div>
@@ -445,19 +395,39 @@ export default function ShiftCoordinationPage() {
               const inMonth = month && isSameMonth(date, month);
               const key = format(date, "yyyy-MM-dd");
               const avail = availByDate.get(key) ?? [];
+              const isHanamaru = hanamaruDates.has(key);
+              const isDetailSelected = !hanamaruMode && selectedDate === key;
+
               return (
                 <div
                   key={key}
-                  onClick={() => inMonth && setSelectedDate(selectedDate === key ? null : key)}
+                  onClick={() => {
+                    if (!inMonth) return;
+                    if (hanamaruMode) {
+                      toggleHanamaru(key);
+                    } else {
+                      setSelectedDate(selectedDate === key ? null : key);
+                    }
+                  }}
                   className={[
                     "min-h-[84px] rounded-lg border p-1.5 transition-all",
                     inMonth
-                      ? "bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 cursor-pointer hover:border-blue-400 dark:hover:border-blue-500"
+                      ? "cursor-pointer"
                       : "bg-slate-50 dark:bg-slate-950 border-transparent",
-                    selectedDate === key ? "border-blue-500 dark:border-blue-400 ring-1 ring-blue-400" : "",
+                    inMonth && !hanamaruMode && !isDetailSelected
+                      ? "bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 hover:border-blue-400 dark:hover:border-blue-500"
+                      : "",
+                    isDetailSelected ? "border-blue-500 dark:border-blue-400 ring-1 ring-blue-400 bg-blue-50 dark:bg-blue-900/20" : "",
+                    isHanamaru ? "border-rose-400 bg-rose-50 dark:bg-rose-900/20 ring-1 ring-rose-300" : "",
+                    inMonth && hanamaruMode && !isHanamaru ? "border-slate-200 dark:border-slate-700 hover:border-rose-300 hover:bg-rose-50/50" : "",
                   ].join(" ")}
                 >
-                  <div className={`text-xs font-bold ${inMonth ? "text-slate-600 dark:text-slate-300" : "text-slate-300 dark:text-slate-700"}`}>{format(date, "d")}</div>
+                  <div className="flex items-center justify-between">
+                    <span className={`text-xs font-bold ${inMonth ? "text-slate-600 dark:text-slate-300" : "text-slate-300 dark:text-slate-700"}`}>
+                      {format(date, "d")}
+                    </span>
+                    {isHanamaru && <Flower2 className="w-3.5 h-3.5 text-rose-400" />}
+                  </div>
                   {inMonth && (
                     <div className="mt-1 space-y-0.5">
                       {avail.slice(0, 5).map((a, i) => (
@@ -475,8 +445,8 @@ export default function ShiftCoordinationPage() {
         )}
       </div>
 
-      {/* 日別詳細パネル */}
-      {selectedDate && (
+      {/* 日別詳細パネル（はなまるモード以外） */}
+      {!hanamaruMode && selectedDate && (
         <DayDetailPanel
           dateStr={selectedDate}
           onClose={() => setSelectedDate(null)}
@@ -498,48 +468,79 @@ export default function ShiftCoordinationPage() {
         </div>
       )}
 
-      {/* AI出勤表案モーダル */}
+      {/* AI出勤表案チャットモーダル */}
       <Dialog open={draftOpen} onOpenChange={setDraftOpen}>
-        <DialogContent className="max-w-3xl max-h-[88vh] flex flex-col">
+        <DialogContent className="max-w-3xl max-h-[90vh] flex flex-col">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Sparkles className="w-5 h-5 text-violet-500" />
-              AI出勤表案（{month && format(month, "yyyy年M月", { locale: ja })}）
+              AI出勤表相談（{month && format(month, "yyyy年M月", { locale: ja })}）
             </DialogTitle>
           </DialogHeader>
-          <div className="flex-1 overflow-auto">
-            {generating ? (
-              <div className="h-56 flex flex-col items-center justify-center text-slate-500">
+
+          {/* チャット履歴 */}
+          <div className="flex-1 overflow-auto space-y-3 pr-1">
+            {chatMessages.length === 0 && generating && (
+              <div className="h-40 flex flex-col items-center justify-center text-slate-500">
                 <Loader2 className="w-8 h-8 animate-spin text-violet-500 mb-3" />
                 <p className="text-sm">出勤希望と方針から作成中... 数十秒かかります</p>
               </div>
-            ) : draft ? (
-              <div className="bg-slate-50 dark:bg-slate-900/40 border border-slate-200 dark:border-slate-700 rounded-xl p-4">
-                <pre className="whitespace-pre-wrap text-xs md:text-sm leading-relaxed text-slate-700 dark:text-slate-200">{draft}</pre>
+            )}
+            {chatMessages.map((msg, i) => (
+              <div key={i} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
+                {msg.role === "assistant" ? (
+                  <div className="max-w-full bg-slate-50 dark:bg-slate-900/40 border border-slate-200 dark:border-slate-700 rounded-2xl rounded-tl-none p-4">
+                    <div className="flex items-center gap-1.5 mb-2 text-[11px] font-bold text-violet-600">
+                      <Sparkles className="w-3.5 h-3.5" />AI
+                    </div>
+                    <pre className="whitespace-pre-wrap text-xs md:text-sm leading-relaxed text-slate-700 dark:text-slate-200">{msg.content}</pre>
+                  </div>
+                ) : (
+                  <div className="max-w-[70%] bg-violet-600 text-white rounded-2xl rounded-tr-none px-4 py-2.5 text-sm">
+                    {msg.content}
+                  </div>
+                )}
               </div>
-            ) : null}
+            ))}
+            {generating && chatMessages.length > 0 && (
+              <div className="flex justify-start">
+                <div className="bg-slate-100 dark:bg-slate-800 rounded-2xl rounded-tl-none px-4 py-3 flex items-center gap-2">
+                  <Loader2 className="w-4 h-4 animate-spin text-violet-500" />
+                  <span className="text-sm text-slate-500">考え中...</span>
+                </div>
+              </div>
+            )}
+            <div ref={chatEndRef} />
           </div>
-          {/* 相談（再生成）＋確定 */}
+
+          {/* 入力エリア + 確定 */}
           <div className="border-t border-slate-200 dark:border-slate-700 pt-3 space-y-2">
             <div className="flex gap-2">
               <input
-                value={extra}
-                onChange={(e) => setExtra(e.target.value)}
+                value={chatInput}
+                onChange={(e) => setChatInput(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && chatInput.trim()) { e.preventDefault(); sendChat(chatInput.trim()); } }}
                 placeholder="相談・調整の指示（例：土曜をもう1名増やして）"
                 className="flex-1 h-10 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-3 text-sm"
+                disabled={generating}
               />
-              <button onClick={() => genDraft(true)} disabled={generating} className="inline-flex items-center gap-1.5 h-10 px-3 rounded-xl border border-violet-300 text-violet-700 dark:text-violet-300 hover:bg-violet-50 dark:hover:bg-violet-900/30 text-sm font-bold disabled:opacity-50 shrink-0">
-                <RefreshCw className={`w-4 h-4 ${generating ? "animate-spin" : ""}`} />相談・再生成
+              <button
+                onClick={() => { if (chatInput.trim()) sendChat(chatInput.trim()); }}
+                disabled={generating || !chatInput.trim()}
+                className="inline-flex items-center gap-1.5 h-10 px-3 rounded-xl bg-violet-600 hover:bg-violet-700 text-white text-sm font-bold disabled:opacity-50 shrink-0"
+              >
+                {generating ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                送信
               </button>
             </div>
             <button
               onClick={confirmLeaves}
-              disabled={confirming || !draft}
+              disabled={confirming || !latestDraft}
               className="w-full h-12 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black disabled:opacity-50"
             >
-              {confirming ? "反映中..." : "この内容で確定（休み希望を予約に反映）"}
+              {confirming ? "反映中..." : "この内容で確定（出勤時間・休み希望を予約に反映）"}
             </button>
-            <p className="text-[11px] text-slate-400 text-center">確定すると、各スタッフが「休み希望」にした日が予約システムでブロックされます（出勤可・未入力の日は変更しません）。細かい調整は「スタッフ予定」画面でできます。</p>
+            <p className="text-[11px] text-slate-400 text-center">確定すると、休み希望の日が予約ブロックされ、出勤時間が予約可能枠として反映されます。</p>
           </div>
         </DialogContent>
       </Dialog>

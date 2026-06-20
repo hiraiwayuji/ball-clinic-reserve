@@ -191,6 +191,7 @@ export async function listShiftCoordination(month: string): Promise<{
 // ── Phase3: 軸設定・AI出勤表生成・確定（予約ブロック反映） ──────────────
 
 const SHIFT_LEAVE_NOTE = "出勤希望アンケートより自動反映"; // 自動生成 leave の目印
+const SHIFT_WORK_NOTE  = "出勤希望アンケートより時間反映";  // 自動生成 work の目印
 
 /** 出勤表の軸・方針（オーナーの自由記述） */
 export async function getShiftPolicy(): Promise<string> {
@@ -210,9 +211,15 @@ export async function setShiftPolicy(policy: string): Promise<{ success: boolean
 }
 
 /** 出勤希望＋軸からAIで出勤表案（マークダウン）を生成。extraInstruction で相談・再調整。 */
+export type ShiftChatMessage = {
+  role: "user" | "assistant";
+  content: string;
+};
+
 export async function generateShiftFromRequests(
   month: string,
   extraInstruction?: string,
+  chatHistory?: ShiftChatMessage[],
 ): Promise<{ success: boolean; draftMarkdown?: string; error?: string }> {
   const { clinicId } = await checkAdminAuth();
   if (!/^\d{4}-\d{2}$/.test(month)) return { success: false, error: "月の指定が不正です" };
@@ -270,8 +277,22 @@ ${extraInstruction ? `\n【追加の相談・指示】\n${extraInstruction}` : "
   try {
     const { GoogleGenerativeAI } = await import("@google/generative-ai");
     const model = new GoogleGenerativeAI(apiKey).getGenerativeModel({ model: "gemini-2.5-flash" });
-    const res = await model.generateContent(prompt);
-    return { success: true, draftMarkdown: res.response.text().trim() };
+
+    if (chatHistory && chatHistory.length > 0) {
+      // マルチターン：既存のチャット履歴を Gemini に渡す
+      const history = chatHistory.map((msg) => ({
+        role: msg.role === "assistant" ? "model" as const : "user" as const,
+        parts: [{ text: msg.content }],
+      }));
+      const chat = model.startChat({ history });
+      const userMsg = extraInstruction?.trim() || "前回の内容を踏まえて、出勤表を改善してください。";
+      const res = await chat.sendMessage(userMsg);
+      return { success: true, draftMarkdown: res.response.text().trim() };
+    } else {
+      // 初回：フルプロンプトで生成
+      const res = await model.generateContent(prompt);
+      return { success: true, draftMarkdown: res.response.text().trim() };
+    }
   } catch (e: any) {
     console.error("[generateShiftFromRequests] error:", e);
     return { success: false, error: e?.message ?? "AI生成に失敗しました" };
@@ -299,22 +320,53 @@ export async function confirmShiftLeaves(month: string): Promise<{ success: bool
   const [yy, mm] = month.split("-").map(Number);
   const monthEnd = `${month}-${String(new Date(yy, mm, 0).getDate()).padStart(2, "0")}`;
 
+  // 出勤日の時間 override 候補（available=true かつ start/end あり）
+  const workByStaff: { staff_id: string; date: string; start_time: string; end_time: string }[] = [];
+  for (const r of reqRows ?? []) {
+    if (!r.submitted_at) continue;
+    for (const [date, d] of Object.entries((r.days as ShiftDays) ?? {})) {
+      if (d && d.available === true && d.start && d.end) {
+        workByStaff.push({ staff_id: r.staff_id as string, date, start_time: d.start, end_time: d.end });
+      }
+    }
+  }
+
   // 既存の自動反映分（この月）を一旦消してから入れ直す（再確定で重複しない）
-  await supabase.from("staff_working_overrides")
-    .delete().eq("clinic_id", clinicId).eq("kind", "leave").eq("note", SHIFT_LEAVE_NOTE)
-    .gte("date", monthStart).lte("date", monthEnd);
+  await Promise.all([
+    supabase.from("staff_working_overrides")
+      .delete().eq("clinic_id", clinicId).eq("kind", "leave").eq("note", SHIFT_LEAVE_NOTE)
+      .gte("date", monthStart).lte("date", monthEnd),
+    supabase.from("staff_working_overrides")
+      .delete().eq("clinic_id", clinicId).eq("kind", "work").eq("note", SHIFT_WORK_NOTE)
+      .gte("date", monthStart).lte("date", monthEnd),
+  ]);
 
-  if (offByStaff.length === 0) return { success: true, written: 0 };
+  const insertRows: object[] = [];
 
-  const rows = offByStaff.map((o) => ({
-    clinic_id: clinicId, staff_id: o.staff_id, date: o.date,
-    kind: "leave", status: "approved", blocks_booking: true,
-    note: SHIFT_LEAVE_NOTE, created_by_email: email ?? null,
-  }));
-  // tenant-isolation-ignore: insert する各行に clinic_id を明示設定済み（rows.map で clinic_id: clinicId）
-  const { error } = await supabase.from("staff_working_overrides").insert(rows);
+  // 休み希望 → leave (blocks_booking=true)
+  for (const o of offByStaff) {
+    insertRows.push({
+      clinic_id: clinicId, staff_id: o.staff_id, date: o.date,
+      kind: "leave", status: "approved", blocks_booking: true,
+      note: SHIFT_LEAVE_NOTE, created_by_email: email ?? null,
+    });
+  }
+  // 出勤時間 → work (blocks_booking=false)
+  for (const o of workByStaff) {
+    insertRows.push({
+      clinic_id: clinicId, staff_id: o.staff_id, date: o.date,
+      kind: "work", status: "approved", blocks_booking: false,
+      start_time: o.start_time, end_time: o.end_time,
+      note: SHIFT_WORK_NOTE, created_by_email: email ?? null,
+    });
+  }
+
+  if (insertRows.length === 0) return { success: true, written: 0 };
+
+  // tenant-isolation-ignore: insert する各行に clinic_id を明示設定済み
+  const { error } = await supabase.from("staff_working_overrides").insert(insertRows);
   if (error) return { success: false, error: error.message };
-  return { success: true, written: rows.length };
+  return { success: true, written: offByStaff.length };
 }
 
 /** 自動運用（1ヶ月前送信・締切リマインド）のON/OFF状態 */

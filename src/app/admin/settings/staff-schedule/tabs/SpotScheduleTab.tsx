@@ -17,6 +17,8 @@ const KIND_LABEL: Record<OverrideKind, string> = {
   leave: "休み・私用",
   training: "研修",
   other: "その他",
+  break: "休憩",
+  work: "出勤時間",
 };
 
 const KIND_BADGE: Record<OverrideKind, string> = {
@@ -24,6 +26,8 @@ const KIND_BADGE: Record<OverrideKind, string> = {
   leave: "bg-amber-100 text-amber-700 border-amber-300",
   training: "bg-emerald-100 text-emerald-700 border-emerald-300",
   other: "bg-slate-100 text-slate-700 border-slate-300",
+  break: "bg-purple-100 text-purple-700 border-purple-300",
+  work: "bg-green-100 text-green-700 border-green-300",
 };
 
 type Props = {

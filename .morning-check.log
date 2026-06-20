@@ -1,0 +1,68 @@
+[2026-05-31 07:00:14 +09:00] ALL OK
+  [OK             ] ball-clinic-reserve    307 -> /admin-login (2094ms)
+  [OK             ] karada-clinic          307 -> /admin-login (2534ms)
+  [OK             ] muscleseitai           307 -> /admin-login (2692ms)
+  [OK             ] relaq-clinic           307 -> /admin-login (2848ms)
+  [OK             ] varc-demo              307 -> /admin-login (2835ms)
+
+[2026-06-06 07:00:15 +09:00] ALL OK
+  [OK             ] ball-clinic-reserve    307 -> /admin-login (1773ms)
+  [OK             ] karada-clinic          307 -> /admin-login (2976ms)
+  [OK             ] muscleseitai           307 -> /admin-login (2826ms)
+  [OK             ] relaq-clinic           307 -> /admin-login (2887ms)
+  [OK             ] varc-demo              307 -> /admin-login (2789ms)
+
+[2026-06-07 07:00:13 +09:00] ALL OK
+  [OK             ] ball-clinic-reserve    307 -> /admin-login (1860ms)
+  [OK             ] karada-clinic          307 -> /admin-login (2193ms)
+  [OK             ] muscleseitai           307 -> /admin-login (2116ms)
+  [OK             ] relaq-clinic           307 -> /admin-login (2810ms)
+  [OK             ] varc-demo              307 -> /admin-login (2752ms)
+
+[2026-06-09 07:00:16 +09:00] ANOMALY DETECTED
+  [OK             ] ball-clinic-reserve    307 -> /admin-login (1872ms)
+  [OK             ] karada-clinic          307 -> /admin-login (2918ms)
+  [UNEXPECTED(307)] muscleseitai           307 -> /admin-login (3315ms)
+  [UNEXPECTED(307)] relaq-clinic           307 -> /admin-login (3294ms)
+  [OK             ] varc-demo              307 -> /admin-login (2956ms)
+
+[2026-06-10 18:30:51 +09:00] ALL OK
+  [OK             ] ball-clinic-reserve    307 -> /admin-login (1923ms)
+  [OK             ] karada-clinic          307 -> /admin-login (2469ms)
+  [OK             ] muscleseitai           307 -> /admin-login (2842ms)
+  [OK             ] relaq-clinic           307 -> /admin-login (2437ms)
+  [OK             ] varc-demo              307 -> /admin-login (2950ms)
+  [OK             ] ball-family-calendar   200 (1300ms)
+
+[2026-06-12 07:00:17 +09:00] ANOMALY DETECTED
+  [OK             ] ball-clinic-reserve    307 -> /admin-login (1946ms)
+  [OK             ] karada-clinic          307 -> /admin-login (2287ms)
+  [OK             ] muscleseitai           307 -> /admin-login (2688ms)
+  [OK             ] relaq-clinic           307 -> /admin-login (2683ms)
+  [UNEXPECTED(307)] varc-demo              307 -> /admin-login (3404ms)
+  [OK             ] ball-family-calendar   200 (2610ms)
+
+[2026-06-16 07:00:19 +09:00] ANOMALY DETECTED
+  [OK             ] ball-clinic-reserve    307 -> /admin-login (2358ms)
+  [UNEXPECTED(307)] karada-clinic          307 -> /admin-login (3067ms)
+  [UNEXPECTED(307)] muscleseitai           307 -> /admin-login (3075ms)
+  [OK             ] relaq-clinic           307 -> /admin-login (2903ms)
+  [OK             ] varc-demo              307 -> /admin-login (2821ms)
+  [OK             ] ball-family-calendar   200 (2693ms)
+
+[2026-06-19 07:00:20 +09:00] ANOMALY DETECTED
+  [OK             ] ball-clinic-reserve    307 -> /admin-login (1983ms)
+  [OK             ] karada-clinic          307 -> /admin-login (2628ms)
+  [OK             ] muscleseitai           307 -> /admin-login (2912ms)
+  [UNEXPECTED(307)] relaq-clinic           307 -> /admin-login (3679ms)
+  [UNEXPECTED(307)] varc-demo              307 -> /admin-login (3213ms)
+  [OK             ] ball-family-calendar   200 (3332ms)
+
+[2026-06-20 07:00:20 +09:00] ANOMALY DETECTED
+  [OK             ] ball-clinic-reserve    307 -> /admin-login (1941ms)
+  [OK             ] karada-clinic          307 -> /admin-login (2600ms)
+  [OK             ] muscleseitai           307 -> /admin-login (2975ms)
+  [UNEXPECTED(307)] relaq-clinic           307 -> /admin-login (4143ms)
+  [OK             ] varc-demo              307 -> /admin-login (2935ms)
+  [OK             ] ball-family-calendar   200 (2607ms)
+

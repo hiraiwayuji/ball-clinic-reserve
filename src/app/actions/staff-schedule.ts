@@ -11,7 +11,7 @@ function getServiceClient() {
   return createSupabaseClient(url, key, { auth: { persistSession: false } });
 }
 
-export type OverrideKind = "meeting" | "leave" | "training" | "other";
+export type OverrideKind = "meeting" | "leave" | "training" | "other" | "break" | "work";
 
 export type OverrideStatus = "pending" | "approved" | "rejected";
 
@@ -443,40 +443,64 @@ export async function getBlockedTimesForDate(
 
   const dayOfWeek = new Date(`${dateStr}T12:00:00+09:00`).getDay();
 
-  const [{ data: staffData }, { data: overrideData }, { data: weeklyHoursData }] = await Promise.all([
+  const [
+    { data: staffData },
+    { data: blockingOverrides },
+    { data: weeklyHoursData },
+    { data: workOverrides },
+  ] = await Promise.all([
     sb
       .from("reservation_staff")
       .select("id")
       .eq("clinic_id", clinicId)
       .eq("is_active", true)
       .eq("available_for_online_booking", true),
+    // blocks_booking=true の override（leave/break/meeting 等）
     sb
       .from("staff_working_overrides")
       .select("staff_id, start_time, end_time, kind")
       .eq("clinic_id", clinicId)
       .eq("date", dateStr)
       .eq("blocks_booking", true),
-    // 週次デフォルトの休憩時間も取得（override がなければ週次 break を使う）
+    // 週次デフォルトの勤務時間 + 休憩時間
     sb
       .from("staff_working_hours")
-      .select("staff_id, break_start, break_end")
+      .select("staff_id, start_time, end_time, break_start, break_end")
       .eq("clinic_id", clinicId)
       .eq("day_of_week", dayOfWeek),
+    // 特定日の勤務時間 override（kind="work"）
+    sb
+      .from("staff_working_overrides")
+      .select("staff_id, start_time, end_time")
+      .eq("clinic_id", clinicId)
+      .eq("date", dateStr)
+      .eq("kind", "work"),
   ]);
 
   const activeStaffIds = new Set((staffData ?? []).map((s: any) => s.id));
   const totalStaff = activeStaffIds.size;
   if (totalStaff === 0) return [];
 
-  // 週次休憩をマップ化（override break があれば上書き）
+  // 週次勤務時間をマップ化
+  const weeklyWorkMap = new Map<string, { start: string; end: string }>();
   const weeklyBreakMap = new Map<string, { start: string; end: string }>();
   for (const w of (weeklyHoursData ?? []) as any[]) {
+    if (w.start_time && w.end_time) {
+      weeklyWorkMap.set(w.staff_id, { start: w.start_time.slice(0, 5), end: w.end_time.slice(0, 5) });
+    }
     if (w.break_start && w.break_end) {
       weeklyBreakMap.set(w.staff_id, { start: w.break_start.slice(0, 5), end: w.break_end.slice(0, 5) });
     }
   }
-  // override の break レコードで上書き
-  for (const o of (overrideData ?? []) as any[]) {
+  // work override で週次を上書き
+  const finalWorkMap = new Map<string, { start: string; end: string }>(weeklyWorkMap);
+  for (const wo of (workOverrides ?? []) as any[]) {
+    if (wo.start_time && wo.end_time) {
+      finalWorkMap.set(wo.staff_id, { start: wo.start_time.slice(0, 5), end: wo.end_time.slice(0, 5) });
+    }
+  }
+  // blocking override の break レコードで休憩上書き
+  for (const o of (blockingOverrides ?? []) as any[]) {
     if (o.kind === "break" && o.start_time && o.end_time) {
       weeklyBreakMap.set(o.staff_id, { start: o.start_time.slice(0, 5), end: o.end_time.slice(0, 5) });
     }
@@ -490,19 +514,32 @@ export async function getBlockedTimesForDate(
     "18:00","18:30","19:00","19:30","20:00","20:30","21:00","21:30","22:00","22:30",
   ];
   for (const slot of allSlots) {
-    const blockedStaff = new Set<string>();
-    for (const o of (overrideData ?? []) as any[]) {
+    const unavailableStaff = new Set<string>();
+
+    // 1. blocks_booking=true の override でブロック
+    for (const o of (blockingOverrides ?? []) as any[]) {
       if (!activeStaffIds.has(o.staff_id)) continue;
-      if (o.kind === "break") continue; // break は下で処理
-      if (!o.start_time || !o.end_time) { blockedStaff.add(o.staff_id); continue; }
-      if (slot >= o.start_time.slice(0, 5) && slot < o.end_time.slice(0, 5)) blockedStaff.add(o.staff_id);
+      if (o.kind === "break") continue; // break は後で処理
+      if (!o.start_time || !o.end_time) { unavailableStaff.add(o.staff_id); continue; }
+      if (slot >= o.start_time.slice(0, 5) && slot < o.end_time.slice(0, 5)) unavailableStaff.add(o.staff_id);
     }
-    // 週次 or override の休憩時間チェック
+
+    // 2. 勤務時間外のスロットをブロック（勤務時間が設定されているスタッフのみ）
+    for (const [staffId, hours] of finalWorkMap.entries()) {
+      if (!activeStaffIds.has(staffId)) continue;
+      if (unavailableStaff.has(staffId)) continue; // 既にブロック済み
+      if (slot < hours.start || slot >= hours.end) {
+        unavailableStaff.add(staffId);
+      }
+    }
+
+    // 3. 休憩時間チェック（週次 or break override）
     for (const [staffId, brk] of weeklyBreakMap.entries()) {
       if (!activeStaffIds.has(staffId)) continue;
-      if (slot >= brk.start && slot < brk.end) blockedStaff.add(staffId);
+      if (slot >= brk.start && slot < brk.end) unavailableStaff.add(staffId);
     }
-    if (blockedStaff.size >= totalStaff) blockedSlots.push(slot);
+
+    if (unavailableStaff.size >= totalStaff) blockedSlots.push(slot);
   }
   return blockedSlots;
 }

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, useTransition } from "react";
+import { DayDetailPanel } from "@/components/admin/DayDetailPanel";
 import {
   listShifts,
   createShift,
@@ -169,6 +170,7 @@ export default function ShiftScheduleTab({
   const [editModal, setEditModal] = useState<EditModalState>(null);
   const [showLocationSettings, setShowLocationSettings] = useState(false);
   const [showColorSettings, setShowColorSettings] = useState(false);
+  const [selectedDate, setSelectedDate] = useState<string | null>(null);
 
   const activeLocations = useMemo(
     () => locations.filter((l) => l.is_active),
@@ -340,6 +342,8 @@ export default function ShiftScheduleTab({
             weekDates={weekDates}
             locations={activeLocations}
             shiftsByDayLocation={shiftsByDayLocation}
+            selectedDate={selectedDate}
+            onDateClick={(date) => setSelectedDate((d) => (d === date ? null : date))}
             onShiftClick={(shift) => setEditModal({ mode: "edit", shift })}
             onEmptyClick={(date, locationId) =>
               setEditModal({
@@ -352,6 +356,14 @@ export default function ShiftScheduleTab({
             }
           />
         </section>
+      )}
+
+      {/* 日別詳細パネル */}
+      {selectedDate && (
+        <DayDetailPanel
+          dateStr={selectedDate}
+          onClose={() => setSelectedDate(null)}
+        />
       )}
 
       {/* 編集モーダル */}
@@ -498,12 +510,16 @@ function ShiftGrid({
   weekDates,
   locations,
   shiftsByDayLocation,
+  selectedDate,
+  onDateClick,
   onShiftClick,
   onEmptyClick,
 }: {
   weekDates: Date[];
   locations: ShiftLocationRow[];
   shiftsByDayLocation: Map<string, StaffShiftRow[]>;
+  selectedDate: string | null;
+  onDateClick: (date: string) => void;
   onShiftClick: (shift: StaffShiftRow) => void;
   onEmptyClick: (date: string, locationId: string) => void;
 }) {
@@ -587,12 +603,15 @@ function ShiftGrid({
             >
               {/* 日付列（最初の場所×最初の row にだけ表示） */}
               <div
-                className={
+                className={[
+                  "shrink-0 border-r border-slate-200",
                   isFirstLocation && isFirstRow
-                    ? `shrink-0 border-r border-slate-200 flex flex-col items-center justify-center text-xs font-bold ${dayColor} bg-slate-50/50`
-                    : "shrink-0 border-r border-slate-200 bg-slate-50/30"
-                }
+                    ? `flex flex-col items-center justify-center text-xs font-bold ${dayColor} cursor-pointer hover:bg-blue-50 transition-colors ${selectedDate === dateStr ? "bg-blue-50 ring-inset ring-1 ring-blue-400" : "bg-slate-50/50"}`
+                    : "bg-slate-50/30",
+                ].join(" ")}
                 style={{ width: `${DATE_COL_WIDTH}px` }}
+                onClick={isFirstLocation && isFirstRow ? () => onDateClick(dateStr) : undefined}
+                title={isFirstLocation && isFirstRow ? "クリックで出勤詳細" : undefined}
               >
                 {isFirstLocation && isFirstRow && (
                   <>
