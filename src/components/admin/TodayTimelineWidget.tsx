@@ -242,24 +242,51 @@ export default function TodayTimelineWidget({
     return out;
   }, [data]);
 
-  // 予約をスタッフごとにグループ化（メイン担当 + 追加担当 additional_staff すべての行に表示）
-  // 担当未設定はデフォルト行（先頭スタッフ）に表示する
+  // 予約をスタッフごとにグループ化
+  // 複数スタッフの予約は、合計施術時間を等分してスタッフごとに時間帯をずらして表示する
+  // （例: 17:00-17:40 を A先生・B先生で 17:00-17:20 / 17:20-17:40 に分割）
+  // _displayStart / _displayEnd はタイムテーブル表示専用で、モーダルは元の start_time を使う
   const aptsByStaff = useMemo(() => {
-    const map = new Map<string, TimelineAppointment[]>();
-    if (!data) return map;
+    type DisplayApt = TimelineAppointment & { _displayStart?: string; _displayEnd?: string };
+    const map = new Map<string, DisplayApt[]>();
+    if (!data) return map as Map<string, TimelineAppointment[]>;
+
     for (const a of data.appointments) {
-      // この予約を表示すべき staff_id のセット（重複防止）
-      const targetIds = new Set<string>();
-      targetIds.add(a.staff_id ?? defaultStaffId ?? UNASSIGNED_KEY);
+      const allStaffIds: string[] = [];
+      allStaffIds.push(a.staff_id ?? defaultStaffId ?? UNASSIGNED_KEY);
       for (const add of a.additional_staff ?? []) {
-        if (add?.staff_id) targetIds.add(add.staff_id);
+        if (add?.staff_id && !allStaffIds.includes(add.staff_id)) {
+          allStaffIds.push(add.staff_id);
+        }
       }
-      for (const key of targetIds) {
+
+      if (allStaffIds.length <= 1) {
+        // スタッフ1人の場合はそのまま
+        const key = allStaffIds[0];
         if (!map.has(key)) map.set(key, []);
         map.get(key)!.push(a);
+        continue;
       }
+
+      // 複数スタッフ: 合計時間をスタッフ数で等分し時間帯をずらす
+      const startMin = minuteOfDayJst(a.start_time);
+      const endMinRaw = a.end_time ? minuteOfDayJst(a.end_time) : startMin + data.slotMinutes;
+      const totalDuration = Math.max(endMinRaw - startMin, data.slotMinutes * allStaffIds.length);
+      const perStaff = Math.round(totalDuration / allStaffIds.length);
+
+      // ISO 文字列を分単位でずらすヘルパー
+      const shiftIso = (isoBase: string, minuteOffset: number): string => {
+        return new Date(new Date(isoBase).getTime() + minuteOffset * 60 * 1000).toISOString();
+      };
+
+      allStaffIds.forEach((staffId, idx) => {
+        if (!map.has(staffId)) map.set(staffId, []);
+        const displayStart = shiftIso(a.start_time, idx * perStaff);
+        const displayEnd = shiftIso(a.start_time, (idx + 1) * perStaff);
+        map.get(staffId)!.push({ ...a, _displayStart: displayStart, _displayEnd: displayEnd });
+      });
     }
-    return map;
+    return map as Map<string, TimelineAppointment[]>;
   }, [data, defaultStaffId]);
 
   if (!date) return null;
@@ -341,22 +368,28 @@ export default function TodayTimelineWidget({
                         : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300")
                   : "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300";
                 // ── 時間がかぶる予約を縦に段積み（サブレーン）して全部見えるようにする ──
-                // 開始時刻順に、空いている一番上のサブレーンへ割り当てる（貪欲法）。
-                const sortedApts = [...apts].sort(
-                  (a, b) => minuteOfDayJst(a.start_time) - minuteOfDayJst(b.start_time),
-                );
+                // 複数スタッフ予約は _displayStart/_displayEnd を使って実際の表示時刻でレーン計算する。
+                type DispApt = TimelineAppointment & { _displayStart?: string; _displayEnd?: string };
+                const sortedApts = [...apts].sort((a, b) => {
+                  const da = a as DispApt;
+                  const db = b as DispApt;
+                  return minuteOfDayJst(da._displayStart ?? a.start_time) - minuteOfDayJst(db._displayStart ?? b.start_time);
+                });
                 const laneEnds: number[] = [];
                 const laneOf = new Map<string, number>();
                 for (const a of sortedApts) {
-                  const sMin = minuteOfDayJst(a.start_time);
+                  const da = a as DispApt;
+                  const sMin = minuteOfDayJst(da._displayStart ?? a.start_time);
                   const eMin = Math.max(
-                    a.end_time ? minuteOfDayJst(a.end_time) : sMin + data.slotMinutes,
+                    (da._displayEnd ?? a.end_time) ? minuteOfDayJst(da._displayEnd ?? a.end_time!) : sMin + data.slotMinutes,
                     sMin + data.slotMinutes,
                   );
+                  // 複数スタッフ予約は staff ごとに別キーを使う
+                  const laneKey = da._displayStart ? `${a.id}-${s.id}` : a.id;
                   let lane = laneEnds.findIndex((end) => end <= sMin);
                   if (lane === -1) { lane = laneEnds.length; laneEnds.push(eMin); }
                   else laneEnds[lane] = eMin;
-                  laneOf.set(a.id, lane);
+                  laneOf.set(laneKey, lane);
                 }
                 const laneCount = Math.max(1, laneEnds.length);
                 return (
@@ -402,8 +435,12 @@ export default function TodayTimelineWidget({
                     ))}
                     {/* 予約バー（absolute 配置） */}
                     {apts.map((a) => {
-                      const startMin = minuteOfDayJst(a.start_time);
-                      const endMinRaw = a.end_time ? minuteOfDayJst(a.end_time) : startMin + data.slotMinutes;
+                      // 複数スタッフ予約は _displayStart/_displayEnd でずらした時刻を使う
+                      const dispA = a as typeof a & { _displayStart?: string; _displayEnd?: string };
+                      const startMin = minuteOfDayJst(dispA._displayStart ?? a.start_time);
+                      const endMinRaw = (dispA._displayEnd ?? a.end_time)
+                        ? minuteOfDayJst(dispA._displayEnd ?? a.end_time!)
+                        : startMin + data.slotMinutes;
                       const endMin = Math.max(endMinRaw, startMin + data.slotMinutes);
                       const scheduleStart = data.scheduleStartHour * 60;
                       const scheduleEnd = data.scheduleEndHour * 60;
@@ -424,20 +461,22 @@ export default function TodayTimelineWidget({
                       // CSS grid 上での位置: 1列目がスタッフ名なので +2
                       const gridColStart = gridStartIdx + 2;
                       const cls = statusColor(a.status, a.checkin_status, a.is_first_visit);
+                      const displayStartLabel = fmtTime(dispA._displayStart ?? a.start_time);
+                      const hasMultiStaff = (dispA._displayStart !== undefined);
                       return (
                         <button
-                          key={a.id}
+                          key={`${a.id}-${s.id}`}
                           type="button"
                           onClick={() => setSelectedApt(a)}
                           className={`text-[11px] leading-tight rounded border px-1 py-0.5 my-0.5 text-left truncate hover:ring-2 hover:ring-blue-400 transition-all ${cls}`}
                           style={{
                             gridColumn: `${gridColStart} / span ${colSpan}`,
-                            gridRow: (laneOf.get(a.id) ?? 0) + 1,
+                            gridRow: (laneOf.get(`${a.id}-${s.id}`) ?? laneOf.get(a.id) ?? 0) + 1,
                             alignSelf: "stretch",
                             marginLeft: `${(offsetFrac / colSpan) * 100}%`,
                             width: `${Math.min((widthCols / colSpan) * 100, 100)}%`,
                           }}
-                          title={`${fmtTime(a.start_time)} ${a.customer_name ?? ""}${a.medical_record_number ? ` (No.${a.medical_record_number})` : ""} ${a.course_name ?? ""}`}
+                          title={`${displayStartLabel} ${a.customer_name ?? ""}${a.medical_record_number ? ` (No.${a.medical_record_number})` : ""} ${a.course_name ?? ""}${hasMultiStaff ? "（時間分割表示）" : ""}`}
                         >
                           <div className="truncate font-semibold">
                             {!a.staff_id && (
