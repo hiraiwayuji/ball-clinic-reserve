@@ -1360,3 +1360,53 @@ export async function importTasksFromCsv(
   revalidatePath("/admin/settings/staff-schedule");
   return { success: true, result };
 }
+
+
+// ──────────────────────────────────────────────────────────────────────
+// 出勤調整用：特定日のスタッフ別サマリー（勤務時間＋予約件数）を返す
+// ──────────────────────────────────────────────────────────────────────
+
+export type DayStaffSummary = StaffDaySchedule & {
+  appointmentCount: number;
+};
+
+export async function getDayStaffSummary(
+  dateStr: string,
+): Promise<{ success: boolean; summaries?: DayStaffSummary[]; error?: string }> {
+  try {
+    const schedResult = await getStaffSchedulesForDate(dateStr);
+    if (!schedResult.success || !schedResult.schedules) {
+      return { success: false, error: schedResult.error };
+    }
+
+    const auth = await checkAdminAuth();
+    const supabase = getServiceClient();
+    if (!supabase) return { success: false, error: "サーバー設定エラー" };
+
+    const dayStart = `${dateStr}T00:00:00+09:00`;
+    const dayEnd   = `${dateStr}T23:59:59+09:00`;
+    const { data: apts } = await supabase
+      .from("appointments")
+      .select("staff_id")
+      .eq("clinic_id", auth.clinicId)
+      .neq("status", "cancelled")
+      .gte("start_time", dayStart)
+      .lte("start_time", dayEnd);
+
+    const countMap = new Map<string, number>();
+    for (const a of (apts ?? []) as { staff_id: string | null }[]) {
+      if (!a.staff_id) continue;
+      countMap.set(a.staff_id, (countMap.get(a.staff_id) ?? 0) + 1);
+    }
+
+    const summaries: DayStaffSummary[] = schedResult.schedules.map((s) => ({
+      ...s,
+      appointmentCount: countMap.get(s.staffId) ?? 0,
+    }));
+
+    return { success: true, summaries };
+  } catch (e) {
+    console.error("getDayStaffSummary error", e);
+    return { success: false, error: "取得に失敗しました" };
+  }
+}
