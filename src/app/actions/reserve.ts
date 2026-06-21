@@ -415,30 +415,7 @@ export async function getDailyAvailability(
     const threshold = requiredStaffId ? 1 : dayCapacity;
     const bookedTimes = Object.keys(slotCounts).filter(time => slotCounts[time] >= threshold);
 
-    // 臨時の休憩枠（clinic_blocked_slots）も予約不可として合流させる。
-    // 患者のスロット粒度（15/20/30分）に依存せず確実に塞ぐため、休憩 [start, end) を
-    // 5分刻みのキーに展開して union する（ALL_DAY_BLOCKED と同じ粒度）。
-    const blockedSet = new Set(bookedTimes);
-    const { data: breaks } = await supabase
-      .from("clinic_blocked_slots")
-      .select("start_time, end_time")
-      .eq("clinic_id", DEFAULT_CLINIC_ID)
-      .eq("date", dateStr);
-    (breaks ?? []).forEach((b: { start_time?: string; end_time?: string }) => {
-      const toMin = (hm?: string) => {
-        if (!hm) return null;
-        const [h, m] = hm.slice(0, 5).split(":").map(Number);
-        return h * 60 + m;
-      };
-      const s = toMin(b.start_time);
-      const e = toMin(b.end_time);
-      if (s === null || e === null) return;
-      for (let t = s; t < e; t += 5) {
-        blockedSet.add(`${String(Math.floor(t / 60)).padStart(2, "0")}:${String(t % 60).padStart(2, "0")}`);
-      }
-    });
-
-    return Array.from(blockedSet);
+    return bookedTimes;
   } catch (err) {
     console.error(err);
     return [];
@@ -835,31 +812,6 @@ export async function createReservation(formData: FormData) {
       const jstDate = new Date(startDateTimeStr);
       const endDate = new Date(jstDate.getTime() + durationMinutes * 60000);
       const endDateTimeStr = endDate.toISOString();
-
-      // ── 休憩枠チェック（管理カレンダーで設定した臨時休憩は患者予約不可） ──
-      // 患者が空きと思ってもサーバー側で必ず弾く（UI 抜けや細工 POST 対策・fail-closed）。
-      {
-        const toDayMin = (hm: string) => {
-          const [h, m] = hm.slice(0, 5).split(":").map(Number);
-          return h * 60 + m;
-        };
-        const reqStart = toDayMin(time);
-        const reqEnd = reqStart + durationMinutes;
-        const { data: dayBreaks } = await adminDb
-          .from("clinic_blocked_slots")
-          .select("start_time, end_time")
-          .eq("clinic_id", DEFAULT_CLINIC_ID)
-          .eq("date", rawDate);
-        const hitBreak = (dayBreaks ?? []).some((b: { start_time?: string; end_time?: string }) => {
-          if (!b.start_time || !b.end_time) return false;
-          const bs = toDayMin(b.start_time);
-          const be = toDayMin(b.end_time);
-          return reqStart < be && reqEnd > bs; // 時間帯が重なる
-        });
-        if (hitBreak) {
-          return { success: false, error: "申し訳ありません。その時間は受付時間外です。別のお時間をお選びください。" };
-        }
-      }
 
       // ── 予約枠の定員チェック（必ず自院のみで判定） ──
       // per_available_staff モード（ボール/からだ/マッスル）:

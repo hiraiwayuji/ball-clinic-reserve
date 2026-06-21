@@ -11,16 +11,13 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
-  ChevronLeft, ChevronRight, Calendar, Settings, Loader2, Plus, User, CalendarDays, Search, LayoutList, Coffee, X,
+  ChevronLeft, ChevronRight, Calendar, Settings, Loader2, Plus, User, CalendarDays, Search, LayoutList,
 } from "lucide-react";
 import Link from "next/link";
 import { EditAppointmentDialog } from "@/components/admin/EditAppointmentDialog";
 import { AddAppointmentDialog } from "@/components/admin/AddAppointmentDialog";
-import { AddBreakDialog } from "@/components/admin/AddBreakDialog";
 import { PatientSearchPanel } from "@/components/admin/PatientSearchPanel";
 import { getAdminTimeSlots, isWithinBusinessHours } from "@/lib/time-slots";
-import { getBlockedSlots, deleteBlockedSlot, type BlockedSlot } from "@/app/actions/blocked-slots";
-import { toast } from "sonner";
 import { useClinicSlotDuration } from "@/lib/use-clinic-slot-duration";
 import { useClinicSchedule } from "@/lib/use-clinic-schedule";
 import { getMyClinicId } from "@/app/actions/auth";
@@ -37,14 +34,7 @@ export default function AdminWeeklyGridPage() {
   const [selectedDay, setSelectedDay] = useState<Date | null>(null);
   const [appointments, setAppointments] = useState<any[]>([]);
   const [holidays, setHolidays] = useState<any[]>([]);
-  const [blockedSlots, setBlockedSlots] = useState<BlockedSlot[]>([]);
   const [loading, setLoading] = useState(true);
-  // 休憩モード: ON のときカレンダーの枠をタップすると「予約」ではなく「休憩」を追加する
-  const [breakMode, setBreakMode] = useState(false);
-  const [isBreakDialogOpen, setIsBreakDialogOpen] = useState(false);
-  const [breakDialogDate, setBreakDialogDate] = useState<Date | undefined>();
-  const [breakDialogStart, setBreakDialogStart] = useState<string>("");
-  const [breakDialogEnd, setBreakDialogEnd] = useState<string>("");
   const [refreshKey, setRefreshKey] = useState(0);
   const [selectedAppointment, setSelectedAppointment] = useState<any>(null);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
@@ -160,17 +150,6 @@ export default function AdminWeeklyGridPage() {
           .eq("clinic_id", clinicId);
         if (holidayData && !holidayErr) setHolidays(holidayData);
 
-        // 臨時の休憩枠（その週の分）。サーバーアクション側で自院の clinic_id に絞られる。
-        try {
-          const breaks = await getBlockedSlots(
-            format(weekStart, "yyyy-MM-dd"),
-            format(addDays(weekStart, 6), "yyyy-MM-dd"),
-          );
-          setBlockedSlots(breaks);
-        } catch (e) {
-          console.warn("[appointments] failed to load blocked slots:", e);
-        }
-
         // rooms 取得（複数roomを持つ院ではフィルタタブを表示）
         const { data: roomData } = await supabase
           .from("reservation_rooms")
@@ -195,7 +174,6 @@ export default function AdminWeeklyGridPage() {
       .channel("admin-realtime")
       .on("postgres_changes", { event: "*", schema: "public", table: "appointments" }, guardedRefresh)
       .on("postgres_changes", { event: "*", schema: "public", table: "clinic_holidays" }, guardedRefresh)
-      .on("postgres_changes", { event: "*", schema: "public", table: "clinic_blocked_slots" }, guardedRefresh)
       .subscribe();
     return () => { supabase.removeChannel(channel); };
   }, []);
@@ -237,49 +215,6 @@ export default function AdminWeeklyGridPage() {
     return schedule.closedDays.includes(day);
   };
 
-  // ── 休憩枠ヘルパー ──
-  const hmToMin = (hm: string) => {
-    const [h, m] = hm.slice(0, 5).split(":").map(Number);
-    return h * 60 + m;
-  };
-  const minToHm = (n: number) =>
-    `${String(Math.floor(n / 60)).padStart(2, "0")}:${String(n % 60).padStart(2, "0")}`;
-
-  // その日付・その時刻スロットを覆っている休憩枠を返す（なければ null）
-  const getCellBreak = (date: Date, slot: string): BlockedSlot | null => {
-    const dateStr = format(date, "yyyy-MM-dd");
-    const slotMin = hmToMin(slot);
-    return (
-      blockedSlots.find(
-        (b) => b.date === dateStr && slotMin >= hmToMin(b.start_time) && slotMin < hmToMin(b.end_time),
-      ) ?? null
-    );
-  };
-  // そのスロットが休憩の「開始セル」か（ブロック描画の起点）
-  const getBreakStartingAt = (date: Date, slot: string): BlockedSlot | null => {
-    const dateStr = format(date, "yyyy-MM-dd");
-    return blockedSlots.find((b) => b.date === dateStr && b.start_time === slot) ?? null;
-  };
-
-  const handleDeleteBreak = async (b: BlockedSlot) => {
-    if (!window.confirm(`${b.start_time}〜${b.end_time} の「${b.reason}」を削除しますか？`)) return;
-    const res = await deleteBlockedSlot(b.id);
-    if (res.success) {
-      toast.success("休憩を削除しました。");
-      setRefreshKey((k) => k + 1);
-    } else {
-      toast.error(res.error || "削除に失敗しました。");
-    }
-  };
-
-  // 休憩モードでセルをタップ → 休憩ダイアログをプリフィルで開く
-  const openBreakDialogForCell = (date: Date, slot: string) => {
-    setBreakDialogDate(date);
-    setBreakDialogStart(slot);
-    setBreakDialogEnd(minToHm(Math.min(hmToMin(slot) + (slotMinutes || 30), 23 * 60 + 59)));
-    setIsBreakDialogOpen(true);
-  };
-
   // 部門・room フィルタ適用後の appointments（カレンダー描画はこちらを使う）
   const displayedAppointments = useMemo(() => {
     let list = appointments;
@@ -294,14 +229,6 @@ export default function AdminWeeklyGridPage() {
       .filter(apt => isSameDay(new Date(apt.start_time), selectedDay))
       .sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime());
   }, [displayedAppointments, selectedDay]);
-
-  const selectedDayBreaks = useMemo(() => {
-    if (!selectedDay) return [];
-    const dateStr = format(selectedDay, "yyyy-MM-dd");
-    return blockedSlots
-      .filter((b) => b.date === dateStr)
-      .sort((a, b) => a.start_time.localeCompare(b.start_time));
-  }, [blockedSlots, selectedDay]);
 
   if (!currentDate || !selectedDay) {
     return (
@@ -347,18 +274,6 @@ export default function AdminWeeklyGridPage() {
             onChanged={() => setRefreshKey(k => k + 1)}
           />
           <div className="flex items-center gap-2 p-1.5 bg-slate-50 rounded-xl border border-slate-200">
-            <Button
-              variant={breakMode ? "default" : "outline"}
-              size="sm"
-              onClick={() => setBreakMode((v) => !v)}
-              className={breakMode
-                ? "bg-amber-600 hover:bg-amber-700 text-white shadow-sm flex items-center gap-2"
-                : "border-amber-300 text-amber-700 hover:bg-amber-50 hover:border-amber-400 flex items-center gap-2"}
-              title="ONのあいだ、カレンダーの枠をタップすると休憩を追加できます"
-            >
-              <Coffee className="w-4 h-4" />
-              <span className="font-bold">{breakMode ? "休憩モード ON" : "休憩"}</span>
-            </Button>
             <Link href="/admin/waitlist">
               <Button
                 variant="default"
@@ -378,15 +293,6 @@ export default function AdminWeeklyGridPage() {
           </div>
         </div>
       </div>
-
-      {/* 休憩モードの案内バナー */}
-      {breakMode && (
-        <div className="mb-3 flex items-center gap-2 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-          <Coffee className="w-4 h-4 shrink-0" />
-          <span className="font-semibold">休憩モード：</span>
-          <span>カレンダーの空き枠をタップすると、その時間を休憩（予約不可）にできます。終わったら右上のボタンでOFFに。</span>
-        </div>
-      )}
 
       {/* ====================================================
           MOBILE VIEW (< md)
@@ -479,64 +385,21 @@ export default function AdminWeeklyGridPage() {
               <span className="text-xs text-rose-500 font-semibold">休診日</span>
             )}
           </div>
-          <div className="flex items-center gap-2">
-            {!isDayOff(selectedDay) && (
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => {
-                  setBreakDialogDate(selectedDay);
-                  setBreakDialogStart("12:00");
-                  setBreakDialogEnd("13:00");
-                  setIsBreakDialogOpen(true);
-                }}
-                className="border-amber-300 text-amber-700 hover:bg-amber-50 rounded-xl h-9"
-              >
-                <Coffee className="w-4 h-4 mr-1" />
-                休憩
-              </Button>
-            )}
-            {!isDayOff(selectedDay) && (
-              <Button
-                size="sm"
-                onClick={() => {
-                  setSelectedAddDate(selectedDay);
-                  setSelectedAddTime("12:00");
-                  setIsAddDialogOpen(true);
-                }}
-                className="bg-blue-600 hover:bg-blue-700 text-white rounded-xl h-9 shadow-md shadow-blue-200/60"
-              >
-                <Plus className="w-4 h-4 mr-1" />
-                予約追加
-              </Button>
-            )}
-          </div>
+          {!isDayOff(selectedDay) && (
+            <Button
+              size="sm"
+              onClick={() => {
+                setSelectedAddDate(selectedDay);
+                setSelectedAddTime("12:00");
+                setIsAddDialogOpen(true);
+              }}
+              className="bg-blue-600 hover:bg-blue-700 text-white rounded-xl h-9 shadow-md shadow-blue-200/60"
+            >
+              <Plus className="w-4 h-4 mr-1" />
+              予約追加
+            </Button>
+          )}
         </div>
-
-        {/* この日の休憩一覧（モバイル） */}
-        {selectedDayBreaks.length > 0 && (
-          <div className="space-y-1.5">
-            {selectedDayBreaks.map((b) => (
-              <div
-                key={b.id}
-                className="flex items-center justify-between rounded-xl border border-amber-200 bg-amber-50 px-3 py-2"
-              >
-                <div className="flex items-center gap-2 text-amber-800 text-sm font-semibold">
-                  <Coffee className="w-4 h-4" />
-                  <span className="tabular-nums">{b.start_time}〜{b.end_time}</span>
-                  <span className="font-normal text-amber-700">{b.reason}</span>
-                </div>
-                <button
-                  onClick={() => handleDeleteBreak(b)}
-                  className="rounded-lg p-1 text-amber-600 hover:bg-amber-200"
-                  title="削除"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
 
         {/* Appointment list */}
         {loading ? (
@@ -1023,28 +886,18 @@ export default function AdminWeeklyGridPage() {
                         const aptDate = new Date(apt.start_time);
                         return isSameDay(aptDate, date) && jstTimeFormatter.format(aptDate) === slot;
                       });
-                      const cellBreak = getCellBreak(date, slot);
-                      const breakStart = getBreakStartingAt(date, slot);
 
                       return (
                         <div
                           key={`${rowIndex}-${colIndex}`}
                           className={`flex-1 min-w-[120px] border-r relative p-1 transition-colors
-                            ${cellBreak
-                              ? "bg-amber-50 cursor-default"
-                              : isBusiness
-                              ? breakMode
-                                ? "bg-white hover:bg-amber-50 cursor-pointer"
-                                : "bg-white hover:bg-blue-50/50 cursor-pointer"
+                            ${isBusiness
+                              ? "bg-white hover:bg-blue-50/50 cursor-pointer"
                               : "bg-slate-100/80 cursor-not-allowed"
                             }
                           `}
                           onClick={() => {
-                            if (cellBreak) return; // 休憩セルは専用の削除ボタンで操作
-                            if (!isBusiness) return;
-                            if (breakMode) {
-                              openBreakDialogForCell(date, slot);
-                            } else {
+                            if (isBusiness) {
                               setSelectedAddDate(date);
                               setSelectedAddTime(slot);
                               setIsAddDialogOpen(true);
@@ -1052,31 +905,7 @@ export default function AdminWeeklyGridPage() {
                           }}
                           style={{ height: "50px" }}
                         >
-                          {/* 休憩ブロック（開始セルに、時間ぶんの高さで表示） */}
-                          {breakStart && (
-                            <div
-                              className="absolute inset-x-0.5 top-0.5 z-[5] rounded border border-amber-300 bg-amber-100/90 px-1.5 py-1 text-[11px] leading-tight text-amber-800 overflow-hidden"
-                              style={{ height: `${Math.max(1, (hmToMin(breakStart.end_time) - hmToMin(breakStart.start_time)) / (slotMinutes || 30)) * 50 - 4}px` }}
-                            >
-                              <div className="flex items-start justify-between gap-1">
-                                <span className="font-bold flex items-center gap-0.5">
-                                  <Coffee className="w-3 h-3" />
-                                  {breakStart.reason}
-                                </span>
-                                <button
-                                  onClick={(e) => { e.stopPropagation(); handleDeleteBreak(breakStart); }}
-                                  className="shrink-0 rounded p-0.5 hover:bg-amber-200 text-amber-700"
-                                  title="この休憩を削除"
-                                >
-                                  <X className="w-3 h-3" />
-                                </button>
-                              </div>
-                              <div className="text-[10px] opacity-80 mt-0.5 tabular-nums">
-                                {breakStart.start_time}〜{breakStart.end_time}
-                              </div>
-                            </div>
-                          )}
-                          {!isBusiness && !cellBreak && slotAppts.length === 0 && (
+                          {!isBusiness && slotAppts.length === 0 && (
                             <div
                               className="absolute inset-0 opacity-50 pointer-events-none"
                               style={{
@@ -1165,64 +994,21 @@ export default function AdminWeeklyGridPage() {
                       <span className="text-sm text-rose-500 font-semibold">休診日</span>
                     )}
                   </div>
-                  <div className="flex items-center gap-2">
-                    {!isDayOff(selectedDay) && (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => {
-                          setBreakDialogDate(selectedDay);
-                          setBreakDialogStart("12:00");
-                          setBreakDialogEnd("13:00");
-                          setIsBreakDialogOpen(true);
-                        }}
-                        className="border-amber-300 text-amber-700 hover:bg-amber-50"
-                      >
-                        <Coffee className="w-4 h-4 mr-1" />
-                        休憩を追加
-                      </Button>
-                    )}
-                    {!isDayOff(selectedDay) && (
-                      <Button
-                        size="sm"
-                        onClick={() => {
-                          setSelectedAddDate(selectedDay);
-                          setSelectedAddTime("12:00");
-                          setIsAddDialogOpen(true);
-                        }}
-                        className="bg-blue-600 hover:bg-blue-700 text-white"
-                      >
-                        <Plus className="w-4 h-4 mr-1" />
-                        予約追加
-                      </Button>
-                    )}
-                  </div>
+                  {!isDayOff(selectedDay) && (
+                    <Button
+                      size="sm"
+                      onClick={() => {
+                        setSelectedAddDate(selectedDay);
+                        setSelectedAddTime("12:00");
+                        setIsAddDialogOpen(true);
+                      }}
+                      className="bg-blue-600 hover:bg-blue-700 text-white"
+                    >
+                      <Plus className="w-4 h-4 mr-1" />
+                      予約追加
+                    </Button>
+                  )}
                 </div>
-
-                {/* この日の休憩一覧（PC日別） */}
-                {selectedDayBreaks.length > 0 && (
-                  <div className="space-y-1.5 mb-3">
-                    {selectedDayBreaks.map((b) => (
-                      <div
-                        key={b.id}
-                        className="flex items-center justify-between rounded-lg border border-amber-200 bg-amber-50 px-4 py-2.5"
-                      >
-                        <div className="flex items-center gap-2 text-amber-800 font-semibold">
-                          <Coffee className="w-4 h-4" />
-                          <span className="tabular-nums">{b.start_time}〜{b.end_time}</span>
-                          <span className="font-normal text-amber-700">{b.reason}</span>
-                        </div>
-                        <button
-                          onClick={() => handleDeleteBreak(b)}
-                          className="rounded-lg p-1 text-amber-600 hover:bg-amber-200"
-                          title="削除"
-                        >
-                          <X className="w-4 h-4" />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
 
                 {selectedDayAppointments.length === 0 ? (
                   <div className="flex flex-col items-center justify-center py-20 text-slate-500">
@@ -1346,16 +1132,6 @@ export default function AdminWeeklyGridPage() {
           }}
         />
       )}
-
-      {/* 休憩追加ダイアログ */}
-      <AddBreakDialog
-        open={isBreakDialogOpen}
-        onOpenChange={setIsBreakDialogOpen}
-        defaultDate={breakDialogDate}
-        defaultStart={breakDialogStart}
-        defaultEnd={breakDialogEnd}
-        onSuccess={() => setRefreshKey(k => k + 1)}
-      />
 
       {/* Patient search panel */}
       <PatientSearchPanel
