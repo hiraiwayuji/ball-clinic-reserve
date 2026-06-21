@@ -223,8 +223,8 @@ function MergeDialog({
             </p>
             {candidates.map(c => {
               const checked = selected.has(c.id);
-              const reasonSameName = c.name.trim() === targetCustomer.name.trim();
-              const reasonSamePhone = c.phone.trim() !== "" && c.phone.trim() === targetCustomer.phone.trim();
+              const reasonSameName = (c.name ?? "").trim() === (targetCustomer.name ?? "").trim();
+              const reasonSamePhone = (c.phone ?? "").trim() !== "" && (c.phone ?? "").trim() === (targetCustomer.phone ?? "").trim();
               return (
                 <label
                   key={c.id}
@@ -353,7 +353,7 @@ function EditableRow({
     allRecordNumbers.has(recordNo.trim());
 
   const warnPhone =
-    phone.trim() !== customer.phone.trim() &&
+    phone.trim() !== (customer.phone ?? "").trim() &&
     allPhones.has(phone.trim());
 
   // 現在の編集内容で重複候補を探す（保存前プレビュー用）
@@ -1210,7 +1210,10 @@ export function CustomersTable({ customers }: { customers: Customer[] }) {
     () => new Set(customers.map(c => c.medical_record_number?.trim()).filter((v): v is string => Boolean(v))),
     [customers]
   );
-  const allPhones = useMemo(() => new Set(customers.map(c => c.phone.trim())), [customers]);
+  const allPhones = useMemo(
+    () => new Set(customers.map(c => c.phone?.trim()).filter((v): v is string => Boolean(v))),
+    [customers]
+  );
 
   const handleSort = (key: SortKey) => {
     if (sortKey === key) setSortDir(d => d === "asc" ? "desc" : "asc");
