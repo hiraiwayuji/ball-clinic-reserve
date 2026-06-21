@@ -42,6 +42,7 @@ const TENANT_TABLES = new Set([
   "audit_log",
   "calendar_events",
   "cash_sales",
+  "clinic_blocked_slots",
   "clinic_expenses",
   "clinic_holidays",
   "clinic_targets",
