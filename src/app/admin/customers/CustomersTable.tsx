@@ -337,8 +337,8 @@ function EditableRow({
   allCustomers: Customer[];
 }) {
   const [editing, setEditing] = useState(false);
-  const [name, setName] = useState(customer.name);
-  const [phone, setPhone] = useState(customer.phone);
+  const [name, setName] = useState(customer.name ?? "");
+  const [phone, setPhone] = useState(customer.phone ?? "");
   const [recordNo, setRecordNo] = useState(customer.medical_record_number ?? "");
   const [qOpen, setQOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
@@ -1228,8 +1228,8 @@ export function CustomersTable({ customers }: { customers: Customer[] }) {
     const trimmed = query.trim();
     let result = trimmed
       ? customers.filter(c =>
-          c.name.includes(trimmed) ||
-          c.phone.includes(trimmed) ||
+          (c.name ?? "").includes(trimmed) ||
+          (c.phone ?? "").includes(trimmed) ||
           (c.medical_record_number ?? "").includes(trimmed))
       : [...customers];
 
