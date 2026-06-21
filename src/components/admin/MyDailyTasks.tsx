@@ -3,7 +3,8 @@
 import { useEffect, useState, useTransition } from "react";
 import { CheckCircle2, Circle, ListTodo, Loader2, FileText, Megaphone, Sparkles, Brush, Plus, Check, X } from "lucide-react";
 import { toast } from "sonner";
-import { getMyDayTasks, toggleTaskDone, addMyTask, TASK_TEMPLATES, type DailyTask, type TaskKind } from "@/app/actions/staff-daily-tasks";
+import { getMyDayTasks, toggleTaskDone, addMyTask, type DailyTask, type TaskKind } from "@/app/actions/staff-daily-tasks";
+import { TASK_TEMPLATES } from "@/lib/daily-task-templates";
 
 const KIND_ICON: Record<TaskKind, typeof FileText> = {
   karte: FileText,

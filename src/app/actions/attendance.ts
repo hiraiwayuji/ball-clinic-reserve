@@ -5,6 +5,7 @@ import { PUBLIC_CLINIC_ID } from "@/lib/default-clinic-id";
 import { CLINIC_CONFIG } from "@/lib/clinic-config";
 import { pushLineToOwners } from "@/lib/admin-notify";
 import { requireRole } from "@/app/actions/auth";
+import { OVERTIME_REASON_LABEL } from "@/lib/attendance-constants";
 
 /**
  * 勤怠（出退勤の打刻）＋残業の見える化 [Phase 1]
@@ -18,19 +19,8 @@ import { requireRole } from "@/app/actions/auth";
 
 export type OvertimeReasonType = "requested" | "closing" | "valid" | "other";
 
-export const OVERTIME_REASONS: { value: OvertimeReasonType; label: string }[] = [
-  { value: "requested", label: "院長の依頼" },
-  { value: "closing", label: "締め作業（1人で締め）" },
-  { value: "valid", label: "正当な理由" },
-  { value: "other", label: "その他" },
-];
-
-export const OVERTIME_REASON_LABEL: Record<OvertimeReasonType, string> = {
-  requested: "院長の依頼",
-  closing: "締め作業（1人で締め）",
-  valid: "正当な理由",
-  other: "その他",
-};
+// 値（OVERTIME_REASONS / OVERTIME_REASON_LABEL / JUDGMENT_LABEL）は
+// "@/lib/attendance-constants" に分離（"use server" は値を export できないため）。
 
 export type AttendanceStaff = { id: string; name: string; display_color: string | null };
 
@@ -325,13 +315,7 @@ export type AttendanceRecord = {
  */
 export type AttendanceJudgment = "requested" | "reservation" | "closing" | "valid" | "wasteful";
 
-export const JUDGMENT_LABEL: Record<AttendanceJudgment, string> = {
-  requested: "院長の依頼",
-  reservation: "予約の担当",
-  closing: "締め作業",
-  valid: "正当な理由",
-  wasteful: "ムダな被り",
-};
+// JUDGMENT_LABEL の値は "@/lib/attendance-constants" に分離。
 
 export type AttendanceReportRecord = AttendanceRecord & {
   judgment: AttendanceJudgment | null; // null = 定時（残業ではない）

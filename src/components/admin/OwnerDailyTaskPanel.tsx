@@ -7,9 +7,10 @@ import {
 import { toast } from "sonner";
 import {
   listDailyTasksForDate, generateDailyTasks, approveTask, approveAllTasksForDate,
-  toggleTaskDone, addManualTask, deleteTask, TASK_TEMPLATES,
+  toggleTaskDone, addManualTask, deleteTask,
   type DailyTask, type TaskKind, type TaskPriority,
 } from "@/app/actions/staff-daily-tasks";
+import { TASK_TEMPLATES } from "@/lib/daily-task-templates";
 import { listActiveStaff, type StaffOption } from "@/app/actions/staff-schedule";
 
 const KIND_ICON: Record<TaskKind, typeof FileText> = {

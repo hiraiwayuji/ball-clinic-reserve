@@ -15,18 +15,9 @@ function getServiceClient() {
 export type TaskKind = "manual" | "karte" | "morning" | "sns" | "cleaning" | "other";
 export type TaskPriority = "low" | "normal" | "high";
 
-/** この院でよく使う業務テンプレ（先生の自己追加・院長の手動追加の候補ボタンに使用）。 */
-export const TASK_TEMPLATES: { title: string; kind: TaskKind }[] = [
-  { title: "柔整書類の確認", kind: "karte" },
-  { title: "保険証の確認", kind: "karte" },
-  { title: "カルテ整理", kind: "karte" },
-  { title: "受付業務のお手伝い", kind: "other" },
-  { title: "ベッドメイキング", kind: "cleaning" },
-  { title: "細かい場所のお掃除", kind: "cleaning" },
-  { title: "トイレ掃除", kind: "cleaning" },
-  { title: "朝の掃除", kind: "cleaning" },
-  { title: "SNS投稿・ブログ下書き", kind: "sns" },
-];
+// 業務テンプレ（TASK_TEMPLATES）の値は "@/lib/daily-task-templates" に分離。
+// "use server" ファイルからは値（オブジェクト/配列）を export できないため
+// （本番ビルドで "A use server file can only export async functions" エラーになる）。
 
 export type DailyTask = {
   id: string;

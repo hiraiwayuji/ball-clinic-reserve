@@ -10,9 +10,9 @@ import {
 } from "lucide-react";
 import {
   getAttendanceSettings, setAttendanceSettings, listStaffWages, setStaffWage, getAttendanceReport,
-  JUDGMENT_LABEL,
   type AttendanceConfig, type OwnerStaffWage, type AttendanceReportRecord, type AttendanceSummary, type AttendanceJudgment,
 } from "@/app/actions/attendance";
+import { JUDGMENT_LABEL } from "@/lib/attendance-constants";
 
 const COLOR: Record<string, string> = {
   blue: "#3b82f6", sky: "#0ea5e9", indigo: "#6366f1", violet: "#8b5cf6", purple: "#a855f7",

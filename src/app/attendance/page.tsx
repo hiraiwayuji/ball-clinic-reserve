@@ -7,9 +7,10 @@ import { toast } from "sonner";
 import { Loader2, Clock, LogIn, LogOut, CheckCircle2, AlertTriangle } from "lucide-react";
 import {
   listAttendanceStaff, getAttendanceConfig, getTodayAttendance,
-  clockIn, clockOut, OVERTIME_REASONS,
+  clockIn, clockOut,
   type AttendanceStaff, type AttendanceConfig, type TodayAttendance, type OvertimeReasonType,
 } from "@/app/actions/attendance";
+import { OVERTIME_REASONS } from "@/lib/attendance-constants";
 import { CLINIC_CONFIG } from "@/lib/clinic-config";
 
 export default function AttendancePage() {
