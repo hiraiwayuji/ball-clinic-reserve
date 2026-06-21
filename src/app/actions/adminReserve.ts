@@ -908,6 +908,18 @@ export async function updateAppointmentDetails(
 
       if (error) {
         console.error("Failed to update appointment:", error);
+        // 除外制約（同じ担当者の予約時間が重なる）を分かりやすい文言にする。
+        // PostgreSQL exclusion_violation = 23P01 / 制約名 appointments_single_resource_no_overlap。
+        const isOverlap =
+          (error as any).code === "23P01" ||
+          /single_resource_no_overlap|exclusion/i.test((error as any).message ?? "");
+        if (isOverlap) {
+          const staffLabel = (updatePayload.staff_name as string | undefined) || "担当者";
+          return {
+            success: false,
+            error: `${staffLabel}さんは、この時間にすでに別のご予約が入っています。担当者か時間を変えてください。（同じ担当者の重複予約はできません）`,
+          };
+        }
         return { success: false, error: "予約の更新に失敗しました" };
       }
 
