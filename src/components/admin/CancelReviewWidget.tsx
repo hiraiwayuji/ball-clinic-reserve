@@ -48,7 +48,7 @@ export default function CancelReviewWidget() {
     });
   };
 
-  const handleBulk = async (kind: "approved" | "unexcused" | "set_removed") => {
+  const handleBulk = async (kind: "approved" | "unexcused" | "set_removed" | "clinic_reason") => {
     if (busy || selected.size === 0) return;
     setBusy(true);
     try {
@@ -58,7 +58,14 @@ export default function CancelReviewWidget() {
         toast.error(res.error ?? "仕分けに失敗しました");
         return;
       }
-      const label = kind === "approved" ? "承諾済み" : kind === "unexcused" ? "無断・未確認" : "セット解除";
+      const label =
+        kind === "approved"
+          ? "承諾済み"
+          : kind === "unexcused"
+            ? "無断・未確認"
+            : kind === "clinic_reason"
+              ? "院都合（カウントしない）"
+              : "セット解除";
       toast.success(`${res.count}件を「${label}」にしました`);
       if (res.blockedPatients?.length) {
         for (const p of res.blockedPatients) {
@@ -155,6 +162,15 @@ export default function CancelReviewWidget() {
                 className="flex-1 py-2.5 rounded-xl text-sm font-bold bg-blue-500 hover:bg-blue-600 text-white transition disabled:opacity-40"
               >
                 {busy ? <Loader2 className="w-4 h-4 animate-spin mx-auto" /> : `選択した${selected.size}件を承諾済みにする`}
+              </button>
+              <button
+                type="button"
+                disabled={busy || selected.size === 0}
+                onClick={() => handleBulk("clinic_reason")}
+                title="院側の都合でやむなくキャンセルしたもの。本人キャンセルではないのでキャンセル回数に数えません"
+                className="px-4 py-2.5 rounded-xl text-xs font-bold bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:bg-slate-200 dark:hover:bg-slate-700 transition disabled:opacity-40"
+              >
+                院都合
               </button>
               <button
                 type="button"

@@ -11,7 +11,7 @@ import {
   type PendingSalePatient,
   type CashSalePaymentType,
 } from "@/app/actions/sales";
-import { markAppointmentNoShow } from "@/app/actions/adminReserve";
+import { markAppointmentNoShow, markAppointmentClinicCancel } from "@/app/actions/adminReserve";
 import { usePaymentCategories } from "@/lib/use-payment-categories";
 import { getPaymentCategoryColor } from "@/lib/payment-category-color";
 import { evaluateMedicalAid, effectiveWindowBurden, DEFAULT_MEDICAL_AID_RULES, type MedicalAidRules } from "@/lib/medical-aid";
@@ -184,6 +184,20 @@ function BulkSalesPageInner() {
     });
   };
 
+  // 院都合でキャンセル扱いにする（本人キャンセルではない＝キャンセル回数に数えない）。
+  // 水素などをこちらの都合で当日できなかったときに使う。
+  const handleClinicCancel = (row: DraftRow) => {
+    startTransition(async () => {
+      const res = await markAppointmentClinicCancel(row.appointmentId);
+      if (res.success) {
+        setRows(prev => prev.filter(r => r.appointmentId !== row.appointmentId));
+        toast.success(`${row.customerName}様を院都合キャンセルで外しました（キャンセル回数に数えません）`);
+      } else {
+        toast.error(res.error ?? "院都合キャンセルの処理に失敗しました");
+      }
+    });
+  };
+
   const checkedCount = rows.filter(r => r.checked && isSavable(r)).length;
   const totalAmount = rows
     .filter(r => r.checked && isSavable(r))
@@ -345,6 +359,7 @@ function BulkSalesPageInner() {
                   setRows(prev => prev.map(r => r.appointmentId === row.appointmentId ? updated : r))
                 }
                 onNoShow={() => handleNoShow(row)}
+                onClinicCancel={() => handleClinicCancel(row)}
               />
             ))}
           </div>
@@ -396,6 +411,7 @@ function DraftRowItem({
   addressAlert,
   onCategoryAdded,
   onNoShow,
+  onClinicCancel,
 }: {
   row: DraftRow;
   onChange: (updated: DraftRow) => void;
@@ -404,9 +420,12 @@ function DraftRowItem({
   addressAlert: boolean;
   onCategoryAdded: () => Promise<void> | void;
   onNoShow: () => void;
+  onClinicCancel: () => void;
 }) {
   // 「未来院」ボタンの押し間違い防止（1回目で確認、2回目で確定）
   const [confirmingNoShow, setConfirmingNoShow] = useState(false);
+  // 「院都合」ボタンの押し間違い防止（1回目で確認、2回目で確定）
+  const [confirmingClinic, setConfirmingClinic] = useState(false);
   // 医療助成の警告から、その場で市町村を登録するためのUI状態
   const [savingCity, setSavingCity] = useState(false);
   const [cityChoice, setCityChoice] = useState("");
@@ -644,8 +663,9 @@ function DraftRowItem({
           />
         </div>
 
-        {/* 未来院（来院されなかった方をこの一覧から外す） */}
-        <div className="shrink-0">
+        {/* 来院されなかった方をこの一覧から外す（未来院 ＝ 本人都合 / 院都合 ＝ こちらの都合） */}
+        <div className="shrink-0 flex flex-col gap-1">
+          {/* 未来院（本人都合・キャンセル回数＋未来院に数える） */}
           {confirmingNoShow ? (
             <div className="flex items-center gap-1">
               <button
@@ -666,12 +686,41 @@ function DraftRowItem({
           ) : (
             <button
               type="button"
-              onClick={() => setConfirmingNoShow(true)}
-              title="来院されなかった方を一覧から外します"
-              className="h-9 px-2.5 rounded-lg text-xs font-bold text-rose-500 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/30 border border-rose-200 dark:border-rose-900/50 inline-flex items-center gap-1"
+              onClick={() => { setConfirmingClinic(false); setConfirmingNoShow(true); }}
+              title="来院されなかった方を一覧から外します（本人都合。キャンセル回数に数えます）"
+              className="h-9 px-2.5 rounded-lg text-xs font-bold text-rose-500 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/30 border border-rose-200 dark:border-rose-900/50 inline-flex items-center justify-center gap-1"
             >
               <UserX className="w-3.5 h-3.5" />
               未来院
+            </button>
+          )}
+
+          {/* 院都合（こちらの都合。本人キャンセルではないのでキャンセル回数に数えない） */}
+          {confirmingClinic ? (
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => { setConfirmingClinic(false); onClinicCancel(); }}
+                className="h-9 px-2.5 rounded-lg text-xs font-bold bg-slate-600 hover:bg-slate-700 text-white"
+              >
+                院都合で外す
+              </button>
+              <button
+                type="button"
+                onClick={() => setConfirmingClinic(false)}
+                className="h-9 px-2 rounded-lg text-xs font-medium text-slate-500 hover:text-slate-700 dark:text-slate-400"
+              >
+                やめる
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => { setConfirmingNoShow(false); setConfirmingClinic(true); }}
+              title="こちらの都合（水素を当日できなかった等）でキャンセル扱いにします。本人キャンセルではないのでキャンセル回数に数えません"
+              className="h-9 px-2.5 rounded-lg text-xs font-bold text-slate-500 hover:text-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800/50 border border-slate-200 dark:border-slate-700 inline-flex items-center justify-center gap-1"
+            >
+              院都合
             </button>
           )}
         </div>

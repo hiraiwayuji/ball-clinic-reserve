@@ -15,6 +15,7 @@ import { SuspendToggle } from "./SuspendToggle";
 import { LinkLineDialog } from "./LinkLineDialog";
 import { updateCustomerInfo, mergeCustomers, sendDormantLinePush, getMonthlyVisitStats, refreshLineDisplayNames, clearAutoSuspension, type MonthlyVisitStat } from "@/app/actions/adminCustomers";
 import { QuestionnaireDialog } from "./QuestionnaireDialog";
+import { CancelHistoryDialog } from "./CancelHistoryDialog";
 import {
   Search, Pencil, Check, X, Loader2, ClipboardList,
   AlertTriangle, ArrowUpDown, Hash, GitMerge, Calendar, Phone, Upload,
@@ -341,7 +342,9 @@ function EditableRow({
   const [phone, setPhone] = useState(customer.phone ?? "");
   const [recordNo, setRecordNo] = useState(customer.medical_record_number ?? "");
   const [qOpen, setQOpen] = useState(false);
+  const [cancelHistoryOpen, setCancelHistoryOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
+  const rowRouter = useRouter();
 
   // 統合ダイアログ
   const [mergeOpen, setMergeOpen] = useState(false);
@@ -481,16 +484,21 @@ function EditableRow({
         </TableCell>
 
         <TableCell className="text-center">
-          {customer.cancelCount > 0
-            ? <Badge variant="secondary" className={"px-3 " + (customer.cancelCount >= 3 ? "bg-orange-100 text-orange-700" : "")}>{customer.cancelCount} 回</Badge>
-            : <span className="text-slate-400 text-sm">0 回</span>}
-          {customer.noShowCount > 0 && (
-            <div className="mt-1">
+          <button
+            type="button"
+            onClick={() => setCancelHistoryOpen(true)}
+            title="キャンセル履歴を見る・院都合（本人キャンセルでないもの）をカウントから外す"
+            className="inline-flex flex-col items-center gap-1 rounded-lg px-1.5 py-1 hover:bg-slate-100 dark:hover:bg-slate-800/60 transition-colors cursor-pointer"
+          >
+            {customer.cancelCount > 0
+              ? <Badge variant="secondary" className={"px-3 " + (customer.cancelCount >= 3 ? "bg-orange-100 text-orange-700" : "")}>{customer.cancelCount} 回</Badge>
+              : <span className="text-slate-400 text-sm">0 回</span>}
+            {customer.noShowCount > 0 && (
               <Badge className={"px-2 text-[11px] " + (customer.noShowCount >= 2 ? "bg-rose-600 text-white" : "bg-rose-100 text-rose-700")}>
                 未来院 {customer.noShowCount}
               </Badge>
-            </div>
-          )}
+            )}
+          </button>
         </TableCell>
 
         <TableCell className="text-sm text-slate-600 dark:text-slate-400 whitespace-nowrap">
@@ -576,6 +584,15 @@ function EditableRow({
         targetCustomer={{ ...customer, name, phone }}
         candidates={mergeCandidates}
         onMergeComplete={() => window.location.reload()}
+      />
+
+      {/* キャンセル履歴（過去ぶんも院都合でカウントから外せる） */}
+      <CancelHistoryDialog
+        open={cancelHistoryOpen}
+        onOpenChange={setCancelHistoryOpen}
+        customerId={customer.id}
+        customerName={name}
+        onAfterChange={() => rowRouter.refresh()}
       />
     </>
   );

@@ -140,10 +140,13 @@ export async function getCustomers(): Promise<CustomerWithStats[]> {
 
     const formattedCustomers: CustomerWithStats[] = customerRows.map((c) => {
       const appointments = c.appointments || [];
-      // セット解除（施術+水素の片割れ削除など cancel_kind='set_removed'）は
-      // ドタキャンではないので、キャンセル回数にも未来院にも数えない。
+      // セット解除（cancel_kind='set_removed'）と院都合（cancel_kind='clinic_reason'）は
+      // 本人のドタキャンではないので、キャンセル回数にも未来院にも数えない。
       const cancelled = appointments.filter(
-        (a) => a.status === "cancelled" && a.cancel_kind !== "set_removed",
+        (a) =>
+          a.status === "cancelled" &&
+          a.cancel_kind !== "set_removed" &&
+          a.cancel_kind !== "clinic_reason",
       );
       const active = appointments.filter((a) => a.status !== "cancelled");
       // 未来院（赤バッジ）＝無断・未確認のみ。

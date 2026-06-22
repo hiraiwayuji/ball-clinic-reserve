@@ -1193,6 +1193,59 @@ export async function markAppointmentNoShow(
   }
 }
 
+/**
+ * 院都合キャンセル。
+ * 本人はキャンセルしていないが、院側の都合（水素を当日できなかった等）で
+ * やむなくキャンセル扱いにするケース。
+ * cancel_kind='clinic_reason' で記録し、no_show は付けない。
+ * → 顧客一覧のキャンセル回数にも未来院にも数えない。仕分け不要。
+ */
+export async function markAppointmentClinicCancel(
+  appointmentId: string,
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const auth = await checkAdminAuth();
+    const supabase = getAdminSupabase();
+    if (!supabase) return { success: false, error: "サーバー設定エラー" };
+
+    const { data: before } = await supabase
+      .from("appointments")
+      .select("id, start_time, status, no_show, cancel_kind, customers(name)")
+      .eq("id", appointmentId)
+      .eq("clinic_id", auth.clinicId)
+      .maybeSingle();
+
+    const { error } = await supabase
+      .from("appointments")
+      .update({ status: "cancelled", checkin_status: null, no_show: false, cancel_kind: "clinic_reason" })
+      .eq("id", appointmentId)
+      .eq("clinic_id", auth.clinicId);
+
+    if (error) return { success: false, error: error.message };
+
+    await writeAudit({
+      clinicId: auth.clinicId,
+      actorUserId: auth.userId,
+      actorEmail: auth.email,
+      actorRole: auth.role,
+      actionType: "appointment.clinic_cancel",
+      targetTable: "appointments",
+      targetId: appointmentId,
+      before,
+      after: { status: "cancelled", no_show: false, cancel_kind: "clinic_reason" },
+    });
+
+    revalidatePath("/admin/counter");
+    revalidatePath("/admin/appointments");
+    revalidatePath("/admin/sales");
+    revalidatePath("/admin/customers");
+    return { success: true };
+  } catch (err) {
+    console.error("markAppointmentClinicCancel error:", err);
+    return { success: false, error: "予期せぬエラーが発生しました" };
+  }
+}
+
 export async function completeAllActiveAppointments(
   appointmentIds: string[],
 ): Promise<{ success: boolean; updatedCount?: number; error?: string }> {
@@ -1784,6 +1837,95 @@ export type UnclassifiedCancellation = {
   no_show: boolean;
 };
 
+export type CustomerCancellation = {
+  id: string;
+  start_time: string;
+  course_name: string | null;
+  cancel_kind: string | null;
+  no_show: boolean;
+};
+
+/** 指定した患者の「キャンセル」一覧（期間制限なし・新しい順）。院都合の付け外しに使う。 */
+export async function getCustomerCancellations(customerId: string): Promise<CustomerCancellation[]> {
+  try {
+    const { clinicId } = await checkAdminAuth();
+    const supabase = getAdminSupabase();
+    if (!supabase || !customerId) return [];
+    const { data } = await supabase
+      .from("appointments")
+      .select("id, start_time, course_name, cancel_kind, no_show")
+      .eq("clinic_id", clinicId)
+      .eq("customer_id", customerId)
+      .eq("status", "cancelled")
+      .order("start_time", { ascending: false })
+      .limit(200);
+    return (data ?? []).map((a: any) => ({
+      id: a.id,
+      start_time: a.start_time,
+      course_name: a.course_name ?? null,
+      cancel_kind: a.cancel_kind ?? null,
+      no_show: !!a.no_show,
+    }));
+  } catch (err) {
+    console.error("getCustomerCancellations error:", err);
+    return [];
+  }
+}
+
+/**
+ * 過去のキャンセル1件を「院都合（カウントしない）」に切り替える／戻す。
+ *   on=true  → cancel_kind='clinic_reason', no_show=false（キャンセル回数・未来院から外す）
+ *   on=false → cancel_kind=null（未仕分けに戻す。再びキャンセル回数に数える）
+ */
+export async function setCancellationClinicReason(
+  appointmentId: string,
+  on: boolean,
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const auth = await checkAdminAuth();
+    const supabase = getAdminSupabase();
+    if (!supabase) return { success: false, error: "サーバー設定エラー" };
+
+    const { data: before } = await supabase
+      .from("appointments")
+      .select("id, status, no_show, cancel_kind")
+      .eq("id", appointmentId)
+      .eq("clinic_id", auth.clinicId)
+      .maybeSingle();
+    if (!before) return { success: false, error: "予約が見つかりません" };
+    if (before.status !== "cancelled") return { success: false, error: "キャンセル済みの予約ではありません" };
+
+    const patch = on
+      ? { cancel_kind: "clinic_reason", no_show: false }
+      : { cancel_kind: null, no_show: false };
+    const { error } = await supabase
+      .from("appointments")
+      .update(patch)
+      .eq("id", appointmentId)
+      .eq("clinic_id", auth.clinicId);
+    if (error) return { success: false, error: error.message };
+
+    await writeAudit({
+      clinicId: auth.clinicId,
+      actorUserId: auth.userId,
+      actorEmail: auth.email,
+      actorRole: auth.role,
+      actionType: on ? "appointment.clinic_cancel" : "appointment.clinic_cancel_undo",
+      targetTable: "appointments",
+      targetId: appointmentId,
+      before: { no_show: before.no_show, cancel_kind: before.cancel_kind },
+      after: patch,
+    });
+
+    revalidatePath("/admin/customers");
+    revalidatePath("/admin/dashboard");
+    return { success: true };
+  } catch (err) {
+    console.error("setCancellationClinicReason error:", err);
+    return { success: false, error: "予期せぬエラーが発生しました" };
+  }
+}
+
 /** 直近30日の「未仕分け」キャンセル一覧（status=cancelled かつ cancel_kind 未設定） */
 export async function getUnclassifiedCancellations(): Promise<UnclassifiedCancellation[]> {
   try {
@@ -1821,7 +1963,7 @@ export async function getUnclassifiedCancellations(): Promise<UnclassifiedCancel
  */
 export async function classifyCancellation(
   appointmentId: string,
-  kind: "unexcused" | "approved" | "set_removed",
+  kind: "unexcused" | "approved" | "set_removed" | "clinic_reason",
 ): Promise<{ success: boolean; error?: string; blockedUntil?: string | null; customerName?: string | null }> {
   try {
     const auth = await checkAdminAuth();
@@ -1959,7 +2101,7 @@ export async function classifyRemainingAsApproved(): Promise<{ success: boolean;
 /** 指定IDのキャンセルをまとめて仕分け */
 export async function classifyByIds(
   ids: string[],
-  kind: "unexcused" | "approved" | "set_removed",
+  kind: "unexcused" | "approved" | "set_removed" | "clinic_reason",
 ): Promise<{ success: boolean; count: number; blockedPatients?: { name: string; until: string }[]; error?: string }> {
   if (!ids.length) return { success: true, count: 0 };
   try {
