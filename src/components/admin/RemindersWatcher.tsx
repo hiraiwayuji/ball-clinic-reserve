@@ -11,7 +11,9 @@ import {
 import { warmupReminderAudio } from "@/lib/reminder-sound";
 import ReminderPopup from "./ReminderPopup";
 
-const POLL_INTERVAL_MS = 30_000;
+// 60秒間隔。リマインダーは分粒度で十分。短すぎる間隔で認証付きポーリングを回すと
+// トークン回転が競合し頻繁ログアウトを誘発するため（runbook_ball_frequent_logout）。
+const POLL_INTERVAL_MS = 60_000;
 
 /**
  * 管理画面に常駐して、自院の発火対象リマインダーをポーリング → ポップアップを表示する。

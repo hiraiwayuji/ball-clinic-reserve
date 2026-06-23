@@ -2,7 +2,7 @@
 
 import { createClient as createAdminClient } from "@supabase/supabase-js";
 import { revalidatePath } from "next/cache";
-import { checkAdminAuth } from "./auth";
+import { checkAdminAuth, checkAdminAuthLite } from "./auth";
 
 export type ReminderRow = {
   id: string;
@@ -71,7 +71,10 @@ export async function createReminder(input: {
  * クライアント側のポーリングから呼ばれる。
  */
 export async function listFiredReminders(): Promise<ReminderRow[]> {
-  const auth = await checkAdminAuth();
+  // 30〜60 秒ごとに呼ばれる常駐ポーリング。getUser（Auth API リモート呼び出し）を
+  // 叩き続けると頻繁ログアウトを誘発するため、ローカル JWT 検証の軽量認証を使う。
+  const auth = await checkAdminAuthLite();
+  if (!auth) return [];
   const db = getAdminDb();
   const nowIso = new Date().toISOString();
   const { data, error } = await db

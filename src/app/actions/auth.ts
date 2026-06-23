@@ -94,6 +94,79 @@ export async function checkAdminAuth(): Promise<AdminAuthInfo> {
 }
 
 /**
+ * 読み取り専用の常駐ポーリング（RemindersWatcher 等）専用の軽量認証。
+ *
+ * 通常の checkAdminAuth は Supabase Auth API への外部呼び出し（getUser）を行うが、
+ * これを 30〜60 秒ごとに叩き続けると、アクセストークン期限切れ時に裏ポーリング・
+ * 複数タブ・画面操作が同時にトークン回転をかけ、Supabase の乗っ取り検知でセッション
+ * ごと失効＝「触ってないのに頻繁にログアウト」の原因になる（runbook_ball_frequent_logout）。
+ *
+ * そこで常駐パスでは getClaims（ローカル JWT 検証＝Auth API を叩かない／トークン回転を
+ * 誘発しない）で user_id を取り出す。署名キー未設定などで getClaims が使えない環境では
+ * 従来の checkAdminAuth にフォールバックするため、挙動が悪化することはない。
+ *
+ * 認証に失敗した場合は null を返す（常駐ポーリングはログイン画面へ redirect せず静かに止まる）。
+ */
+export async function checkAdminAuthLite(): Promise<AdminAuthInfo | null> {
+  const { createClient } = await import("@/lib/supabase/server");
+  const supabase = await createClient();
+
+  const expectedClinicId = process.env.NEXT_PUBLIC_CLINIC_ID;
+  if (!expectedClinicId) return null;
+
+  // getClaims はローカルで JWT 署名を検証する（Auth API への外部呼び出しなし）。
+  let userId: string | null = null;
+  let email: string | null = null;
+  try {
+    const { data } = await withTimeout(supabase.auth.getClaims(), 5_000, "auth.getClaims");
+    const claims = data?.claims;
+    if (claims?.sub) {
+      userId = claims.sub as string;
+      email = (claims.email as string | undefined) ?? null;
+    }
+  } catch (err) {
+    console.warn("[checkAdminAuthLite] getClaims failed, will fall back:", err);
+  }
+
+  // getClaims が使えない環境（署名キー未設定など）では従来の厳格チェックにフォールバック。
+  if (!userId) {
+    try {
+      return await checkAdminAuth();
+    } catch {
+      return null;
+    }
+  }
+
+  // この clinic に対する権限のみ参照（user_id + clinic_id）。
+  let data: { clinic_id: string; role: string | null } | null = null;
+  try {
+    const result = await withTimeout(
+      supabase
+        .from("clinic_users")
+        .select("clinic_id, role")
+        .eq("user_id", userId)
+        .eq("clinic_id", expectedClinicId)
+        .maybeSingle(),
+      5_000,
+      "clinic_users.select(lite)",
+    );
+    data = result.data;
+  } catch (err) {
+    console.error("[checkAdminAuthLite] clinic_users lookup failed:", err);
+    return null;
+  }
+
+  if (!data) return null;
+
+  return {
+    clinicId: data.clinic_id,
+    userId,
+    email,
+    role: (data.role as ClinicRole | null) ?? "owner",
+  };
+}
+
+/**
  * 指定 role のいずれかでなければリダイレクト。
  * - 例: requireRole(['owner'])  → owner 以外は /admin/dashboard?denied=1 へ
  * - 例: requireRole(['owner','admin'])
