@@ -314,40 +314,38 @@ html[data-clinic-light] [data-dark-page] .bg-gradient-to-t,
 html[data-clinic-light] [data-dark-page] .bg-gradient-to-tr,
 html[data-clinic-light] [data-dark-page] .bg-gradient-to-tl,
 html[data-clinic-light] [data-dark-page] .bg-gradient-to-bl { background-image: none !important; background-color: #f8fafc !important; }
-/* 文字色（白 → 黒系） */
-html[data-clinic-light] [data-dark-page] .text-white { color: #0f172a !important; }
-html[data-clinic-light] [data-dark-page] .text-slate-200,
-html[data-clinic-light] [data-dark-page] .text-slate-300 { color: #334155 !important; }
-html[data-clinic-light] [data-dark-page] .text-slate-400,
-html[data-clinic-light] [data-dark-page] .text-slate-500 { color: #64748b !important; }
-html[data-clinic-light] [data-dark-page] .text-blue-100,
-html[data-clinic-light] [data-dark-page] .text-blue-100\/80,
-html[data-clinic-light] [data-dark-page] .text-blue-100\/70,
-html[data-clinic-light] [data-dark-page] .text-blue-200,
-html[data-clinic-light] [data-dark-page] .text-blue-200\/80,
-html[data-clinic-light] [data-dark-page] .text-blue-200\/70 { color: #475569 !important; }
-html[data-clinic-light] [data-dark-page] .text-blue-300,
-html[data-clinic-light] [data-dark-page] .text-blue-400 { color: #2563eb !important; }
-/* 半透明の白文字（住所・補足など）も黒系のグレーに */
-html[data-clinic-light] [data-dark-page] .text-white\/90,
-html[data-clinic-light] [data-dark-page] .text-white\/80 { color: #1f2937 !important; }
-html[data-clinic-light] [data-dark-page] .text-white\/70 { color: #475569 !important; }
-html[data-clinic-light] [data-dark-page] .text-white\/60,
-html[data-clinic-light] [data-dark-page] .text-white\/50,
-html[data-clinic-light] [data-dark-page] .text-white\/40 { color: #64748b !important; }
-/* 色付きボックス内の淡色文字（暗背景用）→ 明るい背景で読める濃色に */
-html[data-clinic-light] [data-dark-page] .text-amber-100,
-html[data-clinic-light] [data-dark-page] .text-amber-100\/90,
-html[data-clinic-light] [data-dark-page] .text-amber-200,
-html[data-clinic-light] [data-dark-page] .text-amber-300 { color: #b45309 !important; }
-html[data-clinic-light] [data-dark-page] .text-emerald-100,
-html[data-clinic-light] [data-dark-page] .text-emerald-200,
-html[data-clinic-light] [data-dark-page] .text-emerald-300 { color: #047857 !important; }
-html[data-clinic-light] [data-dark-page] .text-rose-200,
-html[data-clinic-light] [data-dark-page] .text-rose-300 { color: #be123c !important; }
-html[data-clinic-light] [data-dark-page] .text-cyan-100,
-html[data-clinic-light] [data-dark-page] .text-cyan-200,
-html[data-clinic-light] [data-dark-page] .text-cyan-300 { color: #0e7490 !important; }
+/* 文字色（白/淡色 → 黒・濃色系）。
+   [class*="..."] で /opacity 付きユーティリティ（text-white/80, text-blue-100/85 等）も一括で拾う。
+   ※ "-50" は "-500" と部分一致してしまうため [class*=] を使わず個別クラスで指定する。 */
+html[data-clinic-light] [data-dark-page] [class*="text-white"] { color: #0f172a !important; }
+/* 半透明の白文字（住所・補足など）はやや薄い黒〜グレーに（text-white の後に置いて上書き） */
+html[data-clinic-light] [data-dark-page] :is([class*="text-white/90"],[class*="text-white/80"]) { color: #1f2937 !important; }
+html[data-clinic-light] [data-dark-page] :is([class*="text-white/70"],[class*="text-white/60"],[class*="text-white/50"],[class*="text-white/40"],[class*="text-white/30"]) { color: #475569 !important; }
+/* slate / zinc 系 */
+html[data-clinic-light] [data-dark-page] :is([class*="text-slate-200"],[class*="text-slate-300"],[class*="text-zinc-300"]) { color: #334155 !important; }
+html[data-clinic-light] [data-dark-page] :is([class*="text-slate-400"],[class*="text-slate-500"],[class*="text-zinc-400"],[class*="text-zinc-500"],[class*="text-zinc-600"]) { color: #475569 !important; }
+/* blue（淡い水色サブテキスト→グレー、アクセント青→濃い青） */
+html[data-clinic-light] [data-dark-page] .text-blue-50,
+html[data-clinic-light] [data-dark-page] :is([class*="text-blue-100"],[class*="text-blue-200"]) { color: #475569 !important; }
+html[data-clinic-light] [data-dark-page] :is([class*="text-blue-300"],[class*="text-blue-400"]) { color: #1d4ed8 !important; }
+/* orange / amber */
+html[data-clinic-light] [data-dark-page] .text-orange-50,
+html[data-clinic-light] [data-dark-page] :is([class*="text-orange-100"],[class*="text-orange-200"],[class*="text-orange-300"],[class*="text-orange-400"],[class*="text-orange-500"],[class*="text-orange-600"]) { color: #9a3412 !important; }
+html[data-clinic-light] [data-dark-page] .text-amber-50,
+html[data-clinic-light] [data-dark-page] :is([class*="text-amber-100"],[class*="text-amber-200"],[class*="text-amber-300"]) { color: #92400e !important; }
+/* amber-400/500（価格や「¥0」等の強調） */
+html[data-clinic-light] [data-dark-page] :is([class*="text-amber-400"],[class*="text-amber-500"]) { color: #b45309 !important; }
+/* emerald / green */
+html[data-clinic-light] [data-dark-page] .text-emerald-50,
+html[data-clinic-light] [data-dark-page] :is([class*="text-emerald-100"],[class*="text-emerald-200"],[class*="text-emerald-300"],[class*="text-emerald-400"]) { color: #065f46 !important; }
+html[data-clinic-light] [data-dark-page] .text-green-50,
+html[data-clinic-light] [data-dark-page] :is([class*="text-green-200"],[class*="text-green-300"],[class*="text-green-400"]) { color: #166534 !important; }
+/* red / rose / purple / cyan / sky */
+html[data-clinic-light] [data-dark-page] :is([class*="text-red-200"],[class*="text-red-300"],[class*="text-red-400"]) { color: #b91c1c !important; }
+html[data-clinic-light] [data-dark-page] :is([class*="text-rose-100"],[class*="text-rose-200"],[class*="text-rose-300"],[class*="text-rose-400"]) { color: #be123c !important; }
+html[data-clinic-light] [data-dark-page] :is([class*="text-purple-300"],[class*="text-purple-400"]) { color: #7e22ce !important; }
+html[data-clinic-light] [data-dark-page] :is([class*="text-cyan-100"],[class*="text-cyan-200"],[class*="text-cyan-300"],[class*="text-cyan-400"]) { color: #0e7490 !important; }
+html[data-clinic-light] [data-dark-page] :is([class*="text-sky-200"],[class*="text-sky-300"],[class*="text-sky-400"]) { color: #0369a1 !important; }
 /* 枠線 */
 html[data-clinic-light] [data-dark-page] .border-white\/10 { border-color: #e2e8f0 !important; }
 html[data-clinic-light] [data-dark-page] .border-white\/20 { border-color: #cbd5e1 !important; }
@@ -373,9 +371,28 @@ html[data-clinic-light] [data-dark-page] .hover\:border-zinc-600:hover { border-
 html[data-clinic-light] [data-dark-page] .text-zinc-300 { color: #334155 !important; }
 html[data-clinic-light] [data-dark-page] .text-zinc-400,
 html[data-clinic-light] [data-dark-page] .text-zinc-500,
-html[data-clinic-light] [data-dark-page] .text-zinc-600 { color: #64748b !important; }
+html[data-clinic-light] [data-dark-page] .text-zinc-600 { color: #475569 !important; }
 /* 不透明度付きの濃紺面（固定タブバー等） */
 html[data-clinic-light] [data-dark-page] .bg-slate-900\/95,
 html[data-clinic-light] [data-dark-page] .bg-slate-900\/90,
 html[data-clinic-light] [data-dark-page] .bg-slate-900\/80 { background-color: #ffffff !important; }
+
+/* ============================================================
+   色付き/濃色サーフェス上の文字は「白」を維持する。
+   上の blanket `.text-white → #0f172a` は患者ページの濃紺背景向けだが、
+   青ボタン・各色バッジ・黒丸の×閉じるボタン等（色付きbg＋白文字）まで
+   黒くして埋もれさせてしまうため、ここで打ち消す（最後に置き source order で勝つ）。
+   対象は単色の濃い/CTA色のみ。淡色タイント(bg-*-500/15 等)や amber-400 の
+   dark文字バッジ(text-slate-900)は対象外なので影響しない。 */
+/* (1) サーフェス自身の色を白に（クラス無しの子テキスト/アイコンが継承）。 */
+html[data-clinic-light] [data-dark-page] :is(.bg-blue-500,.bg-blue-600,.bg-blue-700,.bg-sky-500,.bg-sky-600,.bg-indigo-500,.bg-indigo-600,.bg-violet-500,.bg-violet-600,.bg-purple-500,.bg-purple-600,.bg-rose-500,.bg-rose-600,.bg-red-500,.bg-red-600,.bg-emerald-500,.bg-emerald-600,.bg-green-500,.bg-green-600,.bg-teal-500,.bg-teal-600,.bg-cyan-600,.bg-amber-500,.bg-amber-600,.bg-orange-500) { color: #ffffff !important; }
+/* (2) 同要素に text-white を持つバッジ/ボタン（compound で詳細度 0,4,1 → blanket .text-white を上回る）。
+   (3) サーフェス配下の text-white* 子要素（カウント等の text-white/80 含む）。 */
+html[data-clinic-light] [data-dark-page] :is(.bg-blue-500,.bg-blue-600,.bg-blue-700,.bg-sky-500,.bg-sky-600,.bg-indigo-500,.bg-indigo-600,.bg-violet-500,.bg-violet-600,.bg-purple-500,.bg-purple-600,.bg-rose-500,.bg-rose-600,.bg-red-500,.bg-red-600,.bg-emerald-500,.bg-emerald-600,.bg-green-500,.bg-green-600,.bg-teal-500,.bg-teal-600,.bg-cyan-600,.bg-amber-500,.bg-amber-600,.bg-orange-500):is([class*="text-white"]),
+html[data-clinic-light] [data-dark-page] :is(.bg-blue-500,.bg-blue-600,.bg-blue-700,.bg-sky-500,.bg-sky-600,.bg-indigo-500,.bg-indigo-600,.bg-violet-500,.bg-violet-600,.bg-purple-500,.bg-purple-600,.bg-rose-500,.bg-rose-600,.bg-red-500,.bg-red-600,.bg-emerald-500,.bg-emerald-600,.bg-green-500,.bg-green-600,.bg-teal-500,.bg-teal-600,.bg-cyan-600,.bg-amber-500,.bg-amber-600,.bg-orange-500) :is([class*="text-white"]) { color: #ffffff !important; }
+/* 黒丸の×閉じるボタン（暗い円 bg-black/60-80 を持つ閉じるボタン）だけ×を白に。
+   モーダル背景の全画面 bg-black/70・/80（中に白パネルを含む）は対象外なので、
+   パネル内テキストが白抜けしない。透明な×（text-slate-400 等）も対象外。 */
+html[data-clinic-light] [data-dark-page] [aria-label="閉じる"]:is(.bg-black\/60,.bg-black\/70,.bg-black\/80),
+html[data-clinic-light] [data-dark-page] [aria-label="閉じる"]:is(.bg-black\/60,.bg-black\/70,.bg-black\/80) svg { color: #ffffff !important; }
 }
