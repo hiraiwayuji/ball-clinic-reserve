@@ -322,7 +322,8 @@ html[data-clinic-light] [data-dark-page] [class*="text-white"] { color: #0f172a 
 html[data-clinic-light] [data-dark-page] :is([class*="text-white/90"],[class*="text-white/80"]) { color: #1f2937 !important; }
 html[data-clinic-light] [data-dark-page] :is([class*="text-white/70"],[class*="text-white/60"],[class*="text-white/50"],[class*="text-white/40"],[class*="text-white/30"]) { color: #475569 !important; }
 /* slate / zinc 系 */
-html[data-clinic-light] [data-dark-page] :is([class*="text-slate-200"],[class*="text-slate-300"],[class*="text-zinc-300"]) { color: #334155 !important; }
+html[data-clinic-light] [data-dark-page] :is([class*="text-slate-100"],[class*="text-slate-200"],[class*="text-slate-300"]) { color: #334155 !important; }
+html[data-clinic-light] [data-dark-page] :is([class*="text-zinc-100"],[class*="text-zinc-200"],[class*="text-zinc-300"]) { color: #334155 !important; }
 html[data-clinic-light] [data-dark-page] :is([class*="text-slate-400"],[class*="text-slate-500"],[class*="text-zinc-400"],[class*="text-zinc-500"],[class*="text-zinc-600"]) { color: #475569 !important; }
 /* blue（淡い水色サブテキスト→グレー、アクセント青→濃い青） */
 html[data-clinic-light] [data-dark-page] .text-blue-50,
@@ -351,6 +352,23 @@ html[data-clinic-light] [data-dark-page] .border-white\/10 { border-color: #e2e8
 html[data-clinic-light] [data-dark-page] .border-white\/20 { border-color: #cbd5e1 !important; }
 /* アクセントの青はそのまま活かす（白背景で見やすい）。淡い青チップだけ調整。 */
 html[data-clinic-light] [data-dark-page] .bg-blue-600\/20 { background-color: #dbeafe !important; }
+/* 濃い色付き背景（時間枠グリッドの bg-emerald-950「◯空き」/ bg-rose-950「予約済」、
+   bg-blue-950・bg-amber-900/950 の帯やカード）→ 明るいタイントに。文字は上の文字色ルールで濃色化。
+   [class*=] で /opacity 付きも拾う。hover の濃色化も打ち消す。 */
+html[data-clinic-light] [data-dark-page] [class*="bg-emerald-950"],
+html[data-clinic-light] [data-dark-page] [class*="bg-emerald-900"] { background-color: #ecfdf5 !important; }
+html[data-clinic-light] [data-dark-page] [class*="hover:bg-emerald-900"]:hover,
+html[data-clinic-light] [data-dark-page] [class*="hover:bg-emerald-800"]:hover { background-color: #d1fae5 !important; }
+html[data-clinic-light] [data-dark-page] [class*="bg-rose-950"] { background-color: #ffe4e6 !important; }
+html[data-clinic-light] [data-dark-page] [class*="bg-blue-950"] { background-color: #eff6ff !important; }
+html[data-clinic-light] [data-dark-page] [class*="bg-amber-950"],
+html[data-clinic-light] [data-dark-page] [class*="bg-amber-900"] { background-color: #fef3c7 !important; }
+/* 濃い色付き枠線 → 明るい同系色に */
+html[data-clinic-light] [data-dark-page] [class*="border-emerald-700"],
+html[data-clinic-light] [data-dark-page] [class*="border-emerald-800"] { border-color: #6ee7b7 !important; }
+html[data-clinic-light] [data-dark-page] [class*="border-rose-900"] { border-color: #fda4af !important; }
+html[data-clinic-light] [data-dark-page] [class*="border-blue-800"] { border-color: #93c5fd !important; }
+html[data-clinic-light] [data-dark-page] [class*="border-amber-700"] { border-color: #fcd34d !important; }
 /* 入力欄（globals 既定の黒入力を白入力＋黒文字に戻す） */
 html[data-clinic-light] [data-dark-page] input,
 html[data-clinic-light] [data-dark-page] select,
