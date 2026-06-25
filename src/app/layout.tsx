@@ -37,6 +37,7 @@ export default function RootLayout({
       lang="ja"
       suppressHydrationWarning
       data-clinic-warm={CLINIC_CONFIG.reserveTheme === "warm" ? "" : undefined}
+      data-clinic-light={CLINIC_CONFIG.reserveTheme === "light" ? "" : undefined}
     >
       <head>
         <meta name="google" content="notranslate" />

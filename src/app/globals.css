@@ -182,6 +182,12 @@ html:has([data-dark-page]) {
 body:has([data-dark-page]) {
   background-color: #0f172a;
 }
+/* 白基調テーマ（light）はhtml/bodyも白に。↑のダーク既定はunlayeredなので、
+   ここも同じunlayeredで・より高詳細度に書いて確実に上書きする。 */
+html[data-clinic-light]:has([data-dark-page]),
+html[data-clinic-light] body:has([data-dark-page]) {
+  background-color: #ffffff;
+}
 
 /* ============================================================
    からだ等：HP寄りの「明るい暖色テーマ」
@@ -274,4 +280,102 @@ html[data-clinic-warm] [data-dark-page] .bg-slate-900\/95,
 html[data-clinic-warm] [data-dark-page] .bg-slate-900\/90,
 html[data-clinic-warm] [data-dark-page] .bg-slate-900\/80 { background-color: #fbf6ee !important; }
 /* CTA等のオレンジ（theme.ctaBg が bg-blue系でなく orange系のとき）はそのまま活かす */
+}
+
+/* ============================================================
+   白基調テーマ（ボール接骨院 等）
+   <html data-clinic-light> のときだけ、患者向け予約ページ([data-dark-page])の
+   濃紺ダークを「白背景＋黒文字」に上書きする。青アクセントは見やすいので維持。
+   markup は触らず、ここで Tailwind ユーティリティを再マッピングする。
+   warm と同様 @layer utilities 内で高詳細度・後勝ちで確実に勝たせる。
+   ============================================================ */
+@layer utilities {
+/* html/body の白背景は上の unlayered ブロックで定義済み（ダーク既定を上書きするため） */
+/* data-dark-page コンテナ自体の基本文字色。コンテナに付いた text-white / text-slate-200 や
+   inline style={{color:'white'}}（calendar 等）を上書きし、クラス無しテキストの白抜けを防ぐ。
+   配下の text-* クラスは個別ルール（高詳細度）が勝つので影響しない。 */
+html[data-clinic-light] [data-dark-page] { color: #1f2937 !important; }
+/* 背景面 */
+html[data-clinic-light] [data-dark-page].bg-slate-900,
+html[data-clinic-light] [data-dark-page] .bg-slate-900 { background-color: #ffffff !important; }
+html[data-clinic-light] [data-dark-page].bg-slate-950,
+html[data-clinic-light] [data-dark-page] .bg-slate-950 { background-color: #f1f5f9 !important; }
+html[data-clinic-light] [data-dark-page] .bg-slate-800 { background-color: #f1f5f9 !important; }
+html[data-clinic-light] [data-dark-page] .bg-white\/5 { background-color: #f8fafc !important; }
+html[data-clinic-light] [data-dark-page] .bg-white\/10 { background-color: #eef2f7 !important; }
+html[data-clinic-light] [data-dark-page] .hover\:bg-white\/10:hover { background-color: #e2e8f0 !important; }
+/* ヒーロー等のグラデーション（濃紺の背景/オーバーレイ）→ 明るいフラット面に。
+   患者ページのCTAは単色 bg-blue-600 なので、グラデを潰しても色ボタンは壊れない。 */
+html[data-clinic-light] [data-dark-page] .bg-gradient-to-b,
+html[data-clinic-light] [data-dark-page] .bg-gradient-to-br,
+html[data-clinic-light] [data-dark-page] .bg-gradient-to-r,
+html[data-clinic-light] [data-dark-page] .bg-gradient-to-l,
+html[data-clinic-light] [data-dark-page] .bg-gradient-to-t,
+html[data-clinic-light] [data-dark-page] .bg-gradient-to-tr,
+html[data-clinic-light] [data-dark-page] .bg-gradient-to-tl,
+html[data-clinic-light] [data-dark-page] .bg-gradient-to-bl { background-image: none !important; background-color: #f8fafc !important; }
+/* 文字色（白 → 黒系） */
+html[data-clinic-light] [data-dark-page] .text-white { color: #0f172a !important; }
+html[data-clinic-light] [data-dark-page] .text-slate-200,
+html[data-clinic-light] [data-dark-page] .text-slate-300 { color: #334155 !important; }
+html[data-clinic-light] [data-dark-page] .text-slate-400,
+html[data-clinic-light] [data-dark-page] .text-slate-500 { color: #64748b !important; }
+html[data-clinic-light] [data-dark-page] .text-blue-100,
+html[data-clinic-light] [data-dark-page] .text-blue-100\/80,
+html[data-clinic-light] [data-dark-page] .text-blue-100\/70,
+html[data-clinic-light] [data-dark-page] .text-blue-200,
+html[data-clinic-light] [data-dark-page] .text-blue-200\/80,
+html[data-clinic-light] [data-dark-page] .text-blue-200\/70 { color: #475569 !important; }
+html[data-clinic-light] [data-dark-page] .text-blue-300,
+html[data-clinic-light] [data-dark-page] .text-blue-400 { color: #2563eb !important; }
+/* 半透明の白文字（住所・補足など）も黒系のグレーに */
+html[data-clinic-light] [data-dark-page] .text-white\/90,
+html[data-clinic-light] [data-dark-page] .text-white\/80 { color: #1f2937 !important; }
+html[data-clinic-light] [data-dark-page] .text-white\/70 { color: #475569 !important; }
+html[data-clinic-light] [data-dark-page] .text-white\/60,
+html[data-clinic-light] [data-dark-page] .text-white\/50,
+html[data-clinic-light] [data-dark-page] .text-white\/40 { color: #64748b !important; }
+/* 色付きボックス内の淡色文字（暗背景用）→ 明るい背景で読める濃色に */
+html[data-clinic-light] [data-dark-page] .text-amber-100,
+html[data-clinic-light] [data-dark-page] .text-amber-100\/90,
+html[data-clinic-light] [data-dark-page] .text-amber-200,
+html[data-clinic-light] [data-dark-page] .text-amber-300 { color: #b45309 !important; }
+html[data-clinic-light] [data-dark-page] .text-emerald-100,
+html[data-clinic-light] [data-dark-page] .text-emerald-200,
+html[data-clinic-light] [data-dark-page] .text-emerald-300 { color: #047857 !important; }
+html[data-clinic-light] [data-dark-page] .text-rose-200,
+html[data-clinic-light] [data-dark-page] .text-rose-300 { color: #be123c !important; }
+html[data-clinic-light] [data-dark-page] .text-cyan-100,
+html[data-clinic-light] [data-dark-page] .text-cyan-200,
+html[data-clinic-light] [data-dark-page] .text-cyan-300 { color: #0e7490 !important; }
+/* 枠線 */
+html[data-clinic-light] [data-dark-page] .border-white\/10 { border-color: #e2e8f0 !important; }
+html[data-clinic-light] [data-dark-page] .border-white\/20 { border-color: #cbd5e1 !important; }
+/* アクセントの青はそのまま活かす（白背景で見やすい）。淡い青チップだけ調整。 */
+html[data-clinic-light] [data-dark-page] .bg-blue-600\/20 { background-color: #dbeafe !important; }
+/* 入力欄（globals 既定の黒入力を白入力＋黒文字に戻す） */
+html[data-clinic-light] [data-dark-page] input,
+html[data-clinic-light] [data-dark-page] select,
+html[data-clinic-light] [data-dark-page] option {
+  background-color: #ffffff !important;
+  color: #0f172a !important;
+  border-color: #cbd5e1 !important;
+}
+/* メニューLP（MenuLPClient）は zinc 系パレット。これも白基調化する。 */
+html[data-clinic-light] [data-dark-page] .bg-zinc-900 { background-color: #ffffff !important; }
+html[data-clinic-light] [data-dark-page] .bg-zinc-800,
+html[data-clinic-light] [data-dark-page] .bg-zinc-800\/40,
+html[data-clinic-light] [data-dark-page] .bg-zinc-800\/60 { background-color: #f1f5f9 !important; }
+html[data-clinic-light] [data-dark-page] .border-zinc-800,
+html[data-clinic-light] [data-dark-page] .border-zinc-700 { border-color: #e2e8f0 !important; }
+html[data-clinic-light] [data-dark-page] .hover\:border-zinc-700:hover,
+html[data-clinic-light] [data-dark-page] .hover\:border-zinc-600:hover { border-color: #cbd5e1 !important; }
+html[data-clinic-light] [data-dark-page] .text-zinc-300 { color: #334155 !important; }
+html[data-clinic-light] [data-dark-page] .text-zinc-400,
+html[data-clinic-light] [data-dark-page] .text-zinc-500,
+html[data-clinic-light] [data-dark-page] .text-zinc-600 { color: #64748b !important; }
+/* 不透明度付きの濃紺面（固定タブバー等） */
+html[data-clinic-light] [data-dark-page] .bg-slate-900\/95,
+html[data-clinic-light] [data-dark-page] .bg-slate-900\/90,
+html[data-clinic-light] [data-dark-page] .bg-slate-900\/80 { background-color: #ffffff !important; }
 }
