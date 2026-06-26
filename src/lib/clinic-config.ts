@@ -13,6 +13,11 @@ const BALL_CLINIC_ID = "00000000-0000-0000-0000-000000000001";
 const IS_BALL =
   (process.env.NEXT_PUBLIC_CLINIC_ID ?? BALL_CLINIC_ID) === BALL_CLINIC_ID;
 
+/** からだ鍼灸整骨院の clinic_id（予約サイトのテーマ判定用） */
+const KARADA_CLINIC_ID = "d3b55abc-46a6-4cbe-8198-21c0392d9a2e";
+/** からだだけ HP 寄りの暖色（warm）、それ以外は白基調（light）に統一するための判定 */
+const IS_KARADA = process.env.NEXT_PUBLIC_CLINIC_ID === KARADA_CLINIC_ID;
+
 /** ボール本体だけ ball を、それ以外は中立値を返すフォールバック */
 const ball = <T,>(ballValue: T, otherValue: T): T => (IS_BALL ? ballValue : otherValue);
 
@@ -39,6 +44,10 @@ export const CLINIC_CONFIG = {
   hoursClosed: process.env.NEXT_PUBLIC_CLINIC_HOURS_CLOSED ?? ball("※水・日・祝日は休診", ""),
   /** AI 秘書がオーナーを呼ぶ呼びかけ名（ボール接骨院: "ぼーるくん"、からだ: "藤川先生" 等） */
   ownerNickname: process.env.NEXT_PUBLIC_CLINIC_OWNER_NICKNAME ?? ball("ぼーるくん", "院長先生"),
-  /** 患者向け予約ページのテーマ。"warm" でHP寄りの明るい暖色（からだ等）、"light" で白背景＋黒文字。既定は従来の濃紺ダーク。 */
-  reserveTheme: process.env.NEXT_PUBLIC_RESERVE_THEME ?? "dark",
+  /**
+   * 患者向け予約ページのテーマ。"warm" でHP寄りの明るい暖色（からだ）、"light" で白背景＋黒文字。
+   * からだ鍼灸整骨院のみ warm、他院はすべて light（白基調）で統一。
+   * ※ 院ごとの旧 env(NEXT_PUBLIC_RESERVE_THEME=warm) が残っていても、ここで clinic_id 基準に上書きするため白基調になる。
+   */
+  reserveTheme: IS_KARADA ? "warm" : "light",
 } as const;
