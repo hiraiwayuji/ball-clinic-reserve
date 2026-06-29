@@ -190,6 +190,28 @@ export function AddAppointmentDialog({
     }
   }, [open, defaultCourseId, courses]);
 
+  // 患者が確定したら「前回同様の施術内容」を先に入れておく。
+  // ・受付→売上の元データ（過去予約の course/staff）を patientSearch が返す。
+  // ・まだ手入力していない欄だけ埋める（手で選んだ内容は上書きしない）。
+  // ・コース/担当マスタの読み込みが後追いでも反映されるよう、masters を依存に入れる。
+  useEffect(() => {
+    if (!open || !selectedPatient) return;
+    const p = selectedPatient;
+    if (p.lastCourseId && !courseId) {
+      // マスタ未ロード時は c が見つからない → courses ロード後に再実行される。
+      // 廃止済み（is_active=false）コースはプルダウンに無いのでセットしない。
+      const c = courses.find((c) => c.id === p.lastCourseId);
+      if (c && c.is_active) {
+        setCourseId(p.lastCourseId);
+        setDuration(String(c.duration_minutes));
+      }
+    }
+    if (p.lastStaffId && !staffId) {
+      setStaffId(p.lastStaffId);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, selectedPatient, courses, staffList]);
+
   // コース選択時に所要時間も連動して更新
   const handleCourseChange = (id: string) => {
     setCourseId(id);
@@ -615,6 +637,25 @@ export function AddAppointmentDialog({
                       前回来院: {selectedPatient.daysSinceLastVisit}日前
                     </span>
                   )}
+                </div>
+              )}
+
+              {/* 前回同様の施術内容を自動セット＋初診料の注意（再診のみ） */}
+              {selectedPatient && selectedPatient.totalVisits > 0 && (
+                <div className="bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2 mt-1 space-y-0.5">
+                  {selectedPatient.lastCourseName ? (
+                    <p className="text-xs text-emerald-800 font-semibold">
+                      前回と同じ施術内容をセットしました：{selectedPatient.lastCourseName}
+                      {selectedPatient.lastStaffName ? `（担当：${selectedPatient.lastStaffName}）` : ""}
+                    </p>
+                  ) : (
+                    <p className="text-xs text-emerald-800 font-semibold">
+                      再診としてセットしました
+                    </p>
+                  )}
+                  <p className="text-[11px] text-emerald-700 leading-snug">
+                    2回目以降のため初診料は付きません。内容が違う場合は下のメニュー・担当を変更してください。
+                  </p>
                 </div>
               )}
 

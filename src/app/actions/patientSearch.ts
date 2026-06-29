@@ -47,6 +47,12 @@ export type PatientSuggestion = {
   lastVisitDate: string | null; // "yyyy-MM-dd"
   daysSinceLastVisit: number | null;
   totalVisits: number;
+  // 前回（直近の過去来院）の施術内容。受付→売上の元データである過去予約から拾う。
+  // 予約追加時に「前回同様」をプリフィルするために使う。
+  lastCourseId: string | null;
+  lastCourseName: string | null;
+  lastStaffId: string | null;
+  lastStaffName: string | null;
 };
 
 export async function searchPatientsForBooking(query: string): Promise<PatientSuggestion[]> {
@@ -83,13 +89,13 @@ export async function searchPatientsForBooking(query: string): Promise<PatientSu
     customers.map(async (c: { id: string; name: string; phone: string; medical_record_number: string | null }) => {
       const { data: apts } = await supabase
         .from("appointments")
-        .select("start_time")
+        .select("start_time, course_id, course_name, staff_id, staff_name")
         .eq("customer_id", c.id)
         .eq("clinic_id", clinicId)
         .neq("status", "cancelled")
         .lt("start_time", new Date().toISOString())
         .order("start_time", { ascending: false })
-        .limit(1);
+        .limit(5);
 
       const { count } = await supabase
         .from("appointments")
@@ -107,6 +113,11 @@ export async function searchPatientsForBooking(query: string): Promise<PatientSu
         daysSinceLastVisit = Math.floor((Date.now() - d.getTime()) / (1000 * 60 * 60 * 24));
       }
 
+      // 「前回同様の施術内容」のプリフィル元。
+      // 直近の過去来院は「指定なし」で受付されていることもあるので、
+      // course_id が入っている一番新しい予約を採用する（直近5件から探す）。
+      const lastTreated = (apts ?? []).find((a) => a.course_id) ?? null;
+
       return {
         id: c.id,
         name: c.name,
@@ -115,6 +126,10 @@ export async function searchPatientsForBooking(query: string): Promise<PatientSu
         lastVisitDate,
         daysSinceLastVisit,
         totalVisits: count ?? 0,
+        lastCourseId: lastTreated?.course_id ?? null,
+        lastCourseName: lastTreated?.course_name ?? null,
+        lastStaffId: lastTreated?.staff_id ?? null,
+        lastStaffName: lastTreated?.staff_name ?? null,
       };
     })
   );
