@@ -27,6 +27,9 @@ export const metadata: Metadata = isFamilyGift
 
 import { ThemeProvider } from "@/components/ThemeProvider";
 
+// ホーム画面アイコンの表示名（iOS）。予約院では院名、家族配布では家族カレンダー。
+const APPLE_APP_TITLE = isFamilyGift ? "家族カレンダー" : `${CLINIC_CONFIG.nameShort} 予約`;
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -41,12 +44,12 @@ export default function RootLayout({
     >
       <head>
         <meta name="google" content="notranslate" />
-        <link rel="manifest" href="/manifest.json" />
+        {/* manifest は app/manifest.ts が /manifest.webmanifest として自動リンクする（モード別） */}
         <meta name="theme-color" content="#3b82f6" />
         {/* iOS PWA */}
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="default" />
-        <meta name="apple-mobile-web-app-title" content="V-ARC AI秘書" />
+        <meta name="apple-mobile-web-app-title" content={APPLE_APP_TITLE} />
         <link rel="apple-touch-icon" href="/images/logo_symbol_main_black.png" />
       </head>
       <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
