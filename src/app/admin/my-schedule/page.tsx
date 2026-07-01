@@ -278,6 +278,16 @@ export default function ShiftCoordinationPage() {
           <Wand2 className="w-5 h-5 text-violet-500" />
           <p className="font-bold text-violet-800 dark:text-violet-200">AIで出勤表を作る</p>
         </div>
+        {policy.includes("【AIからの提案】") && (
+          <div className="rounded-xl border-2 border-violet-300 dark:border-violet-700 bg-white dark:bg-slate-900 p-3.5">
+            <div className="flex items-center gap-1.5 mb-2">
+              <Sparkles className="w-4 h-4 text-violet-500" />
+              <span className="text-xs font-black text-violet-700 dark:text-violet-300">AIからの提案</span>
+              <span className="text-[10px] text-violet-500/70">（内容は下の「方針・軸」に保存されています）</span>
+            </div>
+            <p className="whitespace-pre-wrap text-[13px] leading-relaxed text-slate-700 dark:text-slate-200">{policy}</p>
+          </div>
+        )}
         <label className="block">
           <span className="text-xs font-bold text-violet-700 dark:text-violet-300">出勤表の方針・軸（AIに渡します）</span>
           <textarea
