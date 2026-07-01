@@ -221,6 +221,39 @@ export async function setShiftPolicy(policy: string): Promise<{ success: boolean
   return error ? { success: false, error: error.message } : { success: true };
 }
 
+/**
+ * AI出勤表の「確認用ドラフト」を月ごとに保存/取得する（Phase1）。
+ * ここに保存された案は "確認用" であり、予約には自動反映しない。
+ * 予約反映は confirmShiftLeaves（別操作）のまま。
+ */
+export type ShiftDraft = { md: string; status: string; updatedAt: string | null; updatedBy: string | null };
+
+export async function getShiftDraft(month: string): Promise<ShiftDraft | null> {
+  const { clinicId } = await checkAdminAuth();
+  if (!/^\d{4}-\d{2}$/.test(month)) return null;
+  const { createClient } = await import("@/lib/supabase/server");
+  const supabase = await createClient();
+  const { data } = await supabase.from("clinic_settings").select("shift_drafts").eq("id", clinicId).maybeSingle();
+  const drafts = (data?.shift_drafts as Record<string, { md?: string; status?: string; updated_at?: string; updated_by?: string }> | null) ?? {};
+  const d = drafts[month];
+  if (!d || typeof d.md !== "string") return null;
+  return { md: d.md, status: d.status ?? "draft", updatedAt: d.updated_at ?? null, updatedBy: d.updated_by ?? null };
+}
+
+export async function saveShiftDraft(month: string, md: string): Promise<{ success: boolean; error?: string }> {
+  const { clinicId, email } = await checkAdminAuth();
+  if (!/^\d{4}-\d{2}$/.test(month)) return { success: false, error: "月の指定が不正です" };
+  const { createClient } = await import("@/lib/supabase/server");
+  const supabase = await createClient();
+  // 既存の月別マップを読んで対象月だけ差し替える（他の月を消さない）
+  const { data, error: readErr } = await supabase.from("clinic_settings").select("shift_drafts").eq("id", clinicId).maybeSingle();
+  if (readErr) return { success: false, error: readErr.message };
+  const drafts: Record<string, unknown> = { ...((data?.shift_drafts as Record<string, unknown> | null) ?? {}) };
+  drafts[month] = { md, status: "draft", updated_at: new Date().toISOString(), updated_by: email ?? null };
+  const { error } = await supabase.from("clinic_settings").update({ shift_drafts: drafts }).eq("id", clinicId);
+  return error ? { success: false, error: error.message } : { success: true };
+}
+
 /** 出勤希望＋軸からAIで出勤表案（マークダウン）を生成。extraInstruction で相談・再調整。 */
 export type ShiftChatMessage = {
   role: "user" | "assistant";

@@ -14,8 +14,8 @@ import {
 import {
   listShiftCoordination, getShiftAutoEnabled, setShiftAutoEnabled,
   getShiftPolicy, setShiftPolicy, generateShiftFromRequests, confirmShiftLeaves,
-  requestShiftDevAssist,
-  type ShiftSubmission, type ShiftStaff, type ShiftChatMessage,
+  requestShiftDevAssist, getShiftDraft, saveShiftDraft,
+  type ShiftSubmission, type ShiftStaff, type ShiftChatMessage, type ShiftDraft,
 } from "@/app/actions/staff-shift-requests";
 import {
   listActiveStaff, createOverride, deleteOverride,
@@ -83,6 +83,11 @@ export default function ShiftCoordinationPage() {
   const [confirming, setConfirming] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
+  // Phase1: 確認用ドラフト（月ごとに保存・予約には自動反映しない）
+  const [savedDraft, setSavedDraft] = useState<ShiftDraft | null>(null);
+  const [draftText, setDraftText] = useState("");
+  const [draftSaving, setDraftSaving] = useState(false);
+
   useEffect(() => { getShiftPolicy().then(setPolicy).catch(() => {}); }, []);
 
   const savePolicy = async () => {
@@ -115,8 +120,26 @@ export default function ShiftCoordinationPage() {
       setChatMessages((prev) => [...(userMessage ? prev : newHistory), aiMsg]);
       setChatInput("");
       setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior: "smooth" }), 100);
+      // 生成した案は「確認用」として自動保存（予約には反映しない）
+      const md = r.draftMarkdown;
+      setDraftText(md);
+      setSavedDraft({ md, status: "draft", updatedAt: new Date().toISOString(), updatedBy: null });
+      saveShiftDraft(monthStr, md).catch(() => {});
     } else {
       toast.error(r.error ?? "生成失敗");
+    }
+  };
+
+  // 確認用ドラフトの手動保存（先生が案を微調整したときに残す）
+  const saveDraft = async () => {
+    setDraftSaving(true);
+    const r = await saveShiftDraft(monthStr, draftText);
+    setDraftSaving(false);
+    if (r.success) {
+      setSavedDraft({ md: draftText, status: "draft", updatedAt: new Date().toISOString(), updatedBy: null });
+      toast.success("案を保存しました（確認用・予約には反映されません）");
+    } else {
+      toast.error(r.error ?? "保存に失敗しました");
     }
   };
 
@@ -151,6 +174,14 @@ export default function ShiftCoordinationPage() {
     () => (month ? `${month.getFullYear()}-${String(month.getMonth() + 1).padStart(2, "0")}` : ""),
     [month],
   );
+
+  // 選択中の月の「確認用ドラフト」を読み込む
+  useEffect(() => {
+    if (!monthStr) { setSavedDraft(null); setDraftText(""); return; }
+    getShiftDraft(monthStr)
+      .then((d) => { setSavedDraft(d); setDraftText(d?.md ?? ""); })
+      .catch(() => { setSavedDraft(null); setDraftText(""); });
+  }, [monthStr]);
 
   useEffect(() => {
     if (!monthStr) return;
@@ -308,6 +339,32 @@ export default function ShiftCoordinationPage() {
         </div>
         <p className="text-[11px] text-violet-600/80 dark:text-violet-300/70">提出済みの出勤希望と上の方針から、{month && format(month, "M月", { locale: ja })}の出勤表案をAIが作ります。確定すると出勤時間・休み希望が予約枠に反映されます。</p>
       </div>
+
+      {/* Phase1: 確認用ドラフト（保存されて残る。予約には自動反映しない） */}
+      {savedDraft && (
+        <div className="rounded-2xl border-2 border-amber-300 dark:border-amber-700 bg-amber-50/60 dark:bg-amber-950/20 p-4 space-y-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            <CalendarClock className="w-5 h-5 text-amber-500" />
+            <p className="font-black text-amber-800 dark:text-amber-200">確認中の案（{month && format(month, "M月", { locale: ja })}）</p>
+            <span className="text-[10px] font-bold text-amber-700 dark:text-amber-300 bg-amber-100 dark:bg-amber-900/40 px-2 py-0.5 rounded-full">確認用・予約には自動反映しません</span>
+            {savedDraft.updatedAt && (
+              <span className="text-[11px] text-amber-600/80">保存: {format(new Date(savedDraft.updatedAt), "M/d HH:mm", { locale: ja })}</span>
+            )}
+          </div>
+          <textarea
+            value={draftText}
+            onChange={(e) => setDraftText(e.target.value)}
+            rows={10}
+            className="w-full rounded-xl border border-amber-200 dark:border-amber-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm leading-relaxed"
+          />
+          <div className="flex items-center gap-2 flex-wrap">
+            <button onClick={saveDraft} disabled={draftSaving} className="inline-flex items-center gap-1.5 h-10 px-4 rounded-xl border border-amber-300 text-amber-700 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900/40 text-sm font-bold disabled:opacity-50">
+              <Save className="w-4 h-4" />{draftSaving ? "保存中..." : "この案を保存（確認用）"}
+            </button>
+            <span className="text-[11px] text-slate-500">細かい調整を書き込んで保存できます。予約への反映は下の「確定」ボタンで別途行います。</span>
+          </div>
+        </div>
+      )}
 
       {/* はなまる直接入力バー */}
       <div className={`rounded-2xl border p-4 transition-colors ${hanamaruMode ? "bg-rose-50 dark:bg-rose-950/20 border-rose-300 dark:border-rose-700" : "bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700"}`}>
