@@ -254,6 +254,34 @@ export async function saveShiftDraft(month: string, md: string): Promise<{ succe
   return error ? { success: false, error: error.message } : { success: true };
 }
 
+/**
+ * 院ごとの「調整ノート」（学習用）。院長が案をどう直したか＋理由を追記蓄積し、
+ * 翌月のAI生成プロンプトに渡して院の好みを学習させる。
+ */
+export async function getShiftAdjustNotes(): Promise<string> {
+  const { clinicId } = await checkAdminAuth();
+  const { createClient } = await import("@/lib/supabase/server");
+  const supabase = await createClient();
+  const { data } = await supabase.from("clinic_settings").select("shift_adjust_notes").eq("id", clinicId).maybeSingle();
+  return (data?.shift_adjust_notes as string | null) ?? "";
+}
+
+export async function appendShiftAdjustNote(month: string, note: string): Promise<{ success: boolean; error?: string }> {
+  const { clinicId } = await checkAdminAuth();
+  const trimmed = note?.trim();
+  if (!trimmed) return { success: false, error: "調整メモが空です" };
+  const { createClient } = await import("@/lib/supabase/server");
+  const supabase = await createClient();
+  const { data } = await supabase.from("clinic_settings").select("shift_adjust_notes").eq("id", clinicId).maybeSingle();
+  const prev = (data?.shift_adjust_notes as string | null) ?? "";
+  const stamp = new Date().toISOString().slice(0, 10);
+  const entry = `【${month}・${stamp}記入】${trimmed}`;
+  // 新しい調整を先頭に追記。肥大化防止に直近 ~4000 文字だけ保持。
+  const next = (entry + "\n" + prev).slice(0, 4000);
+  const { error } = await supabase.from("clinic_settings").update({ shift_adjust_notes: next }).eq("id", clinicId);
+  return error ? { success: false, error: error.message } : { success: true };
+}
+
 /** 出勤希望＋軸からAIで出勤表案（マークダウン）を生成。extraInstruction で相談・再調整。 */
 export type ShiftChatMessage = {
   role: "user" | "assistant";
@@ -319,7 +347,7 @@ export async function generateShiftFromRequests(
   const [{ data: staffRows }, { data: reqRows }, { data: settings }] = await Promise.all([
     supabase.from("reservation_staff").select("id, name, role").eq("clinic_id", clinicId).eq("is_active", true).order("sort_order"),
     supabase.from("staff_shift_requests").select("staff_id, days, note, submitted_at").eq("clinic_id", clinicId).eq("month", month),
-    supabase.from("clinic_settings").select("clinic_name, business_open_weekday, business_close_weekday, business_open_saturday, business_close_saturday, closed_weekdays, shift_policy").eq("id", clinicId).maybeSingle(),
+    supabase.from("clinic_settings").select("clinic_name, business_open_weekday, business_close_weekday, business_open_saturday, business_close_saturday, closed_weekdays, shift_policy, shift_adjust_notes").eq("id", clinicId).maybeSingle(),
   ]);
   const staff = (staffRows ?? []) as { id: string; name: string; role: string | null }[];
   const nameOf = new Map(staff.map((s) => [s.id, s.name]));
@@ -340,6 +368,7 @@ export async function generateShiftFromRequests(
   }
 
   const policy = (settings?.shift_policy as string | null)?.trim();
+  const adjustNotes = (settings?.shift_adjust_notes as string | null)?.trim();
   const clinicName = (settings?.clinic_name as string) || "当院";
   const prompt = `あなたは接骨院のシフト作成が得意な経営支援AIです。${y}年${m}月のスタッフ出勤表の案を作ってください。
 
@@ -349,7 +378,7 @@ export async function generateShiftFromRequests(
 
 【オーナーの方針・軸】
 ${policy || "（特に指定なし。各日の人員バランスを優先）"}
-
+${adjustNotes ? `\n【過去に院長が案を調整した点・理由（＝院の好み。今回はこれを踏まえて提案する）】\n${adjustNotes}\n` : ""}
 【スタッフの出勤希望（${m}月）】
 ${lines.join("\n")}
 ${extraInstruction ? `\n【追加の相談・指示】\n${extraInstruction}` : ""}

@@ -15,6 +15,7 @@ import {
   listShiftCoordination, getShiftAutoEnabled, setShiftAutoEnabled,
   getShiftPolicy, setShiftPolicy, generateShiftFromRequests, confirmShiftLeaves,
   requestShiftDevAssist, getShiftDraft, saveShiftDraft,
+  getShiftAdjustNotes, appendShiftAdjustNote,
   type ShiftSubmission, type ShiftStaff, type ShiftChatMessage, type ShiftDraft,
 } from "@/app/actions/staff-shift-requests";
 import {
@@ -88,7 +89,12 @@ export default function ShiftCoordinationPage() {
   const [draftText, setDraftText] = useState("");
   const [draftSaving, setDraftSaving] = useState(false);
 
+  // Phase2: 調整メモ（なぜ直したか）→ 院ごとの調整ノートに蓄積しAIが翌月に学習
+  const [adjustReason, setAdjustReason] = useState("");
+  const [adjustNotes, setAdjustNotes] = useState("");
+
   useEffect(() => { getShiftPolicy().then(setPolicy).catch(() => {}); }, []);
+  useEffect(() => { getShiftAdjustNotes().then(setAdjustNotes).catch(() => {}); }, []);
 
   const savePolicy = async () => {
     setPolicySaving(true);
@@ -130,14 +136,24 @@ export default function ShiftCoordinationPage() {
     }
   };
 
-  // 確認用ドラフトの手動保存（先生が案を微調整したときに残す）
+  // 確認用ドラフトの手動保存（先生が案を微調整したときに残す）。
+  // 「調整メモ（なぜ変えたか）」があれば院ごとの調整ノートに追記し、AIが翌月に学習する。
   const saveDraft = async () => {
     setDraftSaving(true);
     const r = await saveShiftDraft(monthStr, draftText);
+    if (r.success && adjustReason.trim()) {
+      const nr = await appendShiftAdjustNote(monthStr, adjustReason.trim());
+      if (nr.success) {
+        setAdjustReason("");
+        getShiftAdjustNotes().then(setAdjustNotes).catch(() => {});
+      }
+    }
     setDraftSaving(false);
     if (r.success) {
       setSavedDraft({ md: draftText, status: "draft", updatedAt: new Date().toISOString(), updatedBy: null });
-      toast.success("案を保存しました（確認用・予約には反映されません）");
+      toast.success(adjustReason.trim()
+        ? "案と調整メモを保存しました（メモはAIが翌月の参考にします）"
+        : "案を保存しました（確認用・予約には反映されません）");
     } else {
       toast.error(r.error ?? "保存に失敗しました");
     }
@@ -357,12 +373,27 @@ export default function ShiftCoordinationPage() {
             rows={10}
             className="w-full rounded-xl border border-amber-200 dark:border-amber-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm leading-relaxed"
           />
+          <label className="block">
+            <span className="text-[11px] font-bold text-amber-700 dark:text-amber-300">調整メモ（なぜ変えたか）— AIが翌月の参考にします（任意）</span>
+            <input
+              value={adjustReason}
+              onChange={(e) => setAdjustReason(e.target.value)}
+              placeholder="例：7/20は受付が薄いので金田さんを午後に入れた"
+              className="mt-1 w-full h-10 rounded-xl border border-amber-200 dark:border-amber-700 bg-white dark:bg-slate-900 px-3 text-sm"
+            />
+          </label>
           <div className="flex items-center gap-2 flex-wrap">
             <button onClick={saveDraft} disabled={draftSaving} className="inline-flex items-center gap-1.5 h-10 px-4 rounded-xl border border-amber-300 text-amber-700 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900/40 text-sm font-bold disabled:opacity-50">
               <Save className="w-4 h-4" />{draftSaving ? "保存中..." : "この案を保存（確認用）"}
             </button>
             <span className="text-[11px] text-slate-500">細かい調整を書き込んで保存できます。予約への反映は下の「確定」ボタンで別途行います。</span>
           </div>
+          {adjustNotes && (
+            <details className="mt-1">
+              <summary className="text-[11px] text-amber-700 dark:text-amber-300 cursor-pointer">これまでの調整メモ（AIが学習に使います）</summary>
+              <pre className="mt-1 whitespace-pre-wrap font-sans text-[11px] text-slate-600 dark:text-slate-300 bg-white/60 dark:bg-slate-900/60 rounded-lg p-2 max-h-40 overflow-auto">{adjustNotes}</pre>
+            </details>
+          )}
         </div>
       )}
 
