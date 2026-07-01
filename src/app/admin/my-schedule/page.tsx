@@ -93,6 +93,9 @@ export default function ShiftCoordinationPage() {
   const [adjustReason, setAdjustReason] = useState("");
   const [adjustNotes, setAdjustNotes] = useState("");
 
+  // 予約反映ガード：AI作成・案の調整では予約に触れず、最終調整後にこのチェックを入れて初めて確定できる
+  const [reflectConfirmed, setReflectConfirmed] = useState(false);
+
   useEffect(() => { getShiftPolicy().then(setPolicy).catch(() => {}); }, []);
   useEffect(() => { getShiftAdjustNotes().then(setAdjustNotes).catch(() => {}); }, []);
 
@@ -131,6 +134,8 @@ export default function ShiftCoordinationPage() {
       setDraftText(md);
       setSavedDraft({ md, status: "draft", updatedAt: new Date().toISOString(), updatedBy: null });
       saveShiftDraft(monthStr, md).catch(() => {});
+      // 案が新しくなったら、予約反映ガードは入れ直してもらう
+      setReflectConfirmed(false);
     } else {
       toast.error(r.error ?? "生成失敗");
     }
@@ -178,11 +183,11 @@ export default function ShiftCoordinationPage() {
   };
 
   const confirmLeaves = async () => {
-    if (!confirm(`${month && format(month, "yyyy年M月", { locale: ja })}の出勤調整を確定します。休み希望は予約ブロック、出勤時間は予約可能枠に反映します。よろしいですか？`)) return;
+    if (!confirm(`【最終調整は終わりましたか？】\n${month && format(month, "yyyy年M月", { locale: ja })}の出勤調整を"予約に反映"します。\n・休み希望の日 → 予約ブロック\n・出勤時間 → 予約可能枠\nAIで案を作っただけ・調整中の間は反映されません。反映してよろしいですか？`)) return;
     setConfirming(true);
     const r = await confirmShiftLeaves(monthStr);
     setConfirming(false);
-    if (r.success) toast.success(`確定しました（休み ${r.written ?? 0}件を予約に反映）`);
+    if (r.success) { toast.success(`確定しました（休み ${r.written ?? 0}件を予約に反映）`); setReflectConfirmed(false); }
     else toast.error(r.error ?? "確定に失敗しました");
   };
 
@@ -643,9 +648,18 @@ export default function ShiftCoordinationPage() {
                 送信
               </button>
             </div>
+            <label className="flex items-start gap-2 px-1 py-1 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={reflectConfirmed}
+                onChange={(e) => setReflectConfirmed(e.target.checked)}
+                className="mt-0.5 w-4 h-4 accent-emerald-600 shrink-0"
+              />
+              <span className="text-[12px] text-slate-600 dark:text-slate-300 font-bold">最終調整は終わりました。この内容を<span className="text-emerald-700 dark:text-emerald-400">予約に反映</span>してよい</span>
+            </label>
             <button
               onClick={confirmLeaves}
-              disabled={confirming || !latestDraft}
+              disabled={confirming || !latestDraft || !reflectConfirmed}
               className="w-full h-12 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black disabled:opacity-50"
             >
               {confirming ? "反映中..." : "この内容で確定（出勤時間・休み希望を予約に反映）"}
@@ -657,7 +671,7 @@ export default function ShiftCoordinationPage() {
             >
               {escalating ? "送信中..." : "🛠 うまくいかない…ぼーるくんに調整を依頼する"}
             </button>
-            <p className="text-[11px] text-slate-400 text-center">確定すると、休み希望の日が予約ブロックされ、出勤時間が予約可能枠として反映されます。AIで難しければ「ぼーるくんに依頼」で調整作業を回せます。</p>
+            <p className="text-[11px] text-slate-400 text-center"><span className="font-bold text-slate-500 dark:text-slate-300">AIで案を作った時点では予約に反映されません。</span>上のチェックを入れて「確定」を押したときだけ、休み希望が予約ブロック・出勤時間が予約枠に反映されます。</p>
           </div>
         </DialogContent>
       </Dialog>
