@@ -433,12 +433,15 @@ function CourseDetailModal({
         className="relative w-full sm:max-w-lg max-h-[92vh] sm:max-h-[88vh] bg-slate-900 sm:rounded-3xl rounded-t-3xl border-t sm:border border-zinc-700 shadow-2xl overflow-hidden flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* 閉じるボタン */}
+        {/* 閉じるボタン。写真の上に載る黒丸＋白アイコン。
+            warm/light テーマの text-white 再マッピングで×が濃色化して
+            「黒丸に黒文字」になるのを防ぐため、アイコン色は変換対象外の
+            arbitrary 値で固定する。 */}
         <button
           type="button"
           onClick={onClose}
           aria-label="閉じる"
-          className="absolute top-3 right-3 z-10 w-10 h-10 flex items-center justify-center rounded-full bg-black/60 hover:bg-black/80 backdrop-blur text-white transition"
+          className="absolute top-3 right-3 z-10 w-10 h-10 flex items-center justify-center rounded-full bg-black/60 hover:bg-black/80 backdrop-blur text-[#ffffff] ring-1 ring-white/30 shadow-md transition"
         >
           <X className="w-5 h-5" />
         </button>

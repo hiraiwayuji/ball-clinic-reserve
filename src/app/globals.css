@@ -243,6 +243,11 @@ html[data-clinic-warm] [data-dark-page] .text-rose-300 { color: #b4474f !importa
 html[data-clinic-warm] [data-dark-page] .text-cyan-100,
 html[data-clinic-warm] [data-dark-page] .text-cyan-200,
 html[data-clinic-warm] [data-dark-page] .text-cyan-300 { color: #0e7490 !important; }
+/* orange（出勤日限定バナー等の淡いオレンジ文字）→ クリーム地で読める濃いオレンジに。
+   light テーマには同等ルールがあるが warm に欠けており「オレンジ地にオレンジ文字」に
+   なっていた。/opacity 付き（text-orange-300/80 等）も拾うため [class*=] で指定。 */
+html[data-clinic-warm] [data-dark-page] .text-orange-50,
+html[data-clinic-warm] [data-dark-page] :is([class*="text-orange-100"],[class*="text-orange-200"],[class*="text-orange-300"],[class*="text-orange-400"],[class*="text-orange-500"],[class*="text-orange-600"]) { color: #9a3412 !important; }
 /* 枠線 */
 html[data-clinic-warm] [data-dark-page] .border-white\/10 { border-color: #ece0cd !important; }
 html[data-clinic-warm] [data-dark-page] .border-white\/20 { border-color: #e3d4ba !important; }
