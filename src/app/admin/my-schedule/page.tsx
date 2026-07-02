@@ -88,6 +88,7 @@ export default function ShiftCoordinationPage() {
   const [savedDraft, setSavedDraft] = useState<ShiftDraft | null>(null);
   const [draftText, setDraftText] = useState("");
   const [draftSaving, setDraftSaving] = useState(false);
+  const [gridDay, setGridDay] = useState<string | null>(null); // 日別グリッドで表示中の日付
 
   // Phase2: 調整メモ（なぜ直したか）→ 院ごとの調整ノートに蓄積しAIが翌月に学習
   const [adjustReason, setAdjustReason] = useState("");
@@ -171,6 +172,18 @@ export default function ShiftCoordinationPage() {
 
   const latestDraft = chatMessages.filter((m) => m.role === "assistant").at(-1)?.content ?? null;
 
+  // 日別グリッド表示（確認用）
+  const gridDates = savedDraft?.grid ? Object.keys(savedDraft.grid).sort() : [];
+  const gridIdx = gridDay ? gridDates.indexOf(gridDay) : -1;
+  const curGrid = (gridDay && savedDraft?.grid) ? savedDraft.grid[gridDay] : null;
+  const gridSlots = savedDraft?.slots ?? [];
+  const catCls = (c: string) =>
+    c === "recep" ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200"
+    : c === "ther" ? "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200"
+    : c === "gap" ? "bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-200"
+    : c === "hana" ? "bg-violet-100 text-violet-800 dark:bg-violet-900/40 dark:text-violet-200"
+    : "text-slate-300 dark:text-slate-600";
+
   const [escalating, setEscalating] = useState(false);
   const escalateToBoru = async () => {
     const note = window.prompt("ぼーるくんに伝えたいこと（どんな出勤表にしたいか・AIで難しかった点など）を書いてください：", "");
@@ -198,10 +211,14 @@ export default function ShiftCoordinationPage() {
 
   // 選択中の月の「確認用ドラフト」を読み込む
   useEffect(() => {
-    if (!monthStr) { setSavedDraft(null); setDraftText(""); return; }
+    if (!monthStr) { setSavedDraft(null); setDraftText(""); setGridDay(null); return; }
     getShiftDraft(monthStr)
-      .then((d) => { setSavedDraft(d); setDraftText(d?.md ?? ""); })
-      .catch(() => { setSavedDraft(null); setDraftText(""); });
+      .then((d) => {
+        setSavedDraft(d); setDraftText(d?.md ?? "");
+        const dates = d?.grid ? Object.keys(d.grid).sort() : [];
+        setGridDay(dates[0] ?? null);
+      })
+      .catch(() => { setSavedDraft(null); setDraftText(""); setGridDay(null); });
   }, [monthStr]);
 
   useEffect(() => {
@@ -372,10 +389,71 @@ export default function ShiftCoordinationPage() {
               <span className="text-[11px] text-amber-600/80">保存: {format(new Date(savedDraft.updatedAt), "M/d HH:mm", { locale: ja })}</span>
             )}
           </div>
+
+          {/* 日別グリッド（1日ずつ確認：予約カレンダーと同じ時間軸の見た目） */}
+          {curGrid && (
+            <div className="rounded-xl border border-amber-200 dark:border-amber-800 bg-white dark:bg-slate-900 p-2.5">
+              <div className="flex items-center justify-between gap-2 mb-2">
+                <button
+                  type="button"
+                  onClick={() => setGridDay(gridDates[Math.max(0, gridIdx - 1)] ?? gridDay)}
+                  disabled={gridIdx <= 0}
+                  className="inline-flex items-center gap-1 h-8 px-2.5 rounded-lg border border-slate-300 dark:border-slate-600 text-xs font-bold disabled:opacity-40"
+                >
+                  <ChevronLeft className="w-4 h-4" />前の日
+                </button>
+                <span className="text-sm font-black text-slate-700 dark:text-slate-200">
+                  {gridDay ? `${Number(gridDay.slice(5, 7))}/${Number(gridDay.slice(8, 10))}` : ""}（{curGrid.dow}）
+                  <span className="ml-1 text-[11px] font-normal text-slate-400">{gridIdx + 1}/{gridDates.length}日</span>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setGridDay(gridDates[Math.min(gridDates.length - 1, gridIdx + 1)] ?? gridDay)}
+                  disabled={gridIdx >= gridDates.length - 1}
+                  className="inline-flex items-center gap-1 h-8 px-2.5 rounded-lg border border-slate-300 dark:border-slate-600 text-xs font-bold disabled:opacity-40"
+                >
+                  次の日<ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="border-collapse text-[10px]" style={{ tableLayout: "fixed" }}>
+                  <thead>
+                    <tr>
+                      <th className="sticky left-0 z-10 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 px-1 py-1 w-14 text-slate-500">時間</th>
+                      {gridSlots.map((s, i) => (
+                        <th key={i} className="border border-slate-200 dark:border-slate-700 px-0.5 py-1 font-normal text-slate-500" style={{ minWidth: 26 }}>{s}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td className="sticky left-0 z-10 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 px-1 py-1 font-bold text-slate-600 dark:text-slate-300">受付</td>
+                      {curGrid.recep.map((c, i) => (
+                        <td key={i} className={`border border-slate-200 dark:border-slate-700 px-0.5 py-1 text-center ${catCls(c.c)}`}>{c.n}</td>
+                      ))}
+                    </tr>
+                    <tr>
+                      <td className="sticky left-0 z-10 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 px-1 py-1 font-bold text-violet-600 dark:text-violet-300">はなまる</td>
+                      {curGrid.hana.map((c, i) => (
+                        <td key={i} className={`border border-slate-200 dark:border-slate-700 px-0.5 py-1 text-center ${catCls(c.c)}`}>{c.n || "—"}</td>
+                      ))}
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <div className="flex flex-wrap gap-x-3 gap-y-1 mt-2 text-[10px] text-slate-500">
+                <span><span className="inline-block w-3 h-3 rounded-sm align-middle bg-emerald-100 dark:bg-emerald-900/40 mr-1" />受付職</span>
+                <span><span className="inline-block w-3 h-3 rounded-sm align-middle bg-amber-100 dark:bg-amber-900/40 mr-1" />施術者補填</span>
+                <span><span className="inline-block w-3 h-3 rounded-sm align-middle bg-rose-100 dark:bg-rose-900/40 mr-1" />空き・要調整</span>
+                <span><span className="inline-block w-3 h-3 rounded-sm align-middle bg-violet-100 dark:bg-violet-900/40 mr-1" />はなまる</span>
+              </div>
+            </div>
+          )}
+
           <textarea
             value={draftText}
             onChange={(e) => setDraftText(e.target.value)}
-            rows={10}
+            rows={8}
             className="w-full rounded-xl border border-amber-200 dark:border-amber-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm leading-relaxed"
           />
           <label className="block">

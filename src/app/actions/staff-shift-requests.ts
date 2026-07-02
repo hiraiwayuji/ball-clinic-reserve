@@ -226,7 +226,12 @@ export async function setShiftPolicy(policy: string): Promise<{ success: boolean
  * ここに保存された案は "確認用" であり、予約には自動反映しない。
  * 予約反映は confirmShiftLeaves（別操作）のまま。
  */
-export type ShiftDraft = { md: string; status: string; updatedAt: string | null; updatedBy: string | null };
+export type ShiftGridCell = { n: string; c: string };
+export type ShiftGridDay = { dow: string; recep: ShiftGridCell[]; hana: ShiftGridCell[] };
+export type ShiftDraft = {
+  md: string; status: string; updatedAt: string | null; updatedBy: string | null;
+  grid?: Record<string, ShiftGridDay>; slots?: string[];
+};
 
 export async function getShiftDraft(month: string): Promise<ShiftDraft | null> {
   const { clinicId } = await checkAdminAuth();
@@ -234,10 +239,16 @@ export async function getShiftDraft(month: string): Promise<ShiftDraft | null> {
   const { createClient } = await import("@/lib/supabase/server");
   const supabase = await createClient();
   const { data } = await supabase.from("clinic_settings").select("shift_drafts").eq("id", clinicId).maybeSingle();
-  const drafts = (data?.shift_drafts as Record<string, { md?: string; status?: string; updated_at?: string; updated_by?: string }> | null) ?? {};
+  const drafts = (data?.shift_drafts as Record<string, {
+    md?: string; status?: string; updated_at?: string; updated_by?: string;
+    grid?: Record<string, ShiftGridDay>; slots?: string[];
+  }> | null) ?? {};
   const d = drafts[month];
   if (!d || typeof d.md !== "string") return null;
-  return { md: d.md, status: d.status ?? "draft", updatedAt: d.updated_at ?? null, updatedBy: d.updated_by ?? null };
+  return {
+    md: d.md, status: d.status ?? "draft", updatedAt: d.updated_at ?? null, updatedBy: d.updated_by ?? null,
+    grid: d.grid, slots: d.slots,
+  };
 }
 
 export async function saveShiftDraft(month: string, md: string): Promise<{ success: boolean; error?: string }> {
