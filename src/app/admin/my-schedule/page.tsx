@@ -14,9 +14,9 @@ import {
 import {
   listShiftCoordination, getShiftAutoEnabled, setShiftAutoEnabled,
   getShiftPolicy, setShiftPolicy, generateShiftFromRequests, confirmShiftLeaves,
-  requestShiftDevAssist, getShiftDraft, saveShiftDraft,
+  requestShiftDevAssist, getShiftDraft, saveShiftDraft, saveShiftDraftGrid, listShiftStaff,
   getShiftAdjustNotes, appendShiftAdjustNote,
-  type ShiftSubmission, type ShiftStaff, type ShiftChatMessage, type ShiftDraft,
+  type ShiftSubmission, type ShiftStaff, type ShiftChatMessage, type ShiftDraft, type ShiftGridDay,
 } from "@/app/actions/staff-shift-requests";
 import {
   listActiveStaff, createOverride, deleteOverride,
@@ -90,6 +90,20 @@ export default function ShiftCoordinationPage() {
   const [draftSaving, setDraftSaving] = useState(false);
   const [gridDay, setGridDay] = useState<string | null>(null); // 日別グリッドで表示中の日付
   const [draftView, setDraftView] = useState<"day" | "month">("day"); // 日別 / 月表（色バー）
+
+  // 月表の直接編集（Excelでセルを塗る感覚）：パレットで人を選び、セルをクリック/ドラッグで塗る
+  const [editGrid, setEditGrid] = useState<Record<string, ShiftGridDay> | null>(null);
+  const [gridDirty, setGridDirty] = useState(false);
+  const [gridSaving, setGridSaving] = useState(false);
+  const [paint, setPaint] = useState<string | null>(null); // 選択中: スタッフ姓 / ""=消しゴム / null=未選択
+  const paintingRef = useRef(false);
+  const [allStaff, setAllStaff] = useState<ShiftStaff[]>([]);
+  useEffect(() => { listShiftStaff().then(setAllStaff).catch(() => {}); }, []);
+  useEffect(() => {
+    const up = () => { paintingRef.current = false; };
+    window.addEventListener("mouseup", up);
+    return () => window.removeEventListener("mouseup", up);
+  }, []);
 
   // Phase2: 調整メモ（なぜ直したか）→ 院ごとの調整ノートに蓄積しAIが翌月に学習
   const [adjustReason, setAdjustReason] = useState("");
@@ -173,11 +187,39 @@ export default function ShiftCoordinationPage() {
 
   const latestDraft = chatMessages.filter((m) => m.role === "assistant").at(-1)?.content ?? null;
 
-  // 日別グリッド表示（確認用）
-  const gridDates = savedDraft?.grid ? Object.keys(savedDraft.grid).sort() : [];
+  // 日別/月表グリッド表示（編集中は editGrid を表示）
+  const gridData = editGrid ?? savedDraft?.grid ?? null;
+  const gridDates = gridData ? Object.keys(gridData).sort() : [];
   const gridIdx = gridDay ? gridDates.indexOf(gridDay) : -1;
-  const curGrid = (gridDay && savedDraft?.grid) ? savedDraft.grid[gridDay] : null;
+  const curGrid = (gridDay && gridData) ? gridData[gridDay] : null;
   const gridSlots = savedDraft?.slots ?? [];
+
+  // 月表の塗り：paint（姓 or ""=消す）をセルに適用
+  const paintCell = (ds: string, row: "recep" | "hana", idx: number) => {
+    if (paint === null || !editGrid) return;
+    setEditGrid((prev) => {
+      if (!prev) return prev;
+      const next = { ...prev, [ds]: { ...prev[ds], [row]: prev[ds][row].map((c, i) =>
+        i === idx ? (paint === "" ? { n: "", c: "none" } : { n: paint, c: row === "hana" ? "hana" : "recep" }) : c
+      ) } };
+      return next;
+    });
+    setGridDirty(true);
+  };
+  const saveGrid = async () => {
+    if (!editGrid) return;
+    setGridSaving(true);
+    const r = await saveShiftDraftGrid(monthStr, editGrid);
+    setGridSaving(false);
+    if (r.success) {
+      setGridDirty(false);
+      toast.success("出勤表の修正を保存しました（確認用・予約には反映されません）");
+      if (adjustReason.trim()) {
+        const nr = await appendShiftAdjustNote(monthStr, adjustReason.trim());
+        if (nr.success) { setAdjustReason(""); getShiftAdjustNotes().then(setAdjustNotes).catch(() => {}); }
+      }
+    } else toast.error(r.error ?? "保存に失敗しました");
+  };
   const catCls = (c: string) =>
     c === "recep" ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200"
     : c === "ther" ? "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200"
@@ -188,12 +230,16 @@ export default function ShiftCoordinationPage() {
   // 月表ビュー用：スタッフ名（姓）→ 表示色。各スタッフの display_color（アプリ設定）を使う。
   const staffColorByShort = useMemo(() => {
     const m = new Map<string, string>();
+    for (const s of allStaff) {
+      const short = s.name.split(/[\s　]/)[0];
+      if (short && !m.has(short)) m.set(short, colorOf(s.display_color));
+    }
     for (const s of submissions) {
       const short = s.staffName.split(/[\s　]/)[0];
       if (short) m.set(short, colorOf(s.displayColor));
     }
     return m;
-  }, [submissions]);
+  }, [submissions, allStaff]);
   const cellColor = (cell: { n: string; c: string }): string | undefined => {
     if (cell.c === "gap") return "#fda4af";           // 要調整=赤
     if (!cell.n) return undefined;
@@ -233,8 +279,10 @@ export default function ShiftCoordinationPage() {
         setSavedDraft(d); setDraftText(d?.md ?? "");
         const dates = d?.grid ? Object.keys(d.grid).sort() : [];
         setGridDay(dates[0] ?? null);
+        setEditGrid(d?.grid ? JSON.parse(JSON.stringify(d.grid)) : null);
+        setGridDirty(false); setPaint(null);
       })
-      .catch(() => { setSavedDraft(null); setDraftText(""); setGridDay(null); });
+      .catch(() => { setSavedDraft(null); setDraftText(""); setGridDay(null); setEditGrid(null); setGridDirty(false); });
   }, [monthStr]);
 
   useEffect(() => {
@@ -400,7 +448,11 @@ export default function ShiftCoordinationPage() {
           <div className="flex items-center gap-2 flex-wrap">
             <CalendarClock className="w-5 h-5 text-amber-500" />
             <p className="font-black text-amber-800 dark:text-amber-200">確認中の案（{month && format(month, "M月", { locale: ja })}）</p>
-            <span className="text-[10px] font-bold text-amber-700 dark:text-amber-300 bg-amber-100 dark:bg-amber-900/40 px-2 py-0.5 rounded-full">確認用・予約には自動反映しません</span>
+            {savedDraft.status === "confirmed" ? (
+              <span className="text-[10px] font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-900/40 px-2 py-0.5 rounded-full">✅ 確定済み</span>
+            ) : (
+              <span className="text-[10px] font-bold text-amber-700 dark:text-amber-300 bg-amber-100 dark:bg-amber-900/40 px-2 py-0.5 rounded-full">確認用・予約には自動反映しません</span>
+            )}
             {savedDraft.updatedAt && (
               <span className="text-[11px] text-amber-600/80">保存: {format(new Date(savedDraft.updatedAt), "M/d HH:mm", { locale: ja })}</span>
             )}
@@ -423,6 +475,39 @@ export default function ShiftCoordinationPage() {
               </div>
               {draftView === "month" && (
                 <div className="overflow-x-auto">
+                  {/* 塗りパレット：人を選んでセルをクリック/ドラッグ。Excelでセルを塗る感覚 */}
+                  <div className="flex flex-wrap items-center gap-1.5 mb-2">
+                    <span className="text-[10px] font-bold text-slate-500">✏️ 修正：</span>
+                    {Array.from(staffColorByShort.entries()).map(([nm, col]) => (
+                      <button
+                        key={nm}
+                        type="button"
+                        onClick={() => setPaint(paint === nm ? null : nm)}
+                        className={`h-7 px-2 rounded-lg text-[11px] font-bold border-2 ${paint === nm ? "border-slate-800 dark:border-white scale-105" : "border-transparent"}`}
+                        style={{ backgroundColor: col, color: "#fff", textShadow: "0 1px 2px rgba(0,0,0,.35)" }}
+                      >
+                        {nm}
+                      </button>
+                    ))}
+                    <button
+                      type="button"
+                      onClick={() => setPaint(paint === "" ? null : "")}
+                      className={`h-7 px-2 rounded-lg text-[11px] font-bold border-2 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 ${paint === "" ? "border-slate-800 dark:border-white" : "border-slate-300 dark:border-slate-600"}`}
+                    >
+                      消す
+                    </button>
+                    <button
+                      type="button"
+                      onClick={saveGrid}
+                      disabled={!gridDirty || gridSaving}
+                      className="h-7 px-3 rounded-lg text-[11px] font-black bg-amber-500 hover:bg-amber-600 text-white disabled:opacity-40"
+                    >
+                      {gridSaving ? "保存中..." : gridDirty ? "修正を保存" : "保存済み"}
+                    </button>
+                    <span className="text-[10px] text-slate-400">
+                      {paint === null ? "人を選ぶとセルを塗れます" : paint === "" ? "クリック/ドラッグで消せます" : `${paint}さんで塗ります（ドラッグ可）`}
+                    </span>
+                  </div>
                   <table className="border-collapse" style={{ tableLayout: "fixed" }}>
                     <thead>
                       <tr>
@@ -435,22 +520,27 @@ export default function ShiftCoordinationPage() {
                     </thead>
                     <tbody>
                       {gridDates.map((ds) => {
-                        const g = savedDraft!.grid![ds];
+                        const g = gridData![ds];
                         const dlabel = `${Number(ds.slice(5, 7))}/${Number(ds.slice(8, 10))}(${g.dow})`;
+                        const cellProps = (row: "recep" | "hana", i: number) => ({
+                          onMouseDown: (e: React.MouseEvent) => { if (paint !== null) { e.preventDefault(); paintingRef.current = true; paintCell(ds, row, i); } },
+                          onMouseEnter: () => { if (paint !== null && paintingRef.current) paintCell(ds, row, i); },
+                          style: { height: 16, cursor: paint !== null ? "crosshair" : undefined } as React.CSSProperties,
+                        });
                         return (
                           <Fragment key={ds}>
                             <tr>
                               <td rowSpan={2} className="sticky left-0 z-10 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 px-1 text-[10px] font-bold text-slate-600 dark:text-slate-300">{dlabel}</td>
                               <td className="sticky z-10 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 px-1 text-[9px] text-slate-500" style={{ left: 64 }}>受付</td>
                               {g.recep.map((c, i) => (
-                                <td key={i} title={c.n ? `${c.n} ${gridSlots[i]}` : ""} className="border border-slate-100 dark:border-slate-800 p-0" style={{ height: 16, backgroundColor: cellColor(c) }} />
+                                <td key={i} title={c.n ? `${c.n} ${gridSlots[i]}` : gridSlots[i]} className="border border-slate-100 dark:border-slate-800 p-0 select-none" {...cellProps("recep", i)} style={{ ...cellProps("recep", i).style, backgroundColor: cellColor(c) }} />
                               ))}
                             </tr>
                             <tr>
                               <td className="sticky z-10 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 px-1 text-[9px] text-violet-500" style={{ left: 64 }}>はな</td>
                               {g.hana.map((c, i) => (
-                                <td key={i} title={c.n ? `${c.n} ${gridSlots[i]}` : ""} className="border border-slate-100 dark:border-slate-800 p-0" style={{ height: 16, backgroundColor: cellColor(c) }}>
-                                  {c.c === "hana" ? <span className="block text-center text-[8px] leading-none">●</span> : c.c === "gap" ? <span className="block text-center text-[8px] leading-none">⚠</span> : null}
+                                <td key={i} title={c.n ? `${c.n} ${gridSlots[i]}` : gridSlots[i]} className="border border-slate-100 dark:border-slate-800 p-0 select-none" {...cellProps("hana", i)} style={{ ...cellProps("hana", i).style, backgroundColor: cellColor(c) }}>
+                                  {c.c === "hana" ? <span className="block text-center text-[8px] leading-none pointer-events-none">●</span> : c.c === "gap" ? <span className="block text-center text-[8px] leading-none pointer-events-none">⚠</span> : null}
                                 </td>
                               ))}
                             </tr>

@@ -265,6 +265,32 @@ export async function saveShiftDraft(month: string, md: string): Promise<{ succe
   return error ? { success: false, error: error.message } : { success: true };
 }
 
+/** 月表（色バー）で編集したグリッドを保存（確認用。予約には触れない） */
+export async function saveShiftDraftGrid(
+  month: string,
+  grid: Record<string, ShiftGridDay>,
+): Promise<{ success: boolean; error?: string }> {
+  const { clinicId, email } = await checkAdminAuth();
+  if (!/^\d{4}-\d{2}$/.test(month)) return { success: false, error: "月の指定が不正です" };
+  // 入力サニタイズ（日付キー・セル形だけ通す）
+  const clean: Record<string, ShiftGridDay> = {};
+  for (const [ds, day] of Object.entries(grid || {})) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(ds) || !ds.startsWith(month)) continue;
+    const cells = (arr: ShiftGridCell[]) => (Array.isArray(arr) ? arr.slice(0, 48).map((c) => ({
+      n: String(c?.n ?? "").slice(0, 8), c: String(c?.c ?? "none").slice(0, 8),
+    })) : []);
+    clean[ds] = { dow: String(day?.dow ?? "").slice(0, 2), recep: cells(day?.recep), hana: cells(day?.hana) };
+  }
+  const { createClient } = await import("@/lib/supabase/server");
+  const supabase = await createClient();
+  const { data, error: readErr } = await supabase.from("clinic_settings").select("shift_drafts").eq("id", clinicId).maybeSingle();
+  if (readErr) return { success: false, error: readErr.message };
+  const drafts: Record<string, any> = { ...((data?.shift_drafts as Record<string, unknown> | null) ?? {}) };
+  drafts[month] = { ...(drafts[month] ?? {}), grid: clean, status: "draft", updated_at: new Date().toISOString(), updated_by: email ?? null };
+  const { error } = await supabase.from("clinic_settings").update({ shift_drafts: drafts }).eq("id", clinicId);
+  return error ? { success: false, error: error.message } : { success: true };
+}
+
 /**
  * 院ごとの「調整ノート」（学習用）。院長が案をどう直したか＋理由を追記蓄積し、
  * 翌月のAI生成プロンプトに渡して院の好みを学習させる。
@@ -495,11 +521,22 @@ export async function confirmShiftLeaves(month: string): Promise<{ success: bool
     });
   }
 
-  if (insertRows.length === 0) return { success: true, written: 0 };
+  if (insertRows.length > 0) {
+    // tenant-isolation-ignore: insert する各行に clinic_id を明示設定済み
+    const { error } = await supabase.from("staff_working_overrides").insert(insertRows);
+    if (error) return { success: false, error: error.message };
+  }
 
-  // tenant-isolation-ignore: insert する各行に clinic_id を明示設定済み
-  const { error } = await supabase.from("staff_working_overrides").insert(insertRows);
-  if (error) return { success: false, error: error.message };
+  // 確認用ドラフト（月表）に「確定済み」を付ける（失敗しても確定自体は成立）
+  try {
+    const { data: cs } = await supabase.from("clinic_settings").select("shift_drafts").eq("id", clinicId).maybeSingle();
+    const drafts: Record<string, any> = { ...((cs?.shift_drafts as Record<string, unknown> | null) ?? {}) };
+    if (drafts[month]) {
+      drafts[month] = { ...drafts[month], status: "confirmed", updated_at: new Date().toISOString(), updated_by: email ?? null };
+      await supabase.from("clinic_settings").update({ shift_drafts: drafts }).eq("id", clinicId);
+    }
+  } catch { /* noop */ }
+
   return { success: true, written: offByStaff.length };
 }
 
