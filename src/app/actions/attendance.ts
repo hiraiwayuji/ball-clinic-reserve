@@ -141,7 +141,86 @@ async function verifyStaff(db: ReturnType<typeof admin>, staffId: string): Promi
   return (data?.name as string | undefined) ?? null;
 }
 
-/** 出勤打刻（ログイン不要） */
+// ── 当日の業務チェックリスト（役割別テンプレ → 出勤時に生成・退勤時に申告） ──
+
+/** テンプレ項目の曜日/時期プレフィックス（例 "火:入金確認" "月初:レセプト"）を判定 */
+function templateAppliesToday(title: string, dateStr: string): { applies: boolean; clean: string } {
+  const m = title.match(/^(月初|月末|月|火|水|木|金|土|日):(.+)$/);
+  if (!m) return { applies: true, clean: title };
+  const d = new Date(dateStr + "T00:00:00+09:00");
+  const dow = "日月火水木金土"[d.getDay()];
+  const day = d.getDate();
+  const tag = m[1];
+  const applies =
+    tag === "月初" ? day <= 5 :
+    tag === "月末" ? day >= 25 :
+    tag === dow;
+  return { applies, clean: m[2].trim() };
+}
+
+/** 出勤時：所属グループのテンプレから当日タスクを生成（無いものだけ。承認済み扱い） */
+async function ensureTodayTasks(db: ReturnType<typeof admin>, staffId: string, dateStr: string): Promise<void> {
+  const [{ data: staff }, { data: settings }, { data: existing }] = await Promise.all([
+    db.from("reservation_staff").select("task_groups").eq("id", staffId).eq("clinic_id", PUBLIC_CLINIC_ID).maybeSingle(),
+    db.from("clinic_settings").select("daily_task_templates").eq("id", PUBLIC_CLINIC_ID).maybeSingle(),
+    db.from("staff_tasks").select("title").eq("clinic_id", PUBLIC_CLINIC_ID).eq("staff_id", staffId).eq("due_date", dateStr),
+  ]);
+  const groups: string[] = (staff?.task_groups as string[] | null) ?? [];
+  const templates = (settings?.daily_task_templates as Record<string, string[]> | null) ?? {};
+  const wanted: string[] = [];
+  for (const g of groups) {
+    for (const t of templates[g] ?? []) {
+      const { applies, clean } = templateAppliesToday(t, dateStr);
+      if (applies && !wanted.includes(clean)) wanted.push(clean);
+    }
+  }
+  const have = new Set((existing ?? []).map((r: any) => r.title as string));
+  const rows = wanted.filter((t) => !have.has(t)).map((title) => ({
+    clinic_id: PUBLIC_CLINIC_ID, staff_id: staffId, title, due_date: dateStr,
+    status: "pending", priority: "normal", task_kind: "other", approved: true, source: "manual",
+  }));
+  if (rows.length > 0) await db.from("staff_tasks").insert(rows);
+}
+
+export type TodayTask = { id: string; title: string; outcome: "done" | "not_done" | null; outcomeReason: string | null };
+
+/** 当日の自分の業務リスト（ログイン不要・打刻画面用） */
+export async function getTodayTasks(staffId: string): Promise<TodayTask[]> {
+  if (!staffId) return [];
+  const db = admin();
+  const { date } = jstNow();
+  const { data } = await db.from("staff_tasks")
+    .select("id, title, outcome, outcome_reason")
+    .eq("clinic_id", PUBLIC_CLINIC_ID).eq("staff_id", staffId).eq("due_date", date).eq("approved", true)
+    .order("created_at");
+  return (data ?? []).map((r: any) => ({
+    id: r.id, title: r.title,
+    outcome: (r.outcome as "done" | "not_done" | null) ?? null,
+    outcomeReason: (r.outcome_reason as string | null) ?? null,
+  }));
+}
+
+/** 業務の申告（できた/できない）。できない場合は理由を残せる（ログイン不要） */
+export async function reportTask(
+  staffId: string, taskId: string, outcome: "done" | "not_done", reason?: string,
+): Promise<{ success: boolean; error?: string }> {
+  if (!staffId || !taskId) return { success: false, error: "不正なリクエストです" };
+  const db = admin();
+  const name = await verifyStaff(db, staffId);
+  if (!name) return { success: false, error: "スタッフが見つかりません" };
+  const { iso } = jstNow();
+  const { error } = await db.from("staff_tasks")
+    .update({
+      outcome,
+      outcome_reason: outcome === "not_done" ? (reason?.trim() || null) : null,
+      status: outcome === "done" ? "done" : "pending",
+      completed_at: outcome === "done" ? iso : null,
+    })
+    .eq("id", taskId).eq("clinic_id", PUBLIC_CLINIC_ID).eq("staff_id", staffId);
+  return error ? { success: false, error: error.message } : { success: true };
+}
+
+/** 出勤打刻（ログイン不要）。当日の業務リストも役割テンプレから自動生成する */
 export async function clockIn(staffId: string): Promise<{ success: boolean; error?: string }> {
   if (!staffId) return { success: false, error: "お名前を選んでください" };
   const db = admin();
@@ -153,7 +232,10 @@ export async function clockIn(staffId: string): Promise<{ success: boolean; erro
     { clinic_id: PUBLIC_CLINIC_ID, staff_id: staffId, staff_name: name, work_date: date, clock_in_at: iso, updated_at: iso },
     { onConflict: "clinic_id, staff_id, work_date" },
   );
-  return error ? { success: false, error: error.message } : { success: true };
+  if (error) return { success: false, error: error.message };
+  // 今日の業務チェックリストを用意（失敗しても打刻は成立させる）
+  try { await ensureTodayTasks(db, staffId, date); } catch (e) { console.error("[attendance] ensureTodayTasks:", e); }
+  return { success: true };
 }
 
 /**
@@ -163,7 +245,7 @@ export async function clockIn(staffId: string): Promise<{ success: boolean; erro
 export async function clockOut(
   staffId: string,
   reason?: { type?: OvertimeReasonType; note?: string },
-): Promise<{ success: boolean; requireReason?: boolean; isOvertime?: boolean; error?: string }> {
+): Promise<{ success: boolean; requireReason?: boolean; isOvertime?: boolean; requireTaskReport?: boolean; remainingTasks?: number; error?: string }> {
   if (!staffId) return { success: false, error: "お名前を選んでください" };
   const db = admin();
   const name = await verifyStaff(db, staffId);
@@ -172,6 +254,17 @@ export async function clockOut(
   const cfg = await getAttendanceConfig();
   const { iso, date, minutes } = jstNow();
   const isOvertime = minutes >= toMinutes(cfg.overtimeReasonAfter);
+
+  // ── 退勤ゲート：当日の業務が全部「できた/できない」申告済みでないと退勤できない ──
+  const { data: taskRows } = await db.from("staff_tasks")
+    .select("outcome")
+    .eq("clinic_id", PUBLIC_CLINIC_ID).eq("staff_id", staffId).eq("due_date", date).eq("approved", true);
+  const tasksTotal = (taskRows ?? []).length;
+  const unreported = (taskRows ?? []).filter((r: any) => r.outcome == null).length;
+  if (unreported > 0) {
+    return { success: false, requireTaskReport: true, remainingTasks: unreported };
+  }
+  const tasksDone = (taskRows ?? []).filter((r: any) => r.outcome === "done").length;
 
   if (isOvertime) {
     if (!reason?.type) return { success: false, requireReason: true, isOvertime: true };
@@ -190,6 +283,8 @@ export async function clockOut(
       is_overtime: isOvertime,
       overtime_reason_type: isOvertime ? (reason?.type ?? null) : null,
       overtime_reason_note: isOvertime ? (reason?.note?.trim() || null) : null,
+      tasks_total: tasksTotal,
+      tasks_done: tasksDone,
       updated_at: iso,
     },
     { onConflict: "clinic_id, staff_id, work_date" },

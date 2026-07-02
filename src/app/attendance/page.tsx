@@ -4,11 +4,11 @@ import { useEffect, useMemo, useState } from "react";
 import { format } from "date-fns";
 import { ja } from "date-fns/locale";
 import { toast } from "sonner";
-import { Loader2, Clock, LogIn, LogOut, CheckCircle2, AlertTriangle } from "lucide-react";
+import { Loader2, Clock, LogIn, LogOut, CheckCircle2, AlertTriangle, ListChecks, Circle, XCircle } from "lucide-react";
 import {
   listAttendanceStaff, getAttendanceConfig, getTodayAttendance,
-  clockIn, clockOut,
-  type AttendanceStaff, type AttendanceConfig, type TodayAttendance, type OvertimeReasonType,
+  clockIn, clockOut, getTodayTasks, reportTask,
+  type AttendanceStaff, type AttendanceConfig, type TodayAttendance, type OvertimeReasonType, type TodayTask,
 } from "@/app/actions/attendance";
 import { OVERTIME_REASONS } from "@/lib/attendance-constants";
 import { CLINIC_CONFIG } from "@/lib/clinic-config";
@@ -27,6 +27,32 @@ export default function AttendancePage() {
   const [reasonType, setReasonType] = useState<OvertimeReasonType | "">("");
   const [reasonNote, setReasonNote] = useState("");
 
+  // 今日の業務チェックリスト
+  const [tasks, setTasks] = useState<TodayTask[]>([]);
+  const [taskBusy, setTaskBusy] = useState<string | null>(null);
+  const [highlightTasks, setHighlightTasks] = useState(false);
+  const refreshTasks = async (id: string) => {
+    if (!id) { setTasks([]); return; }
+    try { setTasks(await getTodayTasks(id)); } catch { setTasks([]); }
+  };
+  const reportedCount = tasks.filter((t) => t.outcome !== null).length;
+  const doneCount = tasks.filter((t) => t.outcome === "done").length;
+  const donePct = tasks.length > 0 ? Math.round((doneCount / tasks.length) * 100) : 0;
+
+  const handleReport = async (t: TodayTask, outcome: "done" | "not_done") => {
+    let reason: string | undefined;
+    if (outcome === "not_done") {
+      const v = window.prompt(`「${t.title}」ができなかった理由があれば入力してください（空欄でもOK）`, t.outcomeReason ?? "");
+      if (v === null) return; // キャンセル
+      reason = v;
+    }
+    setTaskBusy(t.id);
+    const r = await reportTask(staffId, t.id, outcome, reason);
+    setTaskBusy(null);
+    if (r.success) refreshTasks(staffId);
+    else toast.error(r.error ?? "記録に失敗しました");
+  };
+
   useEffect(() => {
     listAttendanceStaff().then(setStaffList).catch(() => {});
     getAttendanceConfig().then(setConfig).catch(() => {});
@@ -44,14 +70,14 @@ export default function AttendancePage() {
     }
   };
 
-  useEffect(() => { refreshToday(staffId); }, [staffId]);
+  useEffect(() => { refreshToday(staffId); refreshTasks(staffId); }, [staffId]);
 
   const handleClockIn = async () => {
     if (!staffId) { toast.error("お名前を選んでください"); return; }
     setBusy(true);
     const r = await clockIn(staffId);
     setBusy(false);
-    if (r.success) { toast.success("出勤を記録しました"); refreshToday(staffId); }
+    if (r.success) { toast.success("出勤を記録しました。今日の業務リストを確認してください"); refreshToday(staffId); refreshTasks(staffId); }
     else toast.error(r.error ?? "記録に失敗しました");
   };
 
@@ -61,8 +87,13 @@ export default function AttendancePage() {
     const r = await clockOut(staffId);
     setBusy(false);
     if (r.success) {
-      toast.success("お疲れさまでした。退勤を記録しました");
+      toast.success(`お疲れさまでした。退勤を記録しました（今日の業務 ${donePct}% できました）`);
       refreshToday(staffId);
+      return;
+    }
+    if (r.requireTaskReport) {
+      setHighlightTasks(true);
+      toast.error(`今日の業務 ${r.remainingTasks ?? ""}件が未チェックです。「できた／できなかった」を付けてから退勤してください`);
       return;
     }
     if (r.requireReason) {
@@ -83,8 +114,12 @@ export default function AttendancePage() {
     setBusy(false);
     if (r.success) {
       setReasonOpen(false);
-      toast.success("退勤を記録しました");
+      toast.success(`退勤を記録しました（今日の業務 ${donePct}% できました）`);
       refreshToday(staffId);
+    } else if (r.requireTaskReport) {
+      setReasonOpen(false);
+      setHighlightTasks(true);
+      toast.error("今日の業務のチェックが残っています。先に「できた／できなかった」を付けてください");
     } else {
       toast.error(r.error ?? "記録に失敗しました");
     }
@@ -175,6 +210,50 @@ export default function AttendancePage() {
                 </span>
               </div>
             )}
+          </div>
+        )}
+
+        {/* 今日の業務チェックリスト */}
+        {staffId && tasks.length > 0 && (
+          <div className={`bg-white rounded-2xl border p-4 shadow-sm ${highlightTasks && reportedCount < tasks.length ? "border-rose-400 ring-2 ring-rose-200" : "border-slate-200"}`}>
+            <div className="flex items-center justify-between gap-2 mb-2">
+              <p className="text-xs font-bold text-slate-600 flex items-center gap-1.5">
+                <ListChecks className="w-4 h-4 text-blue-500" />今日の業務（{reportedCount}/{tasks.length} チェック済み）
+              </p>
+              <span className={`text-sm font-black ${donePct >= 80 ? "text-emerald-600" : donePct >= 50 ? "text-amber-600" : "text-slate-500"}`}>{donePct}% できた</span>
+            </div>
+            <div className="h-2 rounded-full bg-slate-100 overflow-hidden mb-3">
+              <div className="h-full bg-emerald-500 transition-all" style={{ width: `${donePct}%` }} />
+            </div>
+            <ul className="space-y-2">
+              {tasks.map((t) => (
+                <li key={t.id} className={`rounded-xl border p-2.5 ${t.outcome === "done" ? "bg-emerald-50 border-emerald-200" : t.outcome === "not_done" ? "bg-rose-50 border-rose-200" : "bg-slate-50 border-slate-200"}`}>
+                  <div className="flex items-center gap-2">
+                    <span className={`flex-1 text-sm font-bold ${t.outcome === "done" ? "text-emerald-800 line-through" : "text-slate-700"}`}>{t.title}</span>
+                    <button
+                      onClick={() => handleReport(t, "done")}
+                      disabled={taskBusy === t.id}
+                      className={`h-9 px-3 rounded-lg text-xs font-black border ${t.outcome === "done" ? "bg-emerald-600 text-white border-emerald-600" : "bg-white border-slate-300 text-slate-600"}`}
+                    >
+                      <CheckCircle2 className="w-4 h-4 inline -mt-0.5 mr-0.5" />できた
+                    </button>
+                    <button
+                      onClick={() => handleReport(t, "not_done")}
+                      disabled={taskBusy === t.id}
+                      className={`h-9 px-3 rounded-lg text-xs font-black border ${t.outcome === "not_done" ? "bg-rose-600 text-white border-rose-600" : "bg-white border-slate-300 text-slate-600"}`}
+                    >
+                      <XCircle className="w-4 h-4 inline -mt-0.5 mr-0.5" />できなかった
+                    </button>
+                  </div>
+                  {t.outcome === "not_done" && t.outcomeReason && (
+                    <p className="mt-1 text-[11px] text-rose-700">理由：{t.outcomeReason}</p>
+                  )}
+                </li>
+              ))}
+            </ul>
+            <p className="mt-2 text-[11px] text-slate-400 flex items-center gap-1">
+              <Circle className="w-3 h-3" />全部にチェックを付けると退勤できます（100%でなくても大丈夫です）
+            </p>
           </div>
         )}
 
