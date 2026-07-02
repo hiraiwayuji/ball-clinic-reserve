@@ -102,9 +102,9 @@ export function AddAppointmentDialog({
   const [additionalStaff, setAdditionalStaff] = useState<string[]>([]);
   // ダブル施術：さみ整体↔ボール担当を同時に組む（相方を additional に自動セット）
   const [doubleOn, setDoubleOn] = useState(false);
-  // 施術後に○○を追加：設定された追加メニュー（after=施術後 / same=同時刻）
+  // 施術前/後に○○を追加：設定された追加メニュー（before=施術前 / after=施術後 / same=同時刻）
   const [addAddon, setAddAddon] = useState(false);
-  const [addonTiming, setAddonTiming] = useState<"after" | "same">("after");
+  const [addonTiming, setAddonTiming] = useState<"before" | "after" | "same">("after");
   const [addonInfo, setAddonInfo] = useState<{ courseId: string; name: string; allowConcurrent: boolean } | null>(null);
 
   // 患者サジェスト
@@ -343,7 +343,9 @@ export function AddAppointmentDialog({
     if (addAddon && addonInfo && courseId !== addonInfo.courseId) {
       formData.set("addAddon", "true");
       // 「同時刻」は allowConcurrent（水素など）のときだけ。それ以外は施術後に固定。
-      formData.set("addonTiming", addonInfo.allowConcurrent ? addonTiming : "after");
+      // 「施術前」はどのメニューでも可（開始時刻の直前に収める）。
+      const timing = addonTiming === "same" && !addonInfo.allowConcurrent ? "after" : addonTiming;
+      formData.set("addonTiming", timing);
     }
     formData.append("date", format(date, "yyyy-MM-dd"));
     formData.append("time", time);
@@ -827,16 +829,20 @@ export function AddAppointmentDialog({
                   <span>＋ {addonInfo.name}を追加する</span>
                   <span className={`text-xs ${addAddon ? "text-white/90" : "text-cyan-500"}`}>{addAddon ? "ON" : "OFF"}</span>
                 </button>
-                {/* 「同時刻に追加」は水素のように別の時間が要らないメニュー(allowConcurrent)だけ。
-                    それ以外は施術後に時間を取るため選択肢を出さない。 */}
-                {addAddon && addonInfo.allowConcurrent && (
-                  <div className="flex gap-2">
-                    {([["after", "施術後に追加"], ["same", "同時刻に追加"]] as const).map(([val, label]) => (
+                {/* 施術前/施術後はどのメニューでも選べる。「同時刻に追加」は水素のように
+                    別の時間が要らないメニュー(allowConcurrent)だけ。 */}
+                {addAddon && (
+                  <div className="grid grid-cols-2 gap-2">
+                    {([
+                      ["before", "施術前に追加"],
+                      ["after", "施術後に追加"],
+                      ...(addonInfo.allowConcurrent ? [["same", "同時刻に追加"]] : []),
+                    ] as Array<["before" | "after" | "same", string]>).map(([val, label]) => (
                       <button
                         key={val}
                         type="button"
                         onClick={() => setAddonTiming(val)}
-                        className={`flex-1 h-10 rounded-lg border text-sm font-semibold transition-all ${
+                        className={`h-10 rounded-lg border text-sm font-semibold transition-all ${
                           addonTiming === val ? "bg-cyan-100 border-cyan-400 text-cyan-800" : "border-slate-200 text-slate-600 hover:bg-slate-50"
                         }`}
                       >

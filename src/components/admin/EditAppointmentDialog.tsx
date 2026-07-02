@@ -244,15 +244,19 @@ export function EditAppointmentDialog({
     }
   };
 
-  // 予約に「設定された追加メニュー」を追加（施術後 or 同時刻）。同一患者へ直接ひもづけ。
-  const handleAddAddon = async (timing: "after" | "same") => {
+  // 予約に「設定された追加メニュー」を追加（施術前 / 施術後 / 同時刻）。同一患者へ直接ひもづけ。
+  const handleAddAddon = async (timing: "before" | "after" | "same") => {
     if (!appointment) return;
     const label = addonInfo?.name ?? "メニュー";
     setIsSubmitting(true);
     try {
       const res = await addAddonToAppointment(appointment.id, timing);
       if (res.success) {
-        toast.success(timing === "same" ? `同時刻に${label}を追加しました` : `施術後に${label}を追加しました`);
+        toast.success(
+          timing === "same" ? `同時刻に${label}を追加しました`
+            : timing === "before" ? `施術前に${label}を追加しました`
+            : `施術後に${label}を追加しました`,
+        );
         onSuccess?.();
         onOpenChange(false);
       } else {
@@ -807,15 +811,24 @@ export function EditAppointmentDialog({
               </div>
             )}
 
-            {/* 施術後に○○を追加（設定 addon_course_id がある院のみ・追加メニュー自体には出さない） */}
+            {/* 施術前／施術後／同時刻に○○を追加（設定 addon_course_id がある院のみ・追加メニュー自体には出さない） */}
             {addonInfo && appointment.course_id !== addonInfo.courseId && (
-              <div className="flex gap-2">
+              <div className="grid grid-cols-2 gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => handleAddAddon("before")}
+                  disabled={isSubmitting}
+                  className="h-10 border-cyan-300 text-cyan-700 hover:bg-cyan-50 rounded-xl text-sm"
+                >
+                  ＋ 施術前に{addonInfo.name}
+                </Button>
                 <Button
                   type="button"
                   variant="outline"
                   onClick={() => handleAddAddon("after")}
                   disabled={isSubmitting}
-                  className="flex-1 h-10 border-cyan-300 text-cyan-700 hover:bg-cyan-50 rounded-xl text-sm"
+                  className="h-10 border-cyan-300 text-cyan-700 hover:bg-cyan-50 rounded-xl text-sm"
                 >
                   ＋ 施術後に{addonInfo.name}
                 </Button>
@@ -826,7 +839,7 @@ export function EditAppointmentDialog({
                     variant="outline"
                     onClick={() => handleAddAddon("same")}
                     disabled={isSubmitting}
-                    className="flex-1 h-10 border-cyan-300 text-cyan-700 hover:bg-cyan-50 rounded-xl text-sm"
+                    className="col-span-2 h-10 border-cyan-300 text-cyan-700 hover:bg-cyan-50 rounded-xl text-sm"
                   >
                     ＋ 同時刻に{addonInfo.name}
                   </Button>

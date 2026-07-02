@@ -63,10 +63,10 @@ export async function getAddonCourseInfo(): Promise<{ courseId: string; name: st
 
 /**
  * 既存予約に「設定された追加メニュー（addon_course_id）」を追加する（同一患者・同じ日に紐づける）。
- * timing: "after"=施術の直後 / "same"=同時刻。
+ * timing: "before"=施術の直前 / "after"=施術の直後 / "same"=同時刻。
  * 新規追加ダイアログの「同じ日に2件」アラートを回避し、追加メニューの担当レーンの重複だけチェックする。
  */
-export async function addAddonToAppointment(appointmentId: string, timing: "after" | "same") {
+export async function addAddonToAppointment(appointmentId: string, timing: "before" | "after" | "same") {
   const { clinicId } = await checkAdminAuth();
   const supabase = getAdminSupabase();
   if (!supabase) return { success: false, error: "サーバー設定エラー（service role key 未設定）" };
@@ -98,13 +98,25 @@ export async function addAddonToAppointment(appointmentId: string, timing: "afte
 
     // 「同時刻」は allow_concurrent（水素など別の時間が要らないもの）だけ許可。
     // それ以外は施術と時間が重ならないよう必ず施術後に回す。
-    const effectiveTiming: "after" | "same" =
-      timing === "same" && addon.allow_concurrent === true ? "same" : "after";
+    // 「施術前」は施術開始の直前に収める（水素を吸ってからトレーニング→施術など）。
+    const effectiveTiming: "before" | "after" | "same" =
+      timing === "same"
+        ? (addon.allow_concurrent === true ? "same" : "after")
+        : timing; // "before" or "after"
     const aDur = Number(addon.duration_minutes ?? 30) || 30;
-    const baseIso = effectiveTiming === "same" ? apt.start_time : (apt.end_time ?? apt.start_time);
-    const aStart = new Date(baseIso);
-    const aStartIso = aStart.toISOString();
-    const aEndIso = new Date(aStart.getTime() + aDur * 60000).toISOString();
+    let aStartIso: string;
+    let aEndIso: string;
+    if (effectiveTiming === "before") {
+      const aEnd = new Date(apt.start_time);
+      const aStart = new Date(aEnd.getTime() - aDur * 60000);
+      aStartIso = aStart.toISOString();
+      aEndIso = aEnd.toISOString();
+    } else {
+      const baseIso = effectiveTiming === "same" ? apt.start_time : (apt.end_time ?? apt.start_time);
+      const aStart = new Date(baseIso);
+      aStartIso = aStart.toISOString();
+      aEndIso = new Date(aStart.getTime() + aDur * 60000).toISOString();
+    }
     const aStaffId = (addon.required_staff_id as string | null) ?? null;
     const aName = addon.name as string;
 
@@ -128,7 +140,7 @@ export async function addAddonToAppointment(appointmentId: string, timing: "afte
       customer_id: apt.customer_id,
       start_time: aStartIso,
       end_time: aEndIso,
-      memo: effectiveTiming === "same" ? `【${aName} 追加・同時刻】` : `【${aName} 追加・施術後】`,
+      memo: effectiveTiming === "same" ? `【${aName} 追加・同時刻】` : effectiveTiming === "before" ? `【${aName} 追加・施術前】` : `【${aName} 追加・施術後】`,
       is_first_visit: false,
       status: "confirmed",
       clinic_id: clinicId,
@@ -593,9 +605,11 @@ export async function createManualReservation(formData: FormData) {
       return { success: false, error: `予約情報の登録に失敗しました: ${appointmentErr.message}` };
     }
 
-    // ── 「施術後に○○を追加」（新規追加時）：設定の addon_course_id を、最初の予約の直後 or 同時刻に入れる ──
+    // ── 「施術前/後に○○を追加」（新規追加時）：設定の addon_course_id を、最初の予約の直前・直後 or 同時刻に入れる ──
     const addAddon = formData.get("addAddon") === "true";
-    const addonTiming = (formData.get("addonTiming") as string) === "same" ? "same" : "after";
+    const rawAddonTiming = formData.get("addonTiming") as string;
+    const addonTiming: "before" | "after" | "same" =
+      rawAddonTiming === "same" ? "same" : rawAddonTiming === "before" ? "before" : "after";
     if (addAddon) {
       try {
         const { data: cs } = await supabase
@@ -614,12 +628,24 @@ export async function createManualReservation(formData: FormData) {
           : { data: null as { id: string; name: string; duration_minutes: number | null; required_staff_id: string | null; allow_concurrent: boolean | null } | null };
         if (addon && addon.id !== courseId) {
           // 「同時刻」は allow_concurrent（水素など）だけ許可。それ以外は施術後に回す。
-          const effectiveTiming: "after" | "same" =
-            addonTiming === "same" && addon.allow_concurrent === true ? "same" : "after";
+          // 「施術前」は施術開始の直前に収める（水素を吸ってからトレーニング→施術など）。
+          const effectiveTiming: "before" | "after" | "same" =
+            addonTiming === "same"
+              ? (addon.allow_concurrent === true ? "same" : "after")
+              : addonTiming; // "before" or "after"
           const aDur = Number(addon.duration_minutes ?? 30) || 30;
-          const aBase = effectiveTiming === "same" ? baseDate : new Date(baseDate.getTime() + durationMinutes * 60 * 1000);
-          const aStartIso = aBase.toISOString();
-          const aEndIso = new Date(aBase.getTime() + aDur * 60 * 1000).toISOString();
+          let aStartIso: string;
+          let aEndIso: string;
+          if (effectiveTiming === "before") {
+            const aEnd = baseDate;
+            const aStart = new Date(baseDate.getTime() - aDur * 60 * 1000);
+            aStartIso = aStart.toISOString();
+            aEndIso = aEnd.toISOString();
+          } else {
+            const aBase = effectiveTiming === "same" ? baseDate : new Date(baseDate.getTime() + durationMinutes * 60 * 1000);
+            aStartIso = aBase.toISOString();
+            aEndIso = new Date(aBase.getTime() + aDur * 60 * 1000).toISOString();
+          }
           const aStaffId = (addon.required_staff_id as string | null) ?? null;
           const aName = addon.name as string;
           let laneFree = true;
@@ -640,7 +666,7 @@ export async function createManualReservation(formData: FormData) {
               customer_id: customerId,
               start_time: aStartIso,
               end_time: aEndIso,
-              memo: effectiveTiming === "same" ? `【${aName} 追加・同時刻】` : `【${aName} 追加・施術後】`,
+              memo: effectiveTiming === "same" ? `【${aName} 追加・同時刻】` : effectiveTiming === "before" ? `【${aName} 追加・施術前】` : `【${aName} 追加・施術後】`,
               is_first_visit: false,
               status: "confirmed",
               clinic_id: clinicId,
