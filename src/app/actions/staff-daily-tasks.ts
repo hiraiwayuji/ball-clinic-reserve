@@ -386,3 +386,87 @@ export async function updateTask(id: string, patch: { title?: string; priority?:
   revalidatePath("/admin/dashboard");
   return { success: true };
 }
+
+// ── 役割別 毎日業務テンプレ（Phase A） ───────────────────────────
+// 施術者/受付/はなまる など役割ごとの「毎日やる業務」を院長が定義し、
+// 出勤打刻時に各人の所属グループから当日タスク(staff_tasks)を自動生成する。
+export type DailyTaskTemplates = Record<string, string[]>;
+
+export async function getDailyTaskTemplates(): Promise<DailyTaskTemplates> {
+  const { clinicId } = await checkAdminAuth();
+  const sb = getServiceClient();
+  if (!sb) return {};
+  const { data } = await sb.from("clinic_settings").select("daily_task_templates").eq("id", clinicId).maybeSingle();
+  return (data?.daily_task_templates as DailyTaskTemplates | null) ?? {};
+}
+
+export async function setDailyTaskTemplates(templates: DailyTaskTemplates): Promise<{ success: boolean; error?: string }> {
+  const { clinicId } = await checkAdminAuth();
+  const sb = getServiceClient();
+  if (!sb) return { success: false, error: "サーバー設定エラー" };
+  const clean: DailyTaskTemplates = {};
+  for (const [g, arr] of Object.entries(templates || {})) {
+    const key = String(g).trim();
+    if (!key) continue;
+    clean[key] = (arr || []).map((t) => String(t).trim().slice(0, 60)).filter(Boolean);
+  }
+  const { error } = await sb.from("clinic_settings").update({ daily_task_templates: clean }).eq("id", clinicId);
+  return error ? { success: false, error: error.message } : { success: true };
+}
+
+export type StaffTaskGroupRow = { id: string; name: string; groups: string[] };
+
+export async function listStaffTaskGroups(): Promise<StaffTaskGroupRow[]> {
+  const { clinicId } = await checkAdminAuth();
+  const sb = getServiceClient();
+  if (!sb) return [];
+  const { data } = await sb.from("reservation_staff")
+    .select("id, name, task_groups").eq("clinic_id", clinicId).eq("is_active", true).order("sort_order");
+  return (data ?? []).map((r: any) => ({ id: r.id, name: r.name, groups: (r.task_groups as string[] | null) ?? [] }));
+}
+
+export async function setStaffTaskGroups(staffId: string, groups: string[]): Promise<{ success: boolean; error?: string }> {
+  const { clinicId } = await checkAdminAuth();
+  const sb = getServiceClient();
+  if (!sb) return { success: false, error: "サーバー設定エラー" };
+  const clean = Array.from(new Set((groups || []).map((g) => String(g).trim()).filter(Boolean)));
+  const { error } = await sb.from("reservation_staff").update({ task_groups: clean }).eq("id", staffId).eq("clinic_id", clinicId);
+  return error ? { success: false, error: error.message } : { success: true };
+}
+
+/**
+ * 当日タスクを役割テンプレから生成（無いものだけ作る。承認済み＝毎日の定型業務）。
+ * clinicId/staffId 明示版。打刻（ログイン不要）からも service client 経由で呼べる。
+ */
+async function ensureTemplateTasksFor(
+  sb: NonNullable<ReturnType<typeof getServiceClient>>,
+  clinicId: string,
+  staffId: string,
+  dateStr: string,
+): Promise<void> {
+  const [{ data: staff }, { data: settings }, { data: existing }] = await Promise.all([
+    sb.from("reservation_staff").select("task_groups").eq("id", staffId).eq("clinic_id", clinicId).maybeSingle(),
+    sb.from("clinic_settings").select("daily_task_templates").eq("id", clinicId).maybeSingle(),
+    sb.from("staff_tasks").select("title").eq("clinic_id", clinicId).eq("staff_id", staffId).eq("due_date", dateStr),
+  ]);
+  const groups: string[] = (staff?.task_groups as string[] | null) ?? [];
+  const templates = (settings?.daily_task_templates as DailyTaskTemplates | null) ?? {};
+  const wanted: string[] = [];
+  for (const g of groups) for (const t of (templates[g] ?? [])) if (!wanted.includes(t)) wanted.push(t);
+  const have = new Set((existing ?? []).map((r: any) => r.title as string));
+  const rows = wanted.filter((t) => !have.has(t)).map((title) => ({
+    clinic_id: clinicId, staff_id: staffId, title, due_date: dateStr,
+    status: "pending", priority: "normal", task_kind: "other", approved: true, source: "manual",
+  }));
+  if (rows.length > 0) await sb.from("staff_tasks").insert(rows);
+}
+
+/** 院長側：指定スタッフの当日テンプレ業務を生成（プレビュー/手動用）。 */
+export async function ensureTodayTemplateTasks(staffId: string, dateStr: string): Promise<{ success: boolean; error?: string }> {
+  const { clinicId } = await checkAdminAuth();
+  const sb = getServiceClient();
+  if (!sb) return { success: false, error: "サーバー設定エラー" };
+  await ensureTemplateTasksFor(sb, clinicId, staffId, dateStr);
+  revalidatePath("/admin/dashboard");
+  return { success: true };
+}
