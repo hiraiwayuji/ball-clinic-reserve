@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import {
   format, addMonths, startOfMonth, endOfMonth, eachDayOfInterval,
   startOfWeek, addDays, isSameMonth,
@@ -89,6 +89,7 @@ export default function ShiftCoordinationPage() {
   const [draftText, setDraftText] = useState("");
   const [draftSaving, setDraftSaving] = useState(false);
   const [gridDay, setGridDay] = useState<string | null>(null); // 日別グリッドで表示中の日付
+  const [draftView, setDraftView] = useState<"day" | "month">("day"); // 日別 / 月表（色バー）
 
   // Phase2: 調整メモ（なぜ直したか）→ 院ごとの調整ノートに蓄積しAIが翌月に学習
   const [adjustReason, setAdjustReason] = useState("");
@@ -183,6 +184,21 @@ export default function ShiftCoordinationPage() {
     : c === "gap" ? "bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-200"
     : c === "hana" ? "bg-violet-100 text-violet-800 dark:bg-violet-900/40 dark:text-violet-200"
     : "text-slate-300 dark:text-slate-600";
+
+  // 月表ビュー用：スタッフ名（姓）→ 表示色。各スタッフの display_color（アプリ設定）を使う。
+  const staffColorByShort = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const s of submissions) {
+      const short = s.staffName.split(/[\s　]/)[0];
+      if (short) m.set(short, colorOf(s.displayColor));
+    }
+    return m;
+  }, [submissions]);
+  const cellColor = (cell: { n: string; c: string }): string | undefined => {
+    if (cell.c === "gap") return "#fda4af";           // 要調整=赤
+    if (!cell.n) return undefined;
+    return staffColorByShort.get(cell.n) ?? "#94a3b8"; // 未登録スタッフ=グレー
+  };
 
   const [escalating, setEscalating] = useState(false);
   const escalateToBoru = async () => {
@@ -390,9 +406,69 @@ export default function ShiftCoordinationPage() {
             )}
           </div>
 
-          {/* 日別グリッド（1日ずつ確認：予約カレンダーと同じ時間軸の見た目） */}
-          {curGrid && (
+          {/* 日別グリッド / 月表（色バー）: 1日ずつ or 月全体で確認 */}
+          {gridDates.length > 0 && (
             <div className="rounded-xl border border-amber-200 dark:border-amber-800 bg-white dark:bg-slate-900 p-2.5">
+              <div className="flex items-center gap-1 mb-2">
+                {(["day", "month"] as const).map((v) => (
+                  <button
+                    key={v}
+                    type="button"
+                    onClick={() => setDraftView(v)}
+                    className={`h-7 px-3 rounded-lg text-[11px] font-bold border ${draftView === v ? "bg-amber-500 text-white border-amber-500" : "border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-300"}`}
+                  >
+                    {v === "day" ? "日別" : "月表（色バー）"}
+                  </button>
+                ))}
+              </div>
+              {draftView === "month" && (
+                <div className="overflow-x-auto">
+                  <table className="border-collapse" style={{ tableLayout: "fixed" }}>
+                    <thead>
+                      <tr>
+                        <th className="sticky left-0 z-10 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 px-1 py-0.5 text-[9px] text-slate-500 w-16">日付</th>
+                        <th className="sticky z-10 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 px-1 py-0.5 text-[9px] text-slate-500 w-12" style={{ left: 64 }}>区分</th>
+                        {gridSlots.map((s, i) => (
+                          <th key={i} className="border border-slate-100 dark:border-slate-800 px-0 py-0.5 text-[8px] font-normal text-slate-400" style={{ minWidth: 18 }}>{s.endsWith(":00") ? s : ""}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {gridDates.map((ds) => {
+                        const g = savedDraft!.grid![ds];
+                        const dlabel = `${Number(ds.slice(5, 7))}/${Number(ds.slice(8, 10))}(${g.dow})`;
+                        return (
+                          <Fragment key={ds}>
+                            <tr>
+                              <td rowSpan={2} className="sticky left-0 z-10 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 px-1 text-[10px] font-bold text-slate-600 dark:text-slate-300">{dlabel}</td>
+                              <td className="sticky z-10 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 px-1 text-[9px] text-slate-500" style={{ left: 64 }}>受付</td>
+                              {g.recep.map((c, i) => (
+                                <td key={i} title={c.n ? `${c.n} ${gridSlots[i]}` : ""} className="border border-slate-100 dark:border-slate-800 p-0" style={{ height: 16, backgroundColor: cellColor(c) }} />
+                              ))}
+                            </tr>
+                            <tr>
+                              <td className="sticky z-10 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 px-1 text-[9px] text-violet-500" style={{ left: 64 }}>はな</td>
+                              {g.hana.map((c, i) => (
+                                <td key={i} title={c.n ? `${c.n} ${gridSlots[i]}` : ""} className="border border-slate-100 dark:border-slate-800 p-0" style={{ height: 16, backgroundColor: cellColor(c) }}>
+                                  {c.c === "hana" ? <span className="block text-center text-[8px] leading-none">●</span> : c.c === "gap" ? <span className="block text-center text-[8px] leading-none">⚠</span> : null}
+                                </td>
+                              ))}
+                            </tr>
+                          </Fragment>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                  <div className="flex flex-wrap gap-x-3 gap-y-1 mt-2 text-[10px] text-slate-500">
+                    {Array.from(staffColorByShort.entries()).map(([nm, col]) => (
+                      <span key={nm}><span className="inline-block w-3 h-3 rounded-sm align-middle mr-1" style={{ backgroundColor: col }} />{nm}</span>
+                    ))}
+                    <span><span className="inline-block w-3 h-3 rounded-sm align-middle mr-1" style={{ backgroundColor: "#fda4af" }} />要調整</span>
+                    <span>●=はなまる（色は各スタッフの設定色）</span>
+                  </div>
+                </div>
+              )}
+              {draftView === "day" && curGrid && (<>
               <div className="flex items-center justify-between gap-2 mb-2">
                 <button
                   type="button"
@@ -447,6 +523,7 @@ export default function ShiftCoordinationPage() {
                 <span><span className="inline-block w-3 h-3 rounded-sm align-middle bg-rose-100 dark:bg-rose-900/40 mr-1" />空き・要調整</span>
                 <span><span className="inline-block w-3 h-3 rounded-sm align-middle bg-violet-100 dark:bg-violet-900/40 mr-1" />はなまる</span>
               </div>
+              </>)}
             </div>
           )}
 
