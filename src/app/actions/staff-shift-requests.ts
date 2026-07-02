@@ -265,6 +265,16 @@ export async function saveShiftDraft(month: string, md: string): Promise<{ succe
   return error ? { success: false, error: error.message } : { success: true };
 }
 
+/** 確認用ドラフトが存在する月の一覧（新しい月順）。月選び迷子の防止に使う */
+export async function listShiftDraftMonths(): Promise<string[]> {
+  const { clinicId } = await checkAdminAuth();
+  const { createClient } = await import("@/lib/supabase/server");
+  const supabase = await createClient();
+  const { data } = await supabase.from("clinic_settings").select("shift_drafts").eq("id", clinicId).maybeSingle();
+  const drafts = (data?.shift_drafts as Record<string, unknown> | null) ?? {};
+  return Object.keys(drafts).filter((k) => /^\d{4}-\d{2}$/.test(k)).sort().reverse();
+}
+
 /** 月表（色バー）で編集したグリッドを保存（確認用。予約には触れない） */
 export async function saveShiftDraftGrid(
   month: string,

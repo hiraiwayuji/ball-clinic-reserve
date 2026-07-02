@@ -14,7 +14,7 @@ import {
 import {
   listShiftCoordination, getShiftAutoEnabled, setShiftAutoEnabled,
   getShiftPolicy, setShiftPolicy, generateShiftFromRequests, confirmShiftLeaves,
-  requestShiftDevAssist, getShiftDraft, saveShiftDraft, saveShiftDraftGrid, listShiftStaff,
+  requestShiftDevAssist, getShiftDraft, saveShiftDraft, saveShiftDraftGrid, listShiftStaff, listShiftDraftMonths,
   getShiftAdjustNotes, appendShiftAdjustNote,
   type ShiftSubmission, type ShiftStaff, type ShiftChatMessage, type ShiftDraft, type ShiftGridDay,
 } from "@/app/actions/staff-shift-requests";
@@ -99,6 +99,9 @@ export default function ShiftCoordinationPage() {
   const paintingRef = useRef(false);
   const [allStaff, setAllStaff] = useState<ShiftStaff[]>([]);
   useEffect(() => { listShiftStaff().then(setAllStaff).catch(() => {}); }, []);
+  // 確認用ドラフトがある月の一覧（「◯月の案があります」案内用）
+  const [draftMonths, setDraftMonths] = useState<string[]>([]);
+  useEffect(() => { listShiftDraftMonths().then(setDraftMonths).catch(() => {}); }, []);
   useEffect(() => {
     const up = () => { paintingRef.current = false; };
     window.addEventListener("mouseup", up);
@@ -441,6 +444,27 @@ export default function ShiftCoordinationPage() {
         </div>
         <p className="text-[11px] text-violet-600/80 dark:text-violet-300/70">提出済みの出勤希望と上の方針から、{month && format(month, "M月", { locale: ja })}の出勤表案をAIが作ります。確定すると出勤時間・休み希望が予約枠に反映されます。</p>
       </div>
+
+      {/* 別の月に確認中の案がある時の案内（月選び迷子防止） */}
+      {!savedDraft && draftMonths.filter((m) => m !== monthStr).length > 0 && (
+        <div className="rounded-2xl border-2 border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-950/20 p-4 flex items-center justify-between gap-3 flex-wrap">
+          <p className="text-sm font-bold text-amber-800 dark:text-amber-200">
+            📋 {draftMonths.filter((m) => m !== monthStr).map((m) => `${Number(m.slice(5, 7))}月`).join("・")}の「確認中の出勤表案」があります
+          </p>
+          <div className="flex gap-2">
+            {draftMonths.filter((m) => m !== monthStr).slice(0, 3).map((m) => (
+              <button
+                key={m}
+                type="button"
+                onClick={() => setMonth(new Date(Number(m.slice(0, 4)), Number(m.slice(5, 7)) - 1, 1))}
+                className="h-9 px-4 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-sm font-black"
+              >
+                {Number(m.slice(5, 7))}月の案を開く
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Phase1: 確認用ドラフト（保存されて残る。予約には自動反映しない） */}
       {savedDraft && (
