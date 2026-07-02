@@ -79,6 +79,7 @@ export async function listAttendanceStaff(): Promise<AttendanceStaff[]> {
     .select("id, name, display_color")
     .eq("clinic_id", PUBLIC_CLINIC_ID)
     .eq("is_active", true)
+    .eq("attendance_excluded", false)
     .order("sort_order")
     .order("created_at");
   return (data ?? []) as AttendanceStaff[];
@@ -359,6 +360,7 @@ export async function listStaffWages(): Promise<OwnerStaffWage[]> {
     .select("id, name, display_color, hourly_wage")
     .eq("clinic_id", clinicId)
     .eq("is_active", true)
+    .eq("attendance_excluded", false)
     .order("sort_order")
     .order("created_at");
   return (data ?? []).map((s) => ({
