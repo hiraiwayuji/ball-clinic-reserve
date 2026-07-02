@@ -197,6 +197,33 @@ export default function ShiftCoordinationPage() {
   const curGrid = (gridDay && gridData) ? gridData[gridDay] : null;
   const gridSlots = savedDraft?.slots ?? [];
 
+  // お知らせ：受付が誰もいない時間帯（日付ごとに連続枠をまとめる）
+  const receptionGaps = useMemo(() => {
+    if (!gridData || gridSlots.length === 0) return [] as { label: string; ranges: string }[];
+    const endOf = (i: number) => {
+      const [h, m] = gridSlots[i].split(":").map(Number);
+      const t = h * 60 + m + 30;
+      return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, "0")}`;
+    };
+    const out: { label: string; ranges: string }[] = [];
+    for (const ds of Object.keys(gridData).sort()) {
+      const g = gridData[ds];
+      const ranges: string[] = [];
+      let start: number | null = null;
+      g.recep.forEach((c, i) => {
+        const isGap = c.c === "gap" || !c.n || c.n === "（空き）";
+        if (isGap && start === null) start = i;
+        if ((!isGap || i === g.recep.length - 1) && start !== null) {
+          const last = isGap ? i : i - 1;
+          ranges.push(`${gridSlots[start]}〜${endOf(last)}`);
+          start = null;
+        }
+      });
+      if (ranges.length > 0) out.push({ label: `${Number(ds.slice(5, 7))}/${Number(ds.slice(8, 10))}(${g.dow})`, ranges: ranges.join("、") });
+    }
+    return out;
+  }, [gridData, gridSlots]);
+
   // 月表の塗り：paint（姓 or ""=消す）をセルに適用
   const paintCell = (ds: string, row: "recep" | "hana", idx: number) => {
     if (paint === null || !editGrid) return;
@@ -482,6 +509,21 @@ export default function ShiftCoordinationPage() {
             )}
           </div>
 
+          {/* お知らせ：受付が誰もいない時間帯 */}
+          {receptionGaps.length > 0 && (
+            <div className="rounded-xl border-2 border-rose-300 dark:border-rose-700 bg-rose-50 dark:bg-rose-950/20 p-3">
+              <p className="text-xs font-black text-rose-700 dark:text-rose-300 flex items-center gap-1.5 mb-1.5">
+                🔔 お知らせ：受付に誰もいない時間があります（{receptionGaps.length}日）
+              </p>
+              <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-rose-700 dark:text-rose-300">
+                {receptionGaps.map((g) => (
+                  <span key={g.label}>⚠ {g.label} {g.ranges}</span>
+                ))}
+              </div>
+              <p className="mt-1.5 text-[10px] text-rose-500/80">月表の赤いマス（⚠）が空きです。パレットで人を塗って埋めるか、方針欄にご指示ください。</p>
+            </div>
+          )}
+
           {/* 日別グリッド / 月表（色バー）: 1日ずつ or 月全体で確認 */}
           {gridDates.length > 0 && (
             <div className="rounded-xl border border-amber-200 dark:border-amber-800 bg-white dark:bg-slate-900 p-2.5">
@@ -556,9 +598,14 @@ export default function ShiftCoordinationPage() {
                             <tr>
                               <td rowSpan={2} className="sticky left-0 z-10 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 px-1 text-[10px] font-bold text-slate-600 dark:text-slate-300">{dlabel}</td>
                               <td className="sticky z-10 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 px-1 text-[9px] text-slate-500" style={{ left: 64 }}>受付</td>
-                              {g.recep.map((c, i) => (
-                                <td key={i} title={c.n ? `${c.n} ${gridSlots[i]}` : gridSlots[i]} className="border border-slate-100 dark:border-slate-800 p-0 select-none" {...cellProps("recep", i)} style={{ ...cellProps("recep", i).style, backgroundColor: cellColor(c) }} />
-                              ))}
+                              {g.recep.map((c, i) => {
+                                const uncovered = c.c === "gap" || !c.n || c.n === "（空き）";
+                                return (
+                                  <td key={i} title={uncovered ? `受付なし ${gridSlots[i]}` : `${c.n} ${gridSlots[i]}`} className="border border-slate-100 dark:border-slate-800 p-0 select-none" {...cellProps("recep", i)} style={{ ...cellProps("recep", i).style, backgroundColor: uncovered ? "#fda4af" : cellColor(c) }}>
+                                    {uncovered ? <span className="block text-center text-[8px] leading-none pointer-events-none">⚠</span> : null}
+                                  </td>
+                                );
+                              })}
                             </tr>
                             <tr>
                               <td className="sticky z-10 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 px-1 text-[9px] text-violet-500" style={{ left: 64 }}>はな</td>

@@ -109,7 +109,14 @@ export default function AttendanceAdminPage() {
                 <span className="block text-[11px] font-normal text-slate-500">オンにするとスタッフが打刻できるようになります</span>
               </span>
               <button
-                onClick={() => setConfig({ ...config, enabled: !config.enabled })}
+                onClick={async () => {
+                  // ON/OFF はその場で保存する（「設定を保存」の押し忘れで反映されない事故防止）
+                  const next = { ...config, enabled: !config.enabled };
+                  setConfig(next);
+                  const r = await setAttendanceSettings(next);
+                  if (r.success) toast.success(next.enabled ? "打刻をオンにしました" : "打刻をオフにしました");
+                  else { setConfig(config); toast.error(r.error ?? "切替に失敗しました"); }
+                }}
                 className={`relative w-12 h-7 rounded-full transition-colors ${config.enabled ? "bg-emerald-500" : "bg-slate-300"}`}
               >
                 <span className={`absolute top-1 left-1 w-5 h-5 rounded-full bg-white transition-transform ${config.enabled ? "translate-x-5" : ""}`} />
