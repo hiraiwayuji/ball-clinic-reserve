@@ -16,7 +16,8 @@ import AIMemo from "@/components/admin/AIMemo";
 import BlogProposal from "@/components/admin/BlogProposal";
 import { PatientSearchPanel } from "@/components/admin/PatientSearchPanel";
 import { getUpcomingBirthdays } from "@/app/actions/admin-marketing-actions";
-import { Cake, Sparkles as SparklesIcon, Star } from "lucide-react";
+import { getDormantAlertCount } from "@/app/actions/adminCustomers";
+import { Cake, Sparkles as SparklesIcon, Star, BellRing } from "lucide-react";
 import AISecretaryBriefing from "@/components/admin/AISecretaryBriefing";
 import { realtimeGuard } from "@/lib/realtime-guard";
 
@@ -35,6 +36,7 @@ export default function DashboardClient({ aiSecretaryEnabled = true, canSeeExpen
   const [patientPanelOpen, setPatientPanelOpen] = useState(false);
   const [selectedPatientId, setSelectedPatientId] = useState<string | null>(null);
   const [birthdays, setBirthdays] = useState<any>(null);
+  const [dormantCount, setDormantCount] = useState<number | null>(null);
 
   useEffect(() => {
     setCurrentDate(new Date());
@@ -50,6 +52,8 @@ export default function DashboardClient({ aiSecretaryEnabled = true, canSeeExpen
         }
         const bDays = await getUpcomingBirthdays();
         setBirthdays(bDays);
+        // 休眠患者数（30日以上未来院）— 失敗してもダッシュボード全体は止めない
+        getDormantAlertCount(30).then(setDormantCount).catch(() => setDormantCount(null));
       } catch (err) {
         console.error("Dashboard fetch error:", err);
         setError("システムエラーが発生しました");
@@ -496,6 +500,36 @@ export default function DashboardClient({ aiSecretaryEnabled = true, canSeeExpen
                 </div>
                 <Link href="/admin/expenses" className="w-full">
                   <Button className="w-full bg-emerald-600 hover:bg-emerald-700">経費入力画面へ</Button>
+                </Link>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* 休眠患者アラート */}
+        {dormantCount !== null && dormantCount > 0 && (
+          <Card className="lg:col-span-1 shadow-sm border-rose-200 bg-gradient-to-br from-rose-50/60 to-white">
+            <CardHeader className="bg-rose-50/40 border-b pb-4">
+              <CardTitle className="flex items-center text-lg text-rose-800">
+                <BellRing className="w-5 h-5 mr-2 text-rose-500" /> 休眠患者アラート
+              </CardTitle>
+              <CardDescription>離脱前のフォローで再来院につなげましょう</CardDescription>
+            </CardHeader>
+            <CardContent className="pt-6">
+              <div className="flex flex-col items-center justify-center space-y-4 py-2 text-center">
+                <div className="flex items-end gap-1">
+                  <span className="text-5xl font-black text-rose-600">{dormantCount}</span>
+                  <span className="text-sm font-bold text-slate-500 mb-1.5">名</span>
+                </div>
+                <p className="text-xs text-slate-500">
+                  30日以上ご来院のない患者さんがいます。<br />
+                  LINEでお声がけしてみませんか？
+                </p>
+                <Link href="/admin/customers?tab=dormant" className="w-full">
+                  <Button className="w-full bg-rose-500 hover:bg-rose-600 text-white">
+                    要フォローリストを見る
+                    <ArrowRight className="w-4 h-4 ml-1.5" />
+                  </Button>
                 </Link>
               </div>
             </CardContent>

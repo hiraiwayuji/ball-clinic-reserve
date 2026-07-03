@@ -13,7 +13,7 @@ import {
 } from "@/components/ui/dialog";
 import { SuspendToggle } from "./SuspendToggle";
 import { LinkLineDialog } from "./LinkLineDialog";
-import { updateCustomerInfo, mergeCustomers, sendDormantLinePush, getMonthlyVisitStats, refreshLineDisplayNames, clearAutoSuspension, type MonthlyVisitStat } from "@/app/actions/adminCustomers";
+import { updateCustomerInfo, mergeCustomers, sendDormantLinePush, getMonthlyVisitStats, refreshLineDisplayNames, clearAutoSuspension, getCustomerLtv, type MonthlyVisitStat, type CustomerLtv } from "@/app/actions/adminCustomers";
 import { QuestionnaireDialog } from "./QuestionnaireDialog";
 import {
   Search, Pencil, Check, X, Loader2, ClipboardList,
@@ -326,6 +326,136 @@ function MergeDialog({
 
 // ── 行コンポーネント ────────────────────────────────────────────────
 
+// ── LTV スコアカードダイアログ ──────────────────────────────────────
+
+function LtvDialog({
+  open, onOpenChange, customerId, customerName,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  customerId: string;
+  customerName: string;
+}) {
+  const [ltv, setLtv] = useState<CustomerLtv | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    setLoading(true);
+    setError(null);
+    getCustomerLtv(customerId)
+      .then((res) => {
+        if (res.success && res.data) setLtv(res.data);
+        else setError(res.error ?? "取得に失敗しました");
+      })
+      .catch(() => setError("取得に失敗しました"))
+      .finally(() => setLoading(false));
+  }, [open, customerId]);
+
+  const scoreColor = (s: number) =>
+    s >= 70 ? "text-emerald-600" : s >= 40 ? "text-amber-600" : "text-rose-600";
+  const scoreBarColor = (s: number) =>
+    s >= 70 ? "bg-emerald-500" : s >= 40 ? "bg-amber-500" : "bg-rose-500";
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2 text-indigo-700 dark:text-indigo-400">
+            <BarChart3 className="w-5 h-5" />
+            {customerName}様の LTV サマリ
+          </DialogTitle>
+          <DialogDescription>
+            自費売上（売上記帳）に基づく生涯価値の見える化です。保険分は含みません。
+          </DialogDescription>
+        </DialogHeader>
+
+        {loading ? (
+          <div className="flex justify-center items-center h-48 text-slate-400">
+            <Loader2 className="w-6 h-6 animate-spin" />
+          </div>
+        ) : error ? (
+          <div className="p-6 text-center text-rose-500 text-sm">{error}</div>
+        ) : !ltv ? null : ltv.visitCount === 0 ? (
+          <div className="p-8 text-center text-slate-400 text-sm">
+            この患者さんの自費売上データはまだありません。<br />
+            売上記帳をすると自動で集計されます。
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {/* 高LTVラベル */}
+            {ltv.isTopTier && (
+              <div className="flex items-center gap-2 p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-xl">
+                <Star className="w-5 h-5 text-amber-500 fill-amber-400 shrink-0" />
+                <p className="text-sm font-bold text-amber-800 dark:text-amber-300">
+                  高LTV患者（直近12ヶ月の売上 上位{ltv.rankPercent}%）
+                </p>
+              </div>
+            )}
+
+            {/* 累計貢献額（メイン数字） */}
+            <div className="text-center py-3 bg-indigo-50/50 dark:bg-indigo-900/10 rounded-xl border border-indigo-100 dark:border-indigo-900/30">
+              <p className="text-xs font-bold text-indigo-500 uppercase tracking-wider mb-1">累計貢献額（自費）</p>
+              <p className="text-4xl font-black text-indigo-700 dark:text-indigo-400">
+                ¥{ltv.totalRevenue.toLocaleString()}
+              </p>
+              <p className="text-xs text-slate-400 mt-1">
+                {ltv.firstSaleDate && `${format(new Date(ltv.firstSaleDate), "yyyy/M/d")}〜`}
+                {ltv.lastSaleDate && format(new Date(ltv.lastSaleDate), "yyyy/M/d")}・{ltv.visitCount}回来院
+              </p>
+            </div>
+
+            {/* サブ指標グリッド */}
+            <div className="grid grid-cols-3 gap-2">
+              <div className="p-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-center">
+                <p className="text-[10px] font-bold text-slate-400 mb-1">来院単価</p>
+                <p className="text-lg font-black text-slate-800 dark:text-slate-100">¥{ltv.avgSpend.toLocaleString()}</p>
+              </div>
+              <div className="p-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-center">
+                <p className="text-[10px] font-bold text-slate-400 mb-1">月平均来院</p>
+                <p className="text-lg font-black text-slate-800 dark:text-slate-100">{ltv.visitsPerMonth}<span className="text-xs font-bold text-slate-400 ml-0.5">回</span></p>
+              </div>
+              <div className="p-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-center">
+                <p className="text-[10px] font-bold text-slate-400 mb-1">推定年間貢献</p>
+                <p className="text-lg font-black text-slate-800 dark:text-slate-100">¥{ltv.estAnnualValue.toLocaleString()}</p>
+              </div>
+            </div>
+
+            {/* 継続スコア */}
+            <div className="p-4 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl">
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-xs font-bold text-slate-500">継続スコア</p>
+                {ltv.continuityScore !== null ? (
+                  <p className={`text-2xl font-black ${scoreColor(ltv.continuityScore)}`}>
+                    {ltv.continuityScore}
+                    <span className="text-xs font-bold text-slate-400 ml-0.5">/100</span>
+                  </p>
+                ) : (
+                  <p className="text-xs text-slate-400">来院3回未満のため算出不可</p>
+                )}
+              </div>
+              {ltv.continuityScore !== null && (
+                <div className="h-2 bg-slate-100 dark:bg-slate-700 rounded-full overflow-hidden">
+                  <div
+                    className={`h-full rounded-full transition-all ${scoreBarColor(ltv.continuityScore)}`}
+                    style={{ width: `${ltv.continuityScore}%` }}
+                  />
+                </div>
+              )}
+              <p className="text-[10px] text-slate-400 mt-2">
+                平均来院間隔{ltv.avgIntervalDays !== null ? ` ${ltv.avgIntervalDays}日` : "—"}に対して、
+                最終来院から{ltv.daysSinceLast !== null ? `${ltv.daysSinceLast}日` : "—"}経過。
+                間隔以内なら100、間隔の3倍空くと0になります。
+              </p>
+            </div>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function EditableRow({
   customer, index, isDuplicate, allRecordNumbers, allPhones, allCustomers,
 }: {
@@ -341,6 +471,7 @@ function EditableRow({
   const [phone, setPhone] = useState(customer.phone);
   const [recordNo, setRecordNo] = useState(customer.medical_record_number ?? "");
   const [qOpen, setQOpen] = useState(false);
+  const [ltvOpen, setLtvOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
 
   // 統合ダイアログ
@@ -477,7 +608,19 @@ function EditableRow({
         </TableCell>
 
         <TableCell className="text-center">
-          <Badge variant="secondary" className="px-3">{customer.appointmentCount} 回</Badge>
+          <div className="flex flex-col items-center gap-1">
+            <Badge variant="secondary" className="px-3">{customer.appointmentCount} 回</Badge>
+            <button
+              type="button"
+              onClick={() => setLtvOpen(true)}
+              title="この患者さんの累計貢献額・来院単価・継続スコアを見る"
+              className="flex items-center gap-0.5 text-[10px] font-bold text-indigo-500 hover:text-indigo-700 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 px-1.5 py-0.5 rounded border border-indigo-200 dark:border-indigo-800/50 transition-colors"
+            >
+              <BarChart3 className="w-2.5 h-2.5" />
+              LTV
+            </button>
+          </div>
+          <LtvDialog open={ltvOpen} onOpenChange={setLtvOpen} customerId={customer.id} customerName={name} />
         </TableCell>
 
         <TableCell className="text-center">
@@ -1156,6 +1299,12 @@ export function CustomersTable({ customers }: { customers: Customer[] }) {
   const [showImport, setShowImport] = useState(false);
   const [refreshingLine, setRefreshingLine] = useState(false);
   const router = useRouter();
+
+  // ダッシュボード等から ?tab=dormant で休眠タブを直接開けるようにする
+  useEffect(() => {
+    const tab = new URLSearchParams(window.location.search).get("tab");
+    if (tab === "dormant" || tab === "retention") setActiveTab(tab);
+  }, []);
 
   // 連携済みだが LINE 表示名が未取得の顧客がいれば、初回に1度だけ自動取得
   const missingLineNameCount = useMemo(

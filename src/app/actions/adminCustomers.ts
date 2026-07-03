@@ -826,6 +826,171 @@ export async function sendDormantLinePush(
   }
 }
 
+// ===== 休眠患者数（ダッシュボードバッジ用） =====
+
+/**
+ * 最終来院から thresholdDays 日以上経過した患者数を返す。
+ * getCustomers と同じ基準（キャンセル以外の予約の最新 start_time を最終来院とする）。
+ */
+export async function getDormantAlertCount(thresholdDays = 30): Promise<number> {
+  const { clinicId } = await checkAdminAuth();
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) return 0;
+  const supabase = createAdminClient(url, key);
+
+  const { data, error } = await supabase
+    .from("customers")
+    .select("id, appointments(start_time, status)")
+    .eq("clinic_id", clinicId);
+
+  if (error || !data) return 0;
+
+  const cutoff = Date.now() - thresholdDays * 24 * 60 * 60 * 1000;
+  let count = 0;
+  for (const c of data as { appointments?: { start_time: string; status: string | null }[] | null }[]) {
+    const active = (c.appointments ?? []).filter((a) => a.status !== "cancelled");
+    if (active.length === 0) continue;
+    const last = Math.max(...active.map((a) => new Date(a.start_time).getTime()));
+    if (last < cutoff) count++;
+  }
+  return count;
+}
+
+// ===== 患者別 LTV（顧客生涯価値）スコアカード =====
+
+export type CustomerLtv = {
+  /** 来院日数（自費売上の記帳日ベース・同日複数明細は1日と数える） */
+  visitCount: number;
+  /** 累計自費売上 */
+  totalRevenue: number;
+  /** 来院1日あたり平均単価 */
+  avgSpend: number;
+  /** 月平均来院日数 */
+  visitsPerMonth: number;
+  /** 推定年間貢献額 = 平均単価 × 月平均来院 × 12 */
+  estAnnualValue: number;
+  /** 継続スコア 0-100（null = 来院3日未満でデータ不足） */
+  continuityScore: number | null;
+  /** 平均来院間隔（日） */
+  avgIntervalDays: number | null;
+  /** 最終来院からの経過日数 */
+  daysSinceLast: number | null;
+  firstSaleDate: string | null;
+  lastSaleDate: string | null;
+  /** 直近12ヶ月の売上で全患者中の上位何%か（1=トップ）。null = 直近12ヶ月売上なし */
+  rankPercent: number | null;
+  /** 上位20%の高LTV患者か */
+  isTopTier: boolean;
+};
+
+/**
+ * 患者のLTVサマリを計算する。
+ * cash_sales は氏名ベースのテーブルなので customer の name で照合する
+ * （getSalesPrediction と同じ方式）。保険入金は患者に紐づかないため対象外。
+ */
+export async function getCustomerLtv(
+  customerId: string,
+): Promise<{ success: boolean; data?: CustomerLtv; error?: string }> {
+  const { clinicId } = await checkAdminAuth();
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) return { success: false, error: "Supabase env missing" };
+  const supabase = createAdminClient(url, key);
+
+  const { data: customer } = await supabase
+    .from("customers")
+    .select("name")
+    .eq("id", customerId)
+    .eq("clinic_id", clinicId)
+    .maybeSingle();
+  if (!customer) return { success: false, error: "患者が見つかりません" };
+
+  // 全期間の自費売上（この患者）
+  const { data: sales, error: salesError } = await supabase
+    .from("cash_sales")
+    .select("treatment_fee, sale_date")
+    .eq("clinic_id", clinicId)
+    .eq("customer_name", customer.name.trim())
+    .order("sale_date", { ascending: true })
+    .limit(5000);
+  if (salesError) return { success: false, error: "売上データの取得に失敗しました" };
+
+  const rows = sales ?? [];
+  if (rows.length === 0) {
+    return {
+      success: true,
+      data: {
+        visitCount: 0, totalRevenue: 0, avgSpend: 0, visitsPerMonth: 0,
+        estAnnualValue: 0, continuityScore: null, avgIntervalDays: null,
+        daysSinceLast: null, firstSaleDate: null, lastSaleDate: null,
+        rankPercent: null, isTopTier: false,
+      },
+    };
+  }
+
+  // 同日複数明細（施術＋物販など）は1来院として数える
+  const uniqueDates = [...new Set(rows.map((r) => r.sale_date))].sort();
+  const visitCount = uniqueDates.length;
+  const totalRevenue = rows.reduce((s, r) => s + (r.treatment_fee ?? 0), 0);
+  const avgSpend = Math.round(totalRevenue / visitCount);
+
+  const firstMs = new Date(uniqueDates[0]).getTime();
+  const lastMs = new Date(uniqueDates[uniqueDates.length - 1]).getTime();
+  const DAY = 24 * 60 * 60 * 1000;
+  const spanMonths = Math.max((lastMs - firstMs) / DAY / 30.44, 1);
+  const visitsPerMonth = Math.round((visitCount / spanMonths) * 10) / 10;
+  const estAnnualValue = Math.round(avgSpend * visitsPerMonth * 12);
+
+  const daysSinceLast = Math.floor((Date.now() - lastMs) / DAY);
+  const avgIntervalDays =
+    visitCount >= 2 ? Math.round((lastMs - firstMs) / DAY / (visitCount - 1)) : null;
+
+  // 継続スコア: 平均来院間隔以内なら100、間隔の3倍空くと0（線形減衰）
+  let continuityScore: number | null = null;
+  if (visitCount >= 3 && avgIntervalDays !== null && avgIntervalDays > 0) {
+    const ratio = (3 * avgIntervalDays - daysSinceLast) / (2 * avgIntervalDays);
+    continuityScore = Math.round(Math.min(Math.max(ratio, 0), 1) * 100);
+  }
+
+  // 直近12ヶ月の患者別売上ランキング（上位%）
+  let rankPercent: number | null = null;
+  let isTopTier = false;
+  const yearAgo = new Date(Date.now() - 365 * DAY).toISOString().slice(0, 10);
+  const { data: recentAll } = await supabase
+    .from("cash_sales")
+    .select("customer_name, treatment_fee")
+    .eq("clinic_id", clinicId)
+    .gte("sale_date", yearAgo)
+    .limit(20000);
+  if (recentAll && recentAll.length > 0) {
+    const totals = new Map<string, number>();
+    for (const r of recentAll) {
+      const n = (r.customer_name ?? "").trim();
+      if (!n) continue;
+      totals.set(n, (totals.get(n) ?? 0) + (r.treatment_fee ?? 0));
+    }
+    const mine = totals.get(customer.name.trim());
+    if (mine !== undefined && totals.size > 0) {
+      const sorted = [...totals.values()].sort((a, b) => b - a);
+      const rank = sorted.findIndex((v) => v <= mine) + 1;
+      rankPercent = Math.max(1, Math.round((rank / sorted.length) * 100));
+      isTopTier = rankPercent <= 20;
+    }
+  }
+
+  return {
+    success: true,
+    data: {
+      visitCount, totalRevenue, avgSpend, visitsPerMonth, estAnnualValue,
+      continuityScore, avgIntervalDays, daysSinceLast,
+      firstSaleDate: uniqueDates[0],
+      lastSaleDate: uniqueDates[uniqueDates.length - 1],
+      rankPercent, isTopTier,
+    },
+  };
+}
+
 // ===== リピート率・失客率 月別推移 =====
 
 export type MonthlyVisitStat = {
