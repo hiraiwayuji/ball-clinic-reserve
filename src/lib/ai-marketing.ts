@@ -2,8 +2,11 @@
  * AI集客投稿アシスタント — 共通定数・型・ボール接骨院の既定プロファイル・医療広告ガイドラインの整形ロジック。
  *
  * サーバー専用 import を持たない（client / server 両方から読める）。
- * 将来の他院横展開: ai_marketing_profiles を院ごとに保存し、未設定時はここの BALL_DEFAULT_PROFILE にフォールバックする。
+ * ai_marketing_profiles を院ごとに保存し、未設定時は DEFAULT_PROFILE にフォールバックする
+ * （ボール本体のみボール既定、他院は中立＝ボールの院名・強みが他院のAI投稿に混ざらない）。
  */
+
+import { CLINIC_CONFIG } from "@/lib/clinic-config";
 
 // ── 選択肢（フォームUIとプロンプト生成で共有）─────────────────────────
 
@@ -339,6 +342,7 @@ export type SavedPost = {
 // ── ボール接骨院の既定プロファイル（初期設定）────────────────────────
 
 export const BALL_DEFAULT_PROFILE: MarketingProfile = {
+  // clinic-leak-ignore: ボール本体専用の既定プロファイル（DEFAULT_PROFILE がボール本体のみに適用）
   clinic_name: "ボール接骨院",
   area_name: "藍住",
   address: "徳島県板野郡藍住町",
@@ -386,23 +390,47 @@ export const BALL_DEFAULT_PROFILE: MarketingProfile = {
   reference_style: "",
 };
 
-/** DB行（JSONB主体）→ 型付きプロファイル。未設定キーはボール既定値で補完。 */
+// ── この稼働の既定プロファイル ────────────────────────────────────────
+// ボール本体のデプロイだけボールの値。他院はプロファイル未設定でも
+// ボールの院名・藍住・強みがAI投稿に混ざらないよう中立値（院名は env 由来）。
+const NEUTRAL_PROFILE: MarketingProfile = {
+  clinic_name: CLINIC_CONFIG.name,
+  area_name: "",
+  address: CLINIC_CONFIG.address,
+  strengths: [],
+  menus: [],
+  targets: [],
+  tone: "親しみやすく、患者さんに伝わりやすい雰囲気",
+  // 医療広告ガイドラインの禁止表現は院に依存しない共通ルール
+  banned_phrases: BALL_DEFAULT_PROFILE.banned_phrases,
+  recommended_keywords: [],
+  sns_accounts: {},
+  line_link: "",
+  reserve_url: "",
+  reference_style: "",
+};
+
+export const DEFAULT_PROFILE: MarketingProfile = CLINIC_CONFIG.isDefaultClinic
+  ? BALL_DEFAULT_PROFILE
+  : NEUTRAL_PROFILE;
+
+/** DB行（JSONB主体）→ 型付きプロファイル。未設定キーはこの院の既定値で補完。 */
 export function profileFromRow(row: Record<string, unknown> | null): MarketingProfile {
-  if (!row) return { ...BALL_DEFAULT_PROFILE };
+  if (!row) return { ...DEFAULT_PROFILE };
   const arr = (v: unknown, fallback: string[]): string[] =>
     Array.isArray(v) && v.length ? (v as string[]) : fallback;
   const str = (v: unknown, fallback: string): string =>
     typeof v === "string" && v.trim() ? (v as string) : fallback;
   return {
-    clinic_name: str(row.clinic_name, BALL_DEFAULT_PROFILE.clinic_name),
-    area_name: str(row.area_name, BALL_DEFAULT_PROFILE.area_name),
-    address: str(row.address, BALL_DEFAULT_PROFILE.address),
-    strengths: arr(row.strengths, BALL_DEFAULT_PROFILE.strengths),
-    menus: arr(row.menus, BALL_DEFAULT_PROFILE.menus),
-    targets: arr(row.targets, BALL_DEFAULT_PROFILE.targets),
-    tone: str(row.tone, BALL_DEFAULT_PROFILE.tone),
-    banned_phrases: arr(row.banned_phrases, BALL_DEFAULT_PROFILE.banned_phrases),
-    recommended_keywords: arr(row.recommended_keywords, BALL_DEFAULT_PROFILE.recommended_keywords),
+    clinic_name: str(row.clinic_name, DEFAULT_PROFILE.clinic_name),
+    area_name: str(row.area_name, DEFAULT_PROFILE.area_name),
+    address: str(row.address, DEFAULT_PROFILE.address),
+    strengths: arr(row.strengths, DEFAULT_PROFILE.strengths),
+    menus: arr(row.menus, DEFAULT_PROFILE.menus),
+    targets: arr(row.targets, DEFAULT_PROFILE.targets),
+    tone: str(row.tone, DEFAULT_PROFILE.tone),
+    banned_phrases: arr(row.banned_phrases, DEFAULT_PROFILE.banned_phrases),
+    recommended_keywords: arr(row.recommended_keywords, DEFAULT_PROFILE.recommended_keywords),
     sns_accounts:
       row.sns_accounts && typeof row.sns_accounts === "object"
         ? (row.sns_accounts as Record<string, string>)

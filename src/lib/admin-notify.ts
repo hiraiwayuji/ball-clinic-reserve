@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import { CLINIC_CONFIG } from "@/lib/clinic-config";
 
 const FALLBACK_EMAIL = "hiraiwayuji@gmail.com";
 
@@ -193,7 +194,7 @@ export async function sendEmailToOwners(
   clinicId: string,
   subject: string,
   text: string,
-  fromLabel: string = "ボール接骨院予約",
+  fromLabel: string = `${CLINIC_CONFIG.name}予約`,
 ): Promise<void> {
   const resendKey = process.env.RESEND_API_KEY;
   if (!resendKey) return;

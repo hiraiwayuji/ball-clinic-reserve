@@ -64,6 +64,16 @@ const RULES = [
     msg: "ボールの clinic_id がハードコードされています（他院データがボールに入る恐れ）。PUBLIC_CLINIC_ID を import してください。",
   },
   {
+    // 院名「ボール接骨院」の文字列ベタ書き＝他院の画面・LINE配信・メールにボール名が出る
+    // （2026-07-03 マッスルの管理画面・リマインドLINEで実例）。
+    // env フォールバック（?? "ボール接骨院"）や isDefaultClinic/IS_BALL/isFamilyGift ガード内は許容。
+    id: "ball-name",
+    re: /["'`][^"'`\n]*ボール接骨院/,
+    needsEnv: /process\.env\.NEXT_PUBLIC_CLINIC_NAME|isDefaultClinic|IS_BALL|isFamilyGift|\bball\(/,
+    skipComments: true,
+    msg: "院名「ボール接骨院」がハードコードされています（他院の画面・配信にボール名が出ます）。CLINIC_CONFIG.name / DB clinic_name を使うか、ボール限定なら isDefaultClinic でガードしてください。",
+  },
+  {
     // 患者向けページでロゴを直接描画＝他院にボールのロゴが漏れる。必ず <ClinicWordmark /> を使う。
     id: "direct-logo-render",
     re: /src=\{?\s*CLINIC_CONFIG\.(logoSmallUrl|logoUrl)/,
@@ -110,6 +120,8 @@ for (const file of files) {
     const envWindow = (i >= 2 ? lines[i - 2] : "") + "\n" + prev + "\n" + line;
     for (const rule of RULES) {
       if (!rule.re.test(line)) continue;
+      // コメント行はスキップするルール（説明文中の「"ボール接骨院"」等の誤検知防止）
+      if (rule.skipComments && /^\s*(\/\/|\*|\/\*)/.test(line)) continue;
       // 対象ディレクトリ限定のルール
       if (rule.onlyUnder && !rule.onlyUnder.some((p) => rel.startsWith(p))) continue;
       // env フォールバック（`process.env... ?? "ボール既定値"`）は許容

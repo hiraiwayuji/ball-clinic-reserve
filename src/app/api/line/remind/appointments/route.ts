@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { getLineAccessToken } from "@/lib/admin-notify";
+import { reminderMessage } from "@/lib/marketing-templates";
+import { CLINIC_CONFIG } from "@/lib/clinic-config";
 
 const REMIND_SECRET = process.env.REMIND_SECRET || "";
 
@@ -39,9 +41,12 @@ export async function POST(req: NextRequest) {
   // 設定を取得
   const { data: settings } = await supabase
     .from("clinic_settings")
-    .select("auto_remind_enabled, auto_remind_time, line_channel_access_token")
+    .select("auto_remind_enabled, auto_remind_time, line_channel_access_token, clinic_name")
     .eq("id", DEFAULT_CLINIC_ID)
     .maybeSingle();
+
+  // 患者に届く文面の院名は DB → env の順で解決（ベタ書き禁止＝他院にボール名で届く事故防止）
+  const clinicName = settings?.clinic_name || CLINIC_CONFIG.name;
 
   if (!settings?.auto_remind_enabled) {
     return NextResponse.json({ status: "skipped", reason: "auto remind disabled" });
@@ -99,7 +104,7 @@ export async function POST(req: NextRequest) {
       timeZone: "Asia/Tokyo", hour: "2-digit", minute: "2-digit",
     });
     const displayName = customer.display_name ?? customer.name;
-    const msg = `${displayName}様\n\nこんにちは！ボール接骨院です。\n本日 ${timeStr} からご予約を頂いております。\nお気を付けてお越しください！`;
+    const msg = reminderMessage(clinicName, displayName, timeStr);
 
     for (const lineId of lineIds) {
       const ok = await pushLine(lineId, msg, channelToken);

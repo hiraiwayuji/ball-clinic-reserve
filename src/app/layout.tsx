@@ -5,6 +5,7 @@ import ServiceWorkerRegistrar from "@/components/ServiceWorkerRegistrar";
 import { Toaster } from "@/components/ui/sonner";
 import { isFamilyGift } from "@/lib/app-mode";
 import { CLINIC_CONFIG } from "@/lib/clinic-config";
+import { clinicPwaIconSrc } from "@/lib/pwa-icon";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -50,7 +51,7 @@ export default function RootLayout({
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="default" />
         <meta name="apple-mobile-web-app-title" content={APPLE_APP_TITLE} />
-        <link rel="apple-touch-icon" href="/images/logo_symbol_main_black.png" />
+        <link rel="apple-touch-icon" href={clinicPwaIconSrc()} />
       </head>
       <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
         <ThemeProvider

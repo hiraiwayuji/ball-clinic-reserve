@@ -1,6 +1,7 @@
 import type { MetadataRoute } from "next";
 import { isFamilyGift } from "@/lib/app-mode";
 import { CLINIC_CONFIG } from "@/lib/clinic-config";
+import { clinicPwaIconSrc } from "@/lib/pwa-icon";
 
 /**
  * PWA manifest をモード別に出し分ける。
@@ -9,15 +10,16 @@ import { CLINIC_CONFIG } from "@/lib/clinic-config";
  * 予約院(CLINIC/DEMO)では予約管理(/admin)を起動先にする。
  */
 export default function manifest(): MetadataRoute.Manifest {
+  const iconSrc = clinicPwaIconSrc();
   const icons = [
     {
-      src: "/images/logo_symbol_main_black.png",
+      src: iconSrc,
       sizes: "192x192",
       type: "image/png",
       purpose: "maskable" as const,
     },
     {
-      src: "/images/logo_symbol_main_black.png",
+      src: iconSrc,
       sizes: "512x512",
       type: "image/png",
       purpose: "maskable" as const,

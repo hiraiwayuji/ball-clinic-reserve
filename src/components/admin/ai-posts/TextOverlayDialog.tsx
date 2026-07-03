@@ -156,7 +156,7 @@ export default function TextOverlayDialog({ open, onOpenChange, imageSrc }: Prop
           </div>
           <div className="space-y-1">
             <Label className="text-xs text-slate-500">小さい文字（サブ・任意）</Label>
-            <Input value={subtitle} onChange={(e) => setSubtitle(e.target.value)} placeholder="例：藍住 ボール接骨院" />
+            <Input value={subtitle} onChange={(e) => setSubtitle(e.target.value)} placeholder="例：藍住 ◯◯接骨院" />
           </div>
 
           <div className="flex flex-wrap gap-4">

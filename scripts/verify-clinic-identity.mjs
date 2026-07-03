@@ -31,14 +31,28 @@ async function check(t) {
     const info = await res.json();
     const nameOk = (info.clinicName || "").includes(t.expectClinic);
     const defaultOk = !!info.isDefault === !!t.expectDefault;
-    if (nameOk && defaultOk) {
-      return { ok: true, msg: `clinic="${info.clinicName}" id=${info.clinicId}` };
+    if (!nameOk || !defaultOk) {
+      return {
+        ok: false,
+        msg: `❗フォールバック疑い: clinic="${info.clinicName}" id=${info.clinicId} isDefault=${info.isDefault}` +
+             ` (期待: "${t.expectClinic}"を含む / default=${t.expectDefault})`,
+      };
     }
-    return {
-      ok: false,
-      msg: `❗フォールバック疑い: clinic="${info.clinicName}" id=${info.clinicId} isDefault=${info.isDefault}` +
-           ` (期待: "${t.expectClinic}"を含む / default=${t.expectDefault})`,
-    };
+    // PWA manifest も検証（ホーム画面アイコン名・アイコンが他院/ボールに化けていないか。
+    // 2026-07-03 マッスル実例: 旧 manifest.json が全院「ボール接骨院 ファミリーカレンダー」だった）
+    const mres = await fetch(t.url + "/manifest.webmanifest", { signal: ctrl.signal, cache: "no-store" });
+    if (mres.ok) {
+      const m = await mres.json().catch(() => null);
+      const mName = m?.name || "";
+      const mIcon = m?.icons?.[0]?.src || "";
+      if (!mName.includes(t.expectClinic)) {
+        return { ok: false, msg: `❗manifest名ズレ: "${mName}" (期待: "${t.expectClinic}"を含む)` };
+      }
+      if (!t.expectDefault && mIcon.includes("logo_symbol_main_black")) {
+        return { ok: false, msg: `❗manifestアイコンがボールのロゴ: ${mIcon}` };
+      }
+    }
+    return { ok: true, msg: `clinic="${info.clinicName}" id=${info.clinicId}` };
   } catch (e) {
     return { ok: false, msg: `err=${e.message}` };
   } finally {

@@ -25,6 +25,7 @@ export async function GET() {
   return NextResponse.json(
     {
       clinicId: PUBLIC_CLINIC_ID,
+      // clinic-leak-ignore: 監視用の既定名（NAME未設定=ボールfallbackを検知して警告する役割）
       clinicName: envName || "ボール接骨院",
       clinicNameShort: process.env.NEXT_PUBLIC_CLINIC_NAME_SHORT ?? (envName || "ボール接骨院"),
       isDefault,

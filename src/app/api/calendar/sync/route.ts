@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { format, addHours } from "date-fns";
 import { PUBLIC_CLINIC_ID } from "@/lib/default-clinic-id";
+import { CLINIC_CONFIG } from "@/lib/clinic-config";
 
 // Supabase クライアントは GET 内で遅延初期化する（ビルド時に env var が
 // 未定義でも 'supabaseUrl is required' でビルドが落ちないようにするため）
@@ -23,7 +24,8 @@ function generateICalendar(events: any[]): string {
     "PRODID:-//Ball Clinic//Reservation System//JA",
     "CALSCALE:GREGORIAN",
     "METHOD:PUBLISH",
-    "X-WR-CALNAME:ボール接骨院＆家族カレンダー",
+    // 院名は env 由来（ボール本体のみ「ボール接骨院」）。ベタ書き禁止＝他院の購読カレンダーにボール名が出る事故防止
+    `X-WR-CALNAME:${CLINIC_CONFIG.isDefaultClinic ? `${CLINIC_CONFIG.name}＆家族カレンダー` : `${CLINIC_CONFIG.name}カレンダー`}`,
     "X-WR-TIMEZONE:Asia/Tokyo",
   ];
 

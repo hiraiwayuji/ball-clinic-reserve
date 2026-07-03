@@ -15,6 +15,7 @@ import {
 import { sendAppointmentReminders, sendBirthdayCoupons, runMonthlyLottery, sendWelcomeQuestionnaire, sendWomenOnlyCampaign, getMarketingStats, sendSegmentedCampaign, sendReferralMessage, getCampaignGuide } from "@/app/actions/line-marketing";
 import { consultCampaign } from "@/app/actions/ai-marketing";
 import type { CampaignKey, CampaignInfo } from "@/lib/marketing-templates";
+import { CLINIC_CONFIG } from "@/lib/clinic-config";
 import { updateClinicSettings, getClinicSettings } from "@/app/actions/settings";
 import Link from "next/link";
 import { Clock } from "lucide-react";
@@ -157,7 +158,7 @@ export default function MarketingDashboardPage() {
 
   const handleSendReminders = () => {
     const count = stats?.todayAppointments != null ? `本日の予約 ${stats.todayAppointments}件` : "本日の予約者";
-    const defaultMsg = "様\n\nこんにちは！ボール接骨院です。\n本日ご予約日となっております。\nお気を付けてお越しください！";
+    const defaultMsg = `様\n\nこんにちは！${CLINIC_CONFIG.name}です。\n本日ご予約日となっております。\nお気を付けてお越しください！`;
     showPreview("当日リマインド", testMode ? "テスト配信（自分のLINEのみ）" : count, defaultMsg, async (_msg, _time) => {
       setLoadingAction("reminders");
       try {
