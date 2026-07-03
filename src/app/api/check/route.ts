@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { PUBLIC_CLINIC_ID } from "@/lib/default-clinic-id";
+import { normalizePhone } from "@/lib/phone";
 
 const DEFAULT_CLINIC_ID = PUBLIC_CLINIC_ID;
 
@@ -58,7 +59,7 @@ export async function GET(req: NextRequest) {
   }
 
   if (phone) {
-    const cleanPhone = phone.replace(/-/g, "");
+    const cleanPhone = normalizePhone(phone);
     const { data: customers } = await supabase
       .from("customers")
       .select("id")

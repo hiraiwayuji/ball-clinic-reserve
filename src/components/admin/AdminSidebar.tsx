@@ -69,13 +69,21 @@ export default function AdminSidebar({ role = "owner", variant = "desktop", onNa
       {/* メニュー */}
       <nav className="flex-1 overflow-y-auto py-4 px-3" aria-label="管理メニュー">
         <ul className="space-y-1">
-          {items.map(({ href, label, icon: Icon }) => {
+          {items.map(({ href, label, icon: Icon, description, group }, i) => {
             const active = isActiveNav(pathname, href);
+            // 直前の項目とグループが変わったところに小さな見出しを入れる
+            const showGroupLabel = !!group && group !== items[i - 1]?.group;
             return (
               <li key={href}>
+                {showGroupLabel && (
+                  <div className={`px-3 pb-1 text-[11px] font-semibold text-slate-400 select-none ${i === 0 ? "pt-0" : "pt-4"}`}>
+                    {group}
+                  </div>
+                )}
                 <Link
                   href={href}
                   onClick={onNavigate}
+                  title={description}
                   aria-current={active ? "page" : undefined}
                   className={
                     active

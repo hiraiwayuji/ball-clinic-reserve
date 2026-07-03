@@ -31,6 +31,9 @@ export default function AttendancePage() {
   const [tasks, setTasks] = useState<TodayTask[]>([]);
   const [taskBusy, setTaskBusy] = useState<string | null>(null);
   const [highlightTasks, setHighlightTasks] = useState(false);
+  // 「できなかった理由」入力モーダル（window.prompt はスマホで使いにくいため使わない）
+  const [reasonTask, setReasonTask] = useState<TodayTask | null>(null);
+  const [taskReason, setTaskReason] = useState("");
   const refreshTasks = async (id: string) => {
     if (!id) { setTasks([]); return; }
     try { setTasks(await getTodayTasks(id)); } catch { setTasks([]); }
@@ -39,23 +42,35 @@ export default function AttendancePage() {
   const doneCount = tasks.filter((t) => t.outcome === "done").length;
   const donePct = tasks.length > 0 ? Math.round((doneCount / tasks.length) * 100) : 0;
 
-  const handleReport = async (t: TodayTask, outcome: "done" | "not_done") => {
-    let reason: string | undefined;
-    if (outcome === "not_done") {
-      const v = window.prompt(`「${t.title}」ができなかった理由があれば入力してください（空欄でもOK）`, t.outcomeReason ?? "");
-      if (v === null) return; // キャンセル
-      reason = v;
-    }
+  const submitReport = async (t: TodayTask, outcome: "done" | "not_done", reason?: string) => {
     setTaskBusy(t.id);
     const r = await reportTask(staffId, t.id, outcome, reason);
     setTaskBusy(null);
-    if (r.success) refreshTasks(staffId);
-    else toast.error(r.error ?? "記録に失敗しました");
+    if (r.success) {
+      setReasonTask(null);
+      refreshTasks(staffId);
+    } else {
+      toast.error(r.error ?? "記録に失敗しました。もう一度お試しください");
+    }
+  };
+
+  const handleReport = (t: TodayTask, outcome: "done" | "not_done") => {
+    if (outcome === "not_done") {
+      // モーダルで理由を聞いてから記録する
+      setTaskReason(t.outcomeReason ?? "");
+      setReasonTask(t);
+      return;
+    }
+    void submitReport(t, "done");
   };
 
   useEffect(() => {
-    listAttendanceStaff().then(setStaffList).catch(() => {});
-    getAttendanceConfig().then(setConfig).catch(() => {});
+    listAttendanceStaff().then(setStaffList).catch(() => {
+      toast.error("スタッフ一覧の読み込みに失敗しました。ページを再読み込みしてください");
+    });
+    getAttendanceConfig().then(setConfig).catch(() => {
+      toast.error("設定の読み込みに失敗しました。ページを再読み込みしてください");
+    });
   }, []);
 
   const selectedStaff = useMemo(() => staffList.find((s) => s.id === staffId), [staffList, staffId]);
@@ -284,6 +299,47 @@ export default function AttendancePage() {
           </div>
         )}
       </div>
+
+      {/* 「できなかった理由」入力モーダル */}
+      {reasonTask && (
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-end sm:items-center justify-center p-4" onClick={() => taskBusy === null && setReasonTask(null)}>
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md p-5 space-y-4" onClick={(e) => e.stopPropagation()}>
+            <div className="text-center">
+              <div className="inline-flex items-center gap-2 text-rose-600 font-black">
+                <XCircle className="w-5 h-5" />
+                「{reasonTask.title}」を「できなかった」で記録します
+              </div>
+              <p className="text-slate-500 text-sm mt-1">
+                理由があれば入力してください。<br />空欄のままでも記録できます。
+              </p>
+            </div>
+            <textarea
+              value={taskReason}
+              onChange={(e) => setTaskReason(e.target.value)}
+              rows={3}
+              autoFocus
+              placeholder="例：予約が立て込んで時間が取れなかった"
+              className="w-full rounded-xl border border-slate-300 px-3 py-2 text-base bg-white"
+            />
+            <div className="flex gap-2 pt-1">
+              <button
+                onClick={() => setReasonTask(null)}
+                disabled={taskBusy !== null}
+                className="flex-1 h-12 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold text-sm"
+              >
+                もどる
+              </button>
+              <button
+                onClick={() => reasonTask && submitReport(reasonTask, "not_done", taskReason)}
+                disabled={taskBusy !== null}
+                className="flex-1 h-12 rounded-xl bg-rose-600 hover:bg-rose-700 disabled:opacity-40 text-white font-black text-sm"
+              >
+                {taskBusy !== null ? "記録中..." : "この内容で記録"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 残業理由モーダル */}
       {reasonOpen && (

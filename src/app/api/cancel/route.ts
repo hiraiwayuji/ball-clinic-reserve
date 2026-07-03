@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { PUBLIC_CLINIC_ID } from "@/lib/default-clinic-id";
+import { normalizePhone } from "@/lib/phone";
 import { writeAudit } from "@/lib/audit";
 import { pushLineToOwners, pushLineToCustomer } from "@/lib/admin-notify";
 
@@ -59,7 +60,7 @@ export async function GET(req: NextRequest) {
   }
 
   if (phone) {
-    const cleanPhone = phone.replace(/-/g, "");
+    const cleanPhone = normalizePhone(phone);
     const { data: customers } = await supabase
       .from("customers")
       .select("id")
@@ -102,7 +103,7 @@ export async function POST(req: NextRequest) {
   // 電話番号 or 名前でcustomer_idを特定し、対象予約が本人のものか検証する
   let allowedCustomerIds: string[] = [];
   if (phone) {
-    const cleanPhone = phone.replace(/-/g, "");
+    const cleanPhone = normalizePhone(phone);
     const { data: customers } = await supabase
       .from("customers")
       .select("id")

@@ -291,8 +291,9 @@ export default function ShiftRequestPage() {
           <button
             onClick={handleSubmit}
             disabled={submitting || !staffId || needsReason}
-            className="w-full h-14 rounded-2xl bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-base font-black shadow-lg"
+            className="w-full h-14 rounded-2xl bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-base font-black shadow-lg flex items-center justify-center gap-2"
           >
+            {submitting && <Loader2 className="w-5 h-5 animate-spin" />}
             {submitting ? "送信中..." : needsReason ? "連絡事項に理由をご記入ください" : "この内容で提出する"}
           </button>
         </div>

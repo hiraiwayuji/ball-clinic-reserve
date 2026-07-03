@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { toast } from "sonner";
-import { CheckCircle2, Circle, Plus, Trash2, AlertCircle, Calendar, ChevronLeft, ChevronRight, Sparkles, Wand2, Lightbulb } from "lucide-react";
+import { CheckCircle2, Circle, Plus, Trash2, AlertCircle, Calendar, ChevronLeft, ChevronRight, Sparkles, Wand2, Lightbulb, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
@@ -223,7 +223,10 @@ export default function TasksPage() {
         </CardHeader>
         <CardContent className="p-0">
           {loading ? (
-            <div className="p-8 text-center text-slate-400 text-sm">読み込み中...</div>
+            <div className="p-8 text-center text-slate-400 text-sm flex flex-col items-center gap-2">
+              <Loader2 className="w-6 h-6 animate-spin" />
+              読み込み中...
+            </div>
           ) : tasks.length === 0 ? (
             <div className="p-8 text-center text-slate-400 text-sm">
               <AlertCircle className="w-8 h-8 mx-auto mb-2 opacity-30" />

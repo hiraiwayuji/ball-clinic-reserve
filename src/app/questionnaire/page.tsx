@@ -9,6 +9,7 @@ import { createReservation, getAutoCourseSelection } from "@/app/actions/reserve
 import { getPublicClinicSettings } from "@/app/actions/publicSettings";
 import { toast } from "sonner";
 import { CLINIC_CONFIG } from "@/lib/clinic-config";
+import { normalizePhone } from "@/lib/phone";
 import { BirthDateInput } from "@/app/admin/customers/BirthDateInput";
 
 // 予約ページから引き継ぐ「選んだ日時・お名前・電話」（reserve/page.tsx と同じキー）
@@ -177,7 +178,7 @@ export default function QuestionnairePage() {
       return;
     }
 
-    const normalizedPhone = phone.trim().replace(/-/g, "");
+    const normalizedPhone = normalizePhone(phone);
     if (!/^\d{10,11}$/.test(normalizedPhone)) {
       toast.error("電話番号は10〜11桁の数字で入力してください（ハイフン不要）");
       return;

@@ -4,6 +4,7 @@ import { PUBLIC_CLINIC_ID } from "@/lib/default-clinic-id";
 import { pushLineToOwners, sendEmailToOwners } from "@/lib/admin-notify";
 import { getLineUidFromCookie } from "@/app/actions/family-line";
 import { resolveBookingCustomer, isBookingSuspendedNow } from "@/lib/booking-customer";
+import { normalizePhone } from "@/lib/phone";
 import { detectClinicMisconfig, CLINIC_MISCONFIG_USER_MESSAGE } from "@/lib/clinic-guard";
 
 async function notifyOwner(
@@ -191,7 +192,7 @@ export async function createWaitlistReservation(formData: FormData) {
       // ── 顧客照合（通常予約と同じゲート。未登録ならアンケート誘導＝bypass禁止） ──
       // ※ これまでキャンセル待ちは無条件に customer を新規作成しており、初めての方が
       //   アンケート未記入のまま登録される bypass になっていた（2026-06-02 修正）。
-      const normalizedPhone = (phone ?? "").replace(/[-\s]/g, "");
+      const normalizedPhone = normalizePhone(phone);
       const lineUid = await getLineUidFromCookie();
       const resolved = await resolveBookingCustomer(adminDb, {
         clinicId: DEFAULT_CLINIC_ID,
@@ -463,7 +464,7 @@ export async function createReservation(formData: FormData) {
     const name = formData.get("name") as string;
     const rawPhone = formData.get("phone") as string;
     // ハイフン・スペースを除去して正規化（アンケートDBと形式を統一）
-    const phone = rawPhone ? rawPhone.trim().replace(/[-\s]/g, "") : "";
+    const phone = normalizePhone(rawPhone);
     const visitType = formData.get("visitType") as string;
     const symptoms = formData.get("symptoms") as string;
     const isWaitlistIntent = formData.get("isWaitlistIntent") === "true";
@@ -1349,7 +1350,7 @@ export async function getAutoCourseSelection(input: {
 
     // ② 電話番号（前回入力 or アンケート登録直後）で特定。名前も来ていれば突き合わせる
     if (!customer && input.phone) {
-      const phone = String(input.phone).trim().replace(/[-\s]/g, "");
+      const phone = normalizePhone(input.phone);
       if (phone) {
         const { data } = await adminDb
           .from("customers")

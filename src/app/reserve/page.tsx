@@ -23,6 +23,7 @@ import { useClinicSlotDuration } from "@/lib/use-clinic-slot-duration";
 import { useClinicSchedule } from "@/lib/use-clinic-schedule";
 import { useClinicPatientCanPickStaff } from "@/lib/use-clinic-patient-staff";
 import { courseShortPrice } from "@/lib/course-price";
+import { normalizePhone } from "@/lib/phone";
 import { toast } from "sonner";
 import { CLINIC_CONFIG } from "@/lib/clinic-config";
 import ReserveLandingPage from "./ReserveLandingPage";
@@ -400,7 +401,7 @@ function ReserveContent() {
       const r2 = result as any;
       if (r2.lineLinked === false) {
         // 登録電話の下4桁（無ければ今回入力の下4桁でフォールバック）
-        const digits = (phone || "").replace(/\D/g, "");
+        const digits = normalizePhone(phone);
         setLineLinkPhone4(r2.phoneLast4 || (digits.length >= 4 ? digits.slice(-4) : null));
         setShowLineLinkPopup(true);
       }
@@ -475,7 +476,25 @@ function ReserveContent() {
           <h1 className="text-3xl font-extrabold text-white mb-2">
             {isWaitingResult ? "キャンセル待ち受付完了" : "仮予約を受け付けました"}
           </h1>
-          <p className="text-blue-200 text-sm mb-6">院長がLINEにて内容を確認後、予約確定のご連絡をいたします。</p>
+          {isWaitingResult ? (
+            <p className="text-blue-200 text-sm mb-6">院長がLINEにて内容を確認後、予約確定のご連絡をいたします。</p>
+          ) : (
+            /* 仮予約→確定の流れ：いまどこまで進んだかをひと目で */
+            <div className="mb-6 mx-auto max-w-sm rounded-2xl bg-white/5 border border-white/10 p-4 text-left space-y-2.5">
+              <p className="flex items-start gap-2 text-sm text-emerald-300 font-bold">
+                <CheckCircle2 className="w-4 h-4 mt-0.5 shrink-0" />
+                ご希望の日時をお預かりしました（仮予約）
+              </p>
+              <p className="flex items-start gap-2 text-sm text-blue-100/80">
+                <span className="w-4 text-center shrink-0">⏳</span>
+                院長が内容を確認します
+              </p>
+              <p className="flex items-start gap-2 text-sm text-blue-100/80">
+                <span className="w-4 text-center shrink-0">📱</span>
+                LINEで「予約確定」のご連絡が届いたら完了です
+              </p>
+            </div>
+          )}
           {hydrogenResult && (
             hydrogenResult.added ? (
               <div className="mb-6 mx-auto max-w-sm rounded-2xl bg-cyan-500/15 border border-cyan-400/30 px-4 py-3 text-cyan-100 text-sm font-bold">
@@ -640,6 +659,34 @@ function ReserveContent() {
   if (visitType === "new" && !phone) missingFields.push("電話番号");
   const canSubmit = missingFields.length === 0;
 
+  // 時間選択肢の空き状況（時間 Select の中身と「満席のご案内」の両方で使う）
+  const timeSlotInfos = (() => {
+    if (!date || (courses.length > 0 && !selectedCourseId)) return [];
+    // 担当固定/指名スタッフの「出勤時間」内だけに絞る（さみ・ヘッドスパ等）
+    const activeStaffSchedule = requiredStaff?.schedule ?? (selectedStaffId ? staffSchedules[selectedStaffId] : undefined);
+    const allSlots = filterSlotsByStaffSchedule(getTimeSlots(date, { slotMinutes, schedule }), date, activeStaffSchedule);
+    const selCourse = courses.find(c => c.id === selectedCourseId);
+    const requiredSteps = Math.max(1, Math.ceil((selCourse?.duration_minutes ?? slotMinutes) / slotMinutes));
+    // コースの施術時間ぶんの連続枠が確保できるか（カレンダー画面と同じ判定）
+    const canFit = (slot: string): boolean => {
+      const idx = allSlots.indexOf(slot);
+      if (idx < 0) return false;
+      for (let i = 0; i < requiredSteps; i++) {
+        const next = allSlots[idx + i];
+        if (!next) return false;
+        if (bookedTimes.includes(next)) return false;
+      }
+      return true;
+    };
+    return allSlots.map((t) => {
+      const isBooked = bookedTimes.includes(t);
+      const tooClose = isTimeSlotWithinTwoHours(date, t);
+      const noFit = !isBooked && !tooClose && !canFit(t);
+      return { time: t, isBooked, tooClose, noFit, selectable: !isBooked && !tooClose && !noFit };
+    });
+  })();
+  const noSelectableSlot = timeSlotInfos.length > 0 && timeSlotInfos.every((s) => !s.selectable);
+
   return (
     <div className="min-h-screen bg-slate-900 text-slate-200" data-dark-page>
       <div className="relative max-w-4xl mx-auto py-12 px-4 md:px-8">
@@ -774,47 +821,50 @@ function ReserveContent() {
                           />
                         </SelectTrigger>
                         <SelectContent className="bg-slate-900 border-white/10 text-white">
-                          {(() => {
-                            if (!date || (courses.length > 0 && !selectedCourseId)) return null;
-                            // 担当固定/指名スタッフの「出勤時間」内だけに絞る（さみ・ヘッドスパ等）
-                            const activeStaffSchedule = requiredStaff?.schedule ?? (selectedStaffId ? staffSchedules[selectedStaffId] : undefined);
-                            const allSlots = filterSlotsByStaffSchedule(getTimeSlots(date, { slotMinutes, schedule }), date, activeStaffSchedule);
-                            const selCourse = courses.find(c => c.id === selectedCourseId);
-                            const requiredSteps = Math.max(1, Math.ceil((selCourse?.duration_minutes ?? slotMinutes) / slotMinutes));
-                            // コースの施術時間ぶんの連続枠が確保できるか（カレンダー画面と同じ判定）
-                            const canFit = (slot: string): boolean => {
-                              const idx = allSlots.indexOf(slot);
-                              if (idx < 0) return false;
-                              for (let i = 0; i < requiredSteps; i++) {
-                                const next = allSlots[idx + i];
-                                if (!next) return false;
-                                if (bookedTimes.includes(next)) return false;
-                              }
-                              return true;
-                            };
-                            return allSlots.map((t) => {
-                              const isBooked = bookedTimes.includes(t);
-                              const tooClose = isTimeSlotWithinTwoHours(date, t);
-                              const noFit = !isBooked && !tooClose && !canFit(t);
-                              const label = isBooked ? `${t}（予約済）` : tooClose ? `${t}（要電話）` : noFit ? `${t}（枠不足）` : t;
-                              return (
-                                <SelectItem
-                                  key={t}
-                                  value={t}
-                                  disabled={isBooked || tooClose || noFit}
-                                  className="bg-slate-900 text-white focus:bg-slate-800 data-[disabled]:opacity-40"
-                                >
-                                  {label}
-                                </SelectItem>
-                              );
-                            });
-                          })()}
+                          {timeSlotInfos.map(({ time: t, isBooked, tooClose, noFit }) => {
+                            const label = isBooked ? `${t}（予約済）` : tooClose ? `${t}（要電話）` : noFit ? `${t}（枠不足）` : t;
+                            return (
+                              <SelectItem
+                                key={t}
+                                value={t}
+                                disabled={isBooked || tooClose || noFit}
+                                className="bg-slate-900 text-white focus:bg-slate-800 data-[disabled]:opacity-40"
+                              >
+                                {label}
+                              </SelectItem>
+                            );
+                          })}
                         </SelectContent>
                       </Select>
                       {courses.length > 0 && !selectedCourseId && (
                         <p className="text-xs text-amber-300 font-bold">
                           メニューを選択すると時間を選べるようになります
                         </p>
+                      )}
+                      {/* 選べない時間の意味（患者さん向けの凡例） */}
+                      {timeSlotInfos.some((s) => !s.selectable) && !noSelectableSlot && (
+                        <p className="text-[11px] text-blue-100/60 leading-relaxed">
+                          （予約済）…すでに埋まっている時間です／（要電話）…直前のご予約はお電話でお願いします／
+                          （枠不足）…この時間からだと施術時間が足りません
+                        </p>
+                      )}
+                      {/* 満席のご案内：別の日への誘導＋LINE相談 */}
+                      {noSelectableSlot && (
+                        <div className="rounded-xl border border-amber-400/40 bg-amber-500/10 p-3 text-sm text-amber-100 space-y-1.5">
+                          <p className="font-bold text-white">この日はご予約がいっぱいです</p>
+                          <p className="text-amber-100/90 leading-relaxed">
+                            お手数ですが、別の日をお選びください。<br />
+                            お急ぎの場合は、LINEでキャンセル待ちのご相談もできます。
+                          </p>
+                          <a
+                            href={LINE_URL}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-block text-xs font-bold text-emerald-300 underline underline-offset-2"
+                          >
+                            LINEで相談する
+                          </a>
+                        </div>
                       )}
                     </div>
                   </div>

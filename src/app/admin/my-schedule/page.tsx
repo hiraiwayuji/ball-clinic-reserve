@@ -277,21 +277,33 @@ export default function ShiftCoordinationPage() {
   };
 
   const [escalating, setEscalating] = useState(false);
-  const escalateToBoru = async () => {
-    const note = window.prompt("ぼーるくんに伝えたいこと（どんな出勤表にしたいか・AIで難しかった点など）を書いてください：", "");
-    if (note === null) return; // キャンセル
+  // window.prompt はスマホで使いにくい＆改行できないため、ダイアログで入力してもらう
+  const [assistOpen, setAssistOpen] = useState(false);
+  const [assistNote, setAssistNote] = useState("");
+  const escalateToBoru = () => {
+    setAssistNote("");
+    setAssistOpen(true);
+  };
+  const sendAssistRequest = async () => {
     setEscalating(true);
-    const r = await requestShiftDevAssist(monthStr, note, chatMessages);
+    const r = await requestShiftDevAssist(monthStr, assistNote, chatMessages);
     setEscalating(false);
-    if (r.success) toast.success("ぼーるくんに依頼しました。確認後に対応します🛠");
-    else toast.error(r.error ?? "依頼の送信に失敗しました");
+    if (r.success) {
+      setAssistOpen(false);
+      toast.success("ぼーるくんに依頼しました。確認後に対応します🛠");
+    } else {
+      toast.error(r.error ?? "依頼の送信に失敗しました");
+    }
   };
 
-  const confirmLeaves = async () => {
-    if (!confirm(`【最終調整は終わりましたか？】\n${month && format(month, "yyyy年M月", { locale: ja })}の出勤調整を"予約に反映"します。\n・休み希望の日 → 予約ブロック\n・出勤時間 → 予約可能枠\nAIで案を作っただけ・調整中の間は反映されません。反映してよろしいですか？`)) return;
+  // 確定（予約反映）の確認も window.confirm ではなくダイアログで内容を落ち着いて読めるように
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const confirmLeaves = () => setConfirmOpen(true);
+  const runConfirmLeaves = async () => {
     setConfirming(true);
     const r = await confirmShiftLeaves(monthStr);
     setConfirming(false);
+    setConfirmOpen(false);
     if (r.success) { toast.success(`確定しました（休み ${r.written ?? 0}件を予約に反映）`); setReflectConfirmed(false); }
     else toast.error(r.error ?? "確定に失敗しました");
   };
@@ -988,6 +1000,83 @@ export default function ShiftCoordinationPage() {
               {escalating ? "送信中..." : "🛠 うまくいかない…ぼーるくんに調整を依頼する"}
             </button>
             <p className="text-[11px] text-slate-400 text-center"><span className="font-bold text-slate-500 dark:text-slate-300">AIで案を作った時点では予約に反映されません。</span>上のチェックを入れて「確定」を押したときだけ、休み希望が予約ブロック・出勤時間が予約枠に反映されます。</p>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* 確定（予約反映）の確認ダイアログ */}
+      <Dialog open={confirmOpen} onOpenChange={(o) => { if (!confirming) setConfirmOpen(o); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>最終調整は終わりましたか？</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 text-sm text-slate-600 dark:text-slate-300">
+            <p className="font-bold text-slate-800 dark:text-slate-100">
+              {month ? format(month, "yyyy年M月", { locale: ja }) : ""}の出勤調整を予約に反映します。
+            </p>
+            <ul className="space-y-1.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 p-3">
+              <li className="flex items-start gap-2"><CheckCircle2 className="w-4 h-4 mt-0.5 text-emerald-600 shrink-0" />休み希望の日 → 予約が入らないようブロックされます</li>
+              <li className="flex items-start gap-2"><CheckCircle2 className="w-4 h-4 mt-0.5 text-emerald-600 shrink-0" />出勤時間 → 予約できる枠として反映されます</li>
+            </ul>
+            <p className="text-xs text-slate-400">
+              AIで案を作っただけ・調整中の間は反映されません。
+            </p>
+          </div>
+          <div className="flex gap-2 pt-2">
+            <button
+              onClick={() => setConfirmOpen(false)}
+              disabled={confirming}
+              className="flex-1 h-11 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 font-bold text-sm"
+            >
+              もどる
+            </button>
+            <button
+              onClick={runConfirmLeaves}
+              disabled={confirming}
+              className="flex-1 h-11 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-black text-sm"
+            >
+              {confirming ? "反映中..." : "予約に反映する"}
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* ぼーるくんへの調整依頼ダイアログ */}
+      <Dialog open={assistOpen} onOpenChange={(o) => { if (!escalating) setAssistOpen(o); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>🛠 ぼーるくんに調整を依頼</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <p className="text-sm text-slate-500 dark:text-slate-400">
+              どんな出勤表にしたいか、AIで難しかった点などを書いてください。<br />
+              今月のシフト希望とAIとのやり取りも一緒に送られます。
+            </p>
+            <textarea
+              value={assistNote}
+              onChange={(e) => setAssistNote(e.target.value)}
+              rows={4}
+              autoFocus
+              placeholder="例：土曜の受付が足りない形になってしまう。◯◯さんを午後だけにしたい など"
+              className="w-full rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-3 py-2 text-sm"
+            />
+          </div>
+          <div className="flex gap-2 pt-2">
+            <button
+              onClick={() => setAssistOpen(false)}
+              disabled={escalating}
+              className="flex-1 h-11 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 font-bold text-sm"
+            >
+              もどる
+            </button>
+            <button
+              onClick={sendAssistRequest}
+              disabled={escalating}
+              className="flex-1 h-11 rounded-xl bg-violet-600 hover:bg-violet-700 disabled:opacity-50 text-white font-black text-sm inline-flex items-center justify-center gap-1.5"
+            >
+              {escalating ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+              {escalating ? "送信中..." : "依頼を送る"}
+            </button>
           </div>
         </DialogContent>
       </Dialog>
