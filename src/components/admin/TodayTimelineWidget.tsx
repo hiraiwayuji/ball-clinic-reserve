@@ -14,7 +14,7 @@ import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
 import { realtimeGuard } from "@/lib/realtime-guard";
 import { getTimelineForDate, type TimelineData, type TimelineAppointment } from "@/app/actions/timeline";
-import { updateCheckinStatus, addAddonToAppointment, getAddonCourseInfo, sendReviewRequest, getReviewRequestConfig, restoreCancelledAppointment, deleteAppointment } from "@/app/actions/adminReserve";
+import { updateCheckinStatus, addAddonToAppointment, getAddonCourseInfo, sendReviewRequest, getReviewRequestConfig, restoreCancelledAppointment, deleteAppointment, setCancelledGhostHidden } from "@/app/actions/adminReserve";
 import { cancelKindLabel } from "@/components/admin/CancelledAppointmentDialog";
 import { getStaffSchedulesForDate, upsertStaffScheduleForDate, type StaffDaySchedule } from "@/app/actions/staff-schedule";
 import { getMyRole } from "@/app/actions/auth";
@@ -898,6 +898,30 @@ export default function TodayTimelineWidget({
                   <RotateCcw className="w-4 h-4 mr-1.5" />
                   予約を元に戻す（復活）
                 </Button>
+                {(selectedApt.cancel_kind === "approved" || selectedApt.cancel_kind === "clinic_reason") && (
+                  <Button
+                    onClick={async () => {
+                      setActionLoading(true);
+                      try {
+                        const res = await setCancelledGhostHidden(selectedApt.id, true);
+                        if (res.success) {
+                          toast.success("カレンダーから隠しました（記録は残っています）");
+                          setSelectedApt(null);
+                          if (date) fetchData(date);
+                        } else {
+                          toast.error(res.error ?? "更新に失敗しました");
+                        }
+                      } finally {
+                        setActionLoading(false);
+                      }
+                    }}
+                    disabled={actionLoading}
+                    variant="outline"
+                    className="w-full border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800"
+                  >
+                    カレンダーから隠す（削除はしない）
+                  </Button>
+                )}
                 <Button
                   onClick={async () => {
                     if (!confirm(`${selectedApt.customer_name ?? ""}様のキャンセル記録を完全に削除しますか？\n（薄い表示も消えます。元に戻せません）`)) return;

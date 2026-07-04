@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { format, parseISO } from "date-fns";
 import { ja } from "date-fns/locale";
-import { RotateCcw, Trash2, XCircle } from "lucide-react";
+import { Eye, EyeOff, RotateCcw, Trash2, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -13,7 +13,7 @@ import {
   DialogDescription,
   DialogFooter,
 } from "@/components/ui/dialog";
-import { restoreCancelledAppointment, deleteAppointment } from "@/app/actions/adminReserve";
+import { restoreCancelledAppointment, deleteAppointment, setCancelledGhostHidden } from "@/app/actions/adminReserve";
 import { toast } from "sonner";
 
 /** キャンセル仕分けの表示ラベル */
@@ -50,6 +50,29 @@ export function CancelledAppointmentDialog({
   const name = appointment.customer_name ?? cust?.name ?? "(お名前未登録)";
   const start = parseISO(appointment.start_time);
   const kindLabel = cancelKindLabel(appointment.cancel_kind, appointment.no_show);
+  // 隠せるのは仕分け済み（承諾済み／院都合）だけ。無断キャンセルは見えるまま残す。
+  const canHide = appointment.cancel_kind === "approved" || appointment.cancel_kind === "clinic_reason";
+  const isHidden = !!appointment.cancel_hidden;
+
+  const handleSetHidden = async (hidden: boolean) => {
+    setBusy(true);
+    try {
+      const res = await setCancelledGhostHidden(appointment.id, hidden);
+      if (res.success) {
+        toast.success(hidden
+          ? "カレンダーから隠しました（記録は残っています）"
+          : "カレンダーに再表示しました");
+        onOpenChange(false);
+        onSuccess?.();
+      } else {
+        toast.error(res.error || "更新に失敗しました");
+      }
+    } catch {
+      toast.error("通信エラーが発生しました");
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const handleRestore = async () => {
     setBusy(true);
@@ -125,6 +148,33 @@ export function CancelledAppointmentDialog({
             <RotateCcw className="w-4 h-4 mr-1.5" />
             予約を元に戻す（復活）
           </Button>
+          {isHidden ? (
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => handleSetHidden(false)}
+              disabled={busy}
+              className="w-full h-10 border-slate-300 text-slate-600 hover:bg-slate-50 rounded-xl text-sm"
+            >
+              <Eye className="w-4 h-4 mr-1.5" />
+              カレンダーに再表示する
+            </Button>
+          ) : canHide ? (
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => handleSetHidden(true)}
+              disabled={busy}
+              className="w-full h-10 border-slate-300 text-slate-600 hover:bg-slate-50 rounded-xl text-sm"
+            >
+              <EyeOff className="w-4 h-4 mr-1.5" />
+              カレンダーから隠す（削除はしない）
+            </Button>
+          ) : (
+            <p className="text-[11px] text-slate-400 text-center">
+              無断キャンセル・未仕分けのキャンセルは隠せません（見えるまま残します）
+            </p>
+          )}
           <Button
             type="button"
             variant="outline"

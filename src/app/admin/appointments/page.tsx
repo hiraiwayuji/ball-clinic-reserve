@@ -52,6 +52,8 @@ export default function AdminWeeklyGridPage() {
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   // キャンセル済み（薄い表示）をタップしたときの復活/完全削除ダイアログ
   const [cancelledApt, setCancelledApt] = useState<any>(null);
+  // 「隠す」にしたキャンセルを一時的に表示するトグル
+  const [showHiddenGhosts, setShowHiddenGhosts] = useState(false);
   // 毎週予約（連続予約）の最終回が近い患者のお知らせ
   const [endingSeries, setEndingSeries] = useState<EndingSeriesAlert[]>([]);
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
@@ -155,7 +157,7 @@ export default function AdminWeeklyGridPage() {
         // 入れ忘れとキャンセルを区別できるようにするため）。件数カウントからは除外する。
         const { data: aptData } = await supabase
           .from("appointments")
-          .select(`id, start_time, end_time, memo, is_first_visit, status, cancel_kind, no_show, customer_id, series_id, clinic_id, course_id, course_name, staff_id, staff_name, room_id, room_name, department, party_size, customers(name, phone, medical_record_number, birth_date)`)
+          .select(`id, start_time, end_time, memo, is_first_visit, status, cancel_kind, no_show, cancel_hidden, customer_id, series_id, clinic_id, course_id, course_name, staff_id, staff_name, room_id, room_name, department, party_size, customers(name, phone, medical_record_number, birth_date)`)
           .eq("clinic_id", clinicId)
           .gte("start_time", weekStart.toISOString())
           .lt("start_time", weekEnd.toISOString());
@@ -300,13 +302,27 @@ export default function AdminWeeklyGridPage() {
     setIsBreakDialogOpen(true);
   };
 
-  // 部門・room フィルタ適用後の appointments（カレンダー描画はこちらを使う。キャンセル済み含む）
-  const displayedAppointments = useMemo(() => {
+  // 部門・room フィルタ適用後の appointments（キャンセル済み含む・隠したものも含む）
+  const filteredAppointments = useMemo(() => {
     let list = appointments;
     if (departmentFilter) list = list.filter(a => a.department === departmentFilter);
     if (roomFilter) list = list.filter(a => a.room_id === roomFilter);
     return list;
   }, [appointments, roomFilter, departmentFilter]);
+
+  // 「隠す」にしたキャンセルの件数（この週）。トグルボタンの表示に使う
+  const hiddenGhostCount = useMemo(
+    () => filteredAppointments.filter(a => a.status === "cancelled" && a.cancel_hidden).length,
+    [filteredAppointments],
+  );
+
+  // カレンダー描画用（トグルOFFのときは隠したキャンセルを除外）
+  const displayedAppointments = useMemo(
+    () => showHiddenGhosts
+      ? filteredAppointments
+      : filteredAppointments.filter(a => !(a.status === "cancelled" && a.cancel_hidden)),
+    [filteredAppointments, showHiddenGhosts],
+  );
 
   // 件数カウント用（キャンセル済みを除く）。日付ピルの数字や月の合計はこちらを使う
   const activeAppointments = useMemo(
@@ -434,6 +450,21 @@ export default function AdminWeeklyGridPage() {
               </li>
             ))}
           </ul>
+        </div>
+      )}
+
+      {/* 「隠す」にしたキャンセルの再表示トグル（この週に非表示があるときだけ出す） */}
+      {hiddenGhostCount > 0 && (
+        <div className="mb-2 flex justify-end">
+          <button
+            type="button"
+            onClick={() => setShowHiddenGhosts(v => !v)}
+            className="text-xs text-slate-400 hover:text-slate-600 underline underline-offset-2"
+          >
+            {showHiddenGhosts
+              ? "非表示のキャンセルを隠す"
+              : `非表示のキャンセルを表示（${hiddenGhostCount}件）`}
+          </button>
         </div>
       )}
 
@@ -663,7 +694,7 @@ export default function AdminWeeklyGridPage() {
                             <span className={`font-bold text-[15px] ${isCancelled ? "text-slate-400 line-through" : "text-slate-900"}`}>{name}</span>
                             {isCancelled && (
                               <span className="text-[9px] font-bold text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded-full border border-slate-200 leading-none">
-                                {cancelKindLabel(apt.cancel_kind, apt.no_show)}
+                                {cancelKindLabel(apt.cancel_kind, apt.no_show)}{apt.cancel_hidden ? "・非表示中" : ""}
                               </span>
                             )}
                             {mrn && (
@@ -1192,7 +1223,7 @@ export default function AdminWeeklyGridPage() {
                                   )}
                                 </div>
                                 <div className="text-[10px] opacity-80 mt-0.5 flex items-center gap-1">
-                                  <span>{isCancelled ? cancelKindLabel(apt.cancel_kind, apt.no_show) : getStatusText(apt.status)}</span>
+                                  <span>{isCancelled ? `${cancelKindLabel(apt.cancel_kind, apt.no_show)}${apt.cancel_hidden ? "・非表示中" : ""}` : getStatusText(apt.status)}</span>
                                   {mrn && !isCancelled && <span className="tabular-nums font-semibold">No.{mrn}</span>}
                                 </div>
                               </div>
@@ -1331,7 +1362,7 @@ export default function AdminWeeklyGridPage() {
                                     <span className={`font-bold text-base ${isCancelled ? "text-slate-400 line-through" : "text-slate-900"}`}>{name}</span>
                                     {isCancelled && (
                                       <span className="text-[10px] font-bold text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full border border-slate-200">
-                                        {cancelKindLabel(apt.cancel_kind, apt.no_show)}
+                                        {cancelKindLabel(apt.cancel_kind, apt.no_show)}{apt.cancel_hidden ? "・非表示中" : ""}
                                       </span>
                                     )}
                                     {mrn && (

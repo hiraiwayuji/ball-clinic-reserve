@@ -1692,7 +1692,7 @@ export async function restoreCancelledAppointment(appointmentId: string) {
 
     const { error } = await supabase
       .from("appointments")
-      .update({ status: "confirmed", cancel_kind: null, no_show: false })
+      .update({ status: "confirmed", cancel_kind: null, no_show: false, cancel_hidden: false })
       .eq("id", appointmentId)
       .eq("clinic_id", auth.clinicId);
     if (error) {
@@ -1728,6 +1728,59 @@ export async function restoreCancelledAppointment(appointmentId: string) {
     return { success: true };
   } catch (err) {
     console.error("restoreCancelledAppointment error:", err);
+    return { success: false, error: "予期せぬエラーが発生しました" };
+  }
+}
+
+/**
+ * キャンセル済み予約の「薄い表示」をカレンダーから隠す／再表示する。
+ * 削除ではないので記録は残る（しめ作業・顧客のキャンセル履歴からは見える）。
+ * 隠せるのは仕分け済み（承諾済み／院都合）のキャンセルだけ。
+ */
+export async function setCancelledGhostHidden(appointmentId: string, hidden: boolean) {
+  const auth = await checkAdminAuth();
+  try {
+    const supabase = getAdminSupabase() || await getSupabase();
+
+    const { data: before } = await supabase
+      .from("appointments")
+      .select("id, status, cancel_kind, no_show, cancel_hidden, customers(name)")
+      .eq("id", appointmentId)
+      .eq("clinic_id", auth.clinicId)
+      .maybeSingle();
+    if (!before) return { success: false, error: "対象の予約が見つかりませんでした" };
+    if (before.status !== "cancelled") return { success: false, error: "キャンセル済みの予約ではありません" };
+    if (hidden && before.cancel_kind !== "approved" && before.cancel_kind !== "clinic_reason") {
+      return { success: false, error: "隠せるのは承諾済み・院都合のキャンセルだけです（無断キャンセルは見えるまま残します）" };
+    }
+
+    const { error } = await supabase
+      .from("appointments")
+      .update({ cancel_hidden: hidden })
+      .eq("id", appointmentId)
+      .eq("clinic_id", auth.clinicId);
+    if (error) {
+      console.error("Failed to set cancel_hidden:", error);
+      return { success: false, error: "更新に失敗しました" };
+    }
+
+    await writeAudit({
+      clinicId: auth.clinicId,
+      actorUserId: auth.userId,
+      actorEmail: auth.email,
+      actorRole: auth.role,
+      actionType: hidden ? "appointment.cancel_hide" : "appointment.cancel_unhide",
+      targetTable: "appointments",
+      targetId: appointmentId,
+      before: { cancel_hidden: before.cancel_hidden },
+      after: { cancel_hidden: hidden },
+    });
+
+    revalidatePath("/admin/appointments");
+    revalidatePath("/admin");
+    return { success: true };
+  } catch (err) {
+    console.error("setCancelledGhostHidden error:", err);
     return { success: false, error: "予期せぬエラーが発生しました" };
   }
 }
