@@ -15,6 +15,8 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { EditAppointmentDialog } from "@/components/admin/EditAppointmentDialog";
+import { CancelledAppointmentDialog, cancelKindLabel } from "@/components/admin/CancelledAppointmentDialog";
+import { getEndingSeriesAlerts, type EndingSeriesAlert } from "@/app/actions/adminReserve";
 import { AddAppointmentDialog } from "@/components/admin/AddAppointmentDialog";
 import { AddBreakDialog } from "@/components/admin/AddBreakDialog";
 import { PatientSearchPanel } from "@/components/admin/PatientSearchPanel";
@@ -48,6 +50,10 @@ export default function AdminWeeklyGridPage() {
   const [refreshKey, setRefreshKey] = useState(0);
   const [selectedAppointment, setSelectedAppointment] = useState<any>(null);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
+  // キャンセル済み（薄い表示）をタップしたときの復活/完全削除ダイアログ
+  const [cancelledApt, setCancelledApt] = useState<any>(null);
+  // 毎週予約（連続予約）の最終回が近い患者のお知らせ
+  const [endingSeries, setEndingSeries] = useState<EndingSeriesAlert[]>([]);
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [selectedAddDate, setSelectedAddDate] = useState<Date | undefined>();
   const [selectedAddTime, setSelectedAddTime] = useState("");
@@ -145,13 +151,14 @@ export default function AdminWeeklyGridPage() {
       const weekEnd = addDays(weekStart, 7);
       try {
         const supabase = createClient();
+        // キャンセル済みも取得する（薄く「○○様 キャンセル」と表示して、
+        // 入れ忘れとキャンセルを区別できるようにするため）。件数カウントからは除外する。
         const { data: aptData } = await supabase
           .from("appointments")
-          .select(`id, start_time, end_time, memo, is_first_visit, status, customer_id, series_id, clinic_id, course_id, course_name, staff_id, staff_name, room_id, room_name, department, party_size, customers(name, phone, medical_record_number, birth_date)`)
+          .select(`id, start_time, end_time, memo, is_first_visit, status, cancel_kind, no_show, customer_id, series_id, clinic_id, course_id, course_name, staff_id, staff_name, room_id, room_name, department, party_size, customers(name, phone, medical_record_number, birth_date)`)
           .eq("clinic_id", clinicId)
           .gte("start_time", weekStart.toISOString())
-          .lt("start_time", weekEnd.toISOString())
-          .neq("status", "cancelled");
+          .lt("start_time", weekEnd.toISOString());
         if (aptData) setAppointments(aptData);
 
         const { data: holidayData, error: holidayErr } = await supabase
@@ -213,6 +220,7 @@ export default function AdminWeeklyGridPage() {
       case "pending": return "bg-amber-100 text-amber-800 border-amber-200";
       case "waiting": return "bg-orange-100 text-orange-800 border-orange-200";
       case "confirmed": return "bg-blue-100 text-blue-800 border-blue-200";
+      case "cancelled": return "bg-slate-50/80 text-slate-400 border-slate-200 border-dashed";
       default: return "bg-slate-100 text-slate-800 border-slate-200";
     }
   };
@@ -222,7 +230,19 @@ export default function AdminWeeklyGridPage() {
       case "pending": return "確認待ち";
       case "waiting": return "C待ち";
       case "confirmed": return "確定";
+      case "cancelled": return "キャンセル";
       default: return status;
+    }
+  };
+
+  // 予約カード/ブロックのタップ時: キャンセル済みは復活ダイアログ、通常は編集ダイアログ
+  const openAppointment = (apt: any) => {
+    const normalized = { ...apt, customers: Array.isArray(apt.customers) ? apt.customers[0] : apt.customers };
+    if (apt.status === "cancelled") {
+      setCancelledApt(normalized);
+    } else {
+      setSelectedAppointment(normalized);
+      setIsEditDialogOpen(true);
     }
   };
 
@@ -280,7 +300,7 @@ export default function AdminWeeklyGridPage() {
     setIsBreakDialogOpen(true);
   };
 
-  // 部門・room フィルタ適用後の appointments（カレンダー描画はこちらを使う）
+  // 部門・room フィルタ適用後の appointments（カレンダー描画はこちらを使う。キャンセル済み含む）
   const displayedAppointments = useMemo(() => {
     let list = appointments;
     if (departmentFilter) list = list.filter(a => a.department === departmentFilter);
@@ -288,11 +308,28 @@ export default function AdminWeeklyGridPage() {
     return list;
   }, [appointments, roomFilter, departmentFilter]);
 
+  // 件数カウント用（キャンセル済みを除く）。日付ピルの数字や月の合計はこちらを使う
+  const activeAppointments = useMemo(
+    () => displayedAppointments.filter(a => a.status !== "cancelled"),
+    [displayedAppointments],
+  );
+
+  // 毎週予約（連続予約）の最終回が近い患者を取得（入れ忘れ防止バナー）
+  useEffect(() => {
+    if (clinicId === null) return;
+    getEndingSeriesAlerts().then(setEndingSeries).catch(() => setEndingSeries([]));
+  }, [clinicId, refreshKey]);
+
   const selectedDayAppointments = useMemo(() => {
     if (!selectedDay) return [];
     return displayedAppointments
       .filter(apt => isSameDay(new Date(apt.start_time), selectedDay))
-      .sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime());
+      .sort((a, b) => {
+        const diff = new Date(a.start_time).getTime() - new Date(b.start_time).getTime();
+        if (diff !== 0) return diff;
+        // 同時刻ならキャンセル済み（薄い表示）を後ろに
+        return (a.status === "cancelled" ? 1 : 0) - (b.status === "cancelled" ? 1 : 0);
+      });
   }, [displayedAppointments, selectedDay]);
 
   const selectedDayBreaks = useMemo(() => {
@@ -379,6 +416,27 @@ export default function AdminWeeklyGridPage() {
         </div>
       </div>
 
+      {/* 毎週予約（連続予約）の最終回が近い方のお知らせ（入れ忘れ防止） */}
+      {endingSeries.length > 0 && (
+        <div className="mb-3 rounded-xl border border-indigo-200 bg-indigo-50 dark:border-indigo-800 dark:bg-indigo-950/30 px-3 py-2.5 text-sm text-indigo-800 dark:text-indigo-200">
+          <p className="font-bold flex items-center gap-1.5 mb-1">
+            <CalendarDays className="w-4 h-4 shrink-0" />
+            毎週予約がもうすぐ終わる方（続ける場合は次の予約を忘れずに）
+          </p>
+          <ul className="space-y-0.5 pl-5 list-disc">
+            {endingSeries.map((s) => (
+              <li key={s.seriesId}>
+                <span className="font-semibold">{s.customerName}</span>
+                <span className="text-slate-400">様</span>
+                <span className="ml-1 text-xs">
+                  （毎週{s.weekday}曜 {s.timeLabel}）最終回 {format(parseISO(s.lastStartTime), "M月d日（E）", { locale: ja })}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       {/* 休憩モードの案内バナー */}
       {breakMode && (
         <div className="mb-3 flex items-center gap-2 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800">
@@ -428,7 +486,7 @@ export default function AdminWeeklyGridPage() {
             const isSelected = isSameDay(date, selectedDay);
             const isToday = isSameDay(date, new Date());
             const isOff = isDayOff(date);
-            const dayApptCount = displayedAppointments.filter(a =>
+            const dayApptCount = activeAppointments.filter(a =>
               isSameDay(new Date(a.start_time), date)
             ).length;
 
@@ -573,24 +631,21 @@ export default function AdminWeeklyGridPage() {
                 : new Date(startTime.getTime() + 30 * 60000);
               const timeStr = format(startTime, "HH:mm");
               const endTimeStr = format(endTime, "HH:mm");
+              const isCancelled = apt.status === "cancelled";
               const accentColor =
+                isCancelled ? "bg-slate-300" :
                 apt.status === "confirmed" ? "bg-blue-500" :
                 apt.status === "pending" ? "bg-amber-400" : "bg-orange-400";
               const cardBg =
+                isCancelled ? "bg-slate-50/70 border-slate-200 border-dashed" :
                 apt.status === "confirmed" ? "bg-white border-slate-200" :
                 apt.status === "pending" ? "bg-amber-50 border-amber-200" : "bg-orange-50 border-orange-200";
 
               return (
                 <button
                   key={apt.id}
-                  className="w-full text-left"
-                  onClick={() => {
-                    setSelectedAppointment({
-                      ...apt,
-                      customers: Array.isArray(apt.customers) ? apt.customers[0] : apt.customers,
-                    });
-                    setIsEditDialogOpen(true);
-                  }}
+                  className={`w-full text-left ${isCancelled ? "opacity-70" : ""}`}
+                  onClick={() => openAppointment(apt)}
                 >
                   <Card className={`border ${cardBg} transition-all hover:shadow-md active:scale-[0.99]`}>
                     <div className="flex items-stretch gap-0 overflow-hidden rounded-xl">
@@ -599,13 +654,18 @@ export default function AdminWeeklyGridPage() {
                       <div className="flex items-start gap-3 px-3 py-3 flex-1 min-w-0">
                         {/* Time */}
                         <div className="flex flex-col items-center min-w-[52px] pt-0.5">
-                          <span className="text-base font-black text-slate-800 tabular-nums">{timeStr}</span>
+                          <span className={`text-base font-black tabular-nums ${isCancelled ? "text-slate-400 line-through" : "text-slate-800"}`}>{timeStr}</span>
                           <span className="text-[10px] text-slate-500 tabular-nums">〜{endTimeStr}</span>
                         </div>
                         {/* Info */}
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-1.5 flex-wrap">
-                            <span className="font-bold text-slate-900 text-[15px]">{name}</span>
+                            <span className={`font-bold text-[15px] ${isCancelled ? "text-slate-400 line-through" : "text-slate-900"}`}>{name}</span>
+                            {isCancelled && (
+                              <span className="text-[9px] font-bold text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded-full border border-slate-200 leading-none">
+                                {cancelKindLabel(apt.cancel_kind, apt.no_show)}
+                              </span>
+                            )}
                             {mrn && (
                               <span className="text-[10px] font-bold text-slate-600 bg-slate-100 px-1.5 py-0.5 rounded-full border border-slate-200 leading-none tabular-nums">
                                 No.{mrn}
@@ -866,7 +926,7 @@ export default function AdminWeeklyGridPage() {
               const isSelected = selectedDay ? isSameDay(date, selectedDay) : false;
               const isToday = isSameDay(date, new Date());
               const isOff = isDayOff(date);
-              const dayApptCount = displayedAppointments.filter(a => isSameDay(new Date(a.start_time), date)).length;
+              const dayApptCount = activeAppointments.filter(a => isSameDay(new Date(a.start_time), date)).length;
               return (
                 <button
                   key={i}
@@ -907,7 +967,7 @@ export default function AdminWeeklyGridPage() {
                   <div className="text-base font-bold text-slate-800">
                     {format(currentDate ?? new Date(), "yyyy年 M月", { locale: ja })}
                     <span className="ml-3 text-sm font-semibold text-blue-600">
-                      合計 {displayedAppointments.filter(a => isSameMonth(new Date(a.start_time), currentDate ?? new Date())).length} 件
+                      合計 {activeAppointments.filter(a => isSameMonth(new Date(a.start_time), currentDate ?? new Date())).length} 件
                     </span>
                   </div>
                   <button
@@ -931,7 +991,7 @@ export default function AdminWeeklyGridPage() {
                     const inMonth = isSameMonth(date, currentDate ?? new Date());
                     const isToday = isSameDay(date, new Date());
                     const isHoliday = holidays.some(h => isSameDay(parseISO(h.date), date));
-                    const dayApps = displayedAppointments.filter(a => isSameDay(new Date(a.start_time), date));
+                    const dayApps = activeAppointments.filter(a => isSameDay(new Date(a.start_time), date));
                     const cnt = dayApps.length;
                     const dow = date.getDay();
                     return (
@@ -1019,10 +1079,13 @@ export default function AdminWeeklyGridPage() {
                         minute: "2-digit",
                         hour12: false,
                       });
-                      const slotAppts = displayedAppointments.filter(apt => {
-                        const aptDate = new Date(apt.start_time);
-                        return isSameDay(aptDate, date) && jstTimeFormatter.format(aptDate) === slot;
-                      });
+                      const slotAppts = displayedAppointments
+                        .filter(apt => {
+                          const aptDate = new Date(apt.start_time);
+                          return isSameDay(aptDate, date) && jstTimeFormatter.format(aptDate) === slot;
+                        })
+                        // キャンセル済み（薄い表示）は右側に寄せる
+                        .sort((a, b) => (a.status === "cancelled" ? 1 : 0) - (b.status === "cancelled" ? 1 : 0));
                       const cellBreak = getCellBreak(date, slot);
                       const breakStart = getBreakStartingAt(date, slot);
 
@@ -1099,18 +1162,17 @@ export default function AdminWeeklyGridPage() {
                             const widthPercent = 100 / (slotAppts.length || 1);
                             const leftOffset = index * widthPercent;
 
+                            const isCancelled = apt.status === "cancelled";
                             return (
                               <div
                                 key={apt.id}
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  setSelectedAppointment({
-                                    ...apt,
-                                    customers: Array.isArray(apt.customers) ? apt.customers[0] : apt.customers,
-                                  });
-                                  setIsEditDialogOpen(true);
+                                  openAppointment(apt);
                                 }}
-                                className={`absolute top-0 z-10 p-1.5 rounded border text-xs leading-tight shadow-sm cursor-pointer overflow-hidden hover:opacity-80
+                                title={isCancelled ? `${name}様 ${cancelKindLabel(apt.cancel_kind, apt.no_show)}（タップで復活できます）` : undefined}
+                                className={`absolute top-0 p-1.5 rounded border text-xs leading-tight cursor-pointer overflow-hidden hover:opacity-80
+                                  ${isCancelled ? "z-[8]" : "z-10 shadow-sm"}
                                   ${getStatusColor(apt.status)}
                                 `}
                                 style={{
@@ -1121,17 +1183,17 @@ export default function AdminWeeklyGridPage() {
                                 }}
                               >
                                 <div className="font-bold flex items-center justify-between">
-                                  <span className="truncate">
-                                    {isBirthdayOnDate(cust?.birth_date, startTime) && "🎂"}
+                                  <span className={`truncate ${isCancelled ? "line-through" : ""}`}>
+                                    {!isCancelled && isBirthdayOnDate(cust?.birth_date, startTime) && "🎂"}
                                     {name}
                                   </span>
-                                  {isFirst && (
+                                  {isFirst && !isCancelled && (
                                     <span className="bg-amber-500 text-white text-[9px] px-1 rounded">初</span>
                                   )}
                                 </div>
                                 <div className="text-[10px] opacity-80 mt-0.5 flex items-center gap-1">
-                                  <span>{getStatusText(apt.status)}</span>
-                                  {mrn && <span className="tabular-nums font-semibold">No.{mrn}</span>}
+                                  <span>{isCancelled ? cancelKindLabel(apt.cancel_kind, apt.no_show) : getStatusText(apt.status)}</span>
+                                  {mrn && !isCancelled && <span className="tabular-nums font-semibold">No.{mrn}</span>}
                                 </div>
                               </div>
                             );
@@ -1246,29 +1308,32 @@ export default function AdminWeeklyGridPage() {
                       const mrn = cust?.medical_record_number || "";
                       const startTime = new Date(apt.start_time);
                       const endTime = apt.end_time ? new Date(apt.end_time) : new Date(startTime.getTime() + 30 * 60000);
-                      const accentColor = apt.status === "confirmed" ? "bg-blue-500" : apt.status === "pending" ? "bg-amber-400" : "bg-orange-400";
-                      const cardBg = apt.status === "confirmed" ? "bg-white border-slate-200" : apt.status === "pending" ? "bg-amber-50 border-amber-200" : "bg-orange-50 border-orange-200";
+                      const isCancelled = apt.status === "cancelled";
+                      const accentColor = isCancelled ? "bg-slate-300" : apt.status === "confirmed" ? "bg-blue-500" : apt.status === "pending" ? "bg-amber-400" : "bg-orange-400";
+                      const cardBg = isCancelled ? "bg-slate-50/70 border-slate-200 border-dashed" : apt.status === "confirmed" ? "bg-white border-slate-200" : apt.status === "pending" ? "bg-amber-50 border-amber-200" : "bg-orange-50 border-orange-200";
 
                       return (
                         <button
                           key={apt.id}
-                          className="w-full text-left"
-                          onClick={() => {
-                            setSelectedAppointment({ ...apt, customers: Array.isArray(apt.customers) ? apt.customers[0] : apt.customers });
-                            setIsEditDialogOpen(true);
-                          }}
+                          className={`w-full text-left ${isCancelled ? "opacity-70" : ""}`}
+                          onClick={() => openAppointment(apt)}
                         >
                           <Card className={`border ${cardBg} transition-all hover:shadow-md`}>
                             <div className="flex items-stretch gap-0 overflow-hidden rounded-xl">
                               <div className={`w-1.5 ${accentColor} shrink-0`} />
                               <div className="flex items-center gap-4 px-4 py-3 flex-1">
                                 <div className="text-center min-w-[64px]">
-                                  <p className="text-xl font-black text-slate-800 tabular-nums">{format(startTime, "HH:mm")}</p>
+                                  <p className={`text-xl font-black tabular-nums ${isCancelled ? "text-slate-400 line-through" : "text-slate-800"}`}>{format(startTime, "HH:mm")}</p>
                                   <p className="text-xs text-slate-500 tabular-nums">〜{format(endTime, "HH:mm")}</p>
                                 </div>
                                 <div className="flex-1 min-w-0">
                                   <div className="flex items-center gap-2 flex-wrap">
-                                    <span className="font-bold text-slate-900 text-base">{name}</span>
+                                    <span className={`font-bold text-base ${isCancelled ? "text-slate-400 line-through" : "text-slate-900"}`}>{name}</span>
+                                    {isCancelled && (
+                                      <span className="text-[10px] font-bold text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full border border-slate-200">
+                                        {cancelKindLabel(apt.cancel_kind, apt.no_show)}
+                                      </span>
+                                    )}
                                     {mrn && (
                                       <span className="text-[10px] font-bold text-slate-600 bg-slate-100 px-2 py-0.5 rounded-full border border-slate-200 tabular-nums">No.{mrn}</span>
                                     )}
@@ -1346,6 +1411,17 @@ export default function AdminWeeklyGridPage() {
           }}
         />
       )}
+
+      {/* キャンセル済み（薄い表示）タップ時の復活/完全削除ダイアログ */}
+      <CancelledAppointmentDialog
+        open={!!cancelledApt}
+        onOpenChange={(o) => { if (!o) setCancelledApt(null); }}
+        appointment={cancelledApt}
+        onSuccess={() => {
+          setRefreshKey(k => k + 1);
+          setCancelledApt(null);
+        }}
+      />
 
       {/* 休憩追加ダイアログ */}
       <AddBreakDialog

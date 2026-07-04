@@ -21,6 +21,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import {
   updateAppointmentDetails,
   deleteAppointment,
+  cancelAppointmentKeepRecord,
   updateAppointmentStatus,
   sendLineConfirmation,
   notifyWaitlistOpening,
@@ -269,8 +270,9 @@ export function EditAppointmentDialog({
     }
   };
 
-  // 削除ボタン押下: 連続予約（series_id あり）なら選択ダイアログを開く。
-  // 単発予約は従来通り confirm のみ。
+  // 削除ボタン押下: 常に選択ダイアログを開く。
+  // 「キャンセル（記録を残す）」と「完全に削除」を選べるようにして、
+  // あとから見たとき『キャンセルなのか入れ忘れなのか』が分かるようにする。
   const handleDeleteClick = async () => {
     if (!appointment) return;
     if (appointment.series_id) {
@@ -292,11 +294,43 @@ export function EditAppointmentDialog({
       } catch {
         setSeriesFutureCount(1);
       }
-      setDeleteChoiceOpen(true);
-      return;
+    } else {
+      setSeriesFutureCount(0);
     }
-    if (!confirm("本当にこの予約を削除しますか？")) return;
-    await runDelete("one");
+    setDeleteChoiceOpen(true);
+  };
+
+  // 削除/キャンセル後の共通処理（キャンセル待ちがいればお知らせポップを出す）
+  const afterRemoval = (cands: WaitlistCandidate[]) => {
+    onSuccess?.();
+    if (cands.length > 0) {
+      // 空きが出た → キャンセル待ちの方へ知らせるポップアップを出す（本体はそのまま）
+      setWaitlistCandidates(cands);
+      setNotifiedIds([]);
+      setWaitlistOpen(true);
+    } else {
+      onOpenChange(false);
+    }
+  };
+
+  // キャンセル扱い（記録を残す）。カレンダーには薄く表示され、枠は空きに戻る。
+  const runCancelKeepRecord = async () => {
+    if (!appointment) return;
+    setIsSubmitting(true);
+    setDeleteChoiceOpen(false);
+    try {
+      const result = await cancelAppointmentKeepRecord(appointment.id);
+      if (result.success) {
+        toast.success("キャンセルにしました（カレンダーに薄く残ります）");
+        afterRemoval(((result as any).waitlistCandidates ?? []) as WaitlistCandidate[]);
+      } else {
+        toast.error(result.error || "エラーが発生しました");
+      }
+    } catch {
+      toast.error("通信エラーが発生しました");
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const runDelete = async (scope: "one" | "future") => {
@@ -310,16 +344,7 @@ export function EditAppointmentDialog({
         toast.success(scope === "future" && n > 1
           ? `連続予約 ${n} 件を削除しました`
           : "予約を削除しました");
-        const cands = ((result as any).waitlistCandidates ?? []) as WaitlistCandidate[];
-        onSuccess?.();
-        if (cands.length > 0) {
-          // 空きが出た → キャンセル待ちの方へ知らせるポップアップを出す（本体はそのまま）
-          setWaitlistCandidates(cands);
-          setNotifiedIds([]);
-          setWaitlistOpen(true);
-        } else {
-          onOpenChange(false);
-        }
+        afterRemoval(((result as any).waitlistCandidates ?? []) as WaitlistCandidate[]);
       } else {
         toast.error(result.error || "エラーが発生しました");
       }
@@ -943,42 +968,62 @@ export function EditAppointmentDialog({
         </DialogContent>
       </Dialog>
 
-      {/* 連続予約の削除選択ダイアログ */}
+      {/* キャンセル／削除の選択ダイアログ */}
       <Dialog open={deleteChoiceOpen} onOpenChange={setDeleteChoiceOpen}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <CalendarRange className="w-5 h-5 text-amber-500" />
-              連続予約の削除
+              キャンセル・削除
             </DialogTitle>
             <DialogDescription>
-              この予約は連続予約（毎週繰り返し）として登録されています。
-              削除する範囲を選んでください。
+              {appointment.series_id
+                ? "この予約は連続予約（毎週繰り返し）として登録されています。どうしますか？"
+                : "この予約をどうしますか？"}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-2 py-2">
             <button
               type="button"
-              onClick={() => runDelete("one")}
+              onClick={runCancelKeepRecord}
               disabled={isSubmitting}
-              className="w-full text-left rounded-xl border-2 border-slate-200 hover:border-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/30 px-4 py-3 transition-all disabled:opacity-50"
+              className="w-full text-left rounded-xl border-2 border-blue-300 hover:border-blue-500 hover:bg-blue-50 dark:hover:bg-blue-950/30 px-4 py-3 transition-all disabled:opacity-50"
             >
-              <p className="font-bold text-sm text-slate-800 dark:text-slate-100">この予約だけ削除</p>
+              <p className="font-bold text-sm text-blue-700 dark:text-blue-300">
+                キャンセルにする（おすすめ）
+              </p>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                {date ? format(date, "M月d日（E）", { locale: ja }) : ""} {time} の 1 件のみを削除します。
+                {date ? format(date, "M月d日（E）", { locale: ja }) : ""} {time} をキャンセル。
+                カレンダーに薄く「キャンセル」と残るので、あとから見ても分かります。枠は空きに戻ります。
               </p>
             </button>
+            {appointment.series_id && (
+              <button
+                type="button"
+                onClick={() => runDelete("future")}
+                disabled={isSubmitting}
+                className="w-full text-left rounded-xl border-2 border-rose-200 hover:border-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/30 px-4 py-3 transition-all disabled:opacity-50"
+              >
+                <p className="font-bold text-sm text-rose-700 dark:text-rose-300">
+                  この日以降の連続予約をすべて削除（{seriesFutureCount}件）
+                </p>
+                <p className="text-xs text-rose-500 dark:text-rose-400 mt-0.5">
+                  毎週の通院が終わりになったときなど。「この日およびそれ以降」の予約をまとめて削除します。元に戻せません。
+                </p>
+              </button>
+            )}
             <button
               type="button"
-              onClick={() => runDelete("future")}
+              onClick={() => {
+                if (!confirm("この予約を完全に削除しますか？（記録は残りません）")) return;
+                runDelete("one");
+              }}
               disabled={isSubmitting}
-              className="w-full text-left rounded-xl border-2 border-rose-200 hover:border-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/30 px-4 py-3 transition-all disabled:opacity-50"
+              className="w-full text-left rounded-xl border-2 border-slate-200 hover:border-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800/50 px-4 py-3 transition-all disabled:opacity-50"
             >
-              <p className="font-bold text-sm text-rose-700 dark:text-rose-300">
-                この日以降の連続予約をすべて削除（{seriesFutureCount}件）
-              </p>
-              <p className="text-xs text-rose-500 dark:text-rose-400 mt-0.5">
-                同じシリーズの「この日およびそれ以降」の予約をまとめて削除します。元に戻せません。
+              <p className="font-bold text-sm text-slate-700 dark:text-slate-200">完全に削除（記録も消す）</p>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                間違えて入れた予約を消すとき用。カレンダーには何も残りません。
               </p>
             </button>
           </div>

@@ -14,7 +14,8 @@ import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
 import { realtimeGuard } from "@/lib/realtime-guard";
 import { getTimelineForDate, type TimelineData, type TimelineAppointment } from "@/app/actions/timeline";
-import { updateCheckinStatus, addAddonToAppointment, getAddonCourseInfo, sendReviewRequest, getReviewRequestConfig } from "@/app/actions/adminReserve";
+import { updateCheckinStatus, addAddonToAppointment, getAddonCourseInfo, sendReviewRequest, getReviewRequestConfig, restoreCancelledAppointment, deleteAppointment } from "@/app/actions/adminReserve";
+import { cancelKindLabel } from "@/components/admin/CancelledAppointmentDialog";
 import { getStaffSchedulesForDate, upsertStaffScheduleForDate, type StaffDaySchedule } from "@/app/actions/staff-schedule";
 import { getMyRole } from "@/app/actions/auth";
 import type { ClinicRole } from "@/app/actions/auth";
@@ -44,6 +45,8 @@ function fmtTime(iso: string): string {
 }
 
 function statusColor(status: string, checkin: string | null, isFirstVisit: boolean): string {
+  // キャンセル済みは薄いゴースト表示（枠は空き扱い。誰がキャンセルしたか一目でわかるように残す）
+  if (status === "cancelled") return "bg-slate-50/70 border-dashed border-slate-300 text-slate-400 dark:bg-slate-800/30 dark:border-slate-600 dark:text-slate-500";
   if (status === "waiting") return "bg-amber-100 border-amber-400 text-amber-900 dark:bg-amber-900/40 dark:text-amber-100";
   if (checkin === "arrived") return "bg-emerald-100 border-emerald-400 text-emerald-900 dark:bg-emerald-900/40 dark:text-emerald-100";
   if (checkin === "done") return "bg-slate-100 border-slate-300 text-slate-600 dark:bg-slate-800/60 dark:text-slate-300";
@@ -737,6 +740,7 @@ export default function TodayTimelineWidget({
                       // CSS grid 上での位置: 1列目がスタッフ名なので +2
                       const gridColStart = gridStartIdx + 2;
                       const cls = statusColor(a.status, a.checkin_status, a.is_first_visit);
+                      const isCancelled = a.status === "cancelled";
                       const displayStartLabel = fmtTime(dispA._displayStart ?? a.start_time);
                       const hasMultiStaff = (dispA._displayStart !== undefined);
                       return (
@@ -752,10 +756,12 @@ export default function TodayTimelineWidget({
                             marginLeft: `${(offsetFrac / colSpan) * 100}%`,
                             width: `${Math.min((widthCols / colSpan) * 100, 100)}%`,
                           }}
-                          title={`${displayStartLabel} ${a.customer_name ?? ""}${a.medical_record_number ? ` (No.${a.medical_record_number})` : ""} ${a.course_name ?? ""}${hasMultiStaff ? "（時間分割表示）" : ""}`}
+                          title={isCancelled
+                            ? `${displayStartLabel} ${a.customer_name ?? ""} ${cancelKindLabel(a.cancel_kind, a.no_show)}（タップで復活できます）`
+                            : `${displayStartLabel} ${a.customer_name ?? ""}${a.medical_record_number ? ` (No.${a.medical_record_number})` : ""} ${a.course_name ?? ""}${hasMultiStaff ? "（時間分割表示）" : ""}`}
                         >
-                          <div className="truncate font-semibold">
-                            {!a.staff_id && (
+                          <div className={`truncate font-semibold ${isCancelled ? "line-through" : ""}`}>
+                            {!a.staff_id && !isCancelled && (
                               <span className="mr-0.5 text-[9px] font-bold text-rose-500" title="担当未設定（予約変更から担当を設定できます）">●</span>
                             )}
                             {a.customer_name ?? "(顧客名なし)"}
@@ -770,7 +776,11 @@ export default function TodayTimelineWidget({
                               <span className="ml-1 text-[9px] font-normal opacity-70">×{(a.additional_staff?.length ?? 0) + 1}人</span>
                             )}
                           </div>
-                          {a.course_name && (
+                          {isCancelled ? (
+                            <div className="truncate text-[9px] font-bold text-slate-400 dark:text-slate-500">
+                              {cancelKindLabel(a.cancel_kind, a.no_show)}
+                            </div>
+                          ) : a.course_name && (
                             <div className="truncate opacity-80">
                               {a.department === "カフェ" ? "☕ " : ""}{a.course_name}
                               {((a.additional_courses?.length ?? 0) > 0) && ` ＋${a.additional_courses?.length}`}
@@ -847,7 +857,11 @@ export default function TodayTimelineWidget({
               )}
               {selectedApt.room_name && <div><span className="text-slate-500">部屋:</span> {selectedApt.room_name}</div>}
               <div>
-                <span className="text-slate-500">状態:</span> {selectedApt.status}{selectedApt.is_first_visit && " (初診)"}
+                <span className="text-slate-500">状態:</span>{" "}
+                {selectedApt.status === "cancelled"
+                  ? `${cancelKindLabel(selectedApt.cancel_kind, selectedApt.no_show)}済み（この枠は空き扱い）`
+                  : selectedApt.status}
+                {selectedApt.is_first_visit && " (初診)"}
                 {selectedApt.checkin_status && (
                   <span className="ml-2 text-xs px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200 font-semibold">
                     {selectedApt.checkin_status === "arrived" ? "受付済" :
@@ -859,7 +873,57 @@ export default function TodayTimelineWidget({
               {selectedApt.memo && <div><span className="text-slate-500">メモ:</span> <span className="whitespace-pre-wrap">{selectedApt.memo}</span></div>}
             </div>
 
-            {/* アクションボタン: 受付 / 会計へ / 次回予約 */}
+            {/* キャンセル済み: 復活 / 完全削除のみ */}
+            {selectedApt.status === "cancelled" ? (
+              <div className="flex flex-col gap-2 pt-3 border-t border-slate-200 dark:border-slate-700">
+                <Button
+                  onClick={async () => {
+                    setActionLoading(true);
+                    try {
+                      const res = await restoreCancelledAppointment(selectedApt.id);
+                      if (res.success) {
+                        toast.success(`${selectedApt.customer_name ?? "患者"}様の予約を元に戻しました`);
+                        setSelectedApt(null);
+                        if (date) fetchData(date);
+                      } else {
+                        toast.error(res.error ?? "元に戻せませんでした");
+                      }
+                    } finally {
+                      setActionLoading(false);
+                    }
+                  }}
+                  disabled={actionLoading}
+                  className="w-full bg-blue-600 hover:bg-blue-700 text-white"
+                >
+                  <RotateCcw className="w-4 h-4 mr-1.5" />
+                  予約を元に戻す（復活）
+                </Button>
+                <Button
+                  onClick={async () => {
+                    if (!confirm(`${selectedApt.customer_name ?? ""}様のキャンセル記録を完全に削除しますか？\n（薄い表示も消えます。元に戻せません）`)) return;
+                    setActionLoading(true);
+                    try {
+                      const res = await deleteAppointment(selectedApt.id, "one");
+                      if (res.success) {
+                        toast.success("キャンセル記録を削除しました");
+                        setSelectedApt(null);
+                        if (date) fetchData(date);
+                      } else {
+                        toast.error(res.error ?? "削除に失敗しました");
+                      }
+                    } finally {
+                      setActionLoading(false);
+                    }
+                  }}
+                  disabled={actionLoading}
+                  variant="outline"
+                  className="w-full border-rose-200 text-rose-600 hover:bg-rose-50 dark:border-rose-800 dark:text-rose-400"
+                >
+                  <XCircle className="w-4 h-4 mr-1.5" />
+                  この記録を完全に削除
+                </Button>
+              </div>
+            ) : (
             <div className="flex flex-col gap-2 pt-3 border-t border-slate-200 dark:border-slate-700">
               <div className="flex gap-2">
                 <Button
@@ -962,6 +1026,7 @@ export default function TodayTimelineWidget({
                 予約変更（時刻・コース・担当・メモを編集）
               </Button>
             </div>
+            )}
           </div>
         </div>
       )}

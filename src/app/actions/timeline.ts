@@ -33,6 +33,8 @@ export type TimelineAppointment = {
   room_id: string | null;      // 編集ダイアログで個室選択に必要
   room_name: string | null;
   series_id: string | null;    // 編集ダイアログで「以降の繰り返し含めて」操作に必要
+  cancel_kind: string | null;  // キャンセル仕分け（unexcused/approved/clinic_reason）。薄い表示のラベルに使う
+  no_show: boolean;            // 無断キャンセル（未来院）フラグ
   customer_id: string | null;
   customer_name: string | null;
   medical_record_number: string | null;
@@ -103,10 +105,11 @@ export async function getTimelineForDate(dateStr: string): Promise<{ success: bo
         .eq("show_in_timeline", true)
         .order("sort_order", { ascending: true })
         .order("name", { ascending: true }),
+      // キャンセル済みも取得する（管理画面に薄く「○○様 キャンセル」と出すため）。
+      // 患者側の空き状況・月間実績カウントには影響しない。
       sb.from("appointments")
-        .select("id, start_time, end_time, status, checkin_status, is_first_visit, memo, course_id, course_name, staff_id, staff_name, room_id, room_name, series_id, customer_id, additional_courses, additional_staff, department, party_size, customers(name, medical_record_number)")
+        .select("id, start_time, end_time, status, checkin_status, is_first_visit, memo, course_id, course_name, staff_id, staff_name, room_id, room_name, series_id, cancel_kind, no_show, customer_id, additional_courses, additional_staff, department, party_size, customers(name, medical_record_number)")
         .eq("clinic_id", clinicId)
-        .neq("status", "cancelled")
         .gte("start_time", dayStart)
         .lte("start_time", dayEnd)
         .order("start_time", { ascending: true }),
@@ -152,6 +155,8 @@ export async function getTimelineForDate(dateStr: string): Promise<{ success: bo
         room_id: (a as any).room_id ?? null,
         room_name: a.room_name ?? null,
         series_id: (a as any).series_id ?? null,
+        cancel_kind: (a as any).cancel_kind ?? null,
+        no_show: !!(a as any).no_show,
         customer_id: a.customer_id ?? null,
         customer_name: cust?.name ?? null,
         medical_record_number: cust?.medical_record_number ?? null,

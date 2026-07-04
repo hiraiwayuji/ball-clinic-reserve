@@ -1552,37 +1552,7 @@ export async function deleteAppointment(
 
     // キャンセルで枠が空いたので、同日のキャンセル待ち（status="waiting"）がいれば候補を返す。
     // → UI 側で「この方に空きをお知らせしましょう」ポップアップを出し、ワンタップ LINE 通知へ。
-    let waitlistCandidates: WaitlistCandidate[] = [];
-    try {
-      if (before?.start_time) {
-        const freed = new Date(before.start_time);
-        // JST の当日範囲（UTC 換算）を作る
-        const jst = new Date(freed.getTime() + 9 * 3600 * 1000);
-        const y = jst.getUTCFullYear(), mo = jst.getUTCMonth(), da = jst.getUTCDate();
-        const dayStartUtc = new Date(Date.UTC(y, mo, da, 0, 0, 0) - 9 * 3600 * 1000);
-        const dayEndUtc = new Date(Date.UTC(y, mo, da + 1, 0, 0, 0) - 9 * 3600 * 1000);
-        const { data: waiting } = await supabase
-          .from("appointments")
-          .select("id, start_time, is_first_visit, customers(name, line_user_id)")
-          .eq("clinic_id", auth.clinicId)
-          .eq("status", "waiting")
-          .gte("start_time", dayStartUtc.toISOString())
-          .lt("start_time", dayEndUtc.toISOString())
-          .order("start_time");
-        waitlistCandidates = (waiting ?? []).map((w: any) => {
-          const c = Array.isArray(w.customers) ? w.customers[0] : w.customers;
-          return {
-            appointmentId: w.id as string,
-            customerName: (c?.name as string) ?? "(お名前未登録)",
-            hasLine: !!c?.line_user_id,
-            startTime: w.start_time as string,
-            isFirstVisit: !!w.is_first_visit,
-          };
-        });
-      }
-    } catch (e) {
-      console.error("waitlist lookup after cancel failed:", e);
-    }
+    const waitlistCandidates = await findWaitlistCandidatesForDay(supabase, auth.clinicId, before?.start_time ?? null);
 
     return { success: true, deletedCount, waitlistCandidates };
   } catch (err) {
@@ -1598,6 +1568,249 @@ export type WaitlistCandidate = {
   startTime: string;
   isFirstVisit: boolean;
 };
+
+// 枠が空いたとき、その日のキャンセル待ち（status="waiting"）候補を返す共通処理。
+// deleteAppointment と cancelAppointmentKeepRecord の両方から使う。
+async function findWaitlistCandidatesForDay(
+  supabase: any,
+  clinicId: string,
+  startTime: string | null,
+): Promise<WaitlistCandidate[]> {
+  try {
+    if (!startTime) return [];
+    const freed = new Date(startTime);
+    // JST の当日範囲（UTC 換算）を作る
+    const jst = new Date(freed.getTime() + 9 * 3600 * 1000);
+    const y = jst.getUTCFullYear(), mo = jst.getUTCMonth(), da = jst.getUTCDate();
+    const dayStartUtc = new Date(Date.UTC(y, mo, da, 0, 0, 0) - 9 * 3600 * 1000);
+    const dayEndUtc = new Date(Date.UTC(y, mo, da + 1, 0, 0, 0) - 9 * 3600 * 1000);
+    const { data: waiting } = await supabase
+      .from("appointments")
+      .select("id, start_time, is_first_visit, customers(name, line_user_id)")
+      .eq("clinic_id", clinicId)
+      .eq("status", "waiting")
+      .gte("start_time", dayStartUtc.toISOString())
+      .lt("start_time", dayEndUtc.toISOString())
+      .order("start_time");
+    return (waiting ?? []).map((w: any) => {
+      const c = Array.isArray(w.customers) ? w.customers[0] : w.customers;
+      return {
+        appointmentId: w.id as string,
+        customerName: (c?.name as string) ?? "(お名前未登録)",
+        hasLine: !!c?.line_user_id,
+        startTime: w.start_time as string,
+        isFirstVisit: !!w.is_first_visit,
+      };
+    });
+  } catch (e) {
+    console.error("waitlist lookup after cancel failed:", e);
+    return [];
+  }
+}
+
+/**
+ * 予約を「キャンセル」として記録に残す（行は消さない）。
+ * カレンダーには薄い文字で「○○様（キャンセル）」と表示され、
+ * 患者側の予約サイトではその枠は空きとして扱われる。
+ * 「毎週予約の方が今週だけお休み」のようなケースはこちらを使う。
+ * 患者了承済みのキャンセル（cancel_kind='approved'）として仕分け済みにするので、
+ * しめ作業の未仕分けリストには出ない。
+ */
+export async function cancelAppointmentKeepRecord(appointmentId: string) {
+  const auth = await checkAdminAuth();
+  try {
+    const supabase = getAdminSupabase() || await getSupabase();
+
+    const { data: before } = await supabase
+      .from("appointments")
+      .select("id, start_time, status, memo, series_id, customers(name)")
+      .eq("id", appointmentId)
+      .eq("clinic_id", auth.clinicId)
+      .maybeSingle();
+    if (!before) return { success: false, error: "対象の予約が見つかりませんでした" };
+    if (before.status === "cancelled") return { success: false, error: "すでにキャンセル済みの予約です" };
+
+    const { error } = await supabase
+      .from("appointments")
+      .update({ status: "cancelled", checkin_status: null, no_show: false, cancel_kind: "approved" })
+      .eq("id", appointmentId)
+      .eq("clinic_id", auth.clinicId);
+    if (error) {
+      console.error("Failed to cancel appointment:", error);
+      return { success: false, error: "キャンセルに失敗しました" };
+    }
+
+    const customerName = Array.isArray(before?.customers) ? before?.customers[0]?.name : (before?.customers as any)?.name;
+    await writeAudit({
+      clinicId: auth.clinicId,
+      actorUserId: auth.userId,
+      actorEmail: auth.email,
+      actorRole: auth.role,
+      actionType: "appointment.cancel_by_staff",
+      targetTable: "appointments",
+      targetId: appointmentId,
+      before: { status: before.status },
+      after: { status: "cancelled", cancel_kind: "approved" },
+    });
+    await notifyOwnerOfStaffAction({
+      clinicId: auth.clinicId,
+      actorRole: auth.role,
+      actorEmail: auth.email,
+      actionType: "予約をキャンセル（記録あり）",
+      summary: `${customerName ?? "(顧客名不明)"}様\n日時: ${before?.start_time ?? ""}\nメモ: ${before?.memo ?? ""}\nID: ${appointmentId}`,
+    });
+
+    revalidatePath("/admin/appointments");
+    revalidatePath("/admin");
+
+    const waitlistCandidates = await findWaitlistCandidatesForDay(supabase, auth.clinicId, before.start_time);
+    return { success: true, waitlistCandidates };
+  } catch (err) {
+    console.error("cancelAppointmentKeepRecord error:", err);
+    return { success: false, error: "予期せぬエラーが発生しました" };
+  }
+}
+
+/**
+ * キャンセル済みの予約を元に戻す（status='confirmed'、仕分け・未来院フラグもクリア）。
+ * 同じ担当の同じ時間に別の予約がすでに入っている場合は、
+ * DB の重複防止制約（23P01）で弾かれるため、わかりやすいエラーで返す。
+ */
+export async function restoreCancelledAppointment(appointmentId: string) {
+  const auth = await checkAdminAuth();
+  try {
+    const supabase = getAdminSupabase() || await getSupabase();
+
+    const { data: before } = await supabase
+      .from("appointments")
+      .select("id, start_time, status, customers(name)")
+      .eq("id", appointmentId)
+      .eq("clinic_id", auth.clinicId)
+      .maybeSingle();
+    if (!before) return { success: false, error: "対象の予約が見つかりませんでした" };
+    if (before.status !== "cancelled") return { success: false, error: "キャンセル済みの予約ではありません" };
+
+    const { error } = await supabase
+      .from("appointments")
+      .update({ status: "confirmed", cancel_kind: null, no_show: false })
+      .eq("id", appointmentId)
+      .eq("clinic_id", auth.clinicId);
+    if (error) {
+      if ((error as any).code === "23P01") {
+        return { success: false, error: "同じ担当の同じ時間に別の予約が入っているため、元に戻せません。時間を変更して新しく予約を入れてください。" };
+      }
+      console.error("Failed to restore appointment:", error);
+      return { success: false, error: "予約の復活に失敗しました" };
+    }
+
+    const customerName = Array.isArray(before?.customers) ? before?.customers[0]?.name : (before?.customers as any)?.name;
+    await writeAudit({
+      clinicId: auth.clinicId,
+      actorUserId: auth.userId,
+      actorEmail: auth.email,
+      actorRole: auth.role,
+      actionType: "appointment.restore",
+      targetTable: "appointments",
+      targetId: appointmentId,
+      before: { status: "cancelled" },
+      after: { status: "confirmed" },
+    });
+    await notifyOwnerOfStaffAction({
+      clinicId: auth.clinicId,
+      actorRole: auth.role,
+      actorEmail: auth.email,
+      actionType: "キャンセル済み予約を復活",
+      summary: `${customerName ?? "(顧客名不明)"}様\n日時: ${before?.start_time ?? ""}\nID: ${appointmentId}`,
+    });
+
+    revalidatePath("/admin/appointments");
+    revalidatePath("/admin");
+    return { success: true };
+  } catch (err) {
+    console.error("restoreCancelledAppointment error:", err);
+    return { success: false, error: "予期せぬエラーが発生しました" };
+  }
+}
+
+export type EndingSeriesAlert = {
+  seriesId: string;
+  customerId: string | null;
+  customerName: string;
+  lastStartTime: string; // シリーズ最終回の日時（ISO）
+  weekday: string;       // 例: "水"
+  timeLabel: string;     // 例: "17:00"
+  occurrenceCount: number;
+};
+
+/**
+ * 「毎週予約（連続予約）がもうすぐ終わる／終わったばかり」の患者一覧。
+ * 連続予約はまとめて N 週分の行を作る仕組みなので、最終回が近づいたら
+ * 次のぶんを入れ忘れないようカレンダー上部にお知らせを出すために使う。
+ * 対象: シリーズの最終回が「今日の7日前〜7日後」にあり、2回以上来ている患者。
+ */
+export async function getEndingSeriesAlerts(): Promise<EndingSeriesAlert[]> {
+  try {
+    const { clinicId } = await checkAdminAuth();
+    const supabase = getAdminSupabase() || await getSupabase();
+
+    // 直近90日〜未来のシリーズ予約を取得して JS 側でシリーズごとに集計する
+    const since = new Date(Date.now() - 90 * 24 * 3600 * 1000).toISOString();
+    const { data, error } = await supabase
+      .from("appointments")
+      .select("series_id, customer_id, start_time, status, customers(name)")
+      .eq("clinic_id", clinicId)
+      .not("series_id", "is", null)
+      .neq("status", "cancelled")
+      .gte("start_time", since)
+      .order("start_time", { ascending: true });
+    if (error || !data) return [];
+
+    const bySeries = new Map<string, { customerId: string | null; name: string; last: string; count: number }>();
+    for (const row of data as any[]) {
+      const c = Array.isArray(row.customers) ? row.customers[0] : row.customers;
+      const cur = bySeries.get(row.series_id);
+      if (!cur) {
+        bySeries.set(row.series_id, {
+          customerId: row.customer_id ?? null,
+          name: c?.name ?? "(お名前未登録)",
+          last: row.start_time,
+          count: 1,
+        });
+      } else {
+        cur.count += 1;
+        if (row.start_time > cur.last) cur.last = row.start_time;
+      }
+    }
+
+    const now = Date.now();
+    const windowMs = 7 * 24 * 3600 * 1000;
+    const weekdays = ["日", "月", "火", "水", "木", "金", "土"];
+    const out: EndingSeriesAlert[] = [];
+    for (const [seriesId, s] of bySeries) {
+      if (s.count < 2) continue; // 単発〜2回未満は「毎週の人」とみなさない
+      const lastMs = new Date(s.last).getTime();
+      if (lastMs < now - windowMs || lastMs > now + windowMs) continue;
+      const d = new Date(lastMs + 9 * 3600 * 1000); // JST
+      const hh = String(d.getUTCHours()).padStart(2, "0");
+      const mm = String(d.getUTCMinutes()).padStart(2, "0");
+      out.push({
+        seriesId,
+        customerId: s.customerId,
+        customerName: s.name,
+        lastStartTime: s.last,
+        weekday: weekdays[d.getUTCDay()],
+        timeLabel: `${hh}:${mm}`,
+        occurrenceCount: s.count,
+      });
+    }
+    // 最終回が近い順
+    out.sort((a, b) => a.lastStartTime.localeCompare(b.lastStartTime));
+    return out;
+  } catch (err) {
+    console.error("getEndingSeriesAlerts error:", err);
+    return [];
+  }
+}
 
 /**
  * キャンセル待ちの方へ「空きが出ました」を LINE で通知する。
