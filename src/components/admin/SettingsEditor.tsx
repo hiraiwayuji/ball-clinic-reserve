@@ -210,6 +210,29 @@ export default function SettingsEditor({ initialSettings }: { initialSettings: C
                 </p>
               </div>
 
+              {/* Web予約のLINE連携必須 */}
+              <div className="border-t pt-4 mt-2 space-y-3">
+                <Label className="font-bold">Web予約のLINE連携必須</Label>
+                <label className="flex items-center gap-2 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={settings?.require_line_link ?? false}
+                    onChange={(e) => updateField("require_line_link", e.target.checked)}
+                    className="w-4 h-4 accent-emerald-500"
+                  />
+                  <span className="text-sm">
+                    LINE連携がまだの方は、連携を済ませてから仮予約が完了するようにする
+                  </span>
+                </label>
+                <p className="text-xs text-slate-500 leading-relaxed">
+                  ONにすると、LINE未連携の患者さんはWeb予約・キャンセル待ちの最後に<br />
+                  「友だち追加 → 電話番号の下4桁をトークで送信」の画面が出て、<br />
+                  連携が確認できると自動でそのまま仮予約が完了します。<br />
+                  仮予約の日時がNGだった時などに、LINEで必ず連絡が取れるようになります。<br />
+                  ※ LINEをお使いでない方には、お電話でのご予約をご案内します。
+                </p>
+              </div>
+
               {/* 営業時間（予約スロット範囲） */}
               <div className="border-t pt-4 mt-2 space-y-3">
                 <Label className="font-bold">公開予約時間（患者向け予約画面）</Label>

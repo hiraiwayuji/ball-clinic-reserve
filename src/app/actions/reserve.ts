@@ -48,7 +48,8 @@ function normStaffTime(v: string | null | undefined): string | null {
   if (!t) return null;
   return t.length >= 5 ? t.slice(0, 5) : t;
 }
-import { getBookingHorizonDays, getCurrentSchedule, getCurrentSlotDuration } from "@/app/actions/clinic-slot";
+import { getBookingHorizonDays, getCurrentSchedule, getCurrentSlotDuration, getRequireLineLink } from "@/app/actions/clinic-slot";
+import { getCustomerLineState } from "@/lib/line-links";
 import { unstable_noStore as noStore } from "next/cache";
 
 async function getSupabase() {
@@ -210,6 +211,31 @@ export async function createWaitlistReservation(formData: FormData) {
       }
       const customerId = resolved.customerId;
 
+      // ── LINE連携必須ゲート（通常予約と同じ。キャンセル待ちこそ連絡手段が必須） ──
+      {
+        const lineState = await getCustomerLineState(customerId, DEFAULT_CLINIC_ID, adminDb);
+        if (!lineState.linked && (await getRequireLineLink())) {
+          if (lineState.phoneDigitCount < 4 && /^\d{10,11}$/.test(normalizedPhone)) {
+            await adminDb
+              .from("customers")
+              .update({ phone: normalizedPhone })
+              .eq("id", customerId)
+              .eq("clinic_id", DEFAULT_CLINIC_ID);
+          }
+          const phoneLast4 =
+            lineState.phoneLast4 ??
+            (/^\d{10,11}$/.test(normalizedPhone) ? normalizedPhone.slice(-4) : null);
+          if (phoneLast4) {
+            return {
+              success: false,
+              requiresLineLink: true,
+              phoneLast4,
+              error: "キャンセル待ちの受付には LINE の連携が必要です。友だち追加のうえ、電話番号の下4桁をトークで送ってください。",
+            };
+          }
+        }
+      }
+
       // キャンセル待ち予約を作成
       // start_time = 希望範囲の開始、end_time = 希望範囲の終了、status = "waiting"
       const startDateTime = `${dateStr}T${startTime}:00+09:00`;
@@ -245,6 +271,51 @@ export async function createWaitlistReservation(formData: FormData) {
   } catch (err) {
     console.error(err);
     return { success: false, error: "エラーが発生しました。お手数ですが、お電話またはLINEにてご予約ください。" };
+  }
+}
+
+/**
+ * LINE連携必須ゲートのポーリング用：お名前＋電話番号から顧客を特定し、
+ * LINE連携が完了したかだけを返す（個人情報は返さない）。
+ * 照合ルールは createReservation と同じ（電話 exact → 氏名正規化・一意のときのみ）。
+ */
+export async function getLineLinkStatus(params: { name?: string; phone?: string }): Promise<{ linked: boolean }> {
+  noStore();
+  try {
+    const adminDb = getAdminSupabase();
+    if (!adminDb) return { linked: false };
+    const phone = normalizePhone(params.phone ?? "");
+    let customerId: string | null = null;
+
+    if (phone) {
+      const { data } = await adminDb
+        .from("customers")
+        .select("id")
+        .eq("clinic_id", PUBLIC_CLINIC_ID)
+        .eq("phone", phone)
+        .maybeSingle();
+      customerId = data?.id ?? null;
+    }
+    if (!customerId && params.name) {
+      const target = normalizeNameForMatch(params.name);
+      if (target) {
+        const { data: clinicCustomers } = await adminDb
+          .from("customers")
+          .select("id, name")
+          .eq("clinic_id", PUBLIC_CLINIC_ID);
+        const matched = (clinicCustomers ?? []).filter(
+          (c) => normalizeNameForMatch(c.name as string) === target,
+        );
+        if (matched.length === 1) customerId = matched[0].id;
+      }
+    }
+    if (!customerId) return { linked: false };
+
+    const state = await getCustomerLineState(customerId, PUBLIC_CLINIC_ID, adminDb);
+    return { linked: state.linked };
+  } catch (e) {
+    console.error("[getLineLinkStatus] error:", e);
+    return { linked: false };
   }
 }
 
@@ -754,29 +825,36 @@ export async function createReservation(formData: FormData) {
         return { success: false, error: "ご予約者の情報が確認できませんでした。お手数ですがお名前と電話番号を再度ご入力ください。" };
       }
 
-      // ── LINE 連携状況と電話下4桁を取得（完了画面の「LINE連携のお願い」ポップアップ用） ──
-      // 連携済みなら出さない。未連携なら下4桁を送ってもらって紐付けを促す。
-      let lineLinked = false;
-      let phoneLast4: string | null = null;
-      {
-        const { data: cust } = await adminDb
-          .from("customers")
-          .select("phone, line_user_id")
-          .eq("id", customerId)
-          .eq("clinic_id", PUBLIC_CLINIC_ID)
-          .maybeSingle();
-        const digits = (cust?.phone ?? "").replace(/\D/g, "");
-        phoneLast4 = digits.length >= 4 ? digits.slice(-4) : null;
-        if (cust?.line_user_id) {
-          lineLinked = true;
-        } else {
-          const { count } = await adminDb
-            .from("customer_line_links")
-            .select("id", { count: "exact", head: true })
-            .eq("customer_id", customerId)
+      // ── LINE 連携状況と電話下4桁を取得（必須ゲート＋完了画面ポップアップ用） ──
+      let lineState = await getCustomerLineState(customerId, PUBLIC_CLINIC_ID, adminDb);
+      let lineLinked = lineState.linked;
+      let phoneLast4 = lineState.phoneLast4;
+
+      // ── LINE連携必須ゲート（clinic_settings.require_line_link が ON の院のみ） ──
+      // 仮予約がNGだった時に院から連絡が取れるよう、連携が確認できるまで予約を作らない。
+      // フロントは「友だち追加＋下4桁送信」画面を出し、連携を確認できたら同じ内容で自動再送信する。
+      if (!lineLinked && (await getRequireLineLink())) {
+        // 名前照合で見つかった顧客に電話が未登録だと、下4桁を送っても webhook 側で照合できない。
+        // 今回フォームに入力された番号が有効なら顧客に登録して、連携コードとして使えるようにする。
+        if (lineState.phoneDigitCount < 4 && /^\d{10,11}$/.test(phone)) {
+          await adminDb
+            .from("customers")
+            .update({ phone })
+            .eq("id", customerId)
             .eq("clinic_id", PUBLIC_CLINIC_ID);
-          lineLinked = (count ?? 0) > 0;
+          lineState = await getCustomerLineState(customerId, PUBLIC_CLINIC_ID, adminDb);
+          phoneLast4 = lineState.phoneLast4;
         }
+        if (lineState.phoneDigitCount >= 4) {
+          return {
+            success: false,
+            requiresLineLink: true,
+            phoneLast4,
+            error: "ご予約の受付には LINE の連携が必要です。友だち追加のうえ、電話番号の下4桁をトークで送ってください。",
+          };
+        }
+        // 有効な電話番号がどこにも無い場合は連携のしようがないため、従来どおり予約は通す
+        // （完了画面のお願いポップアップでフォローする）。
       }
 
       const startDateTimeStr = `${rawDate}T${time}:00+09:00`;

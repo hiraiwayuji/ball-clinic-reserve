@@ -222,3 +222,37 @@ export async function getCurrentPatientCanPickStaff(): Promise<boolean> {
     return true;
   }
 }
+
+/**
+ * Web予約で LINE 連携を必須にするか（clinic_settings.require_line_link）。
+ * true の院では、LINE未連携の患者は「友だち追加＋電話番号下4桁の送信」で
+ * 連携が確認できるまで仮予約（キャンセル待ち含む）を作らない。
+ * 仮予約がNGだった時に院から連絡が取れない事故を防ぐための運用モード設定。
+ *
+ * Fail-safe: 取得失敗時は false を返す（従来挙動＝連携なしでも予約可）。
+ */
+export async function getRequireLineLink(): Promise<boolean> {
+  try {
+    if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
+      return false;
+    }
+    const sb = createSupabaseClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL,
+      process.env.SUPABASE_SERVICE_ROLE_KEY,
+      { auth: { persistSession: false } },
+    );
+    const { data, error } = await sb
+      .from("clinic_settings")
+      .select("require_line_link")
+      .eq("id", PUBLIC_CLINIC_ID)
+      .maybeSingle();
+    if (error) {
+      console.error("[getRequireLineLink] supabase error, fallback to false:", error.message);
+      return false;
+    }
+    return data?.require_line_link === true;
+  } catch (e: any) {
+    console.error("[getRequireLineLink] unexpected error, fallback to false:", e?.message ?? e);
+    return false;
+  }
+}

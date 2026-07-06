@@ -27,6 +27,7 @@ import { normalizePhone } from "@/lib/phone";
 import { toast } from "sonner";
 import { CLINIC_CONFIG } from "@/lib/clinic-config";
 import ReserveLandingPage from "./ReserveLandingPage";
+import LineLinkGate from "@/components/reserve/LineLinkGate";
 import { getPublicClinicSettings } from "@/app/actions/publicSettings";
 import { getPublicClinicHours } from "@/app/actions/settings";
 import ClinicWordmark from "@/components/ClinicWordmark";
@@ -95,6 +96,8 @@ function ReserveContent() {
   // 予約完了後の「LINE連携のお願い」ポップアップ（アンケート済み・LINE未連携の人向け）
   const [showLineLinkPopup, setShowLineLinkPopup] = useState(false);
   const [lineLinkPhone4, setLineLinkPhone4] = useState<string | null>(null);
+  // LINE連携必須ゲート（require_line_link が ON の院）。連携確認後に同じ内容で自動再送信する
+  const [lineGateInfo, setLineGateInfo] = useState<{ phone4: string | null } | null>(null);
   // 同じ日の重複（ブロック → LINE 誘導）
   const [duplicateSameDay, setDuplicateSameDay] = useState(false);
   // 別の日の重複（警告 → 本人が院に確認済みなら続行）。値は既存予約の日時表示
@@ -435,6 +438,11 @@ function ReserveContent() {
         sessionStorage.setItem(PENDING_BOOKING_KEY, JSON.stringify(booking));
       } catch {}
       setRequiresQuestionnaire(true);
+    } else if (r.requiresLineLink) {
+      // LINE連携必須の院で未連携 → 連携ゲートを表示。連携確認後に同じ内容で再送信する
+      pendingFormData.current = formData;
+      const digits = normalizePhone(phone);
+      setLineGateInfo({ phone4: r.phoneLast4 || (digits.length >= 4 ? digits.slice(-4) : null) });
     } else if (r.duplicate === "sameday") {
       // 同じ日の重複 → ブロックして LINE へ誘導
       setDuplicateSameDay(true);
@@ -610,6 +618,36 @@ function ReserveContent() {
             </div>
           </div>
         )}
+      </div>
+    );
+  }
+
+  // LINE連携必須ゲート：連携が確認できたら同じ内容で自動再送信 → 完了画面へ
+  if (lineGateInfo) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-indigo-900 via-blue-900 to-slate-900 flex flex-col items-center justify-center p-4">
+        <div className="w-full max-w-sm mb-4 flex justify-center">
+          <ClinicWordmark sizeClassName="w-36 h-14" />
+        </div>
+        <LineLinkGate
+          phone4={lineGateInfo.phone4}
+          name={name}
+          phone={phone}
+          actionLabel="仮予約"
+          onLinked={async () => {
+            const fd = pendingFormData.current;
+            setLineGateInfo(null);
+            if (!fd) return;
+            setIsSubmitting(true);
+            try {
+              await runReservation(fd);
+            } catch {
+              toast.error("送信エラーが発生しました。しばらく経ってから再度お試しください");
+            } finally {
+              setIsSubmitting(false);
+            }
+          }}
+        />
       </div>
     );
   }

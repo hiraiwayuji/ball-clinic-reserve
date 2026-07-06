@@ -23,6 +23,7 @@ import { useClinicSchedule } from "@/lib/use-clinic-schedule";
 import { useClinicPatientCanPickStaff } from "@/lib/use-clinic-patient-staff";
 import { CLINIC_CONFIG } from "@/lib/clinic-config";
 import { PUBLIC_CLINIC_ID } from "@/lib/default-clinic-id";
+import LineLinkGate from "@/components/reserve/LineLinkGate";
 
 // 静的なTIME_SLOTS, MAX_SLOTSを削除
 
@@ -125,7 +126,7 @@ const levelConfig = {
   },
 };
 
-type WaitlistState = "idle" | "form" | "submitting" | "success" | "needsQuestionnaire";
+type WaitlistState = "idle" | "form" | "submitting" | "success" | "needsQuestionnaire" | "needsLineLink";
 
 export default function ReserveCalendarPage() {
   return (
@@ -201,6 +202,9 @@ function ReserveCalendarContent() {
   const [waitlistSymptoms, setWaitlistSymptoms] = useState("");
   const [waitlistError, setWaitlistError] = useState("");
   const [waitlistNumber, setWaitlistNumber] = useState("");
+  // LINE連携必須ゲート（require_line_link が ON の院）。連携確認後に同じ内容で再送信する
+  const [waitlistLinkPhone4, setWaitlistLinkPhone4] = useState<string | null>(null);
+  const waitlistPendingFd = useRef<FormData | null>(null);
 
   // 選択コースの担当(レーン)。設定されていれば月グリッドもそのレーンの空きで色付けする。
   const requiredStaffId = selectedCourse?.required_staff_id ?? null;
@@ -526,6 +530,28 @@ function ReserveCalendarContent() {
     } else if ((result as any).requiresQuestionnaire) {
       // 初めての方（顧客未登録）→ アンケート誘導（通常予約と同じゲート）
       setWaitlistState("needsQuestionnaire");
+    } else if ((result as any).requiresLineLink) {
+      // LINE連携必須の院 → 連携ゲート。連携確認後に同じ内容で自動再送信する
+      waitlistPendingFd.current = fd;
+      setWaitlistLinkPhone4((result as any).phoneLast4 ?? null);
+      setWaitlistState("needsLineLink");
+    } else {
+      setWaitlistError(result.error || "エラーが発生しました。");
+      setWaitlistState("form");
+    }
+  };
+
+  // LINE連携ゲート通過後にキャンセル待ちを再送信する
+  const resubmitWaitlistAfterLink = async () => {
+    const fd = waitlistPendingFd.current;
+    if (!fd) {
+      setWaitlistState("form");
+      return;
+    }
+    const result = await createWaitlistReservation(fd);
+    if (result.success) {
+      setWaitlistNumber(result.reservationNumber || "");
+      setWaitlistState("success");
     } else {
       setWaitlistError(result.error || "エラーが発生しました。");
       setWaitlistState("form");
@@ -1289,6 +1315,25 @@ function ReserveCalendarContent() {
                 >
                   📋 アンケートに回答する
                 </Link>
+                <button
+                  onClick={() => setWaitlistState("form")}
+                  className="block mx-auto mt-4 text-xs text-zinc-400 underline underline-offset-2"
+                >
+                  入力内容に戻る
+                </button>
+              </div>
+            )}
+
+            {/* ─── LINE連携必須の院：連携ゲート（連携確認後に自動で登録完了） ─── */}
+            {waitlistState === "needsLineLink" && (
+              <div className="border-t border-zinc-800 bg-slate-900 px-5 py-8">
+                <LineLinkGate
+                  phone4={waitlistLinkPhone4}
+                  name={waitlistName}
+                  phone={waitlistPhone}
+                  actionLabel="キャンセル待ち"
+                  onLinked={resubmitWaitlistAfterLink}
+                />
                 <button
                   onClick={() => setWaitlistState("form")}
                   className="block mx-auto mt-4 text-xs text-zinc-400 underline underline-offset-2"

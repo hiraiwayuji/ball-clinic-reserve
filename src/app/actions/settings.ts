@@ -111,6 +111,11 @@ export type ClinicSettings = {
   noshow_block_threshold?: number | null;
   noshow_block_window_days?: number | null;
   noshow_block_days?: number | null;
+  // ── Web予約のLINE連携必須（院ごとの運用設定）──
+  // ON にすると、LINE未連携の患者は「友だち追加＋電話番号下4桁の送信」で連携が
+  // 確認できるまで仮予約（キャンセル待ち含む）が完了しない。仮予約がNGだった時に
+  // 院から連絡できない事故を防ぐ。
+  require_line_link?: boolean | null;
   // 窓口日計表モードの金額カラム定義（JSONB）。専用 getter/setter で更新するため
   // settingsData には載せない（updateClinicSettings 経由では更新しない）。NULL ならデフォルト6列。
   tally_columns?: TallyColumn[] | null;
@@ -276,6 +281,8 @@ export async function updateClinicSettings(
     noshow_block_threshold: settings.noshow_block_threshold,
     noshow_block_window_days: settings.noshow_block_window_days,
     noshow_block_days: settings.noshow_block_days,
+    // Web予約のLINE連携必須（同上：undefined のときはキー自体送らない）
+    require_line_link: settings.require_line_link,
   };
 
   const targetData = {

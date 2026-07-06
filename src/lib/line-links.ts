@@ -76,6 +76,47 @@ export async function getLineUserIdsForCustomer(
   return (data ?? []).map((r: { line_user_id: string }) => r.line_user_id).filter(Boolean);
 }
 
+export type CustomerLineState = {
+  linked: boolean;
+  /** 登録電話の下4桁（LINE連携コードとして案内する数字）。電話が無い/短い場合は null */
+  phoneLast4: string | null;
+  /** 登録電話の数字部分の桁数（連携コード送信が可能かの判定に使う） */
+  phoneDigitCount: number;
+};
+
+/**
+ * customer が LINE 連携済みかと、連携コード（電話下4桁）を返す。
+ * 判定は customers.line_user_id（旧・主紐付け）と customer_line_links（複数紐付け）の両方。
+ * 予約時の「LINE連携必須ゲート」と完了画面のお願いポップアップで共通利用する。
+ */
+export async function getCustomerLineState(
+  customerId: string,
+  clinicId: string,
+  client?: SupabaseClient,
+): Promise<CustomerLineState> {
+  const sb = client ?? getServiceClient();
+  if (!sb) return { linked: false, phoneLast4: null, phoneDigitCount: 0 };
+
+  const { data: cust } = await sb
+    .from("customers")
+    .select("phone, line_user_id")
+    .eq("id", customerId)
+    .eq("clinic_id", clinicId)
+    .maybeSingle();
+  const digits = (cust?.phone ?? "").replace(/\D/g, "");
+  const phoneLast4 = digits.length >= 4 ? digits.slice(-4) : null;
+
+  if (cust?.line_user_id) {
+    return { linked: true, phoneLast4, phoneDigitCount: digits.length };
+  }
+  const { count } = await sb
+    .from("customer_line_links")
+    .select("id", { count: "exact", head: true })
+    .eq("customer_id", customerId)
+    .eq("clinic_id", clinicId);
+  return { linked: (count ?? 0) > 0, phoneLast4, phoneDigitCount: digits.length };
+}
+
 export type LinkResult =
   | { ok: true; created: boolean; isPrimary: boolean }
   | { ok: false; error: string };
