@@ -20,7 +20,8 @@ const TARGETS = [
   { name: "ball-clinic-reserve", url: "https://ball-clinic-reserve.vercel.app", expectClinic: "ボール",   expectDefault: true  },
   { name: "karada-clinic",       url: "https://karada-clinic.vercel.app",       expectClinic: "からだ",   expectDefault: false },
   { name: "muscleseitai",        url: "https://muscleseitai.vercel.app",         expectClinic: "マッスル", expectDefault: false },
-  { name: "relaq-clinic",        url: "https://relaq-clinic.vercel.app",         expectClinic: "RELAQ",    expectDefault: false },
+  // relaq-clinic は 2026-07-06 から Vercel Pause 中（指示があるまで停止）。再開時に戻す:
+  // { name: "relaq-clinic",        url: "https://relaq-clinic.vercel.app",         expectClinic: "RELAQ",    expectDefault: false },
 ];
 
 const PATHS = [
