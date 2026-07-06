@@ -2439,3 +2439,92 @@ export async function classifyByIds(
     return { success: false, count: 0, error: "予期せぬエラーが発生しました" };
   }
 }
+
+/**
+ * 「月またぎ」バッジ用: 指定期間の予約のうち、
+ * 「先月も来院があり、かつその予約がその患者の今月最初の来院」になっている予約IDを返す。
+ * 月初の保険証確認・署名などの月またぎ対応を、受付でひと目で分かるようにする。
+ * 月の判定は JST（Asia/Tokyo）基準。キャンセル済みは来院に数えない。
+ */
+export async function getMonthCrossingFirstVisits(
+  rangeStartISO: string,
+  rangeEndISO: string,
+): Promise<string[]> {
+  try {
+    const { clinicId } = await checkAdminAuth();
+    const supabase = getAdminSupabase() || await getSupabase();
+    if (!supabase) return [];
+
+    const { data: rangeApts, error } = await supabase
+      .from("appointments")
+      .select("id, customer_id, start_time")
+      .eq("clinic_id", clinicId)
+      .neq("status", "cancelled")
+      .not("customer_id", "is", null)
+      .gte("start_time", rangeStartISO)
+      .lt("start_time", rangeEndISO);
+    if (error || !rangeApts || rangeApts.length === 0) return [];
+
+    const customerIds = [...new Set(rangeApts.map((a) => a.customer_id as string))];
+
+    const JST_MS = 9 * 3600 * 1000;
+    const monthKeyJst = (iso: string) => {
+      const d = new Date(new Date(iso).getTime() + JST_MS);
+      return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+    };
+    const prevMonthKey = (key: string) => {
+      const [y, m] = key.split("-").map(Number);
+      return m === 1 ? `${y - 1}-12` : `${y}-${String(m - 1).padStart(2, "0")}`;
+    };
+
+    // 履歴の取得開始 = 期間内で最も早い予約がある月の「前月1日 0:00 JST」
+    const earliest = rangeApts.reduce(
+      (min, a) => (a.start_time < min ? a.start_time : min),
+      rangeApts[0].start_time,
+    );
+    const e = new Date(new Date(earliest).getTime() + JST_MS);
+    const historyStart = new Date(
+      Date.UTC(e.getUTCFullYear(), e.getUTCMonth() - 1, 1) - JST_MS,
+    ).toISOString();
+
+    // 対象患者の来院履歴（前月1日〜期間終わり）。IN句が長くなりすぎないよう分割。
+    const history: Array<{ customer_id: string; start_time: string }> = [];
+    for (let i = 0; i < customerIds.length; i += 200) {
+      const chunk = customerIds.slice(i, i + 200);
+      const { data } = await supabase
+        .from("appointments")
+        .select("customer_id, start_time")
+        .eq("clinic_id", clinicId)
+        .neq("status", "cancelled")
+        .in("customer_id", chunk)
+        .gte("start_time", historyStart)
+        .lt("start_time", rangeEndISO);
+      if (data) history.push(...(data as Array<{ customer_id: string; start_time: string }>));
+    }
+
+    // 患者×月 → その月の最初の来院時刻
+    const firstOfMonth = new Map<string, string>();
+    for (const h of history) {
+      const key = `${h.customer_id}|${monthKeyJst(h.start_time)}`;
+      const cur = firstOfMonth.get(key);
+      if (!cur || h.start_time < cur) firstOfMonth.set(key, h.start_time);
+    }
+
+    // 同時刻の重複予約（同時追加メニュー等）で二重にマークしないよう、患者×月につき1件だけ
+    const flagged = new Map<string, { id: string; start: string }>();
+    for (const a of rangeApts) {
+      const mk = monthKeyJst(a.start_time);
+      const key = `${a.customer_id}|${mk}`;
+      if (!firstOfMonth.has(`${a.customer_id}|${prevMonthKey(mk)}`)) continue; // 先月来院なし
+      if (firstOfMonth.get(key) !== a.start_time) continue; // 今月最初の来院ではない
+      const cur = flagged.get(key);
+      if (!cur || a.start_time < cur.start || (a.start_time === cur.start && a.id < cur.id)) {
+        flagged.set(key, { id: a.id, start: a.start_time });
+      }
+    }
+    return [...flagged.values()].map((f) => f.id);
+  } catch (err) {
+    console.error("getMonthCrossingFirstVisits error:", err);
+    return [];
+  }
+}

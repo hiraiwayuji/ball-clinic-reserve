@@ -14,7 +14,7 @@ import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
 import { realtimeGuard } from "@/lib/realtime-guard";
 import { getTimelineForDate, type TimelineData, type TimelineAppointment } from "@/app/actions/timeline";
-import { updateCheckinStatus, addAddonToAppointment, getAddonCourseInfo, sendReviewRequest, getReviewRequestConfig, restoreCancelledAppointment, deleteAppointment, setCancelledGhostHidden } from "@/app/actions/adminReserve";
+import { updateCheckinStatus, addAddonToAppointment, getAddonCourseInfo, sendReviewRequest, getReviewRequestConfig, restoreCancelledAppointment, deleteAppointment, setCancelledGhostHidden, getMonthCrossingFirstVisits } from "@/app/actions/adminReserve";
 import { cancelKindLabel } from "@/components/admin/CancelledAppointmentDialog";
 import { getStaffSchedulesForDate, upsertStaffScheduleForDate, type StaffDaySchedule } from "@/app/actions/staff-schedule";
 import { getMyRole } from "@/app/actions/auth";
@@ -107,6 +107,8 @@ export default function TodayTimelineWidget({
   const [scheduleLoading, setScheduleLoading] = useState(false);
   // 受付AI調整メッセージ
   const [receptionAiMsg, setReceptionAiMsg] = useState<string | null>(null);
+  // 月またぎ（先月から継続の患者様の今月最初の来院）バッジ対象の予約ID
+  const [monthCrossIds, setMonthCrossIds] = useState<Set<string>>(new Set());
 
   useEffect(() => { setDate(new Date()); }, []);
 
@@ -143,6 +145,13 @@ export default function TodayTimelineWidget({
   const fetchData = useCallback(async (d: Date) => {
     setLoading(true);
     setError(null);
+    // 月またぎバッジ（先月から継続・今月最初の来院）はその日1日ぶんを取得
+    const dayStart = new Date(d);
+    dayStart.setHours(0, 0, 0, 0);
+    const dayEnd = new Date(dayStart.getTime() + 24 * 3600 * 1000);
+    getMonthCrossingFirstVisits(dayStart.toISOString(), dayEnd.toISOString())
+      .then((ids) => setMonthCrossIds(new Set(ids)))
+      .catch(() => setMonthCrossIds(new Set()));
     const [res] = await Promise.all([
       getTimelineForDate(format(d, "yyyy-MM-dd")),
       fetchSchedules(d),
@@ -769,6 +778,14 @@ export default function TodayTimelineWidget({
                               <span className="ml-1 text-[9px] font-bold opacity-70 tabular-nums">No.{a.medical_record_number}</span>
                             )}
                             {a.is_first_visit ? " ⓢ" : ""}
+                            {!isCancelled && monthCrossIds.has(a.id) && (
+                              <span
+                                className="ml-1 text-[9px] font-bold bg-violet-600 text-white px-1 rounded"
+                                title="先月から継続の患者様・今月最初の来院です（保険証確認など月初の対応を）"
+                              >
+                                月初
+                              </span>
+                            )}
                             {a.party_size != null && (
                               <span className="ml-1 text-[9px] font-bold text-orange-600">{a.party_size}名</span>
                             )}
@@ -871,6 +888,12 @@ export default function TodayTimelineWidget({
                 )}
               </div>
               {selectedApt.memo && <div><span className="text-slate-500">メモ:</span> <span className="whitespace-pre-wrap">{selectedApt.memo}</span></div>}
+              {selectedApt.status !== "cancelled" && monthCrossIds.has(selectedApt.id) && (
+                <div className="rounded-lg bg-violet-50 dark:bg-violet-900/20 border border-violet-200 dark:border-violet-800 px-3 py-2 text-xs font-semibold text-violet-800 dark:text-violet-200">
+                  🔖 月またぎ：先月から継続の患者様の今月最初の来院です。
+                  保険証の確認など、月初の対応をお願いします。
+                </div>
+              )}
             </div>
 
             {/* キャンセル済み: 復活 / 完全削除のみ */}

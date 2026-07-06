@@ -16,7 +16,7 @@ import {
 import Link from "next/link";
 import { EditAppointmentDialog } from "@/components/admin/EditAppointmentDialog";
 import { CancelledAppointmentDialog, cancelKindLabel } from "@/components/admin/CancelledAppointmentDialog";
-import { getEndingSeriesAlerts, type EndingSeriesAlert } from "@/app/actions/adminReserve";
+import { getEndingSeriesAlerts, getMonthCrossingFirstVisits, type EndingSeriesAlert } from "@/app/actions/adminReserve";
 import { AddAppointmentDialog } from "@/components/admin/AddAppointmentDialog";
 import { AddBreakDialog } from "@/components/admin/AddBreakDialog";
 import { PatientSearchPanel } from "@/components/admin/PatientSearchPanel";
@@ -56,6 +56,8 @@ export default function AdminWeeklyGridPage() {
   const [showHiddenGhosts, setShowHiddenGhosts] = useState(false);
   // 毎週予約（連続予約）の最終回が近い患者のお知らせ
   const [endingSeries, setEndingSeries] = useState<EndingSeriesAlert[]>([]);
+  // 月またぎ（先月から継続の患者様の今月最初の来院）バッジ対象の予約ID
+  const [monthCrossIds, setMonthCrossIds] = useState<Set<string>>(new Set());
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [selectedAddDate, setSelectedAddDate] = useState<Date | undefined>();
   const [selectedAddTime, setSelectedAddTime] = useState("");
@@ -162,6 +164,15 @@ export default function AdminWeeklyGridPage() {
           .gte("start_time", weekStart.toISOString())
           .lt("start_time", weekEnd.toISOString());
         if (aptData) setAppointments(aptData);
+
+        // 月またぎバッジ（先月から継続・今月最初の来院）の対象を取得
+        try {
+          const ids = await getMonthCrossingFirstVisits(weekStart.toISOString(), weekEnd.toISOString());
+          setMonthCrossIds(new Set(ids));
+        } catch (e) {
+          console.warn("[appointments] failed to load month-crossing flags:", e);
+          setMonthCrossIds(new Set());
+        }
 
         const { data: holidayData, error: holidayErr } = await supabase
           .from("clinic_holidays")
@@ -712,6 +723,14 @@ export default function AdminWeeklyGridPage() {
                                 🎂 誕生日
                               </span>
                             )}
+                            {!isCancelled && monthCrossIds.has(apt.id) && (
+                              <span
+                                className="text-[9px] font-black bg-violet-600 text-white px-1.5 py-0.5 rounded-full leading-none"
+                                title="先月から継続の患者様・今月最初の来院です（保険証確認など月初の対応を）"
+                              >
+                                🔖 月初
+                              </span>
+                            )}
                           </div>
                           <div className="flex items-center gap-2 mt-1 flex-wrap">
                             <Badge
@@ -1218,9 +1237,19 @@ export default function AdminWeeklyGridPage() {
                                     {!isCancelled && isBirthdayOnDate(cust?.birth_date, startTime) && "🎂"}
                                     {name}
                                   </span>
-                                  {isFirst && !isCancelled && (
-                                    <span className="bg-amber-500 text-white text-[9px] px-1 rounded">初</span>
-                                  )}
+                                  <span className="flex items-center gap-0.5 shrink-0">
+                                    {isFirst && !isCancelled && (
+                                      <span className="bg-amber-500 text-white text-[9px] px-1 rounded">初</span>
+                                    )}
+                                    {!isCancelled && monthCrossIds.has(apt.id) && (
+                                      <span
+                                        className="bg-violet-600 text-white text-[9px] px-1 rounded"
+                                        title="先月から継続の患者様・今月最初の来院です（保険証確認など月初の対応を）"
+                                      >
+                                        月初
+                                      </span>
+                                    )}
+                                  </span>
                                 </div>
                                 <div className="text-[10px] opacity-80 mt-0.5 flex items-center gap-1">
                                   <span>{isCancelled ? `${cancelKindLabel(apt.cancel_kind, apt.no_show)}${apt.cancel_hidden ? "・非表示中" : ""}` : getStatusText(apt.status)}</span>
@@ -1373,6 +1402,14 @@ export default function AdminWeeklyGridPage() {
                                     )}
                                     {isBirthdayOnDate(cust?.birth_date, startTime) && (
                                       <span className="text-[10px] font-black bg-pink-500 text-white px-2 py-0.5 rounded-full">🎂 誕生日</span>
+                                    )}
+                                    {!isCancelled && monthCrossIds.has(apt.id) && (
+                                      <span
+                                        className="text-[10px] font-black bg-violet-600 text-white px-2 py-0.5 rounded-full"
+                                        title="先月から継続の患者様・今月最初の来院です（保険証確認など月初の対応を）"
+                                      >
+                                        🔖 月初
+                                      </span>
                                     )}
                                     <Badge variant="outline" className={`text-xs py-0 h-5 ${getStatusColor(apt.status)}`}>
                                       {getStatusText(apt.status)}
