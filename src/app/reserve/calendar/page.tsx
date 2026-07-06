@@ -25,6 +25,9 @@ import { CLINIC_CONFIG } from "@/lib/clinic-config";
 import { PUBLIC_CLINIC_ID } from "@/lib/default-clinic-id";
 import LineLinkGate from "@/components/reserve/LineLinkGate";
 
+// 「友だち追加」用 URL は /R/ti/p/ 形式（/ti/p/ は友だち以外開けない）。reserve/page.tsx と同じ規約
+const LINE_URL = process.env.NEXT_PUBLIC_LINE_OFFICIAL_ACCOUNT_URL ?? "https://line.me/R/ti/p/%40shc8761q";
+
 // 静的なTIME_SLOTS, MAX_SLOTSを削除
 
 type AvailabilityLevel = "available" | "few" | "full" | "closed" | "past";
@@ -1303,18 +1306,42 @@ function ReserveCalendarContent() {
                 <div className="w-16 h-16 bg-blue-950 border border-blue-800 rounded-full flex items-center justify-center mx-auto mb-5">
                   <span className="text-3xl">📋</span>
                 </div>
-                <h4 className="font-black text-white text-xl mb-2">はじめての方へ</h4>
+                <h4 className="font-black text-white text-xl mb-2">ご登録が見つかりませんでした</h4>
                 <p className="text-zinc-400 text-sm mb-6 leading-relaxed">
-                  オンラインのご利用が初めての方は、<br />
-                  先にアンケート（1分程度）へのご回答をお願いします。<br />
-                  ご回答後、キャンセル待ちのご登録ができます。
+                  ご入力のお電話番号では、ご登録が確認できませんでした。<br />
+                  次のどちらかでお進みください。
                 </p>
-                <Link
-                  href="/questionnaire"
-                  className="inline-flex w-full max-w-xs mx-auto items-center justify-center bg-blue-600 hover:bg-blue-500 text-white font-bold py-4 px-4 rounded-2xl transition-all gap-2 text-sm"
-                >
-                  📋 アンケートに回答する
-                </Link>
+                <div className="max-w-xs mx-auto space-y-4 text-left">
+                  <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4 space-y-3">
+                    <p className="text-white font-bold text-sm">🆕 初めての方</p>
+                    <p className="text-zinc-400 text-xs leading-relaxed">
+                      先にアンケート（1分程度）へのご回答をお願いします。<br />
+                      ご回答後、キャンセル待ちのご登録ができます。
+                    </p>
+                    <Link
+                      href="/questionnaire"
+                      className="inline-flex w-full items-center justify-center bg-blue-600 hover:bg-blue-500 text-white font-bold py-3.5 px-4 rounded-2xl transition-all gap-2 text-sm"
+                    >
+                      📋 アンケートに回答する
+                    </Link>
+                  </div>
+                  <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4 space-y-3">
+                    <p className="text-white font-bold text-sm">✅ アンケート回答済み・来院したことのある方</p>
+                    <p className="text-zinc-400 text-xs leading-relaxed">
+                      アンケートは不要です。<br />
+                      ご登録のお電話番号を入力し直してお試しください。<br />
+                      番号が分からない場合は、LINEで電話番号の下4桁を送るだけで紐づけできます。
+                    </p>
+                    <a
+                      href={LINE_URL}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex w-full items-center justify-center bg-[#06C755] hover:bg-[#05b34c] text-white font-bold py-3.5 px-4 rounded-2xl transition-all gap-2 text-sm"
+                    >
+                      LINEで下4桁を送って紐づける
+                    </a>
+                  </div>
+                </div>
                 <button
                   onClick={() => setWaitlistState("form")}
                   className="block mx-auto mt-4 text-xs text-zinc-400 underline underline-offset-2"

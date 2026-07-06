@@ -1356,23 +1356,54 @@ function ReserveContent() {
                       ⏳ まだ仮予約は完了していません
                     </p>
                     <p className="text-amber-100/90 text-sm leading-relaxed">
-                      初めてオンライン予約をされる方は、
-                      <span className="font-bold text-white">最初の1回だけ</span>
-                      かんたんなアンケート登録が必要です（次回からは不要です）。
+                      ご入力のお電話番号では、ご登録が見つかりませんでした。<br />
+                      次のどちらかでお進みください。
                     </p>
-                    <div className="bg-white/10 border border-white/15 rounded-2xl p-4 text-sm text-amber-50/90 leading-relaxed">
-                      いま選んでいただいた
-                      <span className="font-bold text-white">日時・お名前・お電話はそのまま引き継ぎます。</span>
-                      <br />
-                      下のボタンから1分ほどのアンケートに答えていただくと、
-                      <span className="font-bold text-white">選び直しなしで、そのまま仮予約が完了</span>します。
+
+                    {/* A: 初めての方 → アンケート（1回だけ） */}
+                    <div className="bg-white/10 border border-white/15 rounded-2xl p-4 space-y-3">
+                      <p className="text-white font-black text-sm">🆕 初めての方</p>
+                      <p className="text-sm text-amber-100/90 leading-relaxed">
+                        <span className="font-bold text-white">最初の1回だけ</span>
+                        かんたんなアンケート登録が必要です（次回からは不要です）。<br />
+                        いま選んでいただいた
+                        <span className="font-bold text-white">日時・お名前・お電話はそのまま引き継ぎ、</span>
+                        選び直しなしで仮予約まで完了します。
+                      </p>
+                      <Link
+                        href="/questionnaire"
+                        className="inline-flex w-full items-center justify-center bg-amber-500 hover:bg-amber-400 text-amber-950 font-black py-4 px-4 rounded-2xl transition-all gap-2 text-base shadow-lg shadow-amber-500/30"
+                      >
+                        📋 アンケートに答えて仮予約を完了する →
+                      </Link>
                     </div>
-                    <Link
-                      href="/questionnaire"
-                      className="inline-flex w-full items-center justify-center bg-amber-500 hover:bg-amber-400 text-amber-950 font-black py-5 px-4 rounded-2xl transition-all gap-2 text-base shadow-lg shadow-amber-500/30"
-                    >
-                      📋 アンケートに答えて仮予約を完了する →
-                    </Link>
+
+                    {/* B: アンケート回答済み・来院歴のある方 → アンケートは不要 */}
+                    <div className="bg-white/10 border border-white/15 rounded-2xl p-4 space-y-3">
+                      <p className="text-white font-black text-sm">✅ アンケート回答済み・来院したことのある方</p>
+                      <p className="text-sm text-amber-100/90 leading-relaxed">
+                        アンケートにもう一度答える必要はありません。<br />
+                        <span className="font-bold text-white">ご登録のお電話番号</span>
+                        （当院にお伝えいただいている番号）を入力し直して、
+                        もう一度お申し込みください。
+                      </p>
+                      <p className="text-xs text-amber-100/80 leading-relaxed">
+                        番号が分からない場合は、LINEで
+                        <span className="font-bold text-white">電話番号の下4桁</span>
+                        を送るだけで紐づけできます。<br />
+                        紐づけ後、LINEのトークで「予約」と送ると、
+                        本人確認なしでそのまま予約できます。
+                      </p>
+                      <a
+                        href={LINE_URL}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex w-full items-center justify-center bg-[#06C755] hover:bg-[#05b34c] text-white font-bold py-3.5 px-4 rounded-2xl transition-all gap-2 text-sm"
+                      >
+                        <MessageCircle className="w-4 h-4" />
+                        LINEで下4桁を送って紐づける
+                      </a>
+                    </div>
                   </div>
                 )}
 
