@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
+import { usePathname } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import {
   MessageSquare, Send, Loader2, X, Sparkles, Trash2, ChevronDown,
@@ -13,14 +14,45 @@ interface ChatMessage {
   created_at?: string;
 }
 
+// 特定の画面を開いたとき、AI秘書から自発的に「お手伝いしましょうか？」と声をかける。
+// 1画面につきセッション中1回だけ（しつこくならないように）。
+const PROACTIVE_GREETINGS: Array<{ prefix: string; message: string; ask: string }> = [
+  {
+    prefix: "/admin/settings",
+    message: "設定画面を開いたんですね。何かお手伝いしましょうか？ 施術コースの追加や営業時間の変え方など、使い方はなんでも聞いてください。",
+    ask: "設定画面でできることと、よく使う設定の場所を教えてください。",
+  },
+];
+
 export default function AiChatPanel() {
+  const pathname = usePathname();
   const [isOpen, setIsOpen] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [isHistoryLoading, setIsHistoryLoading] = useState(false);
+  // 画面を開いたときの自発的な声かけバブル
+  const [proactive, setProactive] = useState<{ message: string; ask: string } | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // 設定画面などを開いたら、AI秘書から一声かける（セッション中1回だけ）
+  useEffect(() => {
+    if (!pathname) return;
+    const match = PROACTIVE_GREETINGS.find((g) => pathname.startsWith(g.prefix));
+    if (!match) {
+      setProactive(null);
+      return;
+    }
+    if (isOpen) return; // チャットを開いているときは声かけ不要
+    try {
+      const key = `ai-secretary-greeted:${match.prefix}`;
+      if (sessionStorage.getItem(key)) return;
+      sessionStorage.setItem(key, "1");
+    } catch {}
+    setProactive({ message: match.message, ask: match.ask });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pathname]);
 
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -162,6 +194,44 @@ export default function AiChatPanel() {
 
   return (
     <>
+      {/* 自発的な声かけバブル（設定画面などを開いたとき） */}
+      {proactive && !isOpen && (
+        <div className="fixed bottom-20 right-6 z-50 w-[280px] bg-white rounded-2xl shadow-2xl border border-indigo-100 p-4 animate-in slide-in-from-bottom-2 duration-300">
+          <div className="flex items-start gap-2.5">
+            <div className="w-8 h-8 shrink-0 bg-gradient-to-br from-indigo-500 to-purple-500 rounded-full flex items-center justify-center">
+              <Sparkles className="w-4 h-4 text-white" />
+            </div>
+            <p className="text-xs text-slate-700 leading-relaxed flex-1">{proactive.message}</p>
+            <button
+              onClick={() => setProactive(null)}
+              className="text-slate-300 hover:text-slate-500 shrink-0"
+              aria-label="閉じる"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+          <div className="mt-3 flex items-center gap-2">
+            <button
+              onClick={() => {
+                setIsOpen(true);
+                setInput(proactive.ask);
+                setProactive(null);
+                setTimeout(() => inputRef.current?.focus(), 250);
+              }}
+              className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl px-3 py-2 transition-colors"
+            >
+              使い方を聞く
+            </button>
+            <button
+              onClick={() => setProactive(null)}
+              className="text-xs text-slate-400 hover:text-slate-600 px-2 py-2"
+            >
+              今は大丈夫
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Floating Button */}
       {!isOpen && (
         <button
@@ -212,14 +282,15 @@ export default function AiChatPanel() {
                 </div>
                 <h4 className="font-bold text-slate-800 text-lg mb-2">V-ARC AI秘書へようこそ</h4>
                 <p className="text-sm text-slate-500 mb-6">
-                  院の経営状況をリアルタイムで分析し、
-                  <br />具体的なアクションを提案します。
+                  経営の分析・提案はもちろん、
+                  <br />ツールの使い方の質問もどうぞ。
                 </p>
                 <div className="space-y-2 w-full">
                   {[
                     "今の経営状況をどう思う？",
                     "今月の目標達成のためにすべきことは？",
                     "集患を増やすアイデアを教えて",
+                    "LINE紐づけのやり方を教えて",
                   ].map((suggestion) => (
                     <button
                       key={suggestion}
@@ -281,7 +352,7 @@ export default function AiChatPanel() {
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder="経営について質問する..."
+                placeholder="経営や使い方について質問する..."
                 className="flex-1 border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-2.5 text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent bg-slate-50 dark:bg-slate-800 placeholder:text-slate-400 dark:placeholder:text-slate-500"
                 disabled={isLoading}
               />
@@ -294,7 +365,7 @@ export default function AiChatPanel() {
               </button>
             </div>
             <p className="text-[10px] text-slate-400 mt-2 text-center">
-              経営秘書AI — リアルタイムデータに基づく提案
+              経営も使い方も質問OK — 解決しないときは ぼーるくん へLINE
             </p>
           </div>
         </div>
