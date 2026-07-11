@@ -4,11 +4,12 @@ import { useEffect, useMemo, useState } from "react";
 import { format } from "date-fns";
 import { ja } from "date-fns/locale";
 import { toast } from "sonner";
-import { Loader2, Clock, LogIn, LogOut, CheckCircle2, AlertTriangle, ListChecks, Circle, XCircle } from "lucide-react";
+import { Loader2, Clock, LogIn, LogOut, CheckCircle2, AlertTriangle, ListChecks, Circle, XCircle, Lock } from "lucide-react";
 import {
   listAttendanceStaff, getAttendanceConfig, getTodayAttendance,
   clockIn, clockOut, getTodayTasks, reportTask,
-  type AttendanceStaff, type AttendanceConfig, type TodayAttendance, type OvertimeReasonType, type TodayTask,
+  getAttendanceGate, unlockAttendanceDevice,
+  type AttendanceStaff, type AttendanceConfig, type TodayAttendance, type OvertimeReasonType, type TodayTask, type AttendanceGate,
 } from "@/app/actions/attendance";
 import { OVERTIME_REASONS } from "@/lib/attendance-constants";
 import { CLINIC_CONFIG } from "@/lib/clinic-config";
@@ -17,6 +18,9 @@ export default function AttendancePage() {
   const clinicName = CLINIC_CONFIG.name; // ビルド時固定（ボール混入防止）
   const [staffList, setStaffList] = useState<AttendanceStaff[]>([]);
   const [config, setConfig] = useState<AttendanceConfig | null>(null);
+  const [gate, setGate] = useState<AttendanceGate | null>(null);
+  const [unlockCode, setUnlockCode] = useState("");
+  const [unlockBusy, setUnlockBusy] = useState(false);
   const [staffId, setStaffId] = useState("");
   const [today, setToday] = useState<TodayAttendance | null>(null);
   const [loadingToday, setLoadingToday] = useState(false);
@@ -71,7 +75,24 @@ export default function AttendancePage() {
     getAttendanceConfig().then(setConfig).catch(() => {
       toast.error("設定の読み込みに失敗しました。ページを再読み込みしてください");
     });
+    // 端末ロック状態。取得失敗時は解錠扱いで進める（打刻自体はサーバー側でも再確認するため安全）
+    getAttendanceGate().then(setGate).catch(() => setGate({ deviceLock: false, unlocked: true }));
   }, []);
+
+  const submitUnlock = async () => {
+    const code = unlockCode.trim();
+    if (!code) return;
+    setUnlockBusy(true);
+    const r = await unlockAttendanceDevice(code);
+    setUnlockBusy(false);
+    if (r.success) {
+      setGate({ deviceLock: true, unlocked: true });
+      setUnlockCode("");
+      toast.success("このパソコンで打刻が使えるようになりました");
+    } else {
+      toast.error(r.error ?? "パスワードが違います");
+    }
+  };
 
   const selectedStaff = useMemo(() => staffList.find((s) => s.id === staffId), [staffList, staffId]);
 
@@ -139,6 +160,54 @@ export default function AttendancePage() {
       toast.error(r.error ?? "記録に失敗しました");
     }
   };
+
+  // 端末ロックの判定が済むまで待つ（ロック中の端末に打刻UIを一瞬でも見せない）
+  if (gate === null) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
+        <Loader2 className="w-6 h-6 animate-spin text-slate-300" />
+      </div>
+    );
+  }
+
+  // 端末ロック中で、この端末が未登録 → 合言葉（パスワード）入力画面
+  if (gate.deviceLock && !gate.unlocked) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
+        <div className="bg-white rounded-3xl shadow-xl border border-slate-200 max-w-sm w-full p-7 space-y-4">
+          <div className="text-center">
+            <div className="inline-flex items-center gap-2 text-blue-600 font-black">
+              <Lock className="w-5 h-5" /> 打刻用パスワード
+            </div>
+            <p className="text-slate-500 text-sm mt-2 leading-relaxed">
+              このパソコンでパスワードを入力すると<br />打刻が使えるようになります。
+            </p>
+            <p className="text-[11px] text-slate-400 mt-1">院長から聞いたパスワードを入力してください</p>
+          </div>
+          <input
+            type="password"
+            value={unlockCode}
+            onChange={(e) => setUnlockCode(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") void submitUnlock(); }}
+            placeholder="パスワード"
+            autoFocus
+            className="w-full h-12 rounded-xl border border-slate-300 px-3 text-base bg-white text-center tracking-widest"
+          />
+          <button
+            onClick={submitUnlock}
+            disabled={unlockBusy || !unlockCode.trim()}
+            className="w-full h-12 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white font-black text-sm"
+          >
+            {unlockBusy ? "確認中..." : "このパソコンで打刻を使えるようにする"}
+          </button>
+          <p className="text-[11px] text-slate-400 text-center leading-relaxed">
+            一度登録すれば、このパソコンでは次回からパスワード不要です。<br />
+            スタッフ個人のスマホでは打刻できません。
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   // 機能オフ（オーナーが未有効化）
   if (config && !config.enabled) {

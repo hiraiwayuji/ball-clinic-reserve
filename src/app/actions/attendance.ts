@@ -6,6 +6,12 @@ import { CLINIC_CONFIG } from "@/lib/clinic-config";
 import { pushLineToOwners } from "@/lib/admin-notify";
 import { requireRole } from "@/app/actions/auth";
 import { OVERTIME_REASON_LABEL } from "@/lib/attendance-constants";
+import {
+  isAttendanceDeviceUnlocked,
+  setAttendanceDeviceUnlocked,
+  verifyAttendancePasscode,
+  hashAttendancePasscode,
+} from "@/lib/attendance-device";
 
 /**
  * 勤怠（出退勤の打刻）＋残業の見える化 [Phase 1]
@@ -99,6 +105,63 @@ export async function getAttendanceConfig(): Promise<AttendanceConfig> {
     closingAllowanceUntil: hhmm(data?.closing_allowance_until as string | null, "20:30"),
     closingStaffId: (data?.closing_staff_id as string | null) ?? null,
   };
+}
+
+// ── 端末ロック（院のPCでのみ打刻できるようにする） ─────────
+
+export type AttendanceGate = {
+  deviceLock: boolean; // 端末ロックが有効か
+  unlocked: boolean;   // この端末が登録済み（打刻してよい）か
+};
+
+/**
+ * 打刻画面の端末ロック状態（ログイン不要）。
+ * deviceLock=ON かつ unlocked=false のときは、打刻の前に合言葉入力が必要。
+ */
+export async function getAttendanceGate(): Promise<AttendanceGate> {
+  const { data } = await admin()
+    .from("clinic_settings")
+    .select("attendance_device_lock")
+    .eq("id", PUBLIC_CLINIC_ID)
+    .maybeSingle();
+  const deviceLock = !!data?.attendance_device_lock;
+  if (!deviceLock) return { deviceLock: false, unlocked: true };
+  return { deviceLock: true, unlocked: await isAttendanceDeviceUnlocked(PUBLIC_CLINIC_ID) };
+}
+
+/**
+ * 合言葉でこの端末を「院のPC」として登録（解錠）する（ログイン不要）。
+ * 成功するとこのブラウザに長期 Cookie を保存し、以後は合言葉なしで打刻できる。
+ */
+export async function unlockAttendanceDevice(
+  passcode: string,
+): Promise<{ success: boolean; error?: string }> {
+  const { data } = await admin()
+    .from("clinic_settings")
+    .select("attendance_device_lock, attendance_passcode_hash")
+    .eq("id", PUBLIC_CLINIC_ID)
+    .maybeSingle();
+  // そもそもロックしていなければ登録不要
+  if (!data?.attendance_device_lock) return { success: true };
+  const ok = await verifyAttendancePasscode(passcode, data?.attendance_passcode_hash as string | null);
+  if (!ok) return { success: false, error: "パスワードが違います" };
+  await setAttendanceDeviceUnlocked(PUBLIC_CLINIC_ID);
+  return { success: true };
+}
+
+/**
+ * 打刻の共通ガード。端末ロックが有効で、この端末が未登録なら打刻を拒否する。
+ * 画面側のガードを突破されても、ここ（サーバー）で必ず止まる。
+ */
+async function ensureDeviceAllowed(): Promise<{ ok: boolean; error?: string }> {
+  const { data } = await admin()
+    .from("clinic_settings")
+    .select("attendance_device_lock")
+    .eq("id", PUBLIC_CLINIC_ID)
+    .maybeSingle();
+  if (!data?.attendance_device_lock) return { ok: true };
+  if (await isAttendanceDeviceUnlocked(PUBLIC_CLINIC_ID)) return { ok: true };
+  return { ok: false, error: "この端末では打刻できません。院のパソコンで行ってください。" };
 }
 
 export type TodayAttendance = {
@@ -206,6 +269,8 @@ export async function reportTask(
   staffId: string, taskId: string, outcome: "done" | "not_done", reason?: string,
 ): Promise<{ success: boolean; error?: string }> {
   if (!staffId || !taskId) return { success: false, error: "不正なリクエストです" };
+  const gate = await ensureDeviceAllowed();
+  if (!gate.ok) return { success: false, error: gate.error };
   const db = admin();
   const name = await verifyStaff(db, staffId);
   if (!name) return { success: false, error: "スタッフが見つかりません" };
@@ -224,6 +289,8 @@ export async function reportTask(
 /** 出勤打刻（ログイン不要）。当日の業務リストも役割テンプレから自動生成する */
 export async function clockIn(staffId: string): Promise<{ success: boolean; error?: string }> {
   if (!staffId) return { success: false, error: "お名前を選んでください" };
+  const gate = await ensureDeviceAllowed();
+  if (!gate.ok) return { success: false, error: gate.error };
   const db = admin();
   const name = await verifyStaff(db, staffId);
   if (!name) return { success: false, error: "スタッフが見つかりません。お名前を選び直してください。" };
@@ -248,6 +315,8 @@ export async function clockOut(
   reason?: { type?: OvertimeReasonType; note?: string },
 ): Promise<{ success: boolean; requireReason?: boolean; isOvertime?: boolean; requireTaskReport?: boolean; remainingTasks?: number; error?: string }> {
   if (!staffId) return { success: false, error: "お名前を選んでください" };
+  const gate = await ensureDeviceAllowed();
+  if (!gate.ok) return { success: false, error: gate.error };
   const db = admin();
   const name = await verifyStaff(db, staffId);
   if (!name) return { success: false, error: "スタッフが見つかりません。お名前を選び直してください。" };
@@ -346,6 +415,70 @@ export async function setAttendanceSettings(input: AttendanceConfig): Promise<{ 
       closing_allowance_until: input.closingAllowanceUntil,
       closing_staff_id: input.closingStaffId,
     })
+    .eq("id", clinicId);
+  return error ? { success: false, error: error.message } : { success: true };
+}
+
+// ── 端末ロックの管理（owner専用） ─────────────────────────
+
+export type AttendanceDeviceSettings = {
+  deviceLock: boolean;  // 院のPC限定が有効か
+  hasPasscode: boolean; // 打刻用パスワードが設定済みか
+};
+
+/** オーナー：端末ロックの状態取得（パスワードそのものは返さない） */
+export async function getAttendanceDeviceSettings(): Promise<AttendanceDeviceSettings> {
+  await requireRole(["owner"]);
+  const { createClient } = await import("@/lib/supabase/server");
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("clinic_settings")
+    .select("attendance_device_lock, attendance_passcode_hash")
+    .eq("id", process.env.NEXT_PUBLIC_CLINIC_ID!)
+    .maybeSingle();
+  return {
+    deviceLock: !!data?.attendance_device_lock,
+    hasPasscode: !!(data?.attendance_passcode_hash as string | null),
+  };
+}
+
+/** オーナー：打刻用パスワードの設定・変更（4文字以上・ハッシュで保存） */
+export async function setAttendancePasscode(
+  passcode: string,
+): Promise<{ success: boolean; error?: string }> {
+  const { clinicId } = await requireRole(["owner"]);
+  const code = passcode.trim();
+  if (code.length < 4) return { success: false, error: "パスワードは4文字以上にしてください" };
+  const hash = await hashAttendancePasscode(code);
+  const { createClient } = await import("@/lib/supabase/server");
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("clinic_settings")
+    .update({ attendance_passcode_hash: hash })
+    .eq("id", clinicId);
+  return error ? { success: false, error: error.message } : { success: true };
+}
+
+/** オーナー：院のPC限定 ON/OFF。ON にするにはパスワード設定済みが必須 */
+export async function setAttendanceDeviceLock(
+  enabled: boolean,
+): Promise<{ success: boolean; error?: string }> {
+  const { clinicId } = await requireRole(["owner"]);
+  const { createClient } = await import("@/lib/supabase/server");
+  const supabase = await createClient();
+  if (enabled) {
+    const { data } = await supabase
+      .from("clinic_settings")
+      .select("attendance_passcode_hash")
+      .eq("id", clinicId)
+      .maybeSingle();
+    if (!(data?.attendance_passcode_hash as string | null)) {
+      return { success: false, error: "先に打刻用パスワードを設定してください" };
+    }
+  }
+  const { error } = await supabase
+    .from("clinic_settings")
+    .update({ attendance_device_lock: enabled })
     .eq("id", clinicId);
   return error ? { success: false, error: error.message } : { success: true };
 }

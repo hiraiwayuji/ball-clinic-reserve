@@ -6,10 +6,11 @@ import { ja } from "date-fns/locale";
 import { toast } from "sonner";
 import {
   Loader2, Clock, ChevronLeft, ChevronRight, AlertTriangle, Copy, Link2,
-  Save, Coins, Settings2, CheckCircle2, TrendingDown,
+  Save, Coins, Settings2, CheckCircle2, TrendingDown, Lock,
 } from "lucide-react";
 import {
   getAttendanceSettings, setAttendanceSettings, listStaffWages, setStaffWage, getAttendanceReport,
+  getAttendanceDeviceSettings, setAttendancePasscode, setAttendanceDeviceLock,
   type AttendanceConfig, type OwnerStaffWage, type AttendanceReportRecord, type AttendanceSummary, type AttendanceJudgment,
 } from "@/app/actions/attendance";
 import { JUDGMENT_LABEL } from "@/lib/attendance-constants";
@@ -44,6 +45,12 @@ export default function AttendanceAdminPage() {
   const [loading, setLoading] = useState(true);
   const [savingCfg, setSavingCfg] = useState(false);
   const [attendUrl, setAttendUrl] = useState("");
+  // 端末ロック（院のPCのみ打刻）
+  const [deviceLock, setDeviceLock] = useState(false);
+  const [hasPasscode, setHasPasscode] = useState(false);
+  const [passcodeInput, setPasscodeInput] = useState("");
+  const [savingPass, setSavingPass] = useState(false);
+  const [togglingLock, setTogglingLock] = useState(false);
 
   const monthStr = useMemo(
     () => `${month.getFullYear()}-${String(month.getMonth() + 1).padStart(2, "0")}`,
@@ -52,10 +59,32 @@ export default function AttendanceAdminPage() {
 
   useEffect(() => {
     if (typeof window !== "undefined") setAttendUrl(`${window.location.origin}/attendance`);
-    Promise.all([getAttendanceSettings(), listStaffWages()])
-      .then(([cfg, w]) => { setConfig(cfg); setWages(w); })
+    Promise.all([getAttendanceSettings(), listStaffWages(), getAttendanceDeviceSettings()])
+      .then(([cfg, w, dev]) => {
+        setConfig(cfg); setWages(w);
+        setDeviceLock(dev.deviceLock); setHasPasscode(dev.hasPasscode);
+      })
       .catch(() => toast.error("読み込みに失敗しました"));
   }, []);
+
+  const savePasscode = async () => {
+    const code = passcodeInput.trim();
+    if (code.length < 4) { toast.error("パスワードは4文字以上にしてください"); return; }
+    setSavingPass(true);
+    const r = await setAttendancePasscode(code);
+    setSavingPass(false);
+    if (r.success) { setHasPasscode(true); setPasscodeInput(""); toast.success("打刻用パスワードを保存しました"); }
+    else toast.error(r.error ?? "保存に失敗しました");
+  };
+
+  const toggleDeviceLock = async () => {
+    const next = !deviceLock;
+    setTogglingLock(true);
+    const r = await setAttendanceDeviceLock(next);
+    setTogglingLock(false);
+    if (r.success) { setDeviceLock(next); toast.success(next ? "院のパソコンのみで打刻に設定しました" : "端末の制限を解除しました"); }
+    else toast.error(r.error ?? "切替に失敗しました");
+  };
 
   useEffect(() => {
     setLoading(true);
@@ -162,6 +191,68 @@ export default function AttendanceAdminPage() {
             <button onClick={copyUrl} className="h-8 px-3 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold flex items-center gap-1"><Copy className="w-3.5 h-3.5" /> コピー</button>
           </div>
         </div>
+      </div>
+
+      {/* 打刻できる端末の制限（院のPCのみ） */}
+      <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm space-y-3">
+        <div className="flex items-center gap-2 text-sm font-black text-slate-700">
+          <Lock className="w-4 h-4 text-slate-500" /> 打刻できるパソコンを限定する
+        </div>
+        <p className="text-[11px] text-slate-500 leading-relaxed">
+          オンにすると、下のパスワードを入力して登録したパソコンでしか打刻できなくなります。
+          院のパソコンで一度だけパスワードを入力すれば、以後そのパソコンはパスワード不要です。
+          スタッフ個人のスマホでは打刻できなくなります（パスワードは院長だけが知っておいてください）。
+        </p>
+
+        {/* パスワード設定 */}
+        <label className="block">
+          <span className="text-xs font-bold text-slate-600">
+            打刻用パスワード
+            {hasPasscode
+              ? <span className="ml-1 text-emerald-600">（設定済み・変更する時だけ入力）</span>
+              : <span className="ml-1 text-rose-500">（未設定）</span>}
+          </span>
+          <div className="mt-1.5 flex items-center gap-2">
+            <input
+              type="text"
+              value={passcodeInput}
+              onChange={(e) => setPasscodeInput(e.target.value)}
+              placeholder={hasPasscode ? "変更する時だけ入力（4文字以上）" : "4文字以上で決めてください"}
+              className="flex-1 h-11 rounded-xl border border-slate-300 px-3 text-sm bg-white"
+            />
+            <button
+              onClick={savePasscode}
+              disabled={savingPass || passcodeInput.trim().length < 4}
+              className="h-11 px-4 rounded-xl bg-slate-700 hover:bg-slate-800 disabled:opacity-50 text-white text-sm font-bold whitespace-nowrap"
+            >
+              {savingPass ? "保存中..." : "保存"}
+            </button>
+          </div>
+        </label>
+
+        {/* ON/OFF */}
+        <label className="flex items-center justify-between gap-3 rounded-xl bg-slate-50 p-3">
+          <span className="text-sm font-bold text-slate-700">
+            院のパソコンのみで打刻する
+            <span className="block text-[11px] font-normal text-slate-500">
+              {hasPasscode ? "登録したパソコン以外は打刻できなくなります" : "先に上のパスワードを設定してください"}
+            </span>
+          </span>
+          <button
+            onClick={toggleDeviceLock}
+            disabled={togglingLock || (!deviceLock && !hasPasscode)}
+            className={`relative w-12 h-7 rounded-full transition-colors disabled:opacity-40 ${deviceLock ? "bg-emerald-500" : "bg-slate-300"}`}
+          >
+            <span className={`absolute top-1 left-1 w-5 h-5 rounded-full bg-white transition-transform ${deviceLock ? "translate-x-5" : ""}`} />
+          </button>
+        </label>
+
+        {deviceLock && (
+          <p className="text-[11px] text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg p-2 flex items-start gap-1.5">
+            <CheckCircle2 className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+            オンです。院のパソコンで打刻ページを開き、上のパスワードを一度入力して登録してください。
+          </p>
+        )}
       </div>
 
       {/* 時給（owner専用） */}
