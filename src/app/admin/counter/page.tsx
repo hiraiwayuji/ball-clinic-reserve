@@ -329,7 +329,8 @@ function AppointmentCard({
 
       {/* 初診・保険証変更・長期未来院チェックリスト */}
       {(() => {
-        const isLongAbsence = (apt.last_visit_days ?? 0) > 90 && !apt.is_first_visit;
+        // 1ヶ月(30日)以上ぶりの来院 = 再新患扱い（傷病理由を再入力してもらう）
+        const isLongAbsence = (apt.last_visit_days ?? 0) >= 30 && !apt.is_first_visit;
         const trigger =
           apt.is_first_visit       ? "first_visit" as const :
           apt.insurance_changed    ? "insurance_changed" as const :

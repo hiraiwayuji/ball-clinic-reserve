@@ -36,7 +36,7 @@ export function IntakeChecklistPanel({ appointmentId, initialChecklist, staffNam
 
   const triggerLabel =
     trigger === "first_visit"       ? "初診" :
-    trigger === "insurance_changed" ? "保険証変更" : "長期未来院（初診扱い）";
+    trigger === "insurance_changed" ? "保険証変更" : "再新患（1ヶ月以上ぶり）";
 
   const triggerColor =
     trigger === "first_visit"       ? "bg-rose-500" :

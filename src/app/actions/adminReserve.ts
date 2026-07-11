@@ -1359,7 +1359,60 @@ export async function getAppointmentsByDate(dateStr: string) {
       .order("start_time", { ascending: true });
 
     if (error) return { success: false, data: [] };
-    return { success: true, data: data ?? [] };
+
+    // 各予約に「前回来院からの経過日数(last_visit_days)」を付与する。
+    // → 1ヶ月以上ぶりに来院した患者を「再新患」として受付チェック（傷病理由の再入力）に
+    //   回すため。前回の負傷理由と今回が違うことがあるため毎回聞き直す運用に対応。
+    const rows = (data ?? []) as unknown as Array<
+      Record<string, unknown> & {
+        start_time: string;
+        customers: { id: string } | { id: string }[] | null;
+      }
+    >;
+    // customers はSupabaseの型上は配列だが、実データは to-one の単一オブジェクト。両対応。
+    const custId = (c: (typeof rows)[number]["customers"]): string | undefined => {
+      if (!c) return undefined;
+      const obj = Array.isArray(c) ? c[0] : c;
+      return obj?.id;
+    };
+    const customerIds = Array.from(
+      new Set(
+        rows.map((a) => custId(a.customers)).filter((v): v is string => !!v),
+      ),
+    );
+
+    // customerId -> 直近の過去来院 start_time(ISO)
+    const lastVisitByCustomer = new Map<string, string>();
+    if (customerIds.length > 0) {
+      const { data: prior } = await supabase
+        .from("appointments")
+        .select("customer_id, start_time")
+        .eq("clinic_id", clinicId)
+        .neq("status", "cancelled")
+        .in("customer_id", customerIds)
+        .lt("start_time", dayStart) // 当日より前の来院のみ
+        .order("start_time", { ascending: false });
+      for (const p of (prior ?? []) as Array<{ customer_id: string | null; start_time: string }>) {
+        if (!p.customer_id) continue;
+        // 降順なので最初にヒットしたものが直近の来院
+        if (!lastVisitByCustomer.has(p.customer_id)) {
+          lastVisitByCustomer.set(p.customer_id, p.start_time);
+        }
+      }
+    }
+
+    const withGap = rows.map((a) => {
+      const cid = custId(a.customers);
+      const prev = cid ? lastVisitByCustomer.get(cid) : undefined;
+      const last_visit_days = prev
+        ? Math.floor(
+            (new Date(a.start_time).getTime() - new Date(prev).getTime()) / 86_400_000,
+          )
+        : null;
+      return { ...a, last_visit_days };
+    });
+
+    return { success: true, data: withGap };
   } catch (err) {
     console.error("getAppointmentsByDate error:", err);
     return { success: false, data: [] };
