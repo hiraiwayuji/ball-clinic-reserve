@@ -878,7 +878,17 @@ export default function ShiftCoordinationPage() {
                           {a.name}
                         </div>
                       ))}
-                      {avail.length > 5 && <div className="text-[9px] text-slate-400 font-bold">+{avail.length - 5}</div>}
+                      {/* 6人目以降は「＋他N名」。マスをタップすると DayDetailPanel が開き
+                          その日の全出勤者が見えるので、タップで確認できると分かる見た目にする。
+                          hidden分の名前も title に入れてホバーでも確認可能。 */}
+                      {avail.length > 5 && (
+                        <div
+                          className="text-[9px] font-bold text-blue-500 dark:text-blue-400 underline decoration-dotted underline-offset-2"
+                          title={avail.slice(5).map((a) => a.name).join("、")}
+                        >
+                          ＋他{avail.length - 5}名（タップで表示）
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
