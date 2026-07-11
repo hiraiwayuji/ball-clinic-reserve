@@ -153,6 +153,32 @@ export async function pushLineToCustomer(lineUserId: string, text: string): Prom
 }
 
 /**
+ * スタッフ個人の LINE へ push（連携済み line_user_id が対象）。
+ * 出勤希望の提出リンク・締切の催促に使う。実体は顧客pushと同じだが、
+ * 用途が分かるよう別名にしている。戻り値で送信可否を返す。
+ */
+export async function pushLineToStaff(lineUserId: string, text: string): Promise<boolean> {
+  const token = await getLineAccessToken();
+  if (!token || !lineUserId) return false;
+  try {
+    const res = await fetch("https://api.line.me/v2/bot/message/push", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ to: lineUserId, messages: [{ type: "text", text }] }),
+    });
+    if (!res.ok) {
+      const errBody = await res.text().catch(() => "");
+      console.error(`[admin-notify] staff LINE push failed (${res.status}): ${errBody}`);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.error("[admin-notify] staff LINE push error:", err);
+    return false;
+  }
+}
+
+/**
  * 任意の宛先へメール送信（ベストエフォート）。
  * RESEND_API_KEY 未設定なら何もしない。独自ドメイン(RESEND_FROM)未設定だと
  * テスト送信元になり実宛先へ届かない場合がある点に注意（戻り値で送信可否を返す）。

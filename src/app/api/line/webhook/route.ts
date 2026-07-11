@@ -155,6 +155,45 @@ export async function POST(req: NextRequest) {
       let userMessage: string = event.message.text.trim();
       const replyToken: string = event.replyToken;
 
+      // スタッフのLINE連携：「スタッフ連携 123456」（出勤希望の通知を各自LINEで受け取る）
+      // 顧客の電話番号照合(数字のみ)より先に判定する（プレフィックス付きなので誤爆しない）
+      const staffLinkMatch = userMessage.match(/^(?:スタッフ連携|シフト連携|しふと連携)[\s　]*([0-9]{6})$/);
+      if (staffLinkMatch) {
+        const code = staffLinkMatch[1];
+        const sb = getSupabase();
+        if (sb) {
+          const nowIso = new Date().toISOString();
+          const { data: staff } = await sb
+            .from("reservation_staff")
+            .select("id, name, line_link_code_expires_at")
+            .eq("clinic_id", DEFAULT_CLINIC_ID)
+            .eq("line_link_code", code)
+            .eq("is_active", true)
+            .maybeSingle();
+          const expired =
+            staff?.line_link_code_expires_at &&
+            new Date(staff.line_link_code_expires_at as string).getTime() < Date.now();
+          if (!staff) {
+            await replyMessage(replyToken, [{ type: "text", text: "連携コードが確認できませんでした。\nお手数ですが、出勤希望ページで最新のコードを表示して、もう一度お試しください 🙏" }], lineUserId);
+          } else if (expired) {
+            await replyMessage(replyToken, [{ type: "text", text: "連携コードの有効期限が切れています。\n出勤希望ページで新しいコードを表示して、もう一度お送りください。" }], lineUserId);
+          } else {
+            const { error: linkErr } = await sb
+              .from("reservation_staff")
+              .update({ line_user_id: lineUserId, line_linked_at: nowIso, line_link_code: null, line_link_code_expires_at: null })
+              .eq("id", staff.id)
+              .eq("clinic_id", DEFAULT_CLINIC_ID);
+            if (linkErr) {
+              console.error("Staff LINE link error:", linkErr);
+              await replyMessage(replyToken, [{ type: "text", text: "システムエラーが発生しました。院長までお申し付けください。" }], lineUserId);
+            } else {
+              await replyMessage(replyToken, [{ type: "text", text: `${staff.name}さん、LINE連携が完了しました ✅\nこれから出勤希望の提出リンクや締切のお知らせを、このLINEにお届けします 🗓️` }], lineUserId);
+            }
+          }
+        }
+        continue;
+      }
+
       // 電話番号下4-6桁による紐づけ
       // パターン:
       //   "1234"           → 単純4桁（従来）

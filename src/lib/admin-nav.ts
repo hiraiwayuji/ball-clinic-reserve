@@ -15,6 +15,7 @@ import {
   CalendarOff,
   Newspaper,
   Clock,
+  Bell,
 } from "lucide-react";
 import { isFamilyGift } from "@/lib/app-mode";
 
@@ -43,6 +44,7 @@ const CLINIC_NAV_ITEMS: NavItem[] = [
   { href: "/admin/settings/external-signals", label: "時事ネタ", icon: Newspaper, allow: ["owner", "admin"], group: "集客", description: "季節・地域の話題を投稿ネタに活用" },
   { href: "/admin/approvals", label: "承認", icon: ShieldCheck, allow: ["owner"], group: "スタッフ管理", description: "スタッフの休み希望・変更申請をOK/NGする画面" },
   { href: "/admin/my-schedule", label: "出勤調整", icon: CalendarOff, allow: ["owner"], group: "スタッフ管理", description: "月ごとの出勤表（シフト）づくり" },
+  { href: "/admin/shift-reminders", label: "シフト希望の通知", icon: Bell, allow: ["owner"], group: "スタッフ管理", description: "出勤希望の提出リンクを締切前に各自LINEへ自動送信・催促" },
   { href: "/admin/attendance", label: "勤怠", icon: Clock, allow: ["owner"], group: "スタッフ管理", description: "出勤・退勤の打刻記録と残業の確認" },
   { href: "/admin/settings/staff-schedule", label: "スタッフ予定", icon: CalendarClock, allow: ["owner"], group: "スタッフ管理", description: "スタッフごとの出勤日・予定の設定" },
   { href: "/admin/settings", label: "設定", icon: Settings, allow: ["owner"], group: "設定", description: "院の基本情報・コース・通知などの設定" },

@@ -7,11 +7,12 @@ import {
 } from "date-fns";
 import { ja } from "date-fns/locale";
 import { toast } from "sonner";
-import { Loader2, CalendarClock, ChevronLeft, ChevronRight, CheckCircle2, Clock } from "lucide-react";
+import { Loader2, CalendarClock, ChevronLeft, ChevronRight, CheckCircle2, Clock, MessageCircle, Copy } from "lucide-react";
 import {
   listShiftStaff, getShiftRequest, submitShiftRequest,
   type ShiftStaff, type ShiftDays,
 } from "@/app/actions/staff-shift-requests";
+import { startStaffLineLink, type StaffLineLinkState } from "@/app/actions/shift-reminders";
 import { CLINIC_CONFIG } from "@/lib/clinic-config";
 import { findConsecutiveSameWeekdayOffs } from "@/lib/shift-rules";
 import { AlertTriangle } from "lucide-react";
@@ -37,6 +38,21 @@ export default function ShiftRequestPage() {
   const [submitting, setSubmitting] = useState(false);
   const [submittedAt, setSubmittedAt] = useState<string | null>(null);
   const [done, setDone] = useState(false);
+  // LINE連携
+  const [lineLink, setLineLink] = useState<StaffLineLinkState | null>(null);
+  const [lineBusy, setLineBusy] = useState(false);
+
+  const openLineLink = async () => {
+    if (!staffId) { toast.error("先にお名前を選んでください"); return; }
+    setLineBusy(true);
+    try {
+      setLineLink(await startStaffLineLink(staffId));
+    } catch {
+      toast.error("うまくいきませんでした。もう一度お試しください");
+    } finally {
+      setLineBusy(false);
+    }
+  };
 
   useEffect(() => {
     setMonth(addMonths(new Date(), 1)); // 既定：翌月
@@ -49,6 +65,8 @@ export default function ShiftRequestPage() {
   );
 
   // 名前・月が決まったら既存希望を読み込む
+  useEffect(() => { setLineLink(null); }, [staffId]);
+
   useEffect(() => {
     if (!staffId || !monthStr) { setDays({}); setNote(""); setSubmittedAt(null); return; }
     setLoading(true);
@@ -183,6 +201,55 @@ export default function ShiftRequestPage() {
         {staffId && submittedAt && (
           <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-sm text-amber-800">
             この月はすでに提出済みです（{format(new Date(submittedAt), "M/d HH:mm", { locale: ja })}）。修正して再提出できます。
+          </div>
+        )}
+
+        {/* LINE連携（提出リンク・締切のお知らせを各自のLINEで受け取る） */}
+        {staffId && (
+          <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm">
+            {!lineLink ? (
+              <button
+                type="button"
+                onClick={openLineLink}
+                disabled={lineBusy}
+                className="w-full flex items-center justify-center gap-2 h-11 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-700 text-sm font-bold hover:bg-emerald-100 disabled:opacity-50"
+              >
+                {lineBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <MessageCircle className="w-4 h-4" />}
+                出勤希望のお知らせをLINEで受け取る（連携）
+              </button>
+            ) : lineLink.linked ? (
+              <div className="flex items-center gap-2 text-sm font-bold text-emerald-700">
+                <CheckCircle2 className="w-5 h-5" /> LINE連携ずみです。お知らせはLINEにも届きます。
+              </div>
+            ) : lineLink.code ? (
+              <div className="space-y-2">
+                <p className="text-xs font-bold text-slate-600 flex items-center gap-1.5">
+                  <MessageCircle className="w-4 h-4 text-emerald-500" /> LINE連携のしかた（1回だけ）
+                </p>
+                <ol className="text-[12px] text-slate-600 list-decimal pl-4 space-y-0.5">
+                  <li>院の公式LINEを友だち追加して開く</li>
+                  <li>下のメッセージをそのまま送る</li>
+                </ol>
+                <div className="flex items-center gap-2">
+                  <code className="flex-1 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm font-bold tracking-wide">
+                    スタッフ連携 {lineLink.code}
+                  </code>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      try { await navigator.clipboard.writeText(`スタッフ連携 ${lineLink.code}`); toast.success("コピーしました"); }
+                      catch { toast.error("コピーできませんでした"); }
+                    }}
+                    className="h-9 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold flex items-center gap-1"
+                  >
+                    <Copy className="w-3.5 h-3.5" /> コピー
+                  </button>
+                </div>
+                <p className="text-[11px] text-slate-400">送信すると「連携が完了しました」と返信が届きます。</p>
+              </div>
+            ) : (
+              <p className="text-sm text-slate-500">連携情報を取得できませんでした。もう一度お試しください。</p>
+            )}
           </div>
         )}
 
