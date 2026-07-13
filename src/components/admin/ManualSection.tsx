@@ -16,10 +16,11 @@ import {
   Tag,
   Smartphone,
   Network,
+  ScrollText,
 } from "lucide-react";
 
-const MANUAL_VERSION = "v1.2";
-const MANUAL_UPDATED_AT = "2026-06-04";
+const MANUAL_VERSION = "v1.3";
+const MANUAL_UPDATED_AT = "2026-07-13";
 
 type Item = {
   icon: React.ReactNode;
@@ -27,7 +28,7 @@ type Item = {
   body: React.ReactNode;
 };
 
-const Section = ({ icon, title, color, children }: { icon: React.ReactNode; title: string; color: string; children: React.ReactNode }) => {
+const Section = ({ icon, title, color, children }: { icon: React.ReactNode; title: React.ReactNode; color: string; children: React.ReactNode }) => {
   const [open, setOpen] = useState(false);
   return (
     <div className={`border rounded-xl overflow-hidden ${color}`}>
@@ -88,6 +89,111 @@ export default function ManualSection() {
       </div>
 
       <div className="space-y-3">
+        <Section
+          icon={<ScrollText className="w-4 h-4 text-rose-600" />}
+          title={
+            <span className="flex items-center gap-2">
+              療養費改定（令和8年7月〜）
+              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-rose-600 text-white">NEW</span>
+            </span>
+          }
+          color="border-rose-200 dark:border-rose-900 bg-rose-50/50 dark:bg-rose-950/30"
+        >
+          <p>
+            <b>令和8年（2026年）7月1日 施行</b>／改定率 <b>+0.60%</b>（本体+0.14%＋物価対応+0.46%）。
+            7月分の請求からもう新ルールが動いています。大事なのは次の3つです。
+          </p>
+
+          {/* 3つの大きな変更 */}
+          <div className="space-y-2">
+            <div className="rounded-md border border-rose-200 dark:border-rose-900 bg-rose-50 dark:bg-rose-950/40 p-3">
+              <div className="font-semibold text-rose-900 dark:text-rose-200">① 2部位目から減額（今回の目玉）</div>
+              <p className="text-xs mt-1 text-slate-700 dark:text-slate-300">
+                打撲・捻挫の2回目以降の後療などで、<b>2部位目は80%・3部位目以上は60%</b>に逓減。
+                3部位以上が多い患者さんは要注意です。
+              </p>
+            </div>
+            <div className="rounded-md border border-blue-200 dark:border-blue-900 bg-blue-50 dark:bg-blue-950/40 p-3">
+              <div className="font-semibold text-blue-900 dark:text-blue-200">② 明細書は毎回・無料で交付が義務</div>
+              <p className="text-xs mt-1 text-slate-700 dark:text-slate-300">
+                レセコン設置院は<b>1人院でも対象</b>。会計ごとに無償で渡し、そのつど<b>明細書発行加算10円</b>
+                （名称・回数が変更）。毎回不要な人は所定の様式で同意すればまとめ交付もOK。
+              </p>
+            </div>
+            <div className="rounded-md border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/40 p-3">
+              <div className="font-semibold text-slate-800 dark:text-slate-200">③ オンライン請求は延期＝今はスルーでOK</div>
+              <p className="text-xs mt-1 text-slate-700 dark:text-slate-300">
+                当初の令和8年目標は<b>延期</b>。今回は義務化されません。新規登録・機器購入は<b>不要</b>です。
+              </p>
+            </div>
+          </div>
+
+          {/* 主な料金 新旧 */}
+          <div>
+            <div className="font-semibold text-slate-900 dark:text-slate-100 mb-1">主な料金（旧 → 新）</div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs border-collapse">
+                <thead>
+                  <tr className="text-slate-500 border-b border-slate-200 dark:border-slate-700">
+                    <th className="text-left py-1.5 pr-2 font-medium">項目</th>
+                    <th className="text-right py-1.5 px-2 font-medium">旧</th>
+                    <th className="text-right py-1.5 px-2 font-medium">新</th>
+                  </tr>
+                </thead>
+                <tbody className="tabular-nums text-slate-700 dark:text-slate-300">
+                  <tr className="border-b border-slate-100 dark:border-slate-800"><td className="py-1.5 pr-2">初検料</td><td className="text-right px-2">1,550</td><td className="text-right px-2 font-semibold">1,560</td></tr>
+                  <tr className="border-b border-slate-100 dark:border-slate-800"><td className="py-1.5 pr-2">再検料</td><td className="text-right px-2">410</td><td className="text-right px-2 font-semibold">420</td></tr>
+                  <tr className="border-b border-slate-100 dark:border-slate-800"><td className="py-1.5 pr-2">施療料（打撲・捻挫）</td><td className="text-right px-2">760</td><td className="text-right px-2 font-semibold">770</td></tr>
+                  <tr className="border-b border-slate-100 dark:border-slate-800"><td className="py-1.5 pr-2">後療料（打撲・捻挫）</td><td className="text-right px-2">505</td><td className="text-right px-2 font-semibold">550</td></tr>
+                  <tr className="border-b border-slate-100 dark:border-slate-800"><td className="py-1.5 pr-2">温罨法料</td><td className="text-right px-2">75</td><td className="text-right px-2 font-semibold">80</td></tr>
+                  <tr className="border-b border-slate-100 dark:border-slate-800"><td className="py-1.5 pr-2">冷罨法料</td><td className="text-right px-2">85</td><td className="text-right px-2 font-semibold">80</td></tr>
+                  <tr><td className="py-1.5 pr-2">電療料</td><td className="text-right px-2">33</td><td className="text-right px-2 font-semibold">46</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <p className="text-[11px] text-slate-400 mt-1">
+              ※ 骨折・脱臼系（整復料・後療料・金属副子加算など）は今回は据置。初検時相談支援料・往療料も据置。
+            </p>
+          </div>
+
+          <Tip>
+            <b>逓減の対象</b>は「打撲・捻挫の後療料／温罨法／冷罨法／電療料」。
+            初検日の施療料と<b>骨折・脱臼の後療は2部位目80%の対象外</b>（骨折・脱臼は3部位以上60%のみ）。
+          </Tip>
+
+          {/* 償還払い */}
+          <div>
+            <div className="font-semibold text-slate-900 dark:text-slate-100 mb-1">2027年1月〜：償還払いの新基準</div>
+            <p className="text-xs text-slate-700 dark:text-slate-300">
+              直近1年間で <b>通算8か月以上かつ通算9部位以上</b> の患者さんは、患者ごと償還払いの重点審査対象に。
+              あわせて自己施術・自家施術は療養費の支給対象外であることが明確化されました。
+            </p>
+          </div>
+
+          {/* やること */}
+          <div className="font-semibold text-slate-900 dark:text-slate-100">院として、やること</div>
+          <div className="space-y-3">
+            <Step n={1} title="レセコン／請求ソフトを7月版に更新">
+              新単価・2部位逓減・明細書発行加算（毎回）が反映されるか請求団体に確認。
+              6月・7月をまたぐ請求は単価が混ざるので注意。
+            </Step>
+            <Step n={2} title="明細書を毎回・無料で渡す会計フローに">
+              受付オペに組み込む。まとめ交付を希望する人だけ様式で同意を取り、カルテに記録。
+            </Step>
+            <Step n={3} title="患者さんへの説明トークをそろえる">
+              「制度改定で2部位目以降の料金基準が下がりました」と一言で言えるように。窓口負担が変わる人には事前案内。
+            </Step>
+            <Step n={4} title="3部位以上が多い患者さんを見直し">
+              減収に直結します。施術部位の妥当性と記録を再点検（1〜2部位中心なら単価アップで微増）。
+            </Step>
+          </div>
+
+          <p className="text-[11px] text-slate-400">
+            ※ 単価・算定の最終確認は、厚生労働省の正式告示・所属の請求団体の通知・レセコンの更新内容でお願いします。
+            骨折・脱臼・金属副子等は傷病や範囲で金額に幅があります。
+          </p>
+        </Section>
+
         <Section
           icon={<MessageCircle className="w-4 h-4 text-green-600" />}
           title="LINEを患者さんと個別に紐づける"
