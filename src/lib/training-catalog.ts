@@ -40,7 +40,7 @@ export const AXIS_LABEL: Record<AxisKey, string> = {
 };
 
 // ───────────────────────── 部位 ─────────────────────────
-export type RegionKey = "toe" | "ankle" | "hip" | "iliopsoas" | "abs" | "back" | "reflex";
+export type RegionKey = "toe" | "ankle" | "hip" | "hamstring" | "iliopsoas" | "abs" | "back" | "reflex";
 export type Region = {
   key: RegionKey;
   label: string;
@@ -55,6 +55,7 @@ export const REGIONS: Region[] = [
   { key: "toe",       label: "足の指",   group: "下肢", bilateral: true,  hint: "グーパー・タオルギャザー・指の握り" },
   { key: "ankle",     label: "足首",     group: "下肢", bilateral: true,  hint: "背屈/底屈・片足バランス・可動域" },
   { key: "hip",       label: "股関節",   group: "下肢", bilateral: true,  hint: "開脚・片足立ち・可動域" },
+  { key: "hamstring", label: "ハムストリングス", group: "下肢", bilateral: true, hint: "レッグカール・前屈・もも裏の張り" },
   { key: "iliopsoas", label: "腸腰筋",   group: "体幹", bilateral: true,  hint: "もも上げ・脚の引き上げ" },
   { key: "abs",       label: "腹筋",     group: "体幹", bilateral: true,  hint: "体幹の安定・ねじり・保持" },
   { key: "back",      label: "背筋",     group: "体幹", bilateral: true,  hint: "姿勢保持・反り・引き上げ" },
@@ -328,6 +329,12 @@ export const HOME_TRAINING: Record<RegionKey, HomeExercise[]> = {
     { name: "ヒップリフト", note: "20回。お尻を締めて持ち上げる" },
     { name: "クラムシェル", note: "左右各15回。横向きで膝を開く" },
     { name: "股割りストレッチ", note: "30秒×2。可動域を広げる" },
+  ],
+  hamstring: [
+    { name: "レッグカール", note: "左右各15回。もも裏を意識" },
+    { name: "ヒップヒンジ", note: "15回。股関節から前傾" },
+    { name: "もも裏ストレッチ", note: "左右各30秒" },
+    { name: "ノルディックハムストリング", note: "5〜8回。ゆっくり耐える" },
   ],
   iliopsoas: [
     { name: "もも上げマーチ", note: "左右各20回。膝を高く" },
