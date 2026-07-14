@@ -5,6 +5,7 @@ import { checkAdminAuth } from "./auth";
 import { revalidatePath } from "next/cache";
 import {
   TRAINING_CLINIC_IDS,
+  AXES,
   type Assessment,
   type Measurement,
   type RegionKey,
@@ -174,8 +175,10 @@ export async function getClinicBenchmark(customerId: string): Promise<ClinicBenc
     }
   }
   const latestIds = [...latestByCustomer.values()];
+  const emptyAxisAvg = {} as Record<AxisKey, number | null>;
+  for (const a of AXES) emptyAxisAvg[a.key] = null;
   const empty: ClinicBenchmark = {
-    nPatients: latestByCustomer.size, axisAvg: { strength: null, reflex: null, motor: null },
+    nPatients: latestByCustomer.size, axisAvg: emptyAxisAvg,
     overallAvg: null, myOverall: null, rank: null, percentile: null,
   };
   if (latestIds.length === 0) return empty;
@@ -206,11 +209,8 @@ export async function getClinicBenchmark(customerId: string): Promise<ClinicBenc
     const ov = mean(a.scores);
     if (ov != null) overalls.push({ assessmentId: aid, overall: ov });
   }
-  const axisAvg = {
-    strength: mean(allByAxis["strength"] ?? []),
-    reflex: mean(allByAxis["reflex"] ?? []),
-    motor: mean(allByAxis["motor"] ?? []),
-  } as Record<AxisKey, number | null>;
+  const axisAvg = {} as Record<AxisKey, number | null>;
+  for (const a of AXES) axisAvg[a.key] = mean(allByAxis[a.key] ?? []);
   const overallAvg = mean(overalls.map((o) => o.overall));
 
   // この患者の順位

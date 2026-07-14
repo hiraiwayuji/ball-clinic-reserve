@@ -200,9 +200,9 @@ export default function PatientTrainingPage() {
         </CardContent></Card>
       ) : (
         <>
-          {/* 3軸サマリー（最新） */}
+          {/* 軸サマリー（最新） */}
           {axisAvg && (
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
               {AXES.map((a) => {
                 const v = axisAvg[a.key];
                 return (

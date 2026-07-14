@@ -27,20 +27,21 @@ export function isTrainingEnabled(): boolean {
   return TRAINING_CLINIC_IDS.has(id);
 }
 
-// ───────────────────────── 3軸 ─────────────────────────
-export type AxisKey = "strength" | "reflex" | "motor";
+// ───────────────────────── 評価軸 ─────────────────────────
+export type AxisKey = "strength" | "reflex" | "power" | "motor";
 export type Axis = { key: AxisKey; label: string; color: string; desc: string };
 export const AXES: Axis[] = [
   { key: "strength", label: "筋力",     color: "#ef4444", desc: "その部位の力の強さ" },
   { key: "reflex",   label: "反射",     color: "#f59e0b", desc: "刺激への反応の速さ・鋭さ" },
+  { key: "power",    label: "瞬発力",   color: "#8b5cf6", desc: "一気に力を出す速さ・爆発力" },
   { key: "motor",    label: "運動神経", color: "#3b82f6", desc: "思い通りに動かせるか（協調・コントロール）" },
 ];
 export const AXIS_LABEL: Record<AxisKey, string> = {
-  strength: "筋力", reflex: "反射", motor: "運動神経",
+  strength: "筋力", reflex: "反射", power: "瞬発力", motor: "運動神経",
 };
 
 // ───────────────────────── 部位 ─────────────────────────
-export type RegionKey = "toe" | "ankle" | "hip" | "hamstring" | "iliopsoas" | "abs" | "back" | "reflex";
+export type RegionKey = "toe" | "ankle" | "hip" | "hamstring" | "iliopsoas" | "abs" | "back" | "arm" | "reflex";
 export type Region = {
   key: RegionKey;
   label: string;
@@ -59,6 +60,7 @@ export const REGIONS: Region[] = [
   { key: "iliopsoas", label: "腸腰筋",   group: "体幹", bilateral: true,  hint: "もも上げ・脚の引き上げ" },
   { key: "abs",       label: "腹筋",     group: "体幹", bilateral: true,  hint: "体幹の安定・ねじり・保持" },
   { key: "back",      label: "背筋",     group: "体幹", bilateral: true,  hint: "姿勢保持・反り・引き上げ" },
+  { key: "arm",       label: "腕",       group: "上肢", bilateral: true,  hint: "押す/引く・握力・腕の振り" },
   // 反射神経は全身の反応。筋力の概念が薄いので「反射」「運動神経」の2軸のみ、左右差なし。
   { key: "reflex",    label: "反射神経", group: "神経", bilateral: false, hint: "合図→反応・全身の素早さ・切り返し", axes: ["reflex", "motor"] },
 ];
@@ -350,6 +352,12 @@ export const HOME_TRAINING: Record<RegionKey, HomeExercise[]> = {
     { name: "バードドッグ", note: "左右各10回。四つ這いで手足を伸ばす" },
     { name: "バックエクステンション", note: "15回。反りすぎ注意" },
     { name: "ヒップヒンジ", note: "15回。股関節から曲げる" },
+  ],
+  arm: [
+    { name: "腕立て伏せ", note: "10回。膝つきでもOK" },
+    { name: "チューブ/ダンベルカール", note: "左右各15回" },
+    { name: "壁押し・手押し相撲", note: "押す力を鍛える" },
+    { name: "タオル握り", note: "左右各20回。握力" },
   ],
   reflex: [
     { name: "ラダートレーニング", note: "3種×2セット。素早い足さばき" },
