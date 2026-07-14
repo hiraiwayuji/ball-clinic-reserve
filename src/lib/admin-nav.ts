@@ -16,8 +16,10 @@ import {
   Newspaper,
   Clock,
   Bell,
+  Dumbbell,
 } from "lucide-react";
 import { isFamilyGift } from "@/lib/app-mode";
+import { isTrainingEnabled } from "@/lib/training-catalog";
 
 export type Role = "owner" | "admin" | "staff";
 
@@ -37,6 +39,7 @@ const CLINIC_NAV_ITEMS: NavItem[] = [
   { href: "/admin/counter", label: "受付", icon: UserCheck, allow: ["owner", "admin", "staff"], group: "日々の業務", description: "来院した患者さんの受付〜会計までを進める画面" },
   { href: "/admin/appointments", label: "予約一覧", icon: CalendarDays, allow: ["owner", "admin", "staff"], group: "日々の業務", description: "予約カレンダー。予約の追加・変更・休憩枠もここから" },
   { href: "/admin/customers", label: "顧客管理", icon: Users, allow: ["owner", "admin", "staff"], group: "日々の業務", description: "患者さんの一覧・検索・LINE連携の確認" },
+  { href: "/admin/training", label: "トレーニング評価", icon: Dumbbell, allow: ["owner", "admin", "staff"], group: "トレーニング", description: "身体機能を筋力・反射・運動神経の3軸＋左右差で採点し、宿題と次回目標を記録" },
   { href: "/admin/sales", label: "売上記帳", icon: Coins, allow: ["owner"], group: "売上・経営", description: "その日の売上を記帳する画面" },
   { href: "/admin/evaluation", label: "経営評価", icon: TrendingUp, allow: ["owner"], group: "売上・経営", description: "月ごとの売上・来院数などの成績表" },
   { href: "/admin/marketing", label: "SNS・LINE等", icon: MessageSquare, allow: ["owner", "admin"], group: "集客", description: "LINE配信・SNS投稿などの集客ツール" },
@@ -57,7 +60,12 @@ const FAMILY_GIFT_NAV_ITEMS: NavItem[] = [
 
 export function getAdminNavItems(role: Role): NavItem[] {
   const source = isFamilyGift ? FAMILY_GIFT_NAV_ITEMS : CLINIC_NAV_ITEMS;
-  return source.filter((item) => item.allow.includes(role));
+  return source.filter((item) => {
+    if (!item.allow.includes(role)) return false;
+    // トレーニング評価は対象3院（ボール・からだ・マッスル）のみ表示
+    if (item.href === "/admin/training" && !isTrainingEnabled()) return false;
+    return true;
+  });
 }
 
 export function isActiveNav(pathname: string, href: string): boolean {

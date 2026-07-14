@@ -68,6 +68,8 @@ const TENANT_TABLES = new Set([
   "staff_tasks",
   "staff_working_hours",
   "staff_working_overrides",
+  "training_assessments",
+  "training_measurements",
 ]);
 
 /** 主キー自体が clinic_id を兼ねるテーブル（id カラムでフィルタ） */
