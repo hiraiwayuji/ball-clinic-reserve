@@ -18,7 +18,8 @@ import { getClinicHolidays, type ClinicHoliday } from "@/app/actions/holidays";
 import { getActiveCourses, getActiveStaff, getActiveRooms, getCourseRequiredStaffSchedule, getPublicStaffSchedules, type ReservationCourse, type ReservationStaff, type ReservationRoom } from "@/app/actions/courses";
 import { isStaffAvailableOn, filterSlotsByStaffSchedule, type StaffSchedule } from "@/lib/staff-availability";
 import { useSearchParams } from "next/navigation";
-import { getTimeSlots, isDateWithinAllowedRange, isTimeSlotWithinTwoHours, formatScheduleHoursLines, formatScheduleClosedDays } from "@/lib/time-slots";
+import { getTimeSlots, getTimeSlotsForDate, isDateWithinAllowedRange, isTimeSlotWithinTwoHours, isTodayJST, formatScheduleHoursLines, formatScheduleClosedDays } from "@/lib/time-slots";
+import { useSpecialDays, findSpecialDay } from "@/lib/use-special-days";
 import { useClinicSlotDuration } from "@/lib/use-clinic-slot-duration";
 import { useClinicSchedule } from "@/lib/use-clinic-schedule";
 import { useClinicPatientCanPickStaff } from "@/lib/use-clinic-patient-staff";
@@ -46,6 +47,7 @@ const LINE_URL = process.env.NEXT_PUBLIC_LINE_OFFICIAL_ACCOUNT_URL ?? "https://l
 function ReserveContent() {
   const slotMinutes = useClinicSlotDuration();
   const schedule = useClinicSchedule();
+  const specialDays = useSpecialDays();
   // 患者が担当を選べる院か。false（からだ等）は指名ボタンを出さず、メニューの担当固定に任せる。
   const canPickStaff = useClinicPatientCanPickStaff();
   const searchParams = useSearchParams();
@@ -306,7 +308,9 @@ function ReserveContent() {
 
     // 担当固定（さみ・ヘッドスパ等）または指名スタッフの「出勤時間」内だけに絞る
     const activeStaffSchedule = requiredStaff?.schedule ?? (selectedStaffId ? staffSchedules[selectedStaffId] : undefined);
-    const availableSlots = filterSlotsByStaffSchedule(getTimeSlots(date, { slotMinutes, schedule }), date, activeStaffSchedule);
+    const submitDateStr = format(date, "yyyy-MM-dd");
+    const submitSpecial = findSpecialDay(specialDays, submitDateStr);
+    const availableSlots = filterSlotsByStaffSchedule(getTimeSlotsForDate(date, submitDateStr, { slotMinutes, schedule, special: submitSpecial }), date, activeStaffSchedule);
     if (!availableSlots.includes(time)) {
       toast.error("選択された時間は予約できません。別の時間を選択してください");
       return;
@@ -702,7 +706,9 @@ function ReserveContent() {
     if (!date || (courses.length > 0 && !selectedCourseId)) return [];
     // 担当固定/指名スタッフの「出勤時間」内だけに絞る（さみ・ヘッドスパ等）
     const activeStaffSchedule = requiredStaff?.schedule ?? (selectedStaffId ? staffSchedules[selectedStaffId] : undefined);
-    const allSlots = filterSlotsByStaffSchedule(getTimeSlots(date, { slotMinutes, schedule }), date, activeStaffSchedule);
+    const listDateStr = format(date, "yyyy-MM-dd");
+    const listSpecial = findSpecialDay(specialDays, listDateStr);
+    const allSlots = filterSlotsByStaffSchedule(getTimeSlotsForDate(date, listDateStr, { slotMinutes, schedule, special: listSpecial }), date, activeStaffSchedule);
     const selCourse = courses.find(c => c.id === selectedCourseId);
     const requiredSteps = Math.max(1, Math.ceil((selCourse?.duration_minutes ?? slotMinutes) / slotMinutes));
     // コースの施術時間ぶんの連続枠が確保できるか（カレンダー画面と同じ判定）
@@ -837,8 +843,14 @@ function ReserveContent() {
                               const today = new Date();
                               today.setHours(0, 0, 0, 0);
                               const samiBlocked = requiredStaff ? !isStaffAvailableOn(date, requiredStaff.schedule) : false;
+                              // 臨時営業日（clinic_special_days）：休診・当日予約停止は選べなくする。
+                              // 臨時営業時間があれば、通常の定休曜日でも予約可にする。
+                              const special = findSpecialDay(specialDays, dateStr);
+                              if (special?.closed) return true;
+                              if (special?.blockSameDay && isTodayJST(dateStr)) return true;
+                              const hasSpecialHours = !!special && (!!special.openTime || !!special.closeTime);
                               // 休診曜日は院ごと（clinic_settings.closed_weekdays 由来）。ハードコード禁止。
-                              const isClosedDay = schedule.closedDays.includes(day);
+                              const isClosedDay = !hasSpecialHours && schedule.closedDays.includes(day);
                               return isHoliday || date < today || isClosedDay || !isDateWithinAllowedRange(date, false, schedule.bookingHorizonDays) || samiBlocked;
                             }}
                           />

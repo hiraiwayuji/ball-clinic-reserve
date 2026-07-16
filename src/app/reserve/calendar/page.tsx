@@ -17,7 +17,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { createClient } from "@/lib/supabase/client";
 
-import { getTimeSlots, getMaxSlots, isDateWithinAllowedRange, isTimeSlotWithinTwoHours, type SlotMinutes, type Schedule } from "@/lib/time-slots";
+import { getTimeSlots, getTimeSlotsForDate, getMaxSlots, isDateWithinAllowedRange, isTimeSlotWithinTwoHours, isTodayJST, type SlotMinutes, type Schedule, type SpecialDay } from "@/lib/time-slots";
+import { getSpecialDays } from "@/app/actions/special-days";
+import { findSpecialDay } from "@/lib/use-special-days";
 import { useClinicSlotDuration } from "@/lib/use-clinic-slot-duration";
 import { useClinicSchedule } from "@/lib/use-clinic-schedule";
 import { useClinicPatientCanPickStaff } from "@/lib/use-clinic-patient-staff";
@@ -47,12 +49,18 @@ function formatShortDate(ymd: string): string {
   return `${Number(m[2])}/${Number(m[3])}（${wd}）`;
 }
 
-function getAvailabilityLevel(dateStr: string, bookedCount: number, date: Date, clinicHolidays: ClinicHoliday[], slotMinutes: SlotMinutes, schedule: Schedule, staffSchedule?: StaffSchedule | null): AvailabilityLevel {
+function getAvailabilityLevel(dateStr: string, bookedCount: number, date: Date, clinicHolidays: ClinicHoliday[], slotMinutes: SlotMinutes, schedule: Schedule, staffSchedule?: StaffSchedule | null, special?: SpecialDay | null): AvailabilityLevel {
   const isHoliday = clinicHolidays.some(h => h.date === dateStr);
   if (isHoliday) return "closed";
 
+  // 臨時営業日（clinic_special_days）：休診はもちろん、当日予約停止の日は「今日」だけ選べなくする
+  if (special?.closed) return "closed";
+  if (special?.blockSameDay && isToday(date)) return "closed";
+
   const day = date.getDay();
-  if (schedule.closedDays.includes(day)) return "closed";
+  // 臨時営業時間があれば通常の定休曜日でも開ける
+  const hasSpecialHours = !!special && (!!special.openTime || !!special.closeTime);
+  if (!hasSpecialHours && schedule.closedDays.includes(day)) return "closed";
   if (isPast(startOfDay(date)) && !isToday(date)) return "past";
 
   // 担当固定コース（さみ整体など）：そのスタッフの出勤日以外は休診扱いにして選べなくする
@@ -63,7 +71,7 @@ function getAvailabilityLevel(dateStr: string, bookedCount: number, date: Date, 
 
   // 実際に予約可能なスロット（2時間前制限にかかっていないもの）をカウントする
   // 担当固定（さみ・ヘッドスパ等）の出勤時間が設定されていれば、その時間帯だけを母数にする
-  const allSlots = filterSlotsByStaffSchedule(getTimeSlots(date, { slotMinutes, schedule }), date, staffSchedule);
+  const allSlots = filterSlotsByStaffSchedule(getTimeSlotsForDate(date, dateStr, { slotMinutes, schedule, special }), date, staffSchedule);
   const totalSlots = allSlots.length;
 
   if (totalSlots === 0) return "closed";
@@ -189,6 +197,7 @@ function ReserveCalendarContent() {
   const [currentMonth, setCurrentMonth] = useState<Date | null>(null);
   const [monthlyData, setMonthlyData] = useState<Record<string, number>>({});
   const [clinicHolidays, setClinicHolidays] = useState<ClinicHoliday[]>([]);
+  const [specialDays, setSpecialDays] = useState<SpecialDay[]>([]);
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
   const [selectedLevel, setSelectedLevel] = useState<AvailabilityLevel | null>(null);
   const [dailySlots, setDailySlots] = useState<string[]>([]);
@@ -212,6 +221,9 @@ function ReserveCalendarContent() {
   // 選択コースの担当(レーン)。設定されていれば月グリッドもそのレーンの空きで色付けする。
   const requiredStaffId = selectedCourse?.required_staff_id ?? null;
 
+  // 選択中の日付の臨時営業日（時間スロット生成・当日予約停止の判定に使う）
+  const selectedSpecial = selectedDate ? findSpecialDay(specialDays, format(selectedDate, "yyyy-MM-dd")) : null;
+
   const fetchMonthData = useCallback(async (monthDate: Date) => {
     setLoadingMonth(true);
     const supabase = createClient();
@@ -228,7 +240,7 @@ function ReserveCalendarContent() {
 
     // 直接Supabaseからデータを取得（マルチテナント漏洩対策で clinic_id フィルタ必須・
     // customers JOIN は他院の患者名漏洩リスクのため取得しない）
-    const [ { data: aptData }, { data: holidayData } ] = await Promise.all([
+    const [ { data: aptData }, { data: holidayData }, specialData ] = await Promise.all([
       supabase.from("appointments").select("start_time, end_time, staff_id, status")
         .eq("clinic_id", PUBLIC_CLINIC_ID)
         .gte("start_time", startOfMonthUTC)
@@ -236,7 +248,10 @@ function ReserveCalendarContent() {
         .neq("status", "cancelled"),
       supabase.from("clinic_holidays").select("*")
         .eq("clinic_id", PUBLIC_CLINIC_ID),
+      getSpecialDays(PUBLIC_CLINIC_ID),
     ]);
+    const specialList: SpecialDay[] = specialData ?? [];
+    const specialByDate = new Map(specialList.map((s) => [s.date, s]));
 
     const counts: Record<string, number> = {};
     if (aptData) {
@@ -265,7 +280,7 @@ function ReserveCalendarContent() {
           const slotTime = `${hh}:${mm}`; // HH:mm
 
           const slotDateObj = new Date(`${dateKey}T00:00:00+09:00`);
-          const businessSlots = getTimeSlots(slotDateObj, { slotMinutes, schedule });
+          const businessSlots = getTimeSlotsForDate(slotDateObj, dateKey, { slotMinutes, schedule, special: specialByDate.get(dateKey) ?? null });
 
           if (businessSlots.includes(slotTime)) {
             counts[dateKey] = (counts[dateKey] || 0) + 1;

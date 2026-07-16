@@ -38,7 +38,8 @@ async function notifyOwner(
 
 import { createClient as createServerClient } from "@/lib/supabase/server";
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
-import { getTimeSlots, isDateWithinAllowedRange, isTimeSlotWithinTwoHours } from "@/lib/time-slots";
+import { getTimeSlots, isDateWithinAllowedRange, isTimeSlotWithinTwoHours, isTodayJST } from "@/lib/time-slots";
+import { getSpecialDayForDate } from "@/app/actions/special-days";
 import { isTimeWithinStaffHoursYmd, type StaffSchedule } from "@/lib/staff-availability";
 
 /** "HH:MM:SS"/"HH:MM"/null → "HH:MM"/null。スタッフ出勤時間（TIMEカラム）の正規化用 */
@@ -589,6 +590,28 @@ export async function createReservation(formData: FormData) {
     // 2時間前制限のチェック
     if (isTimeSlotWithinTwoHours(rawDate, time)) {
       return { success: false, error: "直前（2時間以内）のご予約はお電話またはLINEなどでお問い合わせください。" };
+    }
+
+    // 臨時営業日（clinic_special_days）による制限（休診・当日予約停止・臨時営業時間外）を弾く。
+    // UI 側でも制御しているが、細工POST対策としてサーバ側でも二重チェック（fail-closed）。
+    {
+      const special = await getSpecialDayForDate(rawDate);
+      if (special) {
+        if (special.closed) {
+          return { success: false, error: "申し訳ございません、この日は休診です。" };
+        }
+        if (special.blockSameDay && isTodayJST(rawDate)) {
+          return { success: false, error: "この日は当日のご予約を受け付けておりません。前日までにご予約ください。" };
+        }
+        const toMinLocal = (hm: string) => { const [h, m] = hm.split(":").map(Number); return h * 60 + m; };
+        const slotMin = toMinLocal(time);
+        if (special.openTime && slotMin < toMinLocal(special.openTime)) {
+          return { success: false, error: `この日は ${special.openTime}〜 の受付です。` };
+        }
+        if (special.closeTime && slotMin >= toMinLocal(special.closeTime)) {
+          return { success: false, error: `この日は 〜${special.closeTime} の受付です。` };
+        }
+      }
     }
 
     const supabase = await getSupabase();

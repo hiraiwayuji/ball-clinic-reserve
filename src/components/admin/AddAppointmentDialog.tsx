@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useRef, useCallback } from "react";
-import { format } from "date-fns";
+import { format, addDays } from "date-fns";
 import { ja } from "date-fns/locale";
 import { CalendarIcon, Plus, X, User, Clock } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -16,12 +16,12 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { createManualReservation, getAddonCourseInfo } from "@/app/actions/adminReserve";
+import { createManualReservation, getAddonCourseInfo, checkAddAppointmentOverlap, type AddOverlapResult } from "@/app/actions/adminReserve";
+import { getAdminDaySlots, type AdminDaySlot } from "@/app/actions/adminDaySlots";
 import { findSameDayAppointmentsByName } from "@/app/actions/duplicateCheck";
 import { searchPatientsForBooking, PatientSuggestion } from "@/app/actions/patientSearch";
 import { getCourses, getStaffList, getRooms, type ReservationCourse, type ReservationStaff, type ReservationRoom } from "@/app/actions/courses";
 import { toast } from "sonner";
-import { getTimeSlots } from "@/lib/time-slots";
 import { useClinicSlotDuration } from "@/lib/use-clinic-slot-duration";
 
 export function AddAppointmentDialog({
@@ -65,15 +65,35 @@ export function AddAppointmentDialog({
   const [date, setDate] = useState<Date | undefined>(defaultDate);
   const [time, setTime] = useState<string>(defaultTime || "");
   const [visitType, setVisitType] = useState<string>("new");
-  const [recurringWeeks, setRecurringWeeks] = useState<string>("1");
   const [duration, setDuration] = useState<string>(String(slotMinutes));
+  // まとめ予約：1件目（上の予約日/時間）に加えて、同じ内容で押さえる追加の日時。
+  // 事故の患者さんなど来院日がバラバラなケースを、1回の登録でまとめて取れるようにする。
+  // staffId が "" の行は1件目と同じ担当（日によって担当が違うときだけ選び直す）。
+  const [extraSlots, setExtraSlots] = useState<
+    { key: string; date: Date | undefined; time: string; staffId: string }[]
+  >([]);
+  // 「日付×担当」ごとの時間枠（そのレーンの埋まり具合つき）。key = "yyyy-MM-dd|staffId"
+  const [daySlots, setDaySlots] = useState<Record<string, AdminDaySlot[]>>({});
+  const [slotsLoading, setSlotsLoading] = useState(false);
+  const slotKeySeq = useRef(0);
   const [isSubmitting, setIsSubmitting] = useState(false);
   // 同じ日に同名患者の予約がある場合の確認（それでも登録するか）
   const [dupWarning, setDupWarning] = useState<{
-    appointments: { id: string; time: string; medicalRecordNumber: string | null }[];
+    appointments: { id: string; date: string; time: string; medicalRecordNumber: string | null }[];
     customerCount: number;
     formData: FormData;
   } | null>(null);
+  // 担当かぶり時の確認。reassign=さみ整体へ振替を提案 / warn=このままでも登録できる警告。
+  const [overlapPrompt, setOverlapPrompt] = useState<
+    | {
+        mode: "reassign";
+        staffName: string;
+        sami: { staffId: string; staffName: string; courseId: string; courseName: string; durationMinutes: number };
+        formData: FormData;
+      }
+    | { mode: "warn"; staffName: string; formData: FormData }
+    | null
+  >(null);
 
   // slot サイズ刻みで 120分まで（slot=20 → 20/40/60/80/100/120）
   // コース duration が slot 倍数でないケースも拾えるよう、現在値を含めてマージする
@@ -157,7 +177,8 @@ export function AddAppointmentDialog({
       setShowSuggestions(false);
       setSelectedPatient(null);
       setVisitType("new");
-      setRecurringWeeks("1");
+      setExtraSlots([]);
+      setDaySlots({});
       setDuration(String(slotMinutes));
       setCourseId("");
       setStaffId("");
@@ -167,6 +188,7 @@ export function AddAppointmentDialog({
       setDoubleOn(false);
       setAddAddon(false);
       setAddonTiming("after");
+      setOverlapPrompt(null);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, defaultDate, defaultTime, defaultStaffId, defaultCourseId, defaultName, defaultPhone, defaultMedicalRecordNumber, defaultVisitType]);
@@ -220,6 +242,148 @@ export function AddAppointmentDialog({
       if (c) setDuration(String(c.duration_minutes));
     }
   };
+
+  // ── まとめ予約（1回で複数日を押さえる） ──
+  // 1件目は上の「予約日」「時間」「担当スタッフ」。2件目以降が extraSlots。
+  // 行の担当が未指定（""）なら1件目と同じ担当を使う。
+  const pickedSlots = [
+    { date, time, staffId },
+    ...extraSlots.map((s) => ({ date: s.date, time: s.time, staffId: s.staffId || staffId })),
+  ];
+  // 同じ日時を2回選んでもサーバー側で1件に畳まれるので、件数も畳んで数える
+  const pickedCount = new Set(
+    pickedSlots
+      .filter((s) => s.date && s.time)
+      .map((s) => `${format(s.date as Date, "yyyy-MM-dd")}T${s.time}`),
+  ).size;
+
+  const nextSlotKey = () => {
+    slotKeySeq.current += 1;
+    return `slot-${slotKeySeq.current}`;
+  };
+
+  // 追加行の初期値は「直前の日時の1週間後・同じ時刻」。毎週通う人はそのまま押していける。
+  const addExtraSlot = () => {
+    const last = extraSlots.length > 0 ? extraSlots[extraSlots.length - 1] : { date, time, staffId: "" };
+    const from = last.date ?? date;
+    setExtraSlots((v) => [
+      ...v,
+      {
+        key: nextSlotKey(),
+        date: from ? addDays(from, 7) : undefined,
+        time: last.time || time,
+        staffId: last.staffId,
+      },
+    ]);
+  };
+
+  // 「毎週◯週分」をまとめてリストに足すショートカット
+  const addWeeklyBatch = (weeks: number) => {
+    if (!date || !time) {
+      toast.error("先に1件目の日付と時間を選んでください");
+      return;
+    }
+    const last = extraSlots.length > 0 ? extraSlots[extraSlots.length - 1] : { date, time, staffId: "" };
+    const from = last.date ?? date;
+    const t = last.time || time;
+    const sid = last.staffId;
+    setExtraSlots((v) => [
+      ...v,
+      ...Array.from({ length: weeks }, (_, i) => ({
+        key: nextSlotKey(),
+        date: addDays(from, (i + 1) * 7),
+        time: t,
+        staffId: sid,
+      })),
+    ]);
+  };
+
+  const updateExtraSlot = (
+    key: string,
+    patch: Partial<{ date: Date | undefined; time: string; staffId: string }>,
+  ) => setExtraSlots((v) => v.map((s) => (s.key === key ? { ...s, ...patch } : s)));
+  const removeExtraSlot = (key: string) =>
+    setExtraSlots((v) => v.filter((s) => s.key !== key));
+
+  // 空き枠は「日付×担当」ごとに変わる（行ごとに担当を変えられるため）
+  const slotKeyOf = (d: Date, sid: string) => `${format(d, "yyyy-MM-dd")}|${sid}`;
+
+  // 選ばれている「日付×担当」ぶんの時間枠を取りにいく。
+  // メニュー・所要時間が変わると埋まり具合も変わるので、依存に入れて取り直す。
+  const slotFetchKey = Array.from(
+    new Set(pickedSlots.filter((s) => s.date).map((s) => slotKeyOf(s.date as Date, s.staffId))),
+  ).join(",");
+
+  useEffect(() => {
+    if (!open) return;
+    const keys = slotFetchKey.split(",").filter(Boolean);
+    if (keys.length === 0) {
+      setDaySlots({});
+      return;
+    }
+    let cancelled = false;
+    setSlotsLoading(true);
+    (async () => {
+      const entries = await Promise.all(
+        keys.map(async (k) => {
+          const [d, sid] = k.split("|");
+          try {
+            const slots = await getAdminDaySlots({
+              date: d,
+              staffId: sid || null,
+              courseId: courseId || null,
+              durationMinutes: Number(duration) || slotMinutes,
+              slotMinutes,
+            });
+            return [k, slots] as const;
+          } catch {
+            // 取得できなくても登録は止めない（空きは不明として全枠出す）
+            return [k, [] as AdminDaySlot[]] as const;
+          }
+        }),
+      );
+      if (cancelled) return;
+      setDaySlots(Object.fromEntries(entries));
+      setSlotsLoading(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, slotFetchKey, courseId, duration, slotMinutes]);
+
+  const isSlotBlocked = (d: Date | undefined, t: string, sid: string) => {
+    if (!d || !t) return false;
+    const slots = daySlots[slotKeyOf(d, sid)];
+    return !!slots?.some((s) => s.time === t && s.blocked);
+  };
+
+  // 時間プルダウンの中身。その行の担当がすでに埋まっている枠は選ばせない。
+  // 休憩・休診日は「（休憩）」等と添えるだけで選べる（院内は例外的にねじ込む運用があるため）。
+  const renderTimeOptions = (d: Date | undefined, sid: string) => {
+    if (!d) return <option value="" disabled>先に日付を選択</option>;
+    const slots = daySlots[slotKeyOf(d, sid)];
+    if (!slots || slots.length === 0) {
+      return <option value="" disabled>{slotsLoading ? "空きを確認中..." : "時間を選択"}</option>;
+    }
+    return (
+      <>
+        <option value="" disabled>時間を選択</option>
+        {slots.map((s) => (
+          <option key={s.time} value={s.time} disabled={s.blocked}>
+            {s.blocked
+              ? `× ${s.time}（${s.note ?? "予約あり"}）`
+              : s.note
+                ? `${s.time}（${s.note}）`
+                : s.time}
+          </option>
+        ))}
+      </>
+    );
+  };
+
+  // 施術担当に出すスタッフ（受付助手＝show_in_timeline=false は除く）
+  const treatmentStaff = staffList.filter((s) => s.is_active && s.show_in_timeline !== false);
+  const commonStaffName = staffList.find((s) => s.id === staffId)?.name ?? null;
 
   // ── ダブル施術（さみ整体 ↔ ボール担当を同時に） ──
   const samiStaff = staffList.find((s) => s.name === "さみ");
@@ -308,6 +472,21 @@ export function AddAppointmentDialog({
       toast.error("日付と時間を選択してください");
       return;
     }
+    // 追加した日時の入力もれ
+    if (extraSlots.some((s) => !s.date || !s.time)) {
+      toast.error("追加した日時に、日付か時間が入っていないものがあります");
+      return;
+    }
+    // 担当が埋まっている枠が選ばれたまま残っていないか
+    // （時間を選んだあとに担当やメニューを変えると、埋まりに変わることがある）
+    const blockedPicked = pickedSlots.filter((s) => isSlotBlocked(s.date, s.time, s.staffId));
+    if (blockedPicked.length > 0) {
+      const label = blockedPicked
+        .map((s) => `${format(s.date as Date, "M/d")} ${s.time}`)
+        .join("、");
+      toast.error(`${label} は担当がすでに埋まっています。時間を選び直してください。`);
+      return;
+    }
 
     const formData = new FormData(e.currentTarget);
     formData.set("name", nameValue);
@@ -350,25 +529,48 @@ export function AddAppointmentDialog({
     formData.append("date", format(date, "yyyy-MM-dd"));
     formData.append("time", time);
     formData.append("visitType", visitType);
-    formData.append("recurringWeeks", recurringWeeks);
+    // まとめ予約：2件目以降の日時。サーバー側で1件目と束ねて同じ内容で登録する。
+    // staffId が空の行は1件目と同じ担当になる（サーバー側で補完）。
+    formData.set(
+      "extraDateTimes",
+      JSON.stringify(
+        extraSlots
+          .filter((s) => s.date && s.time)
+          .map((s) => ({
+            date: format(s.date as Date, "yyyy-MM-dd"),
+            time: s.time,
+            staffId: s.staffId || "",
+          })),
+      ),
+    );
     formData.set("duration", duration);
     if (courseId) formData.append("courseId", courseId);
     if (staffId) formData.append("staffId", staffId);
     if (roomId) formData.append("roomId", roomId);
 
     // ── 同日重複チェック ──
-    // 同じ日に同名の患者さんの予約があれば、誤登録防止のため確認をはさむ
+    // 同じ日に同名の患者さんの予約があれば、誤登録防止のため確認をはさむ。
+    // まとめ予約では選んだ日すべてを調べる（追加した日にだけ既存予約がある、を見逃さないため）。
     setIsSubmitting(true);
     try {
-      const dup = await findSameDayAppointmentsByName(format(date, "yyyy-MM-dd"), nameValue);
-      if (dup.appointments.length > 0) {
+      const targetDates = Array.from(
+        new Set(pickedSlots.filter((s) => s.date).map((s) => format(s.date as Date, "yyyy-MM-dd"))),
+      );
+      const results = await Promise.all(
+        targetDates.map(async (d) => ({ date: d, res: await findSameDayAppointmentsByName(d, nameValue) })),
+      );
+      const hits = results.flatMap(({ date: d, res }) =>
+        res.appointments.map((a) => ({
+          id: a.id,
+          date: d,
+          time: a.time,
+          medicalRecordNumber: a.medicalRecordNumber,
+        })),
+      );
+      if (hits.length > 0) {
         setDupWarning({
-          appointments: dup.appointments.map((a) => ({
-            id: a.id,
-            time: a.time,
-            medicalRecordNumber: a.medicalRecordNumber,
-          })),
-          customerCount: dup.customerCount,
+          appointments: hits,
+          customerCount: Math.max(0, ...results.map((r) => r.res.customerCount)),
           formData,
         });
         setIsSubmitting(false);
@@ -378,26 +580,78 @@ export function AddAppointmentDialog({
       // 重複チェックに失敗しても登録自体は止めない
     }
 
+    await runOverlapGate(formData);
+  };
+
+  // 担当レーンの時間かぶりをサーバーで確認し、必要なら確認ダイアログを出す。
+  // ・かぶりなし → そのまま登録。
+  // ・ボールがかぶり＆さみ出勤日で空き → 「さみ整体へ振替」を提案。
+  // ・それ以外のかぶり → 警告（このままでも登録できる）。
+  const runOverlapGate = async (formData: FormData) => {
+    setIsSubmitting(true);
+    setDupWarning(null);
+    let res: AddOverlapResult = { kind: "none" };
+    try {
+      res = await checkAddAppointmentOverlap({
+        date: (formData.get("date") as string) || "",
+        time: (formData.get("time") as string) || "",
+        durationMinutes: Number(formData.get("duration")) || slotMinutes,
+        staffId: (formData.get("staffId") as string) || null,
+        courseId: (formData.get("courseId") as string) || null,
+      });
+    } catch {
+      // 重複チェックに失敗しても登録自体は止めない
+    }
+    if (res.kind === "reassign_sami") {
+      setOverlapPrompt({ mode: "reassign", staffName: res.staffName, sami: res.sami, formData });
+      setIsSubmitting(false);
+      return;
+    }
+    if (res.kind === "warn") {
+      setOverlapPrompt({ mode: "warn", staffName: res.staffName, formData });
+      setIsSubmitting(false);
+      return;
+    }
     await performSubmit(formData);
   };
 
+  // 「さみ整体へ振り替える」を確定：担当・コース・所要時間をさみ整体に差し替えて登録。
+  const confirmReassignToSami = async () => {
+    if (!overlapPrompt || overlapPrompt.mode !== "reassign") return;
+    const { sami, formData } = overlapPrompt;
+    formData.set("staffId", sami.staffId);
+    formData.set("courseId", sami.courseId);
+    formData.set("duration", String(sami.durationMinutes));
+    formData.set("reassignReport", `ボール重複のためさみ整体（${sami.staffName}）へ振替`);
+    // 振替後は「ボールが主役」の前提が崩れるので、ダブル施術・追加メニューは解除する。
+    formData.delete("doublePartnerStaffId");
+    formData.delete("doublePartnerCourseId");
+    formData.delete("additionalStaffIds");
+    formData.delete("addAddon");
+    formData.delete("addonTiming");
+    await performSubmit(formData, `さみ整体（${sami.staffName}）に振り替えて登録しました`);
+  };
+
   // 実際の予約登録処理（重複チェックを通過 or 確認後に呼ぶ）
-  const performSubmit = async (formData: FormData) => {
+  const performSubmit = async (formData: FormData, successMessage?: string) => {
     setIsSubmitting(true);
     try {
       const result = await createManualReservation(formData);
       if (result.success) {
         toast.success(
-          Number(recurringWeeks) > 1
-            ? `${recurringWeeks}週分の予約を追加しました`
-            : "予約を追加しました"
+          successMessage ??
+          (pickedCount > 1
+            ? `${pickedCount}件の予約をまとめて追加しました`
+            : "予約を追加しました")
         );
         setDupWarning(null);
+        setOverlapPrompt(null);
         setOpen(false);
         setDate(undefined);
         setTime("");
         setVisitType("new");
-        setRecurringWeeks("1");
+        setExtraSlots([]);
+        setDaySlots({});
         setDuration(String(slotMinutes));
         setCourseId("");
         setStaffId("");
@@ -452,13 +706,13 @@ export function AddAppointmentDialog({
                   ⚠ 同じ日にこの患者さんの予約があります
                 </p>
                 <p className="text-sm text-slate-600 mt-1">
-                  {nameValue.trim()}様は、選択された日にすでに予約が入っています。
+                  {nameValue.trim()}様は、選ばれた日にすでに予約が入っています。
                 </p>
               </div>
               <ul className="space-y-1 text-sm text-amber-900 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
                 {dupWarning.appointments.map((a) => (
                   <li key={a.id}>
-                    ・{a.time}
+                    ・{format(new Date(`${a.date}T00:00:00+09:00`), "M/d（E）", { locale: ja })} {a.time}
                     {a.medicalRecordNumber ? `（カルテ ${a.medicalRecordNumber}）` : ""}
                   </li>
                 ))}
@@ -474,7 +728,7 @@ export function AddAppointmentDialog({
               <div className="flex gap-2">
                 <Button
                   type="button"
-                  onClick={() => performSubmit(dupWarning.formData)}
+                  onClick={() => runOverlapGate(dupWarning.formData)}
                   disabled={isSubmitting}
                   className="flex-1 h-11 bg-amber-600 hover:bg-amber-700 rounded-xl font-bold text-white"
                 >
@@ -490,6 +744,87 @@ export function AddAppointmentDialog({
                   やめる
                 </Button>
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* 担当かぶりの確認（さみ整体へ振替 / このままでも登録できる警告） */}
+        {overlapPrompt && (
+          <div className="fixed inset-0 z-[310] flex items-center justify-center bg-black/50 p-4">
+            <div className="w-full max-w-sm bg-white rounded-2xl shadow-2xl border border-amber-300 p-5 space-y-4">
+              {overlapPrompt.mode === "reassign" ? (
+                <>
+                  <div>
+                    <p className="text-base font-bold text-amber-900">
+                      ⚠ ボールがこの時間に埋まっています
+                    </p>
+                    <p className="text-sm text-slate-600 mt-1 leading-relaxed">
+                      選択した時間はボールさんの予約がすでに入っています。<br />
+                      この日は<span className="font-bold">さみさんが出勤</span>していて枠が空いています。
+                      <span className="font-bold">さみ整体（{overlapPrompt.sami.staffName}）</span>に振り替えますか？
+                    </p>
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    <Button
+                      type="button"
+                      onClick={confirmReassignToSami}
+                      disabled={isSubmitting}
+                      className="h-11 bg-emerald-600 hover:bg-emerald-700 rounded-xl font-bold text-white"
+                    >
+                      {isSubmitting ? "登録中..." : `さみ整体（${overlapPrompt.sami.staffName}）に振り替えて登録`}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => performSubmit(overlapPrompt.formData)}
+                      disabled={isSubmitting}
+                      className="h-11 rounded-xl"
+                    >
+                      ボールのまま登録する
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      onClick={() => setOverlapPrompt(null)}
+                      disabled={isSubmitting}
+                      className="h-10 rounded-xl text-slate-500"
+                    >
+                      やめる
+                    </Button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div>
+                    <p className="text-base font-bold text-amber-900">
+                      ⚠ {overlapPrompt.staffName}さんがこの時間に埋まっています
+                    </p>
+                    <p className="text-sm text-slate-600 mt-1 leading-relaxed">
+                      {overlapPrompt.staffName}さんはこの時間にすでにご予約が入っています。<br />
+                      担当か時間を変えるのがおすすめですが、このまま登録することもできます。
+                    </p>
+                  </div>
+                  <div className="flex gap-2">
+                    <Button
+                      type="button"
+                      onClick={() => performSubmit(overlapPrompt.formData)}
+                      disabled={isSubmitting}
+                      className="flex-1 h-11 bg-amber-600 hover:bg-amber-700 rounded-xl font-bold text-white"
+                    >
+                      {isSubmitting ? "登録中..." : "それでも登録する"}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => setOverlapPrompt(null)}
+                      disabled={isSubmitting}
+                      className="flex-1 h-11 rounded-xl"
+                    >
+                      やめる
+                    </Button>
+                  </div>
+                </>
+              )}
             </div>
           </div>
         )}
@@ -529,16 +864,7 @@ export function AddAppointmentDialog({
                   時間 <span className="text-red-500">*</span>
                 </Label>
                 <select value={time} onChange={(e) => setTime(e.target.value)} className={selectClass}>
-                  {!date ? (
-                    <option value="" disabled>先に日付を選択</option>
-                  ) : getTimeSlots(date, { bypassRestrictions: true, slotMinutes }).length === 0 ? (
-                    <option value="" disabled>休診日</option>
-                  ) : (
-                    <option value="" disabled>時間を選択</option>
-                  )}
-                  {date && getTimeSlots(date, { bypassRestrictions: true, slotMinutes }).map((t) => (
-                    <option key={t} value={t}>{t}</option>
-                  ))}
+                  {renderTimeOptions(date, staffId)}
                 </select>
               </div>
 
@@ -863,7 +1189,7 @@ export function AddAppointmentDialog({
                 <select value={staffId} onChange={(e) => setStaffId(e.target.value)} className={selectClass}>
                   <option value="">指定なし</option>
                   {/* 受付スタッフ（show_in_timeline=false の受付助手等）は施術担当に出さない */}
-                  {staffList.filter(s => s.is_active && s.show_in_timeline !== false).map(s => (
+                  {treatmentStaff.map(s => (
                     <option key={s.id} value={s.id}>{s.name}</option>
                   ))}
                 </select>
@@ -882,7 +1208,7 @@ export function AddAppointmentDialog({
                       className={`${selectClass} flex-1`}
                     >
                       <option value="">追加担当を選択</option>
-                      {staffList.filter(s => s.is_active && s.show_in_timeline !== false).map(s => (
+                      {treatmentStaff.map(s => (
                         <option key={s.id} value={s.id}>{s.name}</option>
                       ))}
                     </select>
@@ -919,23 +1245,120 @@ export function AddAppointmentDialog({
               </div>
             )}
 
-            {/* 繰り返し */}
+            {/* まとめ予約：1回の登録で複数日を押さえる */}
             <div className="space-y-1.5">
               <Label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">
-                繰り返し設定
+                予約する日時
               </Label>
-              <select
-                value={recurringWeeks}
-                onChange={(e) => setRecurringWeeks(e.target.value)}
-                className={selectClass}
-              >
-                <option value="1">今回のみ（繰り返しなし）</option>
-                <option value="2">2週連続（毎週）</option>
-                <option value="3">3週連続（毎週）</option>
-                <option value="4">4週連続（毎週）</option>
-                <option value="8">8週連続（約2ヶ月）</option>
-                <option value="12">12週連続（約3ヶ月）</option>
-              </select>
+              <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-2.5 space-y-2">
+                {/* 1件目 = 上で選んだ予約日・時間 */}
+                <div className="flex items-center gap-2 text-sm">
+                  <span className="w-10 shrink-0 text-[11px] font-semibold text-slate-400">1件目</span>
+                  {date && time ? (
+                    <span className="font-bold text-slate-800">
+                      {format(date, "M/d（E）", { locale: ja })} {time}
+                      {commonStaffName && (
+                        <span className="font-normal text-slate-500">／{commonStaffName}</span>
+                      )}
+                    </span>
+                  ) : (
+                    <span className="text-slate-400">上で日付と時間を選んでください</span>
+                  )}
+                </div>
+
+                {extraSlots.map((s, i) => (
+                  <div key={s.key} className="rounded-lg border border-slate-200 bg-white p-2 space-y-1.5">
+                    <div className="flex items-center gap-2">
+                      <span className="w-10 shrink-0 text-[11px] font-semibold text-slate-400">
+                        {i + 2}件目
+                      </span>
+                      <Popover>
+                        <PopoverTrigger className="flex items-center flex-1 min-w-0 h-10 rounded-md border border-input bg-white px-2.5 text-sm shadow-sm hover:bg-accent transition-colors text-left">
+                          <CalendarIcon className="mr-1.5 h-3.5 w-3.5 text-slate-400 shrink-0" />
+                          {s.date ? (
+                            <span className="truncate">{format(s.date, "M/d（E）", { locale: ja })}</span>
+                          ) : (
+                            <span className="text-muted-foreground">日付</span>
+                          )}
+                        </PopoverTrigger>
+                        <PopoverContent className="w-auto p-0 z-[200]" align="start" side="bottom" sideOffset={4}>
+                          <Calendar
+                            mode="single"
+                            selected={s.date}
+                            onSelect={(d) => updateExtraSlot(s.key, { date: d })}
+                            initialFocus
+                            locale={ja}
+                          />
+                        </PopoverContent>
+                      </Popover>
+                      <select
+                        value={s.time}
+                        onChange={(e) => updateExtraSlot(s.key, { time: e.target.value })}
+                        className="flex h-10 w-[7.5rem] shrink-0 rounded-md border border-input bg-white px-2 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                      >
+                        {renderTimeOptions(s.date, s.staffId || staffId)}
+                      </select>
+                      <button
+                        type="button"
+                        onClick={() => removeExtraSlot(s.key)}
+                        className="shrink-0 p-1.5 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 transition-colors"
+                        title="この日時を削除"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+
+                    {/* 日によって担当が違うときだけ選び直す（未指定なら1件目と同じ担当） */}
+                    {treatmentStaff.length > 0 && (
+                      <div className="flex items-center gap-2">
+                        <span className="w-10 shrink-0 text-[11px] text-slate-400">担当</span>
+                        <select
+                          value={s.staffId}
+                          onChange={(e) => updateExtraSlot(s.key, { staffId: e.target.value })}
+                          className="flex h-9 flex-1 min-w-0 rounded-md border border-input bg-white px-2 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                        >
+                          <option value="">
+                            1件目と同じ{commonStaffName ? `（${commonStaffName}）` : "（指定なし）"}
+                          </option>
+                          {treatmentStaff.map((st) => (
+                            <option key={st.id} value={st.id}>{st.name}</option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+                  </div>
+                ))}
+
+                <div className="flex flex-wrap items-center gap-2 pt-0.5">
+                  <button
+                    type="button"
+                    onClick={addExtraSlot}
+                    className="text-xs font-bold text-blue-600 hover:text-blue-700 inline-flex items-center gap-1"
+                  >
+                    <Plus className="w-3.5 h-3.5" /> 日時を追加
+                  </button>
+                  <select
+                    value=""
+                    onChange={(e) => {
+                      const w = Number(e.target.value);
+                      if (w > 0) addWeeklyBatch(w);
+                      e.target.value = "";
+                    }}
+                    className="h-8 rounded-md border border-slate-200 bg-white px-2 text-xs text-slate-600 shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                  >
+                    <option value="">毎週まとめて追加…</option>
+                    <option value="1">翌週の同じ時間（1回分）</option>
+                    <option value="3">毎週3回分</option>
+                    <option value="7">毎週7回分（約2ヶ月）</option>
+                    <option value="11">毎週11回分（約3ヶ月）</option>
+                  </select>
+                </div>
+              </div>
+              <p className="text-[11px] text-slate-500 leading-snug">
+                {pickedCount > 1
+                  ? `同じ患者さん・同じ内容で ${pickedCount}件 をまとめて登録します。`
+                  : "事故の患者さんなど、来院日が決まっている場合は「日時を追加」で複数日をまとめて押さえられます。"}
+              </p>
             </div>
 
             {/* メモ */}
@@ -954,7 +1377,11 @@ export function AddAppointmentDialog({
               disabled={isSubmitting || !date || !time}
               className="w-full h-11 bg-blue-600 hover:bg-blue-700 rounded-xl font-bold"
             >
-              {isSubmitting ? "保存中..." : "予約を追加する"}
+              {isSubmitting
+                ? "保存中..."
+                : pickedCount > 1
+                  ? `この内容で ${pickedCount}件 まとめて登録する`
+                  : "予約を追加する"}
             </Button>
             <Button
               type="button"

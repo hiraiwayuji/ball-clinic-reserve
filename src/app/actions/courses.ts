@@ -598,7 +598,7 @@ export async function getCoursesAvailability(): Promise<CourseAvailability[]> {
       .eq("id", DEFAULT_CLINIC_ID)
       .maybeSingle();
     const schedule = buildSchedule(settings);
-    const slotMinutes = ([15, 20, 30].includes(Number(settings?.slot_duration_minutes)) ? Number(settings?.slot_duration_minutes) : 30) as 15 | 20 | 30;
+    const slotMinutes = ([10, 15, 20, 30].includes(Number(settings?.slot_duration_minutes)) ? Number(settings?.slot_duration_minutes) : 30) as 10 | 15 | 20 | 30;
 
     const courses = await getActiveCourses();
     if (courses.length === 0) return [];

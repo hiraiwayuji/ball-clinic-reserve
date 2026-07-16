@@ -92,9 +92,10 @@ export default function SettingsEditor({ initialSettings }: { initialSettings: C
                   <Label className="font-bold">予約枠サイズ</Label>
                   <select
                     value={settings?.slot_duration_minutes ?? 30}
-                    onChange={(e) => updateField("slot_duration_minutes", parseInt(e.target.value, 10) as 15 | 20 | 30)}
+                    onChange={(e) => updateField("slot_duration_minutes", parseInt(e.target.value, 10) as 10 | 15 | 20 | 30)}
                     className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm bg-white"
                   >
+                    <option value={10}>10分刻み</option>
                     <option value={15}>15分刻み</option>
                     <option value={20}>20分刻み</option>
                     <option value={30}>30分刻み</option>

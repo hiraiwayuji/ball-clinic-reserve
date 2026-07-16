@@ -8,6 +8,15 @@ import { writeAudit, notifyOwnerOfStaffAction } from "@/lib/audit";
 import { awardPoints } from "@/lib/gamification";
 import { getLineAccessToken, pushLineToCustomer } from "@/lib/admin-notify";
 import { getLineUserIdsForCustomer } from "@/lib/line-links";
+import { isTimeWithinStaffHoursYmd, type StaffSchedule } from "@/lib/staff-availability";
+
+/** DB の "HH:MM:SS" / "HH:MM" を "HH:MM" に正規化（未設定は null）。reserve.ts と同じ挙動。 */
+function normStaffTime(v: string | null | undefined): string | null {
+  if (v == null) return null;
+  const t = String(v).trim();
+  if (!t) return null;
+  return t.length >= 5 ? t.slice(0, 5) : t;
+}
 
 async function getSupabase() {
   return await createClient();
@@ -381,6 +390,167 @@ export async function createWaitlistEntryByStaff(formData: FormData) {
   }
 }
 
+export type AddOverlapResult =
+  | { kind: "none" }
+  | { kind: "warn"; staffName: string }
+  | {
+      kind: "reassign_sami";
+      staffName: string;
+      sami: {
+        staffId: string;
+        staffName: string;
+        courseId: string;
+        courseName: string;
+        durationMinutes: number;
+      };
+    };
+
+/**
+ * 管理画面の新規予約追加で、選んだ担当レーンが時間かぶりしていないか調べる。
+ * ・かぶっていなければ none。
+ * ・「ボール」担当がかぶっていて、その日さみが出勤していて さみ枠が空いていれば
+ *   さみ整体への振り替えを提案（reassign_sami）。
+ * ・それ以外のかぶり（ボール以外／さみも埋まり／さみ休み）は警告のみ（warn。登録は通せる）。
+ *
+ * 注: ボールは prevent_overlap=false のため DB の除外制約では重複を弾けない。
+ *     さみ/水素/ヘッドスパ（prevent_overlap=true）は DB でも弾かれるが、生の
+ *     エラーを見せないよう、ここでも同じ判定をして分かりやすいダイアログに寄せる。
+ *     判定（出勤日・出勤時間）は患者予約側 reserve.ts と同じロジックをミラーする。
+ */
+export async function checkAddAppointmentOverlap(params: {
+  date: string;               // "yyyy-MM-dd"
+  time: string;               // "HH:MM"
+  durationMinutes: number;
+  staffId: string | null;
+  courseId: string | null;
+}): Promise<AddOverlapResult> {
+  const { clinicId } = await checkAdminAuth();
+  const supabase = getAdminSupabase();
+  if (!supabase) return { kind: "none" };
+  try {
+    const { date, time } = params;
+    if (!date || !time) return { kind: "none" };
+    const durationMinutes = Number(params.durationMinutes) || 30;
+
+    // 1. 実効の担当レーンを決める（担当指定 > コースの required_staff_id）。
+    //    どちらも無い（指定なし）ときはレーン重複の概念がないので none。
+    let effStaffId = params.staffId || null;
+    if (!effStaffId && params.courseId) {
+      const { data: c } = await supabase
+        .from("reservation_courses")
+        .select("required_staff_id")
+        .eq("id", params.courseId)
+        .eq("clinic_id", clinicId)
+        .maybeSingle();
+      effStaffId = (c?.required_staff_id as string | null) ?? null;
+    }
+    if (!effStaffId) return { kind: "none" };
+
+    const { data: effStaff } = await supabase
+      .from("reservation_staff")
+      .select("id, name")
+      .eq("id", effStaffId)
+      .eq("clinic_id", clinicId)
+      .maybeSingle();
+    if (!effStaff) return { kind: "none" };
+    const effStaffName = (effStaff.name as string) ?? "担当";
+
+    // 2. その担当レーンで時間がかぶる予約があるか（キャンセル除く）。
+    const start = new Date(`${date}T${time}:00+09:00`);
+    const startIso = start.toISOString();
+    const endIso = new Date(start.getTime() + durationMinutes * 60000).toISOString();
+    const laneOccupied = async (staffId: string, sIso: string, eIso: string) => {
+      const { data } = await supabase
+        .from("appointments")
+        .select("id")
+        .eq("clinic_id", clinicId)
+        .eq("staff_id", staffId)
+        .neq("status", "cancelled")
+        .lt("start_time", eIso)
+        .gt("end_time", sIso)
+        .limit(1);
+      return !!(data && data.length > 0);
+    };
+    if (!(await laneOccupied(effStaffId, startIso, endIso))) return { kind: "none" };
+
+    // 3. かぶっている。この機能は「ボール担当のかぶり」だけを対象にする。
+    //    ・ボール以外の担当（さみ/水素/ヘッドスパ）は prevent_overlap=true で
+    //      DB の除外制約が二重予約を弾き、createManualReservation 側で分かりやすい
+    //      文言を返すため、ここでの警告は不要。
+    //    ・他院には "ボール" というスタッフが存在しないので、この判定は自然と
+    //      ボール接骨院だけで発火する（院ごとのフラグを持たずに院を限定できる）。
+    if (effStaffName !== "ボール") {
+      return { kind: "none" };
+    }
+
+    // さみ整体コース（さみ担当・有効）を探す。無ければ振替不可＝警告のみ。
+    const { data: samiCourse } = await supabase
+      .from("reservation_courses")
+      .select("id, name, duration_minutes, required_staff_id")
+      .eq("clinic_id", clinicId)
+      .eq("name", "さみ整体")
+      .eq("is_active", true)
+      .maybeSingle();
+    const samiStaffId = (samiCourse?.required_staff_id as string | null) ?? null;
+    if (!samiCourse || !samiStaffId) return { kind: "warn", staffName: effStaffName };
+
+    const { data: sami } = await supabase
+      .from("reservation_staff")
+      .select("id, name, schedule_based_booking, booking_weekdays, booking_start_time, booking_end_time")
+      .eq("id", samiStaffId)
+      .eq("clinic_id", clinicId)
+      .maybeSingle();
+    if (!sami) return { kind: "warn", staffName: effStaffName };
+
+    // さみは出勤日制。その日出勤していない／受付時間外なら振替不可＝警告のみ。
+    if (sami.schedule_based_booking) {
+      const weekdays = String(sami.booking_weekdays ?? "")
+        .split(",").map((s) => s.trim()).filter(Boolean).map(Number);
+      const { data: ovr } = await supabase
+        .from("staff_booking_dates")
+        .select("available, start_time, end_time")
+        .eq("clinic_id", clinicId)
+        .eq("staff_id", samiStaffId)
+        .eq("date", date)
+        .maybeSingle();
+      const wd = new Date(`${date}T00:00:00`).getDay();
+      const available = ovr ? !!ovr.available : weekdays.includes(wd);
+      if (!available) return { kind: "warn", staffName: effStaffName };
+      const sched: StaffSchedule = {
+        weekdays,
+        dates: ovr
+          ? [{ date, available: true, start: normStaffTime(ovr.start_time), end: normStaffTime(ovr.end_time) }]
+          : [],
+        defaultStart: normStaffTime(sami.booking_start_time as string | null),
+        defaultEnd: normStaffTime(sami.booking_end_time as string | null),
+      };
+      if (!isTimeWithinStaffHoursYmd(date, time, sched)) return { kind: "warn", staffName: effStaffName };
+    }
+
+    // さみ整体の所要時間でさみレーンの空きを確認。さみも埋まっていれば警告のみ。
+    const samiDur = Number(samiCourse.duration_minutes ?? 30) || 30;
+    const samiEndIso = new Date(start.getTime() + samiDur * 60000).toISOString();
+    if (await laneOccupied(samiStaffId, startIso, samiEndIso)) {
+      return { kind: "warn", staffName: effStaffName };
+    }
+
+    return {
+      kind: "reassign_sami",
+      staffName: effStaffName,
+      sami: {
+        staffId: samiStaffId,
+        staffName: (sami.name as string) ?? "さみ",
+        courseId: samiCourse.id as string,
+        courseName: (samiCourse.name as string) ?? "さみ整体",
+        durationMinutes: samiDur,
+      },
+    };
+  } catch (e) {
+    console.error("checkAddAppointmentOverlap failed", e);
+    return { kind: "none" };
+  }
+}
+
 export async function createManualReservation(formData: FormData) {
   const { clinicId } = await checkAdminAuth();
   try {
@@ -401,6 +571,8 @@ export async function createManualReservation(formData: FormData) {
     const courseId = (formData.get("courseId") as string) || null;
     const staffId = (formData.get("staffId") as string) || null;
     const roomId = (formData.get("roomId") as string) || null;
+    // 担当かぶり時の「さみ整体へ振替」など、報告として残したい注記（任意）。
+    const reassignReport = ((formData.get("reassignReport") as string) || "").trim();
 
     if (!rawDate || !time || !name || !phone) {
       return { success: false, error: "必須項目が不足しています" };
@@ -507,7 +679,63 @@ export async function createManualReservation(formData: FormData) {
     }
 
     // 2. 予約を作成（管理側追加は即 confirmed）
-    const baseDate = new Date(`${rawDate}T${time}:00+09:00`);
+    //
+    // 予約する日時の一覧を組み立てる。1件目は date/time、「日時を追加」で選ばれた分は
+    // extraDateTimes（[{date,time}] の JSON）で届く。事故の患者さんのように来院日が
+    // バラバラでも、1回の登録でまとめて取れるようにするため。
+    // recurringWeeks（毎週N週連続）は各日時から週送りで展開する（後方互換）。
+    // staffId は行ごとに変えられる（日によって担当が違うケース）。空なら1件目と同じ担当。
+    let extraDateTimes: { date: string; time: string; staffId?: string }[] = [];
+    try {
+      const raw = (formData.get("extraDateTimes") as string) || "";
+      const parsed = raw ? JSON.parse(raw) : [];
+      if (Array.isArray(parsed)) {
+        extraDateTimes = parsed.filter(
+          (s: unknown): s is { date: string; time: string; staffId?: string } => {
+            const v = s as { date?: unknown; time?: unknown } | null;
+            return (
+              !!v &&
+              typeof v.date === "string" &&
+              typeof v.time === "string" &&
+              /^\d{4}-\d{2}-\d{2}$/.test(v.date) &&
+              /^\d{2}:\d{2}$/.test(v.time)
+            );
+          },
+        );
+      }
+    } catch (err) {
+      console.warn("[addAppointmentByAdmin] failed to parse extraDateTimes:", err);
+    }
+
+    // 同じ日時が二重に入らないよう畳む（1件目と追加分が同じ日時、など）
+    const seenSlotKeys = new Set<string>();
+    const baseStarts: { start: Date; staffId: string | null }[] = [];
+    for (const s of [{ date: rawDate, time, staffId: staffId ?? undefined }, ...extraDateTimes]) {
+      const key = `${s.date}T${s.time}`;
+      if (seenSlotKeys.has(key)) continue;
+      const d = new Date(`${s.date}T${s.time}:00+09:00`);
+      if (Number.isNaN(d.getTime())) continue;
+      seenSlotKeys.add(key);
+      const rowStaffId = (typeof s.staffId === "string" && s.staffId.trim()) || staffId || null;
+      baseStarts.push({ start: d, staffId: rowStaffId });
+    }
+    if (baseStarts.length === 0) {
+      return { success: false, error: "予約日時が正しくありません" };
+    }
+
+    // 毎週N週ぶんに展開したうえで、時系列に並べる。
+    // 並べ替えるのは「初診フラグを一番早い予約に付ける」ため（追加した日の方が先、でも正しく動く）。
+    const weeks = Number.isFinite(recurringWeeks) && recurringWeeks > 0 ? recurringWeeks : 1;
+    const allStarts: { start: Date; staffId: string | null }[] = [];
+    for (const b of baseStarts) {
+      for (let i = 0; i < weeks; i++) {
+        const d = new Date(b.start.getTime());
+        d.setDate(d.getDate() + i * 7);
+        allStarts.push({ start: d, staffId: b.staffId });
+      }
+    }
+    allStarts.sort((a, b) => a.start.getTime() - b.start.getTime());
+
     const isFirstVisit = visitType === "new";
 
     // コース/スタッフ/個室のマスタ名を解決（clinic_id 指定で別院ID混入を防ぐ）
@@ -526,8 +754,22 @@ export async function createManualReservation(formData: FormData) {
     const staffName  = staffRow.data?.name ?? null;
     const roomName   = roomRow.data?.name ?? null;
     const courseExtra = courseId && courseName ? { course_id: courseId, course_name: courseName } : {};
-    const staffExtra  = staffId  && staffName  ? { staff_id:  staffId,  staff_name:  staffName  } : {};
     const roomExtra   = roomId   && roomName   ? { room_id:   roomId,   room_name:   roomName   } : {};
+
+    // 担当は行ごとに変えられる（日によって担当が違うケース）。使われている担当の名前をまとめて解決する。
+    // clinic_id 指定で引くので、自院にない ID（他院/削除済み）は名前が付かず、その行は担当なしで登録される。
+    const rowStaffIds = Array.from(
+      new Set(allStarts.map((s) => s.staffId).filter((v): v is string => !!v)),
+    );
+    const staffNameById = new Map<string, string>();
+    if (rowStaffIds.length > 0) {
+      const { data: rows } = await supabase
+        .from("reservation_staff")
+        .select("id, name")
+        .in("id", rowStaffIds)
+        .eq("clinic_id", clinicId);
+      (rows ?? []).forEach((r) => staffNameById.set(r.id as string, r.name as string));
+    }
 
     // 追加メニュー・追加担当（同一予約に複数項目を紐付け）
     let additionalCoursesJson: { course_id: string; course_name: string }[] = [];
@@ -563,37 +805,43 @@ export async function createManualReservation(formData: FormData) {
     const additionalCoursesExtra = additionalCoursesJson.length > 0 ? { additional_courses: additionalCoursesJson } : {};
     const additionalStaffExtra   = additionalStaffJson.length   > 0 ? { additional_staff:   additionalStaffJson   } : {};
 
-    // 連続予約は同一 series_id で束ねる（後で「この日以降を全削除」できるように）
-    const seriesId = recurringWeeks > 1
+    // 2件以上をまとめて取るときは同一 series_id で束ねる（後で「この日以降を全削除」できるように）
+    const seriesId = allStarts.length > 1
       ? (typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : null)
       : null;
 
-    const appointmentsToInsert = [];
-    for (let i = 0; i < recurringWeeks; i++) {
-      const targetDate = new Date(baseDate.getTime());
-      targetDate.setDate(targetDate.getDate() + i * 7);
-
-      const startDateTimeStr = targetDate.toISOString();
+    const appointmentsToInsert = allStarts.map((slot, i) => {
+      const targetDate = slot.start;
       const endDate = new Date(targetDate.getTime() + durationMinutes * 60 * 1000);
       const memoBase = `[院内追加] ${symptoms}`.trim();
-      const memoText = recurringWeeks > 1 ? `${memoBase} (定期予約 ${i + 1}/${recurringWeeks})` : memoBase;
+      const memoWithReport = reassignReport ? `${memoBase} 【${reassignReport}】`.trim() : memoBase;
+      const memoText = allStarts.length > 1
+        ? `${memoWithReport} (まとめ予約 ${i + 1}/${allStarts.length})`
+        : memoWithReport;
 
-      appointmentsToInsert.push({
+      // 担当はこの行のもの（行で指定がなければ1件目と同じ担当が入っている）
+      const rowStaffName = slot.staffId ? staffNameById.get(slot.staffId) ?? null : null;
+      const rowStaffExtra = slot.staffId && rowStaffName
+        ? { staff_id: slot.staffId, staff_name: rowStaffName }
+        : {};
+
+      return {
         customer_id: customerId,
-        start_time: startDateTimeStr,
+        start_time: targetDate.toISOString(),
         end_time: endDate.toISOString(),
         memo: memoText,
+        // 初診は一番早い1件だけ。2件目以降は再診として入れる。
         is_first_visit: i === 0 ? isFirstVisit : false,
         status: "confirmed",
         clinic_id: clinicId,
         series_id: seriesId,
         ...courseExtra,
-        ...staffExtra,
+        ...rowStaffExtra,
         ...roomExtra,
         ...additionalCoursesExtra,
         ...additionalStaffExtra,
-      });
-    }
+      };
+    });
 
     // tenant-isolation-ignore: appointmentsToInsert の各行に clinic_id を埋め込み済み（L143）
     const { error: appointmentErr } = await supabase
@@ -602,6 +850,22 @@ export async function createManualReservation(formData: FormData) {
 
     if (appointmentErr) {
       console.error("Appointment insertion error:", appointmentErr);
+      // 除外制約（prevent_overlap の担当＝さみ/水素/ヘッドスパ が時間かぶり）を分かりやすい文言に。
+      // PostgreSQL exclusion_violation = 23P01 / 制約名 appointments_single_resource_no_overlap。
+      const isOverlap =
+        (appointmentErr as any).code === "23P01" ||
+        /single_resource_no_overlap|exclusion/i.test((appointmentErr as any).message ?? "");
+      if (isOverlap) {
+        const staffLabel = staffName || "担当者";
+        // まとめ予約は1回の insert なので、1件でも重なると全件入らない（部分登録は起きない）。
+        // どの日が重なったかは insert のエラーからは分からないため、見直しを促す文言にする。
+        return {
+          success: false,
+          error: allStarts.length > 1
+            ? `選んだ日時のどれかに、${staffLabel}さんの別のご予約が入っています。まとめ予約は1件でも重なると登録されないので、日時を見直してください。`
+            : `${staffLabel}さんは、この時間にすでに別のご予約が入っています。担当者か時間を変えてください。`,
+        };
+      }
       return { success: false, error: `予約情報の登録に失敗しました: ${appointmentErr.message}` };
     }
 
@@ -634,34 +898,36 @@ export async function createManualReservation(formData: FormData) {
               ? (addon.allow_concurrent === true ? "same" : "after")
               : addonTiming; // "before" or "after"
           const aDur = Number(addon.duration_minutes ?? 30) || 30;
-          let aStartIso: string;
-          let aEndIso: string;
-          if (effectiveTiming === "before") {
-            const aEnd = baseDate;
-            const aStart = new Date(baseDate.getTime() - aDur * 60 * 1000);
-            aStartIso = aStart.toISOString();
-            aEndIso = aEnd.toISOString();
-          } else {
-            const aBase = effectiveTiming === "same" ? baseDate : new Date(baseDate.getTime() + durationMinutes * 60 * 1000);
-            aStartIso = aBase.toISOString();
-            aEndIso = new Date(aBase.getTime() + aDur * 60 * 1000).toISOString();
-          }
           const aStaffId = (addon.required_staff_id as string | null) ?? null;
           const aName = addon.name as string;
-          let laneFree = true;
-          if (aStaffId) {
-            const { data: conf } = await supabase
-              .from("appointments")
-              .select("id")
-              .eq("clinic_id", clinicId)
-              .eq("staff_id", aStaffId)
-              .neq("status", "cancelled")
-              .lt("start_time", aEndIso)
-              .gt("end_time", aStartIso)
-              .limit(1);
-            laneFree = !(conf && conf.length > 0);
-          }
-          if (laneFree) {
+
+          // まとめ予約では各回の施術それぞれに追加メニューを付ける（1回目だけ水素、では困るため）
+          for (const slot of allStarts) {
+            const mainStart = slot.start;
+            let aStartIso: string;
+            let aEndIso: string;
+            if (effectiveTiming === "before") {
+              aStartIso = new Date(mainStart.getTime() - aDur * 60 * 1000).toISOString();
+              aEndIso = mainStart.toISOString();
+            } else {
+              const aBase = effectiveTiming === "same" ? mainStart : new Date(mainStart.getTime() + durationMinutes * 60 * 1000);
+              aStartIso = aBase.toISOString();
+              aEndIso = new Date(aBase.getTime() + aDur * 60 * 1000).toISOString();
+            }
+            let laneFree = true;
+            if (aStaffId) {
+              const { data: conf } = await supabase
+                .from("appointments")
+                .select("id")
+                .eq("clinic_id", clinicId)
+                .eq("staff_id", aStaffId)
+                .neq("status", "cancelled")
+                .lt("start_time", aEndIso)
+                .gt("end_time", aStartIso)
+                .limit(1);
+              laneFree = !(conf && conf.length > 0);
+            }
+            if (!laneFree) continue;
             await supabase.from("appointments").insert([{
               customer_id: customerId,
               start_time: aStartIso,
@@ -670,6 +936,7 @@ export async function createManualReservation(formData: FormData) {
               is_first_visit: false,
               status: "confirmed",
               clinic_id: clinicId,
+              series_id: seriesId,
               course_id: addon.id,
               course_name: aName,
               ...(aStaffId ? { staff_id: aStaffId, staff_name: aName } : {}),
@@ -706,10 +973,9 @@ export async function createManualReservation(formData: FormData) {
         const pStaffName = (pStaff?.name as string | null) ?? null;
         const pCourseName = (pCourse?.name as string | null) ?? pStaffName ?? "施術";
 
-        for (let i = 0; i < recurringWeeks; i++) {
-          const mainStart = new Date(baseDate.getTime() + i * 7 * 24 * 60 * 60 * 1000);
+        for (const slot of allStarts) {
           // 相方は「主施術が終わった直後」から開始（連続）
-          const pStart = new Date(mainStart.getTime() + durationMinutes * 60 * 1000);
+          const pStart = new Date(slot.start.getTime() + durationMinutes * 60 * 1000);
           const pStartIso = pStart.toISOString();
           const pEndIso = new Date(pStart.getTime() + pDur * 60 * 1000).toISOString();
 
@@ -763,7 +1029,7 @@ export async function createManualReservation(formData: FormData) {
       actorRole: auth.role,
       actorEmail: auth.email,
       actionType: "予約の新規作成",
-      summary: `${name.trim()}様の予約を作成（${rawDate} ${time}、${appointmentsToInsert.length}件）`,
+      summary: `${name.trim()}様の予約を作成（${rawDate} ${time}、${appointmentsToInsert.length}件）${reassignReport ? `\n※ ${reassignReport}` : ""}`,
     });
     // ポイント加算（予約作成 1 件につき 5pt × 件数）
     for (let i = 0; i < appointmentsToInsert.length; i++) {

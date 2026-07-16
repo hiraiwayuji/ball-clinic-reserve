@@ -174,7 +174,7 @@ export async function getTimelineForDate(dateStr: string): Promise<{ success: bo
     });
 
     const slotV = settingsRes.data?.slot_duration_minutes;
-    const slotMinutes = (slotV === 15 || slotV === 20 || slotV === 30) ? slotV : 30;
+    const slotMinutes = (slotV === 10 || slotV === 15 || slotV === 20 || slotV === 30) ? slotV : 30;
 
     // 表示範囲は「管理画面タイムテーブル専用設定 (admin_timeline_*)」を最優先、
     // 設定が無ければ患者LP用の営業時間 (business_*) にフォールバック。

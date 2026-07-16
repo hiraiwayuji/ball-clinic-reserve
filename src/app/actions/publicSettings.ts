@@ -33,7 +33,7 @@ export type PublicClinicSettings = {
   line_official_account_url: string | null;
 
   /** 予約画面のグリッド刻み（15/20/30分） */
-  slot_duration_minutes: 15 | 20 | 30;
+  slot_duration_minutes: 10 | 15 | 20 | 30;
 
   /** 患者LP /reserve の予約フロー（datetime_first|menu_first） */
   public_reserve_flow: "datetime_first" | "menu_first";
@@ -167,8 +167,8 @@ function parseCafeBusinessHours(raw: unknown): CafeBusinessHours | null {
   return { ...(lunch ? { lunch } : {}), ...(dinner ? { dinner } : {}) };
 }
 
-function normalizeSlotDuration(raw: unknown): 15 | 20 | 30 {
-  if (raw === 15 || raw === 20 || raw === 30) return raw;
+function normalizeSlotDuration(raw: unknown): 10 | 15 | 20 | 30 {
+  if (raw === 10 || raw === 15 || raw === 20 || raw === 30) return raw;
   return 30;
 }
 

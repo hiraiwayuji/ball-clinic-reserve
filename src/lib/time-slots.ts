@@ -1,5 +1,5 @@
 // 予約画面・管理画面で表示する時刻スロットの定義。
-// 院ごとの slot_duration_minutes (clinic_settings) で 15 / 20 / 30 分を切替可能。
+// 院ごとの slot_duration_minutes (clinic_settings) で 10 / 15 / 20 / 30 分を切替可能。
 // 営業時間も clinic_settings.business_open_*/close_*/closed_weekdays で院ごとに変更可能。
 // DEFAULT_SCHEDULE は未設定時のフォールバック（既存ボール接骨院互換）。
 
@@ -113,7 +113,7 @@ export function formatScheduleClosedDays(sched: Schedule): string {
   return [...sched.closedDays].sort((a, b) => a - b).map((d) => DAY_JP[d]).join("・");
 }
 
-export type SlotMinutes = 15 | 20 | 30;
+export type SlotMinutes = 10 | 15 | 20 | 30;
 
 /**
  * "HH:MM" 形式の時刻配列を、start〜end の範囲で minutes 刻みに生成。
@@ -265,6 +265,64 @@ export function isDateWithinAllowedRange(
   const limit = new Date(today);
   limit.setDate(limit.getDate() + normalizeBookingHorizonDays(horizonDays));
   return date >= today && date <= limit;
+}
+
+/**
+ * 臨時営業日（clinic_special_days）1件分。日付ごとの特別スケジュール。
+ * - closed: その日を休診にする
+ * - openTime/closeTime: その日だけの臨時営業時間（"HH:MM"）。null=通常営業時間
+ * - blockSameDay: 当日予約を不可にする（事前予約はOK）
+ * - note: 患者向けメモ
+ */
+export type SpecialDay = {
+  date: string; // YYYY-MM-DD
+  closed: boolean;
+  openTime: string | null;   // "HH:MM"
+  closeTime: string | null;  // "HH:MM"
+  blockSameDay: boolean;
+  note: string | null;
+};
+
+/** 指定の "YYYY-MM-DD" が日本時間の今日かどうか。 */
+export function isTodayJST(dateStr: string): boolean {
+  const nowJst = new Date(Date.now() + 9 * 3600000);
+  const y = nowJst.getUTCFullYear();
+  const m = String(nowJst.getUTCMonth() + 1).padStart(2, "0");
+  const d = String(nowJst.getUTCDate()).padStart(2, "0");
+  return dateStr === `${y}-${m}-${d}`;
+}
+
+/**
+ * 指定日に患者が予約できる時刻スロットを、臨時営業日（SpecialDay）を加味して返す。
+ * - special.closed → []（休診）
+ * - special.blockSameDay かつ その日が今日 → []（当日予約不可）
+ * - special.openTime/closeTime あり → 通常営業時間の“外”も含め、その臨時時間で生成
+ *   （通常休みの曜日でも臨時営業時間があれば開ける）
+ * - special が無ければ通常の getTimeSlots と同じ
+ */
+export function getTimeSlotsForDate(
+  dateObj: Date | undefined,
+  dateStr: string,
+  opts: { slotMinutes?: SlotMinutes; schedule?: Schedule; special?: SpecialDay | null } = {},
+): string[] {
+  if (!dateObj) return [];
+  const special = opts.special ?? null;
+  if (special?.closed) return [];
+  if (special?.blockSameDay && isTodayJST(dateStr)) return [];
+
+  const slotMinutes: SlotMinutes = opts.slotMinutes ?? 30;
+  const schedule = opts.schedule;
+
+  if (special && (special.openTime || special.closeTime)) {
+    const sched = schedule ?? buildSchedule(null);
+    const base = dateObj.getDay() === 6 ? sched.saturday : sched.weekday;
+    const start = normalizeHHMM(special.openTime) || base.start;
+    const end = normalizeHHMM(special.closeTime) || base.end;
+    // 臨時営業時間中は院の昼休み設定は考慮しない（臨時時間そのものを尊重）
+    return generateSlots(start, end, slotMinutes);
+  }
+
+  return getTimeSlots(dateObj, { slotMinutes, schedule });
 }
 
 export function isTimeSlotWithinTwoHours(dateStrOrDate: Date | string, timeStr: string, isAdmin: boolean = false): boolean {

@@ -27,7 +27,7 @@ export async function getCurrentSlotDuration(): Promise<SlotMinutes> {
     .eq("id", PUBLIC_CLINIC_ID)
     .maybeSingle();
   const v = data?.slot_duration_minutes;
-  if (v === 15 || v === 20 || v === 30) return v;
+  if (v === 10 || v === 15 || v === 20 || v === 30) return v;
   return 30;
 }
 
