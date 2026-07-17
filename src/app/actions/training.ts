@@ -329,52 +329,6 @@ function reportBaseUrl(): string {
   return "http://localhost:3000";
 }
 
-/**
- * LINE push（原因が分かるように失敗理由を返す）。
- *
- * トークンは「毎回発行(LINE_CHANNEL_ID/SECRET) → 院設定の保存トークン → env」の順で試す。
- * admin-notify の実績パス（毎回発行）を優先しつつ、認証エラー時のみ次の候補へフォールバックする。
- * 既存コードは保存トークン優先＋エラーを握り潰していたため、失敗が表に出なかった。
- */
-async function pushLine(to: string, text: string): Promise<{ ok: boolean; detail?: string }> {
-  const { getLineAccessToken } = await import("@/lib/admin-notify");
-  const { getClinicSettings } = await import("./settings");
-  let stored: string | null = null;
-  try {
-    const settings = await getClinicSettings();
-    stored = ((settings as any)?.line_channel_access_token as string) || null;
-  } catch { /* 設定が読めなくても他候補で試す */ }
-
-  const candidates = [
-    { name: "発行", token: await getLineAccessToken() },
-    { name: "院設定", token: stored },
-    { name: "env", token: process.env.LINE_CHANNEL_ACCESS_TOKEN ?? null },
-  ].filter((c) => !!c.token) as { name: string; token: string }[];
-
-  if (candidates.length === 0) return { ok: false, detail: "LINEトークンが1つも取得できません" };
-
-  let last = "";
-  for (const c of candidates) {
-    try {
-      const res = await fetch("https://api.line.me/v2/bot/message/push", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${c.token}` },
-        body: JSON.stringify({ to, messages: [{ type: "text", text }] }),
-      });
-      if (res.ok) return { ok: true };
-      const body = await res.text().catch(() => "");
-      last = `${c.name}トークン:${res.status} ${body.slice(0, 140)}`;
-      console.error("[training report] LINE push failed", last);
-      // 認証系だけ次のトークンで再試行。宛先不正(400)等は再試行しても同じ。
-      if (res.status !== 401 && res.status !== 403) break;
-    } catch (err) {
-      last = `${c.name}トークン: 通信エラー`;
-      console.error("[training report] LINE push error", err);
-    }
-  }
-  return { ok: false, detail: last };
-}
-
 export type ReportPreview = {
   assessmentId: string;
   customerName: string;
@@ -541,7 +495,8 @@ export async function sendTrainingReport(
     const lineUserId = await findLineUserId(supabase, clinicId, (customer as any).id, (customer as any).line_user_id ?? null);
     if (!lineUserId) return { success: false, error: "この患者さんはLINE未連携です。連携をお願いしてください。" };
 
-    const push = await pushLine(lineUserId, text);
+    const { pushLineText } = await import("@/lib/admin-notify");
+    const push = await pushLineText(lineUserId, text, clinicId);
     if (!push.ok) {
       return { success: false, error: `LINE送信に失敗しました（${push.detail ?? "原因不明"}）` };
     }
@@ -584,8 +539,9 @@ export async function sendTrainingReportTest(
     const body = `【テスト送信】患者さんには届いていません\n──────────\n${text}`;
     const sentTo: string[] = [];
     let lastDetail = "";
+    const { pushLineText } = await import("@/lib/admin-notify");
     for (const t of list as any[]) {
-      const push = await pushLine(t.line_user_id, body);
+      const push = await pushLineText(t.line_user_id, body, clinicId);
       if (push.ok) sentTo.push(t.label ?? "管理者");
       else lastDetail = `${t.label ?? "管理者"} → ${push.detail ?? "原因不明"}`;
     }

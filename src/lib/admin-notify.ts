@@ -23,6 +23,79 @@ export async function getLineAccessToken(): Promise<string | null> {
 }
 
 /**
+ * 院設定(clinic_settings)に保存されたチャネルアクセストークン。
+ * ※ 各院は自分の Vercel プロジェクトに LINE_CHANNEL_ID/SECRET を持つので、通常はこれを使わない。
+ *   古い値が残っていると送信が全部失敗する事故が起きたため、**フォールバック扱い**にしている。
+ */
+async function getStoredClinicToken(clinicId: string): Promise<string | null> {
+  const sb = getServiceClient();
+  if (!sb) return null;
+  try {
+    const { data } = await sb
+      .from("clinic_settings")
+      .select("line_channel_access_token")
+      .eq("id", clinicId)
+      .maybeSingle();
+    const t = (data as { line_channel_access_token: string | null } | null)?.line_channel_access_token;
+    return t && t.trim() ? t : null;
+  } catch {
+    return null;
+  }
+}
+
+export type LinePushResult = { ok: boolean; detail?: string };
+
+/**
+ * LINE へテキストを push する共通経路（全機能はこれを使うこと）。
+ *
+ * トークンは「毎回発行(LINE_CHANNEL_ID/SECRET) → 院設定の保存トークン → 静的env」の順で試し、
+ * 401/403（認証エラー）のときだけ次の候補へフォールバックする。
+ * 失敗理由は detail に入れて返す（握り潰さない＝原因が追える）。
+ *
+ * 背景: 以前は「院設定の保存トークン優先・エラー握り潰し」だったため、
+ * ボールの古いトークンが残っていて LINE送信が全滅していたのに誰も気づけなかった（2026-07-17）。
+ */
+export async function pushLineText(
+  to: string,
+  text: string,
+  clinicId?: string,
+): Promise<LinePushResult> {
+  if (!to) return { ok: false, detail: "宛先が空です" };
+
+  const candidates: { name: string; token: string }[] = [];
+  const fresh = await getLineAccessToken();
+  if (fresh) candidates.push({ name: "発行", token: fresh });
+  if (clinicId) {
+    const stored = await getStoredClinicToken(clinicId);
+    if (stored && stored !== fresh) candidates.push({ name: "院設定", token: stored });
+  }
+  const envToken = process.env.LINE_CHANNEL_ACCESS_TOKEN;
+  if (envToken && envToken !== fresh) candidates.push({ name: "env", token: envToken });
+
+  if (candidates.length === 0) return { ok: false, detail: "LINEトークンが取得できません" };
+
+  let last = "";
+  for (const c of candidates) {
+    try {
+      const res = await fetch("https://api.line.me/v2/bot/message/push", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${c.token}` },
+        body: JSON.stringify({ to, messages: [{ type: "text", text }] }),
+      });
+      if (res.ok) return { ok: true };
+      const body = await res.text().catch(() => "");
+      last = `${c.name}トークン:${res.status} ${body.slice(0, 140)}`;
+      console.error(`[admin-notify] LINE push failed to=${to}: ${last}`);
+      if (res.status !== 401 && res.status !== 403) break; // 宛先不正等は再試行しても同じ
+    } catch (err) {
+      last = `${c.name}トークン: 通信エラー`;
+      console.error(`[admin-notify] LINE push error to=${to}:`, err);
+    }
+  }
+  return { ok: false, detail: last };
+}
+
+/**
  * LINE user_id から表示名(displayName)を取得する。
  * 友だち（公式アカウントを追加済み）でないと 404 になるため、その場合は null。
  * 大量に呼ぶ場合は token を渡して使い回すこと（毎回発行しない）。

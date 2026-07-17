@@ -3,6 +3,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { checkAdminAuth } from "@/app/actions/auth";
 import { getClinicSettings } from "./settings";
+import { pushLineText } from "@/lib/admin-notify";
 import {
   CAMPAIGN_INFO,
   buildCampaignSamples,
@@ -151,38 +152,20 @@ export async function sendAppointmentReminders(testLineId: string | null = null)
        
        sentTo.push(`${customer.name}様 (${timeMatch}〜)`);
 
-       // --- 実際の送信処理 ---
-       const settings = await getClinicSettings();
-       const channelToken = settings?.line_channel_access_token || await getLineAccessToken() || process.env.LINE_CHANNEL_ACCESS_TOKEN;
+       // --- 実際の送信処理（共通経路：発行トークン優先・認証エラー時のみフォールバック） ---
        const targetId = effectiveTestId || customer.line_user_id;
 
-       if (channelToken && targetId) {
-         try {
-           const response = await fetch('https://api.line.me/v2/bot/message/push', {
-             method: 'POST',
-             headers: {
-               'Content-Type': 'application/json',
-               'Authorization': `Bearer ${channelToken}`
-             },
-             body: JSON.stringify({
-               to: targetId,
-               messages: [{ type: 'text', text: messageText }]
-             })
-           });
-           if (!response.ok) {
-             const errData = await response.json();
-             console.error(`LINE API Error (${customer.name}):`, errData);
-             debugLogs.push(`⚠️ LINE送信失敗 (${customer.name}): ${JSON.stringify(errData)}`);
-           } else {
-             console.log(`✅ LINE送信成功: ${customer.name}`);
-             debugLogs[debugLogs.length-1] += `\n(→ 実機送信: 成功)`;
-           }
-         } catch (err) {
-           console.error(`LINE Fetch Error (${customer.name}):`, err);
-           debugLogs.push(`⚠️ 通信エラー (${customer.name}): ${err}`);
+       if (targetId) {
+         const push = await pushLineText(targetId, messageText, clinicId);
+         if (push.ok) {
+           console.log(`✅ LINE送信成功: ${customer.name}`);
+           debugLogs[debugLogs.length-1] += `\n(→ 実機送信: 成功)`;
+         } else {
+           console.error(`LINE送信失敗 (${customer.name}):`, push.detail);
+           debugLogs.push(`⚠️ LINE送信失敗 (${customer.name}): ${push.detail ?? "原因不明"}`);
          }
        } else {
-         debugLogs[debugLogs.length-1] += `\n(→ シミュレーションのみ: API設定またはIDがありません)`;
+         debugLogs[debugLogs.length-1] += `\n(→ シミュレーションのみ: 宛先のLINE IDがありません)`;
        }
     }
   }

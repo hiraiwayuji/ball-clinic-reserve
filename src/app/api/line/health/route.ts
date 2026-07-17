@@ -35,6 +35,13 @@ export async function GET() {
     tokenValid: boolean | null;
     botInfo: { userId?: string; basicId?: string; displayName?: string; pictureUrl?: string } | null;
     statusCode: number | null;
+    /** 院設定(clinic_settings)に保存された値の状態。古い値が残ると送信が全滅するため必ず検証する。 */
+    storedClinicToken: {
+      present: boolean;
+      valid: boolean | null;   // present=false なら null
+      statusCode: number | null;
+    };
+    storedClinicSecret: { present: boolean };
     notificationTargets: {
       clinicId: string;
       enabledCount: number;
@@ -56,6 +63,8 @@ export async function GET() {
     tokenValid: null,
     botInfo: null,
     statusCode: null,
+    storedClinicToken: { present: false, valid: null, statusCode: null },
+    storedClinicSecret: { present: false },
     notificationTargets: {
       clinicId,
       enabledCount: 0,
@@ -141,8 +150,59 @@ export async function GET() {
     result.warnings.push(`通知先テーブル参照例外: ${err?.message ?? String(err)}`);
   }
 
+  // ── 院設定に保存された token / secret の検証 ──
+  // 2026-07-17: ボールに古い access token が残っていて LINE送信が全滅していた。
+  // 保存値は本来不要（各院の env に CHANNEL_ID/SECRET があるため）なので、
+  // 「残っていて無効」を検知できるようにする。
+  try {
+    const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    if (url && key) {
+      const sb = createClient(url, key, { auth: { persistSession: false } });
+      const { data } = await sb
+        .from("clinic_settings")
+        .select("line_channel_access_token, line_channel_secret")
+        .eq("id", clinicId)
+        .maybeSingle();
+
+      const storedToken = (data as { line_channel_access_token: string | null } | null)?.line_channel_access_token?.trim() || null;
+      const storedSecret = (data as { line_channel_secret: string | null } | null)?.line_channel_secret?.trim() || null;
+      result.storedClinicSecret.present = Boolean(storedSecret);
+      result.storedClinicToken.present = Boolean(storedToken);
+
+      if (storedToken) {
+        // 保存トークンが実際に使えるかを LINE API で検証する
+        try {
+          const res = await fetch("https://api.line.me/v2/bot/info", {
+            headers: { Authorization: `Bearer ${storedToken}` },
+            cache: "no-store",
+          });
+          result.storedClinicToken.statusCode = res.status;
+          result.storedClinicToken.valid = res.ok;
+          if (!res.ok) {
+            result.warnings.push(
+              `🚨 院設定に保存された LINE アクセストークンが無効です（LINE API ${res.status}）。` +
+              `多くの送信処理はこれを優先するため、LINE送信が失敗します。設定のトークン欄を空にしてください（env の CHANNEL_ID/SECRET から自動発行されます）。`,
+            );
+          } else {
+            result.warnings.push(
+              "院設定に LINE アクセストークンが保存されています。env から自動発行できるため通常は不要です（失効すると送信が壊れる原因になります）。",
+            );
+          }
+        } catch {
+          result.storedClinicToken.valid = false;
+          result.warnings.push("院設定の保存トークンを検証できませんでした（通信エラー）。");
+        }
+      }
+    }
+  } catch (err: any) {
+    result.warnings.push(`院設定の検証で例外: ${err?.message ?? String(err)}`);
+  }
+
   result.ok =
     result.tokenValid === true &&
+    // 保存トークンが残っていて無効なら、送信は失敗するので ok=false にする
+    result.storedClinicToken.valid !== false &&
     (result.notificationTargets.enabledCount > 0 || result.notificationTargets.hasOwnerEnvFallback);
 
   return NextResponse.json(result, { status: 200 });

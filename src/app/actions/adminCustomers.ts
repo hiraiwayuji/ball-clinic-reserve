@@ -791,35 +791,14 @@ export async function sendDormantLinePush(
   message: string,
 ): Promise<{ success: boolean; error?: string }> {
   try {
-    await checkAdminAuth();
+    const { clinicId } = await checkAdminAuth();
 
-    const settings = await getClinicSettings();
-    const { getLineAccessToken } = await import("@/lib/admin-notify");
-    const token =
-      settings?.line_channel_access_token ||
-      (await getLineAccessToken()) ||
-      process.env.LINE_CHANNEL_ACCESS_TOKEN;
-
-    if (!token) {
-      return { success: false, error: "LINE トークンが取得できません。env LINE_CHANNEL_ID/SECRET を確認してください。" };
-    }
-
-    const res = await fetch("https://api.line.me/v2/bot/message/push", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({
-        to: lineUserId,
-        messages: [{ type: "text", text: message }],
-      }),
-    });
-
-    if (!res.ok) {
-      const body = await res.json();
-      console.error("[LINE追客送信失敗]", customerName, body);
-      return { success: false, error: "LINE送信に失敗しました" };
+    // 送信は共通経路に統一（発行トークン優先・認証エラー時のみフォールバック・失敗理由を返す）
+    const { pushLineText } = await import("@/lib/admin-notify");
+    const push = await pushLineText(lineUserId, message, clinicId);
+    if (!push.ok) {
+      console.error("[LINE追客送信失敗]", customerName, push.detail);
+      return { success: false, error: `LINE送信に失敗しました（${push.detail ?? "原因不明"}）` };
     }
 
     return { success: true };
