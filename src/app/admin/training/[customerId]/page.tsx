@@ -8,9 +8,14 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
   ChevronLeft, Plus, Loader2, Target, NotebookPen, Trash2, ChevronDown, ChevronUp,
-  TrendingUp, Scale, Home, Users, AlertTriangle, Award,
+  TrendingUp, Scale, Home, Users, AlertTriangle, Send, Copy, Link2Off, CheckCircle2,
 } from "lucide-react";
-import { getPatientTraining, deleteAssessment, getClinicBenchmark, type PatientTraining, type ClinicBenchmark } from "@/app/actions/training";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  getPatientTraining, deleteAssessment, getClinicBenchmark, getReportPreview, sendTrainingReport,
+  type PatientTraining, type ClinicBenchmark, type ReportPreview,
+} from "@/app/actions/training";
 import {
   AXES, REGIONS, axesFor, sidesFor, cellKey, AXIS_LABEL, SIDE_LABEL,
   axisAverages, regionAverages, overallAverage, asymmetries, toScoreMap, diffLevel, scoreColor,
@@ -97,6 +102,12 @@ export default function PatientTrainingPage() {
   const [loading, setLoading] = useState(true);
   const [openId, setOpenId] = useState<string | null>(null);
   const [benchmark, setBenchmark] = useState<ClinicBenchmark | null>(null);
+  // レポート送信ダイアログ
+  const [reportOpen, setReportOpen] = useState(false);
+  const [preview, setPreview] = useState<ReportPreview | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [sending, setSending] = useState(false);
   // 期間指定（比較の基準）
   const [periodKey, setPeriodKey] = useState<string>("prev");
   const [useCustom, setUseCustom] = useState(false);
@@ -164,6 +175,26 @@ export default function PatientTrainingPage() {
     const res = await deleteAssessment(id);
     if (res.success) { toast.success("削除しました"); load(); }
     else toast.error(res.error ?? "削除に失敗しました");
+  };
+
+  // レポート送信（必ずプレビューで確認してから送る）
+  const openReport = async (assessmentId: string) => {
+    setReportOpen(true);
+    setPreview(null);
+    setPreviewLoading(true);
+    const res = await getReportPreview(assessmentId);
+    setPreviewLoading(false);
+    if (res.success && res.data) { setPreview(res.data); setDraft(res.data.text); }
+    else { toast.error(res.error ?? "レポートの作成に失敗しました"); setReportOpen(false); }
+  };
+
+  const doSend = async () => {
+    if (!preview) return;
+    setSending(true);
+    const res = await sendTrainingReport(preview.assessmentId, draft);
+    setSending(false);
+    if (res.success) { toast.success("レポートを送信しました"); setReportOpen(false); load(); }
+    else toast.error(res.error ?? "送信に失敗しました");
   };
 
   if (loading) {
@@ -294,6 +325,67 @@ export default function PatientTrainingPage() {
           {/* 弱点と自宅トレーニング */}
           {weaknesses.length > 0 && <WeaknessPanel items={weaknesses} />}
 
+          {/* レポート送信ダイアログ（必ず内容を確認してから送る） */}
+          <Dialog open={reportOpen} onOpenChange={setReportOpen}>
+            <DialogContent className="max-w-lg">
+              <DialogHeader>
+                <DialogTitle className="text-base flex items-center gap-2"><Send className="w-4 h-4" />レポートを送る</DialogTitle>
+              </DialogHeader>
+
+              {previewLoading || !preview ? (
+                <div className="py-10 text-center text-slate-400 flex items-center justify-center gap-2">
+                  <Loader2 className="w-4 h-4 animate-spin" />作成中…
+                </div>
+              ) : !preview.lineLinked ? (
+                // LINE未連携 → 送れない。連携のお願い文を渡す。
+                <div className="space-y-3">
+                  <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 flex gap-2">
+                    <Link2Off className="w-4 h-4 shrink-0 mt-0.5" />
+                    <div>
+                      <b>{preview.customerName}さんはLINE未連携です</b><br />
+                      LINEで送るには連携が必要です。下の文をお渡しして連携をお願いしてください。
+                    </div>
+                  </div>
+                  <Textarea value={preview.linkRequestText} readOnly rows={6} className="text-sm" />
+                  <div className="flex gap-2">
+                    <Button variant="outline" className="flex-1"
+                      onClick={() => { navigator.clipboard.writeText(preview.linkRequestText); toast.success("連携のお願い文をコピーしました"); }}>
+                      <Copy className="w-4 h-4 mr-1" />お願い文をコピー
+                    </Button>
+                    <Button variant="outline" className="flex-1"
+                      onClick={() => { navigator.clipboard.writeText(preview.url); toast.success("レポートのURLをコピーしました"); }}>
+                      <Copy className="w-4 h-4 mr-1" />レポートURLをコピー
+                    </Button>
+                  </div>
+                  <p className="text-[11px] text-slate-400">※ 連携後はこのボタンからそのまま送れます。URLを直接お渡しすることもできます。</p>
+                </div>
+              ) : (
+                // 連携済み → 内容を確認して送信
+                <div className="space-y-3">
+                  <div className="text-xs text-slate-500">
+                    送り先：<b className="text-slate-700">{preview.customerName}さんのLINE</b>
+                    {preview.sentAt && (
+                      <span className="ml-2 text-amber-600">※ このレポートは {new Date(preview.sentAt).toLocaleString("ja-JP")} に送信済みです</span>
+                    )}
+                  </div>
+                  <div>
+                    <label className="text-xs font-bold text-slate-600">送る内容（そのまま編集できます）</label>
+                    <Textarea value={draft} onChange={(e) => setDraft(e.target.value)} rows={14} className="text-sm mt-1 font-mono" />
+                  </div>
+                  <div className="rounded-lg bg-slate-50 border p-2 text-[11px] text-slate-500 break-all">
+                    図つきレポート：{preview.url}
+                  </div>
+                  <div className="flex gap-2">
+                    <Button variant="outline" onClick={() => setReportOpen(false)} className="flex-1">やめる</Button>
+                    <Button onClick={doSend} disabled={sending || !draft.trim()} className="flex-1 bg-emerald-600 hover:bg-emerald-700">
+                      {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : <><CheckCircle2 className="w-4 h-4 mr-1" />この内容で送信</>}
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </DialogContent>
+          </Dialog>
+
           {/* 履歴（宿題・目標・メモ） */}
           <div>
             <h2 className="text-sm font-bold text-slate-500 mb-2">評価の履歴</h2>
@@ -305,6 +397,7 @@ export default function PatientTrainingPage() {
                   open={openId === a.id}
                   onToggle={() => setOpenId(openId === a.id ? null : a.id)}
                   onDelete={() => handleDelete(a.id)}
+                  onReport={() => openReport(a.id)}
                 />
               ))}
             </div>
@@ -489,7 +582,7 @@ function MoversPanel({ movers }: { movers: Mover[] }) {
   );
 }
 
-function HistoryCard({ a, open, onToggle, onDelete }: { a: Assessment; open: boolean; onToggle: () => void; onDelete: () => void }) {
+function HistoryCard({ a, open, onToggle, onDelete, onReport }: { a: Assessment; open: boolean; onToggle: () => void; onDelete: () => void; onReport: () => void }) {
   const axisAvg = axisAverages(a.measurements);
   const map = toScoreMap(a.measurements);
   return (
@@ -507,6 +600,10 @@ function HistoryCard({ a, open, onToggle, onDelete }: { a: Assessment; open: boo
           </div>
         </button>
         <div className="flex items-center gap-1 shrink-0">
+          <button onClick={onReport} title="この結果を患者さんへLINEで送る"
+            className="px-2.5 py-1.5 rounded-lg text-xs font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 inline-flex items-center gap-1">
+            <Send className="w-3.5 h-3.5" />レポート
+          </button>
           <button onClick={onDelete} className="p-2 rounded-lg text-slate-300 hover:text-red-500 hover:bg-red-50"><Trash2 className="w-4 h-4" /></button>
           <button onClick={onToggle} className="p-2 rounded-lg text-slate-400">{open ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}</button>
         </div>

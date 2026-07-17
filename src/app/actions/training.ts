@@ -3,9 +3,13 @@
 import { createClient } from "@/lib/supabase/server";
 import { checkAdminAuth } from "./auth";
 import { revalidatePath } from "next/cache";
+import { randomBytes } from "crypto";
 import {
   TRAINING_CLINIC_IDS,
   AXES,
+  axisAverages,
+  asymmetries,
+  growth,
   type Assessment,
   type Measurement,
   type RegionKey,
@@ -314,6 +318,214 @@ export async function saveAssessment(
   } catch (err) {
     console.error("saveAssessment error:", err);
     return { success: false, error: "保存に失敗しました。" };
+  }
+}
+
+// ───────────────────────── 患者レポート（LINE送信＋公開ページ） ─────────────────────────
+
+function reportBaseUrl(): string {
+  if (process.env.NEXT_PUBLIC_APP_URL) return process.env.NEXT_PUBLIC_APP_URL.replace(/\/$/, "");
+  if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`;
+  return "http://localhost:3000";
+}
+
+export type ReportPreview = {
+  assessmentId: string;
+  customerName: string;
+  text: string;              // LINEで送る本文（リンク込み）
+  url: string;               // 図つきレポートページ
+  lineLinked: boolean;       // LINE連携済みか
+  sentAt: string | null;     // 前回送信日時（重複送信の気づき用）
+  linkRequestText: string;   // 未連携のときに使う「LINE連携のお願い」文
+};
+
+/** その患者のLINE user id（customers 優先、なければ連携テーブルの primary） */
+async function findLineUserId(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  clinicId: string,
+  customerId: string,
+  customerLineUserId: string | null,
+): Promise<string | null> {
+  if (customerLineUserId) return customerLineUserId;
+  const { data } = await supabase
+    .from("customer_line_links")
+    .select("line_user_id, is_primary")
+    .eq("clinic_id", clinicId)
+    .eq("customer_id", customerId)
+    .order("is_primary", { ascending: false })
+    .limit(1);
+  return (data?.[0] as any)?.line_user_id ?? null;
+}
+
+/** レポート本文を組み立てる（点数・左右差・前回からの伸び・宿題・目標） */
+function buildReportText(a: Assessment, prev: Assessment | null, name: string, url: string): string {
+  const lines: string[] = [];
+  lines.push(`🏋️ ${name}さん トレーニング結果（${a.assessed_on}）`);
+  lines.push("");
+
+  const aa = axisAverages(a.measurements);
+  const scoreLine = AXES.map((ax) => {
+    const v = aa[ax.key];
+    return v != null ? `${ax.label} ${v.toFixed(1)}` : null;
+  }).filter(Boolean).join(" / ");
+  if (scoreLine) {
+    lines.push("【今日の点数（10点満点）】");
+    lines.push(scoreLine);
+  }
+
+  // 左右差（一番大きいもの）
+  const asym = asymmetries(a.measurements).filter((x) => x.diff >= 2);
+  if (asym.length > 0) {
+    const top = asym[0];
+    lines.push("");
+    lines.push(`⚖️ 左右差：${top.label}・${top.axisLabel} が${top.higher === "left" ? "右" : "左"}${top.diff}点ひくめ`);
+  }
+
+  // 前回からの伸び
+  if (prev) {
+    const g = growth(prev, a);
+    if (g.overall != null && Math.abs(g.overall) >= 0.05) {
+      lines.push("");
+      lines.push(g.overall > 0
+        ? `📈 前回から +${g.overall.toFixed(1)} アップ！よく頑張りました`
+        : `📉 前回から ${g.overall.toFixed(1)}（体調や測り方の差もあります）`);
+    }
+  }
+
+  if (a.overall_memo) { lines.push(""); lines.push("✅ 今日できたこと"); lines.push(a.overall_memo); }
+  if (a.next_goal)    { lines.push(""); lines.push("🎯 次回の目標");   lines.push(a.next_goal); }
+  if (a.homework)     { lines.push(""); lines.push("📓 今週の宿題");   lines.push(a.homework); }
+
+  lines.push("");
+  lines.push("くわしいグラフはこちら👇");
+  lines.push(url);
+  return lines.join("\n");
+}
+
+/** 送信前プレビュー。トークンが無ければ発行する（送信はまだしない）。 */
+export async function getReportPreview(assessmentId: string): Promise<{ success: boolean; data?: ReportPreview; error?: string }> {
+  const { clinicId } = await auth();
+  const supabase = await createClient();
+  try {
+    const { data: head } = await supabase
+      .from("training_assessments")
+      .select("id, customer_id, assessed_on, assessor_name, overall_memo, next_goal, homework, report_token, report_sent_at")
+      .eq("id", assessmentId)
+      .eq("clinic_id", clinicId)
+      .maybeSingle();
+    if (!head) return { success: false, error: "評価が見つかりません。" };
+
+    const { data: customer } = await supabase
+      .from("customers")
+      .select("id, name, line_user_id")
+      .eq("id", (head as any).customer_id)
+      .eq("clinic_id", clinicId)
+      .maybeSingle();
+    if (!customer) return { success: false, error: "患者が見つかりません。" };
+
+    // トークン発行（未発行なら）
+    let token: string = (head as any).report_token ?? "";
+    if (!token) {
+      token = randomBytes(16).toString("hex");
+      const { error: tErr } = await supabase
+        .from("training_assessments")
+        .update({ report_token: token })
+        .eq("id", assessmentId)
+        .eq("clinic_id", clinicId);
+      if (tErr) throw tErr;
+    }
+
+    // 本文組み立てに必要な履歴（前回比のため）
+    const full = await getPatientTraining((head as any).customer_id);
+    const list = full?.assessments ?? [];
+    const current = list.find((x) => x.id === assessmentId) ?? null;
+    if (!current) return { success: false, error: "評価データの取得に失敗しました。" };
+    const idx = list.findIndex((x) => x.id === assessmentId);
+    const prev = idx >= 0 && idx + 1 < list.length ? list[idx + 1] : null;
+
+    const url = `${reportBaseUrl()}/report/training/${token}`;
+    const name = (customer as any).name as string;
+    const lineUserId = await findLineUserId(supabase, clinicId, (customer as any).id, (customer as any).line_user_id ?? null);
+
+    return {
+      success: true,
+      data: {
+        assessmentId,
+        customerName: name,
+        text: buildReportText(current, prev, name, url),
+        url,
+        lineLinked: !!lineUserId,
+        sentAt: (head as any).report_sent_at ?? null,
+        linkRequestText:
+          `${name}さんへ\n\nトレーニングの結果レポートをLINEでお送りしたいのですが、まだLINE連携がお済みでないようです。\n` +
+          `当院のLINEを友だち追加のうえ、お名前とお電話番号の下4桁をお送りいただくと連携できます。\n` +
+          `連携後は、毎回の測定結果・宿題・次回の目標をLINEでお届けします🏋️`,
+      },
+    };
+  } catch (err) {
+    console.error("getReportPreview error:", err);
+    return { success: false, error: "レポートの作成に失敗しました。" };
+  }
+}
+
+/** 実際にLINEへ送信する（プレビューで確認した本文をそのまま送る） */
+export async function sendTrainingReport(
+  assessmentId: string,
+  text: string,
+): Promise<{ success: boolean; error?: string }> {
+  const { clinicId } = await auth();
+  const supabase = await createClient();
+  try {
+    const { data: head } = await supabase
+      .from("training_assessments")
+      .select("id, customer_id")
+      .eq("id", assessmentId)
+      .eq("clinic_id", clinicId)
+      .maybeSingle();
+    if (!head) return { success: false, error: "評価が見つかりません。" };
+
+    const { data: customer } = await supabase
+      .from("customers")
+      .select("id, name, line_user_id")
+      .eq("id", (head as any).customer_id)
+      .eq("clinic_id", clinicId)
+      .maybeSingle();
+    if (!customer) return { success: false, error: "患者が見つかりません。" };
+
+    const lineUserId = await findLineUserId(supabase, clinicId, (customer as any).id, (customer as any).line_user_id ?? null);
+    if (!lineUserId) return { success: false, error: "この患者さんはLINE未連携です。連携をお願いしてください。" };
+
+    const { getClinicSettings } = await import("./settings");
+    const settings = await getClinicSettings();
+    const { getLineAccessToken } = await import("@/lib/admin-notify");
+    const lineToken =
+      (settings as any)?.line_channel_access_token ||
+      (await getLineAccessToken()) ||
+      process.env.LINE_CHANNEL_ACCESS_TOKEN;
+    if (!lineToken) return { success: false, error: "LINEトークンが取得できません。LINE設定を確認してください。" };
+
+    const res = await fetch("https://api.line.me/v2/bot/message/push", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${lineToken}` },
+      body: JSON.stringify({ to: lineUserId, messages: [{ type: "text", text }] }),
+    });
+    if (!res.ok) {
+      const body = await res.text();
+      console.error("[トレーニングレポート送信失敗]", (customer as any).name, body);
+      return { success: false, error: "LINE送信に失敗しました。" };
+    }
+
+    await supabase
+      .from("training_assessments")
+      .update({ report_sent_at: new Date().toISOString() })
+      .eq("id", assessmentId)
+      .eq("clinic_id", clinicId);
+
+    revalidatePath(`/admin/training/${(head as any).customer_id}`);
+    return { success: true };
+  } catch (err) {
+    console.error("sendTrainingReport error:", err);
+    return { success: false, error: "送信に失敗しました。" };
   }
 }
 
