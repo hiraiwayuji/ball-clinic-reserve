@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { pushLineText } from "@/lib/admin-notify";
-import { birthdayMessage } from "@/lib/marketing-templates";
+import { birthdayDayMessage } from "@/lib/marketing-templates";
 import { CLINIC_CONFIG } from "@/lib/clinic-config";
 
 /**
@@ -36,6 +36,18 @@ function todayJst(): { year: number; month: number; day: number } {
   }).format(new Date());
   const [y, m, d] = s.split("-").map((v) => parseInt(v, 10));
   return { year: y, month: m, day: d };
+}
+
+/**
+ * クーポンの有効期限＝誕生日から1ヶ月後を「◯年◯月◯日」で返す。
+ * 1/31 → 2/31 のような存在しない日は、その月の末日に丸める（3/3 などに飛ばさない）。
+ */
+function expiryOneMonthLater(year: number, month: number, day: number): string {
+  const targetMonth = month === 12 ? 1 : month + 1;
+  const targetYear = month === 12 ? year + 1 : year;
+  const lastDay = new Date(targetYear, targetMonth, 0).getDate(); // 翌月の末日
+  const targetDay = Math.min(day, lastDay);
+  return `${targetYear}年${targetMonth}月${targetDay}日`;
 }
 
 export async function GET(req: NextRequest) {
@@ -89,7 +101,8 @@ export async function GET(req: NextRequest) {
     if (lineIds.length === 0) continue;
 
     const name = c.display_name ?? c.name;
-    const msg = birthdayMessage(clinicName, name);
+    // クーポンは誕生日から1ヶ月有効・実費メニューのみ（保険診療への値引きは違法）
+    const msg = birthdayDayMessage(clinicName, name, expiryOneMonthLater(year, month, day));
 
     let anySent = false;
     let lastDetail: string | undefined;
