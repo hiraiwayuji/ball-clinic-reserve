@@ -9,6 +9,7 @@
  */
 import { createClient as createAdminClient } from "@supabase/supabase-js";
 import type { Metadata } from "next";
+import { PUBLIC_CLINIC_ID } from "@/lib/default-clinic-id";
 import {
   AXES, REGIONS, axisAverages, overallAverage, asymmetries, regionAverages,
   scoreColor, diffLevel, growth, gradeOf,
@@ -49,6 +50,9 @@ async function load(token: string): Promise<LoadResult> {
   if (!head) return null;
 
   const clinicId = (head as any).clinic_id as string;
+  // このデプロイ（院）のレポートだけを表示する。
+  // 他院のトークンを自院ドメインで開かせない＝院をまたいだ表示・取り違えを構造的に防ぐ。
+  if (clinicId !== PUBLIC_CLINIC_ID) return null;
   const customerId = (head as any).customer_id as string;
 
   const [{ data: customer }, { data: settings }, { data: prevHead }] = await Promise.all([
