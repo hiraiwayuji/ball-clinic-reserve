@@ -6,6 +6,23 @@ import { writeAudit, notifyOwnerOfStaffAction } from "@/lib/audit";
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { DEFAULT_TALLY_COLUMNS, type TallyColumn } from "@/lib/tally-columns";
 
+/**
+ * 設定画面の「テスト送信」。サーバー側で発行したトークンを使うため、
+ * 画面に Channel Access Token を貼る必要はない（貼った古い値で全滅する事故の再発防止）。
+ */
+export async function sendLineTestMessage(
+  userId: string,
+): Promise<{ success: boolean; error?: string }> {
+  const { clinicId } = await checkAdminAuth();
+  const id = userId.trim();
+  if (!id) return { success: false, error: "LINEユーザーIDが空です" };
+
+  const { pushLineText } = await import("@/lib/admin-notify");
+  const push = await pushLineText(id, "LINEテスト送信、成功しました！⚽️", clinicId);
+  if (!push.ok) return { success: false, error: push.detail ?? "送信に失敗しました" };
+  return { success: true };
+}
+
 export type ClinicSettings = {
   id: string;
   clinic_name: string;

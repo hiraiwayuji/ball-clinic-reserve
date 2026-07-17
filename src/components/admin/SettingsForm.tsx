@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Settings, Video, MapPin, Save, Loader2, MessageSquare, Instagram, Youtube, Twitter, Phone, Users, Building2, Target, Globe, Clock } from "lucide-react";
-import { updateClinicSettings, ClinicSettings } from "@/app/actions/settings";
+import { updateClinicSettings, sendLineTestMessage, ClinicSettings } from "@/app/actions/settings";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
 import { isDemo } from "@/lib/app-mode";
@@ -42,16 +42,10 @@ export default function SettingsForm({ initialSettings }: { initialSettings: Cli
     const defaultId = process.env.NEXT_PUBLIC_TEST_LINE_USER_ID || "U1236495734df25789d98f15d7b2b3b46";
     const userId = prompt("LINEユーザーID（U...）を入力してください", defaultId);
     if (!userId) return;
-    const res = await fetch("/api/line/test", {
-      method: "POST",
-      body: JSON.stringify({
-        userId: userId,
-        accessToken: settings?.line_channel_access_token,
-      }),
-    });
-    const data = await res.json();
-    if (data.success) toast.success("送信成功！スマホを確認してください！");
-    else toast.error("失敗: " + data.error);
+    // トークンはサーバー側で発行する（画面に貼る必要なし）
+    const res = await sendLineTestMessage(userId);
+    if (res.success) toast.success("送信成功！スマホを確認してください！");
+    else toast.error("失敗: " + res.error);
   };
 
   const updateField = (field: keyof ClinicSettings, value: any) => {

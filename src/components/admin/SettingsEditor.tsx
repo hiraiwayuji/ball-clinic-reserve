@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Save, Loader2, MessageSquare, Video, Settings, Target, MapPin, Hash, Coins } from "lucide-react";
-import { ClinicSettings, updateClinicSettings } from "@/app/actions/settings";
+import { ClinicSettings, updateClinicSettings, sendLineTestMessage } from "@/app/actions/settings";
 import { getActiveCourses, type ReservationCourse } from "@/app/actions/courses";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
@@ -51,16 +51,10 @@ export default function SettingsEditor({ initialSettings }: { initialSettings: C
   const handleTestLine = async () => {
     const userId = prompt("LINEユーザーID（U...）を入力してください");
     if (!userId) return;
-    const res = await fetch("/api/line/test", {
-      method: "POST",
-      body: JSON.stringify({
-        userId: userId,
-        accessToken: settings?.line_channel_access_token,
-      }),
-    });
-    const data = await res.json();
-    if (data.success) toast.success("送信成功！スマホを確認してください！");
-    else toast.error("失敗: " + data.error);
+    // トークンはサーバー側で発行する（画面に貼る必要なし）
+    const res = await sendLineTestMessage(userId);
+    if (res.success) toast.success("送信成功！スマホを確認してください！");
+    else toast.error("失敗: " + res.error);
   };
 
   const updateField = (field: keyof ClinicSettings, value: any) => {
