@@ -116,6 +116,14 @@ export type ClinicSettings = {
   // 確認できるまで仮予約（キャンセル待ち含む）が完了しない。仮予約がNGだった時に
   // 院から連絡できない事故を防ぐ。
   require_line_link?: boolean | null;
+  // ── 自動LINE配信（院ごとの運用設定・既定OFF）──
+  // auto_remind_enabled: 当日の予約リマインドを毎朝の cron で自動送信する
+  // auto_remind_time   : 送信時刻の目安（"HH:MM"）。cron が1日1回のため現状は表示用
+  // auto_birthday_enabled: 誕生日当日にお祝いメッセージを自動送信する
+  // ★ONにすると患者さんへ自動でLINEが飛ぶ。必ず院の意思でONにしてもらうこと。
+  auto_remind_enabled?: boolean | null;
+  auto_remind_time?: string | null;
+  auto_birthday_enabled?: boolean | null;
   // 窓口日計表モードの金額カラム定義（JSONB）。専用 getter/setter で更新するため
   // settingsData には載せない（updateClinicSettings 経由では更新しない）。NULL ならデフォルト6列。
   tally_columns?: TallyColumn[] | null;
@@ -283,6 +291,10 @@ export async function updateClinicSettings(
     noshow_block_days: settings.noshow_block_days,
     // Web予約のLINE連携必須（同上：undefined のときはキー自体送らない）
     require_line_link: settings.require_line_link,
+    // 自動LINE配信（同上：undefined のときはキー自体送らない）
+    auto_remind_enabled: settings.auto_remind_enabled,
+    auto_remind_time: settings.auto_remind_time,
+    auto_birthday_enabled: settings.auto_birthday_enabled,
   };
 
   const targetData = {

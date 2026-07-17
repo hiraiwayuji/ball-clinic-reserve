@@ -5,8 +5,12 @@
       "schedule": "0 22 * * *"
     },
     {
-      "path": "/api/line/remind/appointments?secret=REMIND_SECRET_PLACEHOLDER",
+      "path": "/api/line/remind/appointments",
       "schedule": "30 22 * * *"
+    },
+    {
+      "path": "/api/cron/birthday",
+      "schedule": "0 23 * * *"
     },
     {
       "path": "/api/cron/fetch-external-signals",

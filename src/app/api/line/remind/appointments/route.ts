@@ -1,8 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { getLineAccessToken } from "@/lib/admin-notify";
+import { pushLineText } from "@/lib/admin-notify";
 import { reminderMessage } from "@/lib/marketing-templates";
 import { CLINIC_CONFIG } from "@/lib/clinic-config";
+
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 
 const REMIND_SECRET = process.env.REMIND_SECRET || "";
 
@@ -12,26 +15,29 @@ function getAdminSupabase() {
   return createClient(url, key);
 }
 
-async function pushLine(userId: string, text: string, token: string) {
-  const res = await fetch("https://api.line.me/v2/bot/message/push", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
-    },
-    body: JSON.stringify({ to: userId, messages: [{ type: "text", text }] }),
-  });
-  return res.ok;
+/**
+ * 認可。Vercel Cron は CRON_SECRET を Authorization: Bearer で自動付与する（他のcronと同じ方式）。
+ * 手動実行や外部スケジューラ向けに ?secret= / body.secret（REMIND_SECRET）も受ける。
+ *
+ * ※以前は vercel.json が "?secret=REMIND_SECRET_PLACEHOLDER" という
+ *   プレースホルダのまま cron を叩いていたため、毎回401で一度も動いていなかった。
+ */
+function isAuthorized(req: NextRequest, bodySecret?: string): boolean {
+  const cronSecret = process.env.CRON_SECRET;
+  const auth = req.headers.get("authorization") ?? "";
+  if (cronSecret && auth === `Bearer ${cronSecret}`) return true;
+  const given = bodySecret ?? req.nextUrl.searchParams.get("secret") ?? "";
+  return Boolean(REMIND_SECRET) && given === REMIND_SECRET;
 }
 
 /**
  * 自動当日リマインド配信エンドポイント
- * Vercel Cron または外部から呼ばれる
- * clinic_settings の auto_remind_enabled / auto_remind_time を確認して実行
+ * Vercel Cron（毎日 7:30 JST）から GET で呼ばれる。
+ * clinic_settings.auto_remind_enabled が true の院だけ送信する（既定OFF）。
  */
 export async function POST(req: NextRequest) {
   const { secret } = await req.json().catch(() => ({}));
-  if (!REMIND_SECRET || secret !== REMIND_SECRET) {
+  if (!isAuthorized(req, secret)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -57,14 +63,8 @@ export async function POST(req: NextRequest) {
   const now = new Date();
   const jstNow = new Date(now.toLocaleString("en-US", { timeZone: "Asia/Tokyo" }));
 
-  // 優先順: clinic_settings.line_channel_access_token → 動的取得 (LINE_CHANNEL_ID/SECRET) → 静的 env
-  const channelToken =
-    settings.line_channel_access_token ||
-    (await getLineAccessToken()) ||
-    process.env.LINE_CHANNEL_ACCESS_TOKEN;
-  if (!channelToken) {
-    return NextResponse.json({ error: "LINE token not configured" }, { status: 500 });
-  }
+  // 送信は共通経路 pushLineText（発行トークン優先・認証エラー時のみフォールバック）に統一。
+  // 以前は院設定の保存トークンを最優先しており、古い値が残っていると全滅していた。
 
   // 本日の予約を取得
   const todayStr = `${jstNow.getFullYear()}-${String(jstNow.getMonth() + 1).padStart(2, "0")}-${String(jstNow.getDate()).padStart(2, "0")}`;
@@ -107,8 +107,8 @@ export async function POST(req: NextRequest) {
     const msg = reminderMessage(clinicName, displayName, timeStr);
 
     for (const lineId of lineIds) {
-      const ok = await pushLine(lineId, msg, channelToken);
-      results.push({ name: displayName, lineId, time: timeStr, sent: ok });
+      const push = await pushLineText(lineId, msg, DEFAULT_CLINIC_ID);
+      results.push({ name: displayName, time: timeStr, sent: push.ok, detail: push.detail });
     }
   }
 

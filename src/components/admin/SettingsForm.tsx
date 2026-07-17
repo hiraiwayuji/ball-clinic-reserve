@@ -397,11 +397,65 @@ export default function SettingsForm({ initialSettings }: { initialSettings: Cli
               <div className="space-y-2">
                 <Label htmlFor="line_token" className="text-slate-700 dark:text-slate-300">Channel Access Token</Label>
                 <Input id="line_token" type="password" value={settings?.line_channel_access_token || ""} onChange={(e) => updateField("line_channel_access_token", e.target.value)} />
+                <p className="text-xs text-amber-600 dark:text-amber-400">
+                  ⚠️ 通常は<b>空のままでOK</b>です（自動で発行されます）。ここに貼った値は期限切れになることがあり、
+                  古いまま残るとLINE送信が全部失敗します。分からなければ空にしてください。
+                </p>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="line_secret" className="text-slate-700 dark:text-slate-300">Channel Secret</Label>
                 <Input id="line_secret" type="password" value={settings?.line_channel_secret || ""} onChange={(e) => updateField("line_channel_secret", e.target.value)} />
               </div>
+              {/* 自動LINE配信（患者さんへ自動で送るので既定OFF・院の意思でONにしてもらう） */}
+              <div className="pt-4 border-t border-green-200 dark:border-green-800 space-y-3">
+                <p className="font-bold text-slate-700 dark:text-slate-300">自動でLINEを送る</p>
+                <p className="text-xs text-slate-500">
+                  ONにすると、患者さんへ自動でLINEが届くようになります。OFFの間は一切送りません。
+                </p>
+
+                <label className="flex items-start gap-3 p-3 rounded-lg border border-slate-200 dark:border-slate-700 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    className="mt-1 w-5 h-5 accent-green-600"
+                    checked={settings?.auto_remind_enabled ?? false}
+                    onChange={(e) => updateField("auto_remind_enabled", e.target.checked)}
+                  />
+                  <span>
+                    <span className="font-bold text-slate-700 dark:text-slate-300">当日の予約リマインド</span>
+                    <span className="block text-xs text-slate-500">
+                      毎朝、その日に予約がある患者さんへ「本日◯時にお待ちしています」を自動送信します（無断キャンセル対策）。
+                    </span>
+                  </span>
+                </label>
+
+                <div className="flex items-center gap-2 pl-8">
+                  <Label htmlFor="remind_time" className="text-xs text-slate-500">送信時刻の目安</Label>
+                  <Input
+                    id="remind_time"
+                    type="time"
+                    className="w-32"
+                    value={settings?.auto_remind_time || "08:00"}
+                    onChange={(e) => updateField("auto_remind_time", e.target.value)}
+                  />
+                  <span className="text-xs text-slate-400">※現在は毎朝7:30ごろに送信されます</span>
+                </div>
+
+                <label className="flex items-start gap-3 p-3 rounded-lg border border-slate-200 dark:border-slate-700 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    className="mt-1 w-5 h-5 accent-green-600"
+                    checked={settings?.auto_birthday_enabled ?? false}
+                    onChange={(e) => updateField("auto_birthday_enabled", e.target.checked)}
+                  />
+                  <span>
+                    <span className="font-bold text-slate-700 dark:text-slate-300">誕生日のお祝いメッセージ</span>
+                    <span className="block text-xs text-slate-500">
+                      誕生日当日の朝に、お祝いメッセージを自動送信します（同じ年に二重送信はしません）。
+                    </span>
+                  </span>
+                </label>
+              </div>
+
               <div className="pt-4 border-t border-green-200 dark:border-green-800 flex flex-col items-center gap-4 bg-green-50 dark:bg-green-950/40 p-4 rounded-lg">
                 <p className="font-bold text-green-700 dark:text-green-400 text-lg">ここを押してテスト！</p>
                 <p className="text-xs text-green-600 dark:text-green-500">※保存ボタンを先に押してからテストしてね！</p>
