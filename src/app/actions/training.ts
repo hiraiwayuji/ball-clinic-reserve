@@ -529,6 +529,55 @@ export async function sendTrainingReport(
   }
 }
 
+/**
+ * 患者に送る前の下見用：同じ内容を「自分（管理者のLINE）」に送る。
+ * 送り先は admin_notification_targets（例:「ぼーるくん LINE」）。患者には一切届かない。
+ */
+export async function sendTrainingReportTest(
+  text: string,
+): Promise<{ success: boolean; sentTo?: string[]; error?: string }> {
+  const { clinicId } = await auth();
+  const supabase = await createClient();
+  try {
+    const { data: targets } = await supabase
+      .from("admin_notification_targets")
+      .select("label, line_user_id, enabled")
+      .eq("clinic_id", clinicId)
+      .eq("enabled", true);
+
+    const list = (targets ?? []).filter((t: any) => t.line_user_id);
+    if (list.length === 0) {
+      return { success: false, error: "テスト送信先が未設定です（管理者のLINE通知先を登録してください）。" };
+    }
+
+    const { getClinicSettings } = await import("./settings");
+    const settings = await getClinicSettings();
+    const { getLineAccessToken } = await import("@/lib/admin-notify");
+    const lineToken =
+      (settings as any)?.line_channel_access_token ||
+      (await getLineAccessToken()) ||
+      process.env.LINE_CHANNEL_ACCESS_TOKEN;
+    if (!lineToken) return { success: false, error: "LINEトークンが取得できません。" };
+
+    const body = `【テスト送信】患者さんには届いていません\n──────────\n${text}`;
+    const sentTo: string[] = [];
+    for (const t of list as any[]) {
+      const res = await fetch("https://api.line.me/v2/bot/message/push", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${lineToken}` },
+        body: JSON.stringify({ to: t.line_user_id, messages: [{ type: "text", text: body }] }),
+      });
+      if (res.ok) sentTo.push(t.label ?? "管理者");
+      else console.error("[レポート テスト送信失敗]", t.label, await res.text());
+    }
+    if (sentTo.length === 0) return { success: false, error: "テスト送信に失敗しました。" };
+    return { success: true, sentTo };
+  } catch (err) {
+    console.error("sendTrainingReportTest error:", err);
+    return { success: false, error: "テスト送信に失敗しました。" };
+  }
+}
+
 export async function deleteAssessment(id: string): Promise<{ success: boolean; error?: string }> {
   const { clinicId } = await auth();
   const supabase = await createClient();

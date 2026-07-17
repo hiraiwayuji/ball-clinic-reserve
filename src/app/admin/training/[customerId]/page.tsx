@@ -14,6 +14,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Textarea } from "@/components/ui/textarea";
 import {
   getPatientTraining, deleteAssessment, getClinicBenchmark, getReportPreview, sendTrainingReport,
+  sendTrainingReportTest,
   type PatientTraining, type ClinicBenchmark, type ReportPreview,
 } from "@/app/actions/training";
 import {
@@ -108,6 +109,7 @@ export default function PatientTrainingPage() {
   const [previewLoading, setPreviewLoading] = useState(false);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
+  const [testing, setTesting] = useState(false);
   // 期間指定（比較の基準）
   const [periodKey, setPeriodKey] = useState<string>("prev");
   const [useCustom, setUseCustom] = useState(false);
@@ -195,6 +197,16 @@ export default function PatientTrainingPage() {
     setSending(false);
     if (res.success) { toast.success("レポートを送信しました"); setReportOpen(false); load(); }
     else toast.error(res.error ?? "送信に失敗しました");
+  };
+
+  // 患者に送る前の下見：自分（管理者LINE）に同じ内容を送る
+  const doTestSend = async () => {
+    if (!draft.trim()) return;
+    setTesting(true);
+    const res = await sendTrainingReportTest(draft);
+    setTesting(false);
+    if (res.success) toast.success(`テスト送信しました（${res.sentTo?.join("・")}）`);
+    else toast.error(res.error ?? "テスト送信に失敗しました");
   };
 
   if (loading) {
@@ -358,6 +370,12 @@ export default function PatientTrainingPage() {
                     </Button>
                   </div>
                   <p className="text-[11px] text-slate-400">※ 連携後はこのボタンからそのまま送れます。URLを直接お渡しすることもできます。</p>
+                  <div className="border-t pt-3">
+                    <p className="text-[11px] text-slate-500 mb-1.5">送る内容の下見（自分のLINEに届きます・患者さんには届きません）</p>
+                    <Button variant="outline" onClick={doTestSend} disabled={testing || !draft.trim()} className="w-full">
+                      {testing ? <Loader2 className="w-4 h-4 animate-spin" /> : <><Send className="w-4 h-4 mr-1" />自分にテスト送信</>}
+                    </Button>
+                  </div>
                 </div>
               ) : (
                 // 連携済み → 内容を確認して送信
@@ -375,10 +393,13 @@ export default function PatientTrainingPage() {
                   <div className="rounded-lg bg-slate-50 border p-2 text-[11px] text-slate-500 break-all">
                     図つきレポート：{preview.url}
                   </div>
+                  <Button variant="outline" onClick={doTestSend} disabled={testing || !draft.trim()} className="w-full">
+                    {testing ? <Loader2 className="w-4 h-4 animate-spin" /> : <><Send className="w-4 h-4 mr-1" />まず自分にテスト送信（患者さんには届きません）</>}
+                  </Button>
                   <div className="flex gap-2">
                     <Button variant="outline" onClick={() => setReportOpen(false)} className="flex-1">やめる</Button>
                     <Button onClick={doSend} disabled={sending || !draft.trim()} className="flex-1 bg-emerald-600 hover:bg-emerald-700">
-                      {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : <><CheckCircle2 className="w-4 h-4 mr-1" />この内容で送信</>}
+                      {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : <><CheckCircle2 className="w-4 h-4 mr-1" />この内容で {preview.customerName}さんへ送信</>}
                     </Button>
                   </div>
                 </div>
