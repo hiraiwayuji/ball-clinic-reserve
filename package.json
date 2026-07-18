@@ -15,7 +15,9 @@
     "audit:use-server": "node scripts/audit-use-server-exports.mjs",
     "audit": "node scripts/check-clinic-env.mjs && npm run audit:tenant && npm run audit:clinic-leaks && npm run audit:use-server",
     "smoke": "node scripts/post-deploy-smoke.mjs",
-    "verify:clinic": "node scripts/verify-clinic-identity.mjs"
+    "verify:clinic": "node scripts/verify-clinic-identity.mjs",
+    "check:schema": "node scripts/preflight-schema.mjs",
+    "audit:schema": "node scripts/preflight-schema.mjs --all"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.82.0",

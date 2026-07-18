@@ -1,0 +1,20 @@
+#!/bin/sh
+# push 前スキーマゲート（2026-07-18 の事故対策）。
+#
+# このリポジトリの共有Supabaseはマイグレーションを手動適用しているため、
+# 新カラムを使うコードを、カラム未適用のまま push すると本番で実行時エラーになる。
+# 今回のpushで新しく増えたマイグレーションのカラムが本番DBに無ければ push を止める。
+#
+# 判定不可（DB接続不可・環境変数なし等）のときは素通りする（誤ブロック防止）。
+# 緊急でどうしても通したいときだけ: SKIP_SCHEMA_CHECK=1 git push ...
+
+ROOT="$(git rev-parse --show-toplevel)"
+node "$ROOT/scripts/preflight-schema.mjs"
+status=$?
+if [ "$status" -ne 0 ]; then
+  echo ""
+  echo "  push を中止しました。上のカラムを Supabase に適用してから push し直してください。"
+  echo "  （どうしても止めたくないときは: SKIP_SCHEMA_CHECK=1 git push ...）"
+  exit 1
+fi
+exit 0
