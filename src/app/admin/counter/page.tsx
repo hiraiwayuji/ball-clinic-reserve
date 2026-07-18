@@ -135,6 +135,7 @@ function AppointmentCard({
   staffName,
   onIntakeUpdate,
   onRefresh,
+  onCompleteUpTo,
 }: {
   apt: Appointment;
   onStatusChange: (id: string, status: CheckinStatus) => void;
@@ -142,6 +143,9 @@ function AppointmentCard({
   staffName: string;
   onIntakeUpdate: (id: string, checklist: IntakeChecklist) => void;
   onRefresh: () => void;
+  /** 「ここまで終了」。この予約より前（この予約を含む）をまとめて会計完了にする。
+   *  一番下の予約＝「本日の施術はすべて終了」と同じなので、そこでは渡さない。 */
+  onCompleteUpTo?: () => void;
 }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
@@ -547,6 +551,19 @@ function AppointmentCard({
           次回予約
         </button>
 
+        {/* ここまで終了 — この予約までをまとめて会計完了にして一括入力へ */}
+        {onCompleteUpTo && (
+          <button
+            type="button"
+            onClick={onCompleteUpTo}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium text-slate-600 dark:text-slate-300 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+            title="この方までをまとめて会計完了にして、一括入力へ進みます"
+          >
+            <CheckCircle2 className="w-3.5 h-3.5" />
+            ここまで終了
+          </button>
+        )}
+
       </div>
 
       {/* 次回予約ダイアログ — その予約の course_id/staff_id/時刻をプリセット */}
@@ -677,10 +694,11 @@ export default function CounterPage() {
   const hasActiveAppointments = activeApts.length > 0;
   const canSuggestClosing = hasActiveAppointments && doneApts.length > 0;
 
-  const handleCloseDay = () => {
-    if (!hasActiveAppointments) return;
-    const targetIds = activeApts.map(a => a.id);
-    if (!confirm(`残り${targetIds.length}名を会計完了にして、一括入力へ進みますか？`)) return;
+  // 未完了ぶんを会計完了にして一括入力へ。targets を絞れば「ここまで」になる。
+  const completeAndGoToBulk = (targets: Appointment[], confirmMessage: string) => {
+    const targetIds = targets.map(a => a.id);
+    if (targetIds.length === 0) return;
+    if (!confirm(confirmMessage)) return;
 
     startClosingDayTransition(async () => {
       const res = await completeAllActiveAppointments(targetIds);
@@ -688,12 +706,34 @@ export default function CounterPage() {
         setAppointments(prev =>
           prev.map(a => targetIds.includes(a.id) ? { ...a, checkin_status: "done" } : a)
         );
-        toast.success(`残り${res.updatedCount ?? targetIds.length}名を会計完了にしました`);
+        toast.success(`${res.updatedCount ?? targetIds.length}名を会計完了にしました`);
         router.push(`/admin/sales/bulk?date=${format(targetDate, "yyyy-MM-dd")}`);
       } else {
         toast.error(res.error ?? "一括更新に失敗しました");
       }
     });
+  };
+
+  const handleCloseDay = () => {
+    if (!hasActiveAppointments) return;
+    completeAndGoToBulk(
+      activeApts,
+      `残り${activeApts.length}名を会計完了にして、一括入力へ進みますか？`,
+    );
+  };
+
+  // 「ここまで終了」: 一覧の上から、押した予約までをまとめて会計完了にする。
+  // 一覧は開始時刻の昇順なので、index までを切り出せば「その時間まで」になる。
+  const handleCompleteUpTo = (index: number) => {
+    const targets = activeApts.slice(0, index + 1);
+    const last = targets[targets.length - 1];
+    if (!last) return;
+    const label = `${format(parseISO(last.start_time), "HH:mm")} ${last.customers?.name ?? "この方"}様`;
+    completeAndGoToBulk(
+      targets,
+      `${label} まで、${targets.length}名を会計完了にして一括入力へ進みますか？\n\n`
+        + `来院されなかった方が混ざっている場合は、先に「来院なし」で外してください。`,
+    );
   };
 
   return (
@@ -836,7 +876,7 @@ export default function CounterPage() {
           {/* アクティブな予約 */}
           {activeApts.length > 0 && (
             <div className="space-y-3">
-              {activeApts.map(apt => (
+              {activeApts.map((apt, i) => (
                 <AppointmentCard
                   key={apt.id}
                   apt={apt}
@@ -845,6 +885,12 @@ export default function CounterPage() {
                   staffName={staffName}
                   onIntakeUpdate={(id, cl) => setAppointments(prev => prev.map(a => a.id === id ? { ...a, intake_checklist: cl } : a))}
                   onRefresh={fetchAppointments}
+                  // 一番下の予約は「本日の施術はすべて終了」と同じ結果になるので出さない
+                  onCompleteUpTo={
+                    i < activeApts.length - 1 && !isClosingDay
+                      ? () => handleCompleteUpTo(i)
+                      : undefined
+                  }
                 />
               ))}
             </div>
