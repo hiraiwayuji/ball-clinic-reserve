@@ -90,3 +90,61 @@ export async function isAttendanceDeviceUnlocked(clinicId: string): Promise<bool
   const expected = await hmacHex(`${clinicId}:${expiry}`);
   return expected === sig;
 }
+
+// ── 時給の表示ロック ─────────────────────────────────────
+// 時給は role としては owner 専用だが、受付PCが院のオーナーアカウントで
+// ログインしっぱなしだとスタッフも開けてしまう。そこで表示のたびに院長の
+// 合言葉を求める。端末ロックとは別の合言葉・別の Cookie で、TTL は短くする
+// （受付PCで開いたまま離席しても、しばらくすれば再び隠れる）。
+
+const WAGE_COOKIE_NAME = "ball_wage_view";
+const WAGE_TTL_MS = 15 * 60 * 1000; // 15 分
+
+/** 時給用の合言葉のハッシュ。打刻用とはソルトを変える（同じ合言葉でも別ハッシュ）。 */
+export async function hashWagePasscode(passcode: string): Promise<string> {
+  return sha256Hex(`wage::${passcode.trim()}`);
+}
+
+/** 時給用の合言葉の検証。未設定なら常に false（＝合言葉を決めるまで時給は出さない）。 */
+export async function verifyWagePasscode(
+  passcode: string,
+  storedHash: string | null | undefined,
+): Promise<boolean> {
+  const code = passcode.trim();
+  if (!code || !storedHash) return false;
+  return (await sha256Hex(`wage::${code}`)) === storedHash;
+}
+
+/** 時給の表示を解錠（15分間）。 */
+export async function setWageViewUnlocked(clinicId: string): Promise<void> {
+  const expiry = Date.now() + WAGE_TTL_MS;
+  const sig = await hmacHex(`wage:${clinicId}:${expiry}`);
+  const store = await cookies();
+  store.set({
+    name: WAGE_COOKIE_NAME,
+    value: `${expiry}.${sig}`,
+    httpOnly: true,
+    sameSite: "lax",
+    secure: process.env.NODE_ENV === "production",
+    path: "/",
+    maxAge: Math.floor(WAGE_TTL_MS / 1000),
+  });
+}
+
+/** 時給の表示を手動で閉じる。 */
+export async function clearWageViewUnlocked(): Promise<void> {
+  const store = await cookies();
+  store.delete(WAGE_COOKIE_NAME);
+}
+
+/** 時給を表示してよい状態か。 */
+export async function isWageViewUnlocked(clinicId: string): Promise<boolean> {
+  const store = await cookies();
+  const v = store.get(WAGE_COOKIE_NAME)?.value;
+  if (!v) return false;
+  const [expiryStr, sig] = v.split(".");
+  const expiry = Number(expiryStr);
+  if (!expiry || Number.isNaN(expiry)) return false;
+  if (expiry < Date.now()) return false;
+  return (await hmacHex(`wage:${clinicId}:${expiry}`)) === sig;
+}

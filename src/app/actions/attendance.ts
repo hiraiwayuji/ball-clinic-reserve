@@ -11,7 +11,13 @@ import {
   setAttendanceDeviceUnlocked,
   verifyAttendancePasscode,
   hashAttendancePasscode,
+  isWageViewUnlocked,
+  setWageViewUnlocked,
+  clearWageViewUnlocked,
+  verifyWagePasscode,
+  hashWagePasscode,
 } from "@/lib/attendance-device";
+import { writeAudit } from "@/lib/audit";
 
 /**
  * 勤怠（出退勤の打刻）＋残業の見える化 [Phase 1]
@@ -33,7 +39,13 @@ export type AttendanceStaff = { id: string; name: string; display_color: string 
 export type AttendanceConfig = {
   enabled: boolean;
   workEndTarget: string;        // "HH:mm"（原則退社の目標）
-  overtimeReasonAfter: string;  // "HH:mm"（これ以降の退社は理由必須）
+  /**
+   * "HH:mm"。シフトが登録されていない日の残業判定に使うフォールバック。
+   * シフトがある日は「シフト終了＋overtimeGraceMinutes」で判定するので使わない。
+   */
+  overtimeReasonAfter: string;
+  /** シフト終了から何分までは残業扱いにしないか（既定10分） */
+  overtimeGraceMinutes: number;
   closingAllowanceUntil: string;
   closingStaffId: string | null;
 };
@@ -70,6 +82,46 @@ function toMinutes(hhmmStr: string): number {
   const m = /^(\d{1,2}):(\d{2})/.exec(hhmmStr);
   return m ? parseInt(m[1], 10) * 60 + parseInt(m[2], 10) : 0;
 }
+/** 0〜120 に収めた猶予分（DB の値が壊れていても判定が暴走しないように） */
+function graceOf(v: unknown): number {
+  const n = Number(v);
+  if (!Number.isFinite(n) || n < 0 || n > 120) return 10;
+  return Math.round(n);
+}
+
+/**
+ * その日の「シフト終了時刻（0時からの分）」。無ければ null。
+ * 優先順位は勤務表と同じ: 単発の override（kind=work）> 曜日テンプレ（staff_working_hours）。
+ * 休み（kind=off/leave）の日は null を返す＝シフトが無い扱い。
+ * ※打刻はログイン不要なので service role で引く。clinicId は呼び出し側で必ず渡す。
+ */
+async function getShiftEndMinutes(
+  db: ReturnType<typeof admin>,
+  clinicId: string,
+  staffId: string,
+  dateStr: string,
+): Promise<number | null> {
+  // 曜日は JST の正午基準で出す（サーバーのタイムゾーンに左右されないように）
+  const dayOfWeek = new Date(`${dateStr}T12:00:00+09:00`).getDay();
+  const [{ data: override }, { data: weekly }] = await Promise.all([
+    db.from("staff_working_overrides")
+      .select("start_time, end_time, kind")
+      .eq("clinic_id", clinicId).eq("staff_id", staffId).eq("date", dateStr)
+      .neq("kind", "break")
+      .maybeSingle(),
+    db.from("staff_working_hours")
+      .select("end_time")
+      .eq("clinic_id", clinicId).eq("staff_id", staffId).eq("day_of_week", dayOfWeek)
+      .maybeSingle(),
+  ]);
+
+  if (override) {
+    if (override.kind === "off" || override.kind === "leave") return null;
+    if (override.end_time) return toMinutes(String(override.end_time).slice(0, 5));
+  }
+  if (weekly?.end_time) return toMinutes(String(weekly.end_time).slice(0, 5));
+  return null;
+}
 
 // ── 打刻ページ（ログイン不要） ─────────────────────────
 
@@ -95,13 +147,14 @@ export async function listAttendanceStaff(): Promise<AttendanceStaff[]> {
 export async function getAttendanceConfig(): Promise<AttendanceConfig> {
   const { data } = await admin()
     .from("clinic_settings")
-    .select("attendance_enabled, work_end_target, overtime_reason_after, closing_allowance_until, closing_staff_id")
+    .select("attendance_enabled, work_end_target, overtime_reason_after, overtime_grace_minutes, closing_allowance_until, closing_staff_id")
     .eq("id", PUBLIC_CLINIC_ID)
     .maybeSingle();
   return {
     enabled: !!data?.attendance_enabled,
     workEndTarget: hhmm(data?.work_end_target as string | null, "20:00"),
     overtimeReasonAfter: hhmm(data?.overtime_reason_after as string | null, "20:15"),
+    overtimeGraceMinutes: graceOf(data?.overtime_grace_minutes),
     closingAllowanceUntil: hhmm(data?.closing_allowance_until as string | null, "20:30"),
     closingStaffId: (data?.closing_staff_id as string | null) ?? null,
   };
@@ -323,7 +376,16 @@ export async function clockOut(
 
   const cfg = await getAttendanceConfig();
   const { iso, date, minutes } = jstNow();
-  const isOvertime = minutes >= toMinutes(cfg.overtimeReasonAfter);
+
+  // ── 残業かどうかは「その人のシフト終了＋猶予(既定10分)」で決める ──
+  // シフト終わりから10分以内の退社は残業扱いにしない。それを過ぎたら理由の入力が要る。
+  // シフトが登録されていない日（休みの日に出た／曜日テンプレも単発設定も無い）は、
+  // 判定材料が無いので従来どおり固定時刻（既定20:15）にフォールバックする。
+  const shiftEndMin = await getShiftEndMinutes(db, PUBLIC_CLINIC_ID, staffId, date);
+  const overtimeAfterMin = shiftEndMin != null
+    ? shiftEndMin + cfg.overtimeGraceMinutes
+    : toMinutes(cfg.overtimeReasonAfter);
+  const isOvertime = minutes > overtimeAfterMin;
 
   // ── 退勤ゲート：当日の業務が全部「できた/できない」申告済みでないと退勤できない ──
   const { data: taskRows } = await db.from("staff_tasks")
@@ -389,13 +451,14 @@ export async function getAttendanceSettings(): Promise<AttendanceConfig> {
   const supabase = await createClient();
   const { data } = await supabase
     .from("clinic_settings")
-    .select("attendance_enabled, work_end_target, overtime_reason_after, closing_allowance_until, closing_staff_id")
+    .select("attendance_enabled, work_end_target, overtime_reason_after, overtime_grace_minutes, closing_allowance_until, closing_staff_id")
     .eq("id", process.env.NEXT_PUBLIC_CLINIC_ID!)
     .maybeSingle();
   return {
     enabled: !!data?.attendance_enabled,
     workEndTarget: hhmm(data?.work_end_target as string | null, "20:00"),
     overtimeReasonAfter: hhmm(data?.overtime_reason_after as string | null, "20:15"),
+    overtimeGraceMinutes: graceOf(data?.overtime_grace_minutes),
     closingAllowanceUntil: hhmm(data?.closing_allowance_until as string | null, "20:30"),
     closingStaffId: (data?.closing_staff_id as string | null) ?? null,
   };
@@ -412,6 +475,7 @@ export async function setAttendanceSettings(input: AttendanceConfig): Promise<{ 
       attendance_enabled: input.enabled,
       work_end_target: input.workEndTarget,
       overtime_reason_after: input.overtimeReasonAfter,
+      overtime_grace_minutes: graceOf(input.overtimeGraceMinutes),
       closing_allowance_until: input.closingAllowanceUntil,
       closing_staff_id: input.closingStaffId,
     })
@@ -483,9 +547,84 @@ export async function setAttendanceDeviceLock(
   return error ? { success: false, error: error.message } : { success: true };
 }
 
-/** オーナー：自院スタッフ＋時給（owner専用） */
+// ── 時給の表示ロック（owner専用＋院長の合言葉） ─────────────
+//
+// 時給は role としては owner 専用だが、受付PCが院のオーナーアカウントで
+// ログインしっぱなしになるため、スタッフがメニューから「勤怠」を開けば
+// 見えてしまっていた。そこで owner であることに加えて、表示のたびに
+// 院長の合言葉を求める（15分で自動的にまた隠れる）。
+// 打刻端末の合言葉とは別物（あちらは受付でスタッフの前で入力するため）。
+
+export type WageGate = {
+  hasPasscode: boolean; // 院長の合言葉が設定済みか
+  unlocked: boolean;    // いま時給を表示してよいか
+};
+
+export async function getWageGate(): Promise<WageGate> {
+  const { clinicId } = await requireRole(["owner"]);
+  const { createClient } = await import("@/lib/supabase/server");
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("clinic_settings")
+    .select("wage_passcode_hash")
+    .eq("id", clinicId)
+    .maybeSingle();
+  const hasPasscode = !!(data?.wage_passcode_hash as string | null);
+  return { hasPasscode, unlocked: hasPasscode && (await isWageViewUnlocked(clinicId)) };
+}
+
+/** 院長：時給用の合言葉を決める・変更する（4文字以上・ハッシュで保存） */
+export async function setWagePasscode(passcode: string): Promise<{ success: boolean; error?: string }> {
+  const { clinicId } = await requireRole(["owner"]);
+  const code = passcode.trim();
+  if (code.length < 4) return { success: false, error: "合言葉は4文字以上にしてください" };
+  const { createClient } = await import("@/lib/supabase/server");
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("clinic_settings")
+    .update({ wage_passcode_hash: await hashWagePasscode(code) })
+    .eq("id", clinicId);
+  if (error) return { success: false, error: error.message };
+  // 決めた本人はそのまま見られるようにする
+  await setWageViewUnlocked(clinicId);
+  return { success: true };
+}
+
+/** 合言葉を入れて時給を表示する（15分） */
+export async function unlockWageView(passcode: string): Promise<{ success: boolean; error?: string }> {
+  const { clinicId } = await requireRole(["owner"]);
+  const { createClient } = await import("@/lib/supabase/server");
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("clinic_settings")
+    .select("wage_passcode_hash")
+    .eq("id", clinicId)
+    .maybeSingle();
+  const ok = await verifyWagePasscode(passcode, data?.wage_passcode_hash as string | null);
+  if (!ok) return { success: false, error: "合言葉が違います" };
+  await setWageViewUnlocked(clinicId);
+  return { success: true };
+}
+
+/** 時給を隠す（離席するときに手で閉じる用） */
+export async function lockWageView(): Promise<{ success: boolean }> {
+  await requireRole(["owner"]);
+  await clearWageViewUnlocked();
+  return { success: true };
+}
+
+/** 時給を出してよいか。owner かつ合言葉で解錠済みのときだけ true。 */
+async function canSeeWages(clinicId: string): Promise<boolean> {
+  return await isWageViewUnlocked(clinicId);
+}
+
+/**
+ * オーナー：自院スタッフ＋時給（owner専用＋合言葉）。
+ * 合言葉で解錠していないときは名前だけ返し、金額は null にする。
+ */
 export async function listStaffWages(): Promise<OwnerStaffWage[]> {
   const { clinicId } = await requireRole(["owner"]);
+  const unlocked = await canSeeWages(clinicId);
   const { createClient } = await import("@/lib/supabase/server");
   const supabase = await createClient();
   const { data } = await supabase
@@ -500,13 +639,17 @@ export async function listStaffWages(): Promise<OwnerStaffWage[]> {
     id: s.id as string,
     name: s.name as string,
     display_color: (s.display_color as string | null) ?? null,
-    hourlyWage: (s.hourly_wage as number | null) ?? null,
+    // 解錠していない画面には金額そのものを渡さない（DevTools でも見えないように）
+    hourlyWage: unlocked ? ((s.hourly_wage as number | null) ?? null) : null,
   }));
 }
 
-/** オーナー：時給の保存（owner専用） */
+/** オーナー：時給の保存（owner専用＋合言葉） */
 export async function setStaffWage(staffId: string, wage: number | null): Promise<{ success: boolean; error?: string }> {
   const { clinicId } = await requireRole(["owner"]);
+  if (!(await canSeeWages(clinicId))) {
+    return { success: false, error: "先に合言葉を入力してください" };
+  }
   if (wage != null && (!Number.isFinite(wage) || wage < 0 || wage > 100000)) {
     return { success: false, error: "時給の値が正しくありません" };
   }
@@ -533,6 +676,96 @@ export type AttendanceRecord = {
   reasonNote: string | null;
 };
 
+/**
+ * オーナー：打刻時刻の修正（owner専用）。
+ *
+ * 打刻そのものはサーバー時刻で入るのでスタッフには動かせない。ただし押し忘れ・
+ * 二度押しは必ず起きるので、院長だけが後から直せるようにする。
+ * 直したら残業判定（シフト終了＋猶予）もその場で計算し直す。
+ * 誰がいつ何を直したかは audit_log に残す。
+ */
+export async function setAttendanceTimes(
+  recordId: string,
+  clockInHm: string | null,   // "HH:mm" / null=クリア
+  clockOutHm: string | null,
+): Promise<{ success: boolean; error?: string }> {
+  const auth = await requireRole(["owner"]);
+  const isHm = (v: string | null) => v === null || /^([01]\d|2[0-3]):[0-5]\d$/.test(v);
+  if (!isHm(clockInHm) || !isHm(clockOutHm)) {
+    return { success: false, error: "時刻は HH:MM で入力してください" };
+  }
+
+  const db = admin();
+  const { data: before } = await db
+    .from("staff_attendance")
+    .select("id, staff_id, staff_name, work_date, clock_in_at, clock_out_at, is_overtime, overtime_reason_type")
+    .eq("id", recordId)
+    .eq("clinic_id", auth.clinicId)
+    .maybeSingle();
+  if (!before) return { success: false, error: "対象の記録が見つかりません" };
+
+  const workDate = before.work_date as string;
+  const toIso = (hm: string | null) =>
+    hm === null ? null : new Date(`${workDate}T${hm}:00+09:00`).toISOString();
+  const clockInAt = toIso(clockInHm);
+  const clockOutAt = toIso(clockOutHm);
+
+  if (clockInAt && clockOutAt && new Date(clockOutAt) <= new Date(clockInAt)) {
+    return { success: false, error: "退勤は出勤より後の時刻にしてください" };
+  }
+
+  // 退勤を直したら残業かどうかも判定し直す（時刻だけ直って判定が古いままだと辻褄が合わない）
+  const cfg = await getAttendanceConfig();
+  const shiftEndMin = await getShiftEndMinutes(db, auth.clinicId, before.staff_id as string, workDate);
+  const overtimeAfterMin = shiftEndMin != null
+    ? shiftEndMin + cfg.overtimeGraceMinutes
+    : toMinutes(cfg.overtimeReasonAfter);
+  const isOvertime = clockOutAt
+    ? jstPartsOf(clockOutAt).minutes > overtimeAfterMin
+    : false;
+
+  const payload: Record<string, unknown> = {
+    clock_in_at: clockInAt,
+    clock_out_at: clockOutAt,
+    is_overtime: isOvertime,
+    updated_at: new Date().toISOString(),
+  };
+  // 残業でなくなったら、残業理由も一緒に消す（残っていると一覧の判定が矛盾する）
+  if (!isOvertime) {
+    payload.overtime_reason_type = null;
+    payload.overtime_reason_note = null;
+  }
+
+  const { error } = await db
+    .from("staff_attendance")
+    .update(payload)
+    .eq("id", recordId)
+    .eq("clinic_id", auth.clinicId);
+  if (error) return { success: false, error: error.message };
+
+  await writeAudit({
+    clinicId: auth.clinicId,
+    actorUserId: auth.userId,
+    actorEmail: auth.email,
+    actorRole: auth.role,
+    actionType: "attendance.times.update",
+    targetTable: "staff_attendance",
+    targetId: recordId,
+    before: {
+      staff_name: before.staff_name, work_date: workDate,
+      clock_in_at: before.clock_in_at, clock_out_at: before.clock_out_at,
+      is_overtime: before.is_overtime,
+    },
+    after: {
+      staff_name: before.staff_name, work_date: workDate,
+      clock_in_at: clockInAt, clock_out_at: clockOutAt,
+      is_overtime: isOvertime,
+    },
+  });
+
+  return { success: true };
+}
+
 // ── Phase 2/3: 無駄な被り判定＋コスト・折半計算 ──────────
 
 /**
@@ -547,12 +780,20 @@ export type AttendanceJudgment = "requested" | "reservation" | "closing" | "vali
 
 // JUDGMENT_LABEL の値は "@/lib/attendance-constants" に分離。
 
+export type NotDoneTask = { title: string; reason: string | null };
+
 export type AttendanceReportRecord = AttendanceRecord & {
   judgment: AttendanceJudgment | null; // null = 定時（残業ではない）
-  overtimeMinutes: number;             // 退社目標を超えた分（残業のみ）
+  overtimeMinutes: number;             // シフト終了（無ければ退社目標）を超えた分
+  /** その日のシフト終わり "HH:mm"。null＝シフト未登録（固定時刻で判定した日） */
+  shiftEnd: string | null;
   hourlyWage: number | null;
   fullPayYen: number | null;           // wasteful の満額残業代相当（時給未設定なら null）
   splitPayYen: number | null;          // 折半後の支給額
+  tasksTotal: number;
+  tasksDone: number;
+  /** 「できなかった」と申告された業務（理由つき） */
+  notDoneTasks: NotDoneTask[];
 };
 
 export type AttendanceSummary = {
@@ -564,6 +805,9 @@ export type AttendanceSummary = {
   wastefulSplitYen: number;   // 折半後の合計
   savedYen: number;           // 折半で抑えられる額（満額 - 折半後）
   wageMissing: boolean;       // 時給未設定の wasteful がある（金額が過小評価の可能性）
+  notDoneTaskCount: number;   // 今月「できなかった」業務の件数
+  /** 時給の合言葉で解錠していない＝金額は伏せている */
+  wagesLocked: boolean;
 };
 
 /** timestamptz を JST の {勤務日, 0時からの分数} に変換 */
@@ -588,6 +832,7 @@ export async function getAttendanceReport(
 ): Promise<{ success: boolean; records?: AttendanceReportRecord[]; summary?: AttendanceSummary; error?: string }> {
   const { clinicId } = await requireRole(["owner"]);
   if (!/^\d{4}-\d{2}$/.test(month)) return { success: false, error: "月の指定が不正です" };
+  const wagesUnlocked = await canSeeWages(clinicId);
   const { createClient } = await import("@/lib/supabase/server");
   const supabase = await createClient();
 
@@ -595,9 +840,12 @@ export async function getAttendanceReport(
   const monthStart = `${month}-01`;
   const monthEnd = `${month}-${String(new Date(yy, mm, 0).getDate()).padStart(2, "0")}`;
 
-  const [{ data: settings }, { data: staffRows }, attendanceRes, apptRes] = await Promise.all([
+  const [
+    { data: settings }, { data: staffRows }, attendanceRes, apptRes,
+    { data: overrideRows }, { data: weeklyRows }, { data: taskRows },
+  ] = await Promise.all([
     supabase.from("clinic_settings")
-      .select("work_end_target, overtime_reason_after, closing_allowance_until, closing_staff_id")
+      .select("work_end_target, overtime_reason_after, overtime_grace_minutes, closing_allowance_until, closing_staff_id")
       .eq("id", clinicId).maybeSingle(),
     supabase.from("reservation_staff").select("id, display_color, hourly_wage").eq("clinic_id", clinicId),
     supabase.from("staff_attendance")
@@ -605,17 +853,35 @@ export async function getAttendanceReport(
       .eq("clinic_id", clinicId)
       .gte("work_date", monthStart).lte("work_date", monthEnd)
       .order("work_date", { ascending: false }).order("clock_out_at", { ascending: true }),
-    // 20:00超まで続く予約の担当を割り出すため、月内に終わる非キャンセル予約を取得
+    // シフト終わりより後まで続く予約の担当を割り出すため、月内に終わる非キャンセル予約を取得
     supabase.from("appointments")
       .select("end_time, staff_id, additional_staff")
       .eq("clinic_id", clinicId)
       .neq("status", "cancelled")
       .gte("end_time", `${monthStart}T00:00:00+09:00`)
       .lte("end_time", `${monthEnd}T23:59:59+09:00`),
+    // 月内の単発シフト（勤務表と同じ優先順位で使う）
+    supabase.from("staff_working_overrides")
+      .select("staff_id, date, end_time, kind")
+      .eq("clinic_id", clinicId)
+      .neq("kind", "break")
+      .gte("date", monthStart).lte("date", monthEnd),
+    // 曜日テンプレのシフト
+    supabase.from("staff_working_hours")
+      .select("staff_id, day_of_week, end_time")
+      .eq("clinic_id", clinicId),
+    // 当月の業務（できなかったものを一覧に出す）
+    supabase.from("staff_tasks")
+      .select("staff_id, due_date, title, outcome, outcome_reason")
+      .eq("clinic_id", clinicId)
+      .eq("approved", true)
+      .gte("due_date", monthStart).lte("due_date", monthEnd),
   ]);
   if (attendanceRes.error) return { success: false, error: attendanceRes.error.message };
 
   const workEndMin = toMinutes(hhmm(settings?.work_end_target as string | null, "20:00"));
+  const fallbackOvertimeMin = toMinutes(hhmm(settings?.overtime_reason_after as string | null, "20:15"));
+  const graceMin = graceOf(settings?.overtime_grace_minutes);
   const closingUntilMin = toMinutes(hhmm(settings?.closing_allowance_until as string | null, "20:30"));
   const closingStaffId = (settings?.closing_staff_id as string | null) ?? null;
 
@@ -626,19 +892,53 @@ export async function getAttendanceReport(
     wageOf.set(s.id as string, (s.hourly_wage as number | null) ?? null);
   }
 
-  // 予約表突合: 日付 → 20:00超まで担当していた staff_id 集合
-  const justifiedByReservation = new Map<string, Set<string>>();
+  // ── (スタッフ, 日) → シフト終了（分）。打刻時と同じ優先順位で解決する ──
+  const overrideEnd = new Map<string, number | null>(); // "staff|date" → 分 / null=休み
+  for (const o of overrideRows ?? []) {
+    const key = `${o.staff_id}|${o.date}`;
+    if (o.kind === "off" || o.kind === "leave") { overrideEnd.set(key, null); continue; }
+    if (o.end_time) overrideEnd.set(key, toMinutes(String(o.end_time).slice(0, 5)));
+  }
+  const weeklyEnd = new Map<string, number>(); // "staff|dow" → 分
+  for (const w of weeklyRows ?? []) {
+    if (w.end_time) weeklyEnd.set(`${w.staff_id}|${w.day_of_week}`, toMinutes(String(w.end_time).slice(0, 5)));
+  }
+  const shiftEndOf = (staffId: string, date: string): number | null => {
+    const k = `${staffId}|${date}`;
+    if (overrideEnd.has(k)) return overrideEnd.get(k) ?? null;
+    const dow = new Date(`${date}T12:00:00+09:00`).getDay();
+    return weeklyEnd.get(`${staffId}|${dow}`) ?? null;
+  };
+
+  // 予約表突合: "staff|date" → その日そのスタッフの予約の最終終了時刻（分）
+  const lastApptEnd = new Map<string, number>();
   for (const a of apptRes.data ?? []) {
     const end = a.end_time as string | null;
     if (!end) continue;
     const { date, minutes } = jstPartsOf(end);
-    if (minutes <= workEndMin) continue; // 20:00 までに終わる予約は対象外
-    const set = justifiedByReservation.get(date) ?? new Set<string>();
-    if (a.staff_id) set.add(a.staff_id as string);
+    const ids: string[] = [];
+    if (a.staff_id) ids.push(a.staff_id as string);
     for (const ex of (a.additional_staff as { staff_id: string }[] | null) ?? []) {
-      if (ex?.staff_id) set.add(ex.staff_id);
+      if (ex?.staff_id) ids.push(ex.staff_id);
     }
-    justifiedByReservation.set(date, set);
+    for (const id of ids) {
+      const k = `${id}|${date}`;
+      lastApptEnd.set(k, Math.max(lastApptEnd.get(k) ?? 0, minutes));
+    }
+  }
+
+  // 当日の業務（できなかったもの）を "staff|date" でまとめる
+  const tasksOf = new Map<string, { total: number; done: number; notDone: NotDoneTask[] }>();
+  for (const t of taskRows ?? []) {
+    if (!t.staff_id || !t.due_date) continue;
+    const k = `${t.staff_id}|${t.due_date}`;
+    const cur = tasksOf.get(k) ?? { total: 0, done: 0, notDone: [] };
+    cur.total++;
+    if (t.outcome === "done") cur.done++;
+    else if (t.outcome === "not_done") {
+      cur.notDone.push({ title: t.title as string, reason: (t.outcome_reason as string | null) ?? null });
+    }
+    tasksOf.set(k, cur);
   }
 
   const overtimeByDate = new Map<string, number>();
@@ -648,19 +948,29 @@ export async function getAttendanceReport(
     const reasonType = (r.overtime_reason_type as OvertimeReasonType | null) ?? null;
     const clockOutAt = (r.clock_out_at as string | null) ?? null;
     const workDate = r.work_date as string;
-    const wage = wageOf.get(staffId) ?? null;
+    // 合言葉で解錠していないときは金額を一切のせない（画面にも DevTools にも出ない）
+    const wage = wagesUnlocked ? (wageOf.get(staffId) ?? null) : null;
 
     let judgment: AttendanceJudgment | null = null;
     let overtimeMinutes = 0;
     let fullPayYen: number | null = null;
     let splitPayYen: number | null = null;
 
+    // その日のシフト終わり。無い日は従来どおり固定時刻を基準にする。
+    const shiftEndMin = shiftEndOf(staffId, workDate);
+    const baseMin = shiftEndMin ?? workEndMin;
+
     if (isOvertime) {
       overtimeByDate.set(workDate, (overtimeByDate.get(workDate) ?? 0) + 1);
-      const coMin = clockOutAt ? jstPartsOf(clockOutAt).minutes : workEndMin;
-      overtimeMinutes = Math.max(0, coMin - workEndMin);
+      const coMin = clockOutAt ? jstPartsOf(clockOutAt).minutes : baseMin;
+      // 残業時間は「シフト終わりから何分オーバーしたか」。猶予(10分)ぶんは差し引かない
+      // ＝10分を超えた時点で、シフト終わりからの超過分すべてが残業になる。
+      overtimeMinutes = Math.max(0, coMin - baseMin);
 
-      const hasLateReservation = justifiedByReservation.get(workDate)?.has(staffId) ?? false;
+      // その日そのスタッフの予約が、シフト終わりより後まで入っていたか
+      const apptEnd = lastApptEnd.get(`${staffId}|${workDate}`) ?? 0;
+      const hasLateReservation = apptEnd > baseMin;
+
       if (reasonType === "requested") judgment = "requested";
       else if (hasLateReservation) judgment = "reservation";
       else if (reasonType === "closing" && closingStaffId === staffId && coMin <= closingUntilMin) judgment = "closing";
@@ -672,6 +982,8 @@ export async function getAttendanceReport(
         splitPayYen = Math.round(fullPayYen / 2);
       }
     }
+
+    const t = tasksOf.get(`${staffId}|${workDate}`);
 
     return {
       id: r.id as string,
@@ -686,9 +998,15 @@ export async function getAttendanceReport(
       reasonNote: (r.overtime_reason_note as string | null) ?? null,
       judgment,
       overtimeMinutes,
+      shiftEnd: shiftEndMin != null
+        ? `${String(Math.floor(shiftEndMin / 60)).padStart(2, "0")}:${String(shiftEndMin % 60).padStart(2, "0")}`
+        : null,
       hourlyWage: wage,
       fullPayYen,
       splitPayYen,
+      tasksTotal: t?.total ?? 0,
+      tasksDone: t?.done ?? 0,
+      notDoneTasks: t?.notDone ?? [],
     };
   });
 
@@ -701,7 +1019,10 @@ export async function getAttendanceReport(
     wastefulFullYen: wasteful.reduce((s, r) => s + (r.fullPayYen ?? 0), 0),
     wastefulSplitYen: wasteful.reduce((s, r) => s + (r.splitPayYen ?? 0), 0),
     savedYen: wasteful.reduce((s, r) => s + ((r.fullPayYen ?? 0) - (r.splitPayYen ?? 0)), 0),
-    wageMissing: wasteful.some((r) => r.hourlyWage == null),
+    // 解錠していないときは「時給未設定」ではなく「伏せている」だけなので警告を出さない
+    wageMissing: wagesUnlocked && wasteful.some((r) => r.hourlyWage == null),
+    notDoneTaskCount: records.reduce((s, r) => s + r.notDoneTasks.length, 0),
+    wagesLocked: !wagesUnlocked,
   };
 
   return { success: true, records, summary };

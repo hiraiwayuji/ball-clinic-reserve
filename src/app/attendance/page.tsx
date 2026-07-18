@@ -239,7 +239,7 @@ export default function AttendancePage() {
           <p className="text-slate-500 text-sm mt-1">{clinicName}</p>
           {config && (
             <p className="text-[11px] text-slate-400 mt-1">
-              退社の目標 {config.workEndTarget} ／ {config.overtimeReasonAfter} 以降の退社は理由の入力が必要です
+              シフト終わりから{config.overtimeGraceMinutes}分を過ぎての退社は、理由の入力が必要です
             </p>
           )}
         </div>
@@ -417,7 +417,7 @@ export default function AttendancePage() {
             <div className="text-center">
               <div className="inline-flex items-center gap-2 text-amber-600 font-black">
                 <AlertTriangle className="w-5 h-5" />
-                {config?.overtimeReasonAfter ?? "20:15"} 以降の退社です
+                シフト終わりを過ぎての退社です
               </div>
               <p className="text-slate-500 text-sm mt-1">何のために残ったかを選んでください</p>
             </div>

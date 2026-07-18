@@ -6,11 +6,12 @@ import { ja } from "date-fns/locale";
 import { toast } from "sonner";
 import {
   Loader2, Clock, ChevronLeft, ChevronRight, AlertTriangle, Copy, Link2,
-  Save, Coins, Settings2, CheckCircle2, TrendingDown, Lock,
+  Save, Coins, Settings2, CheckCircle2, TrendingDown, Lock, Eye, EyeOff, Pencil,
 } from "lucide-react";
 import {
   getAttendanceSettings, setAttendanceSettings, listStaffWages, setStaffWage, getAttendanceReport,
   getAttendanceDeviceSettings, setAttendancePasscode, setAttendanceDeviceLock,
+  getWageGate, setWagePasscode, unlockWageView, lockWageView, setAttendanceTimes,
   type AttendanceConfig, type OwnerStaffWage, type AttendanceReportRecord, type AttendanceSummary, type AttendanceJudgment,
 } from "@/app/actions/attendance";
 import { JUDGMENT_LABEL } from "@/lib/attendance-constants";
@@ -51,21 +52,100 @@ export default function AttendanceAdminPage() {
   const [passcodeInput, setPasscodeInput] = useState("");
   const [savingPass, setSavingPass] = useState(false);
   const [togglingLock, setTogglingLock] = useState(false);
+  // 時給の合言葉ゲート
+  const [wageHasPass, setWageHasPass] = useState(false);
+  const [wageUnlocked, setWageUnlocked] = useState(false);
+  const [wagePassInput, setWagePassInput] = useState("");
+  const [wageNewPassInput, setWageNewPassInput] = useState("");
+  const [wageBusy, setWageBusy] = useState(false);
+  // 打刻修正ダイアログ（owner のみ）
+  const [editRec, setEditRec] = useState<AttendanceReportRecord | null>(null);
+  const [editIn, setEditIn] = useState("");
+  const [editOut, setEditOut] = useState("");
+  const [savingTimes, setSavingTimes] = useState(false);
 
   const monthStr = useMemo(
     () => `${month.getFullYear()}-${String(month.getMonth() + 1).padStart(2, "0")}`,
     [month],
   );
 
+  const reloadWages = () => listStaffWages().then(setWages).catch(() => {});
+
   useEffect(() => {
     if (typeof window !== "undefined") setAttendUrl(`${window.location.origin}/attendance`);
-    Promise.all([getAttendanceSettings(), listStaffWages(), getAttendanceDeviceSettings()])
-      .then(([cfg, w, dev]) => {
+    Promise.all([getAttendanceSettings(), listStaffWages(), getAttendanceDeviceSettings(), getWageGate()])
+      .then(([cfg, w, dev, wg]) => {
         setConfig(cfg); setWages(w);
         setDeviceLock(dev.deviceLock); setHasPasscode(dev.hasPasscode);
+        setWageHasPass(wg.hasPasscode); setWageUnlocked(wg.unlocked);
       })
       .catch(() => toast.error("読み込みに失敗しました"));
   }, []);
+
+  // 時給の解錠が変わったら、金額つき/伏せ字の一覧とレポートを取り直す
+  const refreshAfterWageGate = async () => {
+    await Promise.all([reloadWages(), getAttendanceReport(monthStr).then((r) => {
+      setRecords(r.success ? r.records ?? [] : []);
+      setSummary(r.success ? r.summary ?? null : null);
+    })]);
+  };
+
+  // 時給の合言葉を決める（初回）
+  const saveWagePass = async () => {
+    const code = wageNewPassInput.trim();
+    if (code.length < 4) { toast.error("合言葉は4文字以上にしてください"); return; }
+    setWageBusy(true);
+    const r = await setWagePasscode(code);
+    setWageBusy(false);
+    if (r.success) {
+      setWageHasPass(true); setWageUnlocked(true); setWageNewPassInput("");
+      toast.success("合言葉を設定しました");
+      await refreshAfterWageGate();
+    } else toast.error(r.error ?? "設定に失敗しました");
+  };
+
+  // 合言葉を入れて時給を表示
+  const unlockWages = async () => {
+    const code = wagePassInput.trim();
+    if (!code) return;
+    setWageBusy(true);
+    const r = await unlockWageView(code);
+    setWageBusy(false);
+    if (r.success) {
+      setWageUnlocked(true); setWagePassInput("");
+      toast.success("時給を表示しました（15分でまた隠れます）");
+      await refreshAfterWageGate();
+    } else toast.error(r.error ?? "合言葉が違います");
+  };
+
+  // 時給を隠す
+  const hideWages = async () => {
+    await lockWageView();
+    setWageUnlocked(false);
+    toast.success("時給を隠しました");
+    await refreshAfterWageGate();
+  };
+
+  // 打刻修正を開く
+  const openEditTimes = (r: AttendanceReportRecord) => {
+    setEditRec(r);
+    setEditIn(r.clockInAt ? format(new Date(r.clockInAt), "HH:mm") : "");
+    setEditOut(r.clockOutAt ? format(new Date(r.clockOutAt), "HH:mm") : "");
+  };
+
+  const saveTimes = async () => {
+    if (!editRec) return;
+    setSavingTimes(true);
+    const r = await setAttendanceTimes(editRec.id, editIn || null, editOut || null);
+    setSavingTimes(false);
+    if (r.success) {
+      toast.success("打刻を修正しました");
+      setEditRec(null);
+      const rep = await getAttendanceReport(monthStr);
+      setRecords(rep.success ? rep.records ?? [] : []);
+      setSummary(rep.success ? rep.summary ?? null : null);
+    } else toast.error(r.error ?? "修正に失敗しました");
+  };
 
   const savePasscode = async () => {
     const code = passcodeInput.trim();
@@ -152,10 +232,33 @@ export default function AttendanceAdminPage() {
               </button>
             </label>
 
-            {/* しきい値 */}
+            {/* 残業の基準：シフト終わり＋猶予 */}
+            <div className="rounded-xl bg-blue-50/60 border border-blue-100 p-3 space-y-2">
+              <label className="block">
+                <span className="text-xs font-bold text-slate-700">残業とみなすまでの猶予</span>
+                <span className="block text-[11px] font-normal text-slate-500 mb-1.5">
+                  各スタッフの<b>シフト終わりから何分</b>までを「定時」とするか。これを過ぎた退勤は残業として理由の入力が必要になります。
+                </span>
+                <div className="flex items-center gap-2">
+                  <select
+                    value={config.overtimeGraceMinutes}
+                    onChange={(e) => setConfig({ ...config, overtimeGraceMinutes: Number(e.target.value) })}
+                    className="h-11 rounded-xl border border-slate-300 px-3 text-sm bg-white"
+                  >
+                    {[0, 5, 10, 15, 20, 30].map((n) => <option key={n} value={n}>{n}分</option>)}
+                  </select>
+                  <span className="text-xs text-slate-500">シフト終わり ＋ この時間まではOK</span>
+                </div>
+              </label>
+              <p className="text-[11px] text-slate-500 leading-snug">
+                ※ シフトが登録されていない日は、下の「この時刻以降は理由必須」で判定します。
+              </p>
+            </div>
+
+            {/* しきい値（シフト未登録日のフォールバック） */}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <TimeField label="原則退社の目標" value={config.workEndTarget} onChange={(v) => setConfig({ ...config, workEndTarget: v })} />
-              <TimeField label="この時刻以降は理由必須" value={config.overtimeReasonAfter} onChange={(v) => setConfig({ ...config, overtimeReasonAfter: v })} />
+              <TimeField label="理由必須（シフト無い日）" value={config.overtimeReasonAfter} onChange={(v) => setConfig({ ...config, overtimeReasonAfter: v })} />
               <TimeField label="締めの許容時刻" value={config.closingAllowanceUntil} onChange={(v) => setConfig({ ...config, closingAllowanceUntil: v })} />
             </div>
 
@@ -255,31 +358,121 @@ export default function AttendanceAdminPage() {
         )}
       </div>
 
-      {/* 時給（owner専用） */}
+      {/* 時給（owner専用＋院長の合言葉ゲート） */}
       <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm space-y-3">
-        <div className="flex items-center gap-2 text-sm font-black text-slate-700">
-          <Coins className="w-4 h-4 text-amber-500" /> スタッフの時給（院長だけが見られます）
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2 text-sm font-black text-slate-700">
+            <Coins className="w-4 h-4 text-amber-500" /> スタッフの時給（院長だけ）
+          </div>
+          {wageUnlocked && (
+            <button
+              onClick={hideWages}
+              className="flex items-center gap-1 text-[11px] font-bold text-slate-500 hover:text-slate-700"
+            >
+              <EyeOff className="w-3.5 h-3.5" /> 隠す
+            </button>
+          )}
         </div>
-        <p className="text-[11px] text-slate-500">後ほどコスト計算（ムダになった残業の金額・折半額）に使います。空欄でもかまいません。</p>
-        <div className="space-y-2">
-          {wages.map((s) => (
-            <div key={s.id} className="flex items-center gap-3">
-              <span className="w-3 h-3 rounded-full shrink-0" style={{ background: colorOf(s.display_color) }} />
-              <span className="flex-1 text-sm font-bold text-slate-700">{s.name}</span>
-              <div className="flex items-center gap-1">
-                <input
-                  type="number"
-                  defaultValue={s.hourlyWage ?? ""}
-                  onBlur={(e) => { if (String(s.hourlyWage ?? "") !== e.target.value) saveWage(s.id, e.target.value); }}
-                  placeholder="—"
-                  className="w-24 h-10 rounded-lg border border-slate-300 px-2 text-right text-sm bg-white"
-                />
-                <span className="text-xs text-slate-500">円/時</span>
-              </div>
+
+        {/* まだ合言葉が未設定：まず院長が合言葉を決める */}
+        {!wageHasPass ? (
+          <div className="rounded-xl bg-amber-50 border border-amber-200 p-3 space-y-2">
+            <p className="text-[12px] font-bold text-amber-800 flex items-start gap-1.5">
+              <Lock className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+              時給は院長だけが見られるように、合言葉で守ります。まず合言葉を決めてください。
+            </p>
+            <p className="text-[11px] text-amber-700/90 leading-snug">
+              受付のパソコンを院長のアカウントで開いていても、この合言葉を知らないスタッフには時給が見えなくなります。打刻用のパスワードとは別のものにしてください。
+            </p>
+            <div className="flex items-center gap-2">
+              <input
+                type="password"
+                value={wageNewPassInput}
+                onChange={(e) => setWageNewPassInput(e.target.value)}
+                placeholder="4文字以上で決めてください"
+                className="flex-1 h-11 rounded-xl border border-amber-300 px-3 text-sm bg-white"
+              />
+              <button
+                onClick={saveWagePass}
+                disabled={wageBusy || wageNewPassInput.trim().length < 4}
+                className="h-11 px-4 rounded-xl bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white text-sm font-bold whitespace-nowrap"
+              >
+                {wageBusy ? "設定中..." : "決める"}
+              </button>
             </div>
-          ))}
-          {wages.length === 0 && <p className="text-sm text-slate-400">スタッフが登録されていません。</p>}
-        </div>
+          </div>
+        ) : !wageUnlocked ? (
+          /* 合言葉あり・未解錠：合言葉を入れると表示 */
+          <div className="rounded-xl bg-slate-50 border border-slate-200 p-3 space-y-2">
+            <p className="text-[12px] font-bold text-slate-600 flex items-center gap-1.5">
+              <Lock className="w-3.5 h-3.5" /> 時給は隠れています。院長の合言葉を入れると表示します。
+            </p>
+            <div className="flex items-center gap-2">
+              <input
+                type="password"
+                value={wagePassInput}
+                onChange={(e) => setWagePassInput(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") unlockWages(); }}
+                placeholder="院長の合言葉"
+                className="flex-1 h-11 rounded-xl border border-slate-300 px-3 text-sm bg-white"
+              />
+              <button
+                onClick={unlockWages}
+                disabled={wageBusy || !wagePassInput.trim()}
+                className="h-11 px-4 rounded-xl bg-slate-700 hover:bg-slate-800 disabled:opacity-50 text-white text-sm font-bold whitespace-nowrap flex items-center gap-1"
+              >
+                <Eye className="w-4 h-4" /> {wageBusy ? "確認中..." : "表示"}
+              </button>
+            </div>
+            <p className="text-[10px] text-slate-400">合言葉を忘れたときは、下の入力欄で新しく決め直せます（前の値は上書きされます）。</p>
+            <details className="text-[11px]">
+              <summary className="cursor-pointer text-slate-400 hover:text-slate-600">合言葉を決め直す</summary>
+              <div className="flex items-center gap-2 mt-1.5">
+                <input
+                  type="password"
+                  value={wageNewPassInput}
+                  onChange={(e) => setWageNewPassInput(e.target.value)}
+                  placeholder="新しい合言葉（4文字以上）"
+                  className="flex-1 h-10 rounded-lg border border-slate-300 px-3 text-sm bg-white"
+                />
+                <button
+                  onClick={saveWagePass}
+                  disabled={wageBusy || wageNewPassInput.trim().length < 4}
+                  className="h-10 px-3 rounded-lg bg-slate-600 hover:bg-slate-700 disabled:opacity-50 text-white text-xs font-bold whitespace-nowrap"
+                >
+                  決め直す
+                </button>
+              </div>
+            </details>
+          </div>
+        ) : (
+          /* 解錠済み：時給の入力 */
+          <>
+            <p className="text-[11px] text-slate-500">
+              コスト計算（ムダになった残業の金額・折半額）に使います。空欄でもかまいません。
+              <span className="text-emerald-600 font-bold">15分でまた自動的に隠れます。</span>
+            </p>
+            <div className="space-y-2">
+              {wages.map((s) => (
+                <div key={s.id} className="flex items-center gap-3">
+                  <span className="w-3 h-3 rounded-full shrink-0" style={{ background: colorOf(s.display_color) }} />
+                  <span className="flex-1 text-sm font-bold text-slate-700">{s.name}</span>
+                  <div className="flex items-center gap-1">
+                    <input
+                      type="number"
+                      defaultValue={s.hourlyWage ?? ""}
+                      onBlur={(e) => { if (String(s.hourlyWage ?? "") !== e.target.value) saveWage(s.id, e.target.value); }}
+                      placeholder="—"
+                      className="w-24 h-10 rounded-lg border border-slate-300 px-2 text-right text-sm bg-white"
+                    />
+                    <span className="text-xs text-slate-500">円/時</span>
+                  </div>
+                </div>
+              ))}
+              {wages.length === 0 && <p className="text-sm text-slate-400">スタッフが登録されていません。</p>}
+            </div>
+          </>
+        )}
       </div>
 
       {/* 月切替 */}
@@ -293,10 +486,11 @@ export default function AttendanceAdminPage() {
       </div>
 
       {/* サマリ */}
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <SummaryCard label="記録日数" value={`${summary?.recordDays ?? 0}`} tone="slate" />
         <SummaryCard label="残業の退社" value={`${summary?.overtimeCount ?? 0}`} tone="amber" />
         <SummaryCard label="ムダな被り" value={`${summary?.wastefulCount ?? 0}`} tone="rose" hint="依頼/予約/正当以外" />
+        <SummaryCard label="できなかった業務" value={`${summary?.notDoneTaskCount ?? 0}`} tone="orange" hint="下の一覧に理由" />
       </div>
 
       {/* コスト（Phase 3） */}
@@ -320,9 +514,14 @@ export default function AttendanceAdminPage() {
             </div>
           </div>
           <p className="text-[11px] text-slate-500">
-            「ムダな被り」と判定された残業を、退社目標（{config?.workEndTarget ?? "20:00"}）からの超過時間×時給で計算しています。
+            「ムダな被り」と判定された残業を、その人のシフト終わりからの超過時間×時給で計算しています。
             予約の担当・院長の依頼・正当な理由・締め作業は除いています。
           </p>
+          {summary.wagesLocked && (
+            <p className="text-[11px] text-slate-500 flex items-center gap-1">
+              <Lock className="w-3 h-3" /> 金額は伏せています。上の「スタッフの時給」で合言葉を入れると表示されます。
+            </p>
+          )}
           {summary.wageMissing && (
             <p className="text-[11px] text-rose-600 flex items-center gap-1">
               <AlertTriangle className="w-3 h-3" /> 時給が未設定のスタッフがいるため、金額は実際より少なく出ています。上の欄で時給をご入力ください。
@@ -345,7 +544,8 @@ export default function AttendanceAdminPage() {
                 <th className="text-left font-bold px-2 py-2">スタッフ</th>
                 <th className="text-center font-bold px-2 py-2">出勤</th>
                 <th className="text-center font-bold px-2 py-2">退勤</th>
-                <th className="text-left font-bold px-3 py-2">判定・理由</th>
+                <th className="text-left font-bold px-3 py-2">判定・理由 / できなかった業務</th>
+                <th className="text-center font-bold px-2 py-2">修正</th>
               </tr>
             </thead>
             <tbody>
@@ -359,7 +559,10 @@ export default function AttendanceAdminPage() {
                     </span>
                   </td>
                   <td className="px-2 py-2 text-center text-slate-600">{r.clockInAt ? format(new Date(r.clockInAt), "HH:mm") : "—"}</td>
-                  <td className={`px-2 py-2 text-center font-bold ${r.isOvertime ? "text-amber-700" : "text-slate-600"}`}>{r.clockOutAt ? format(new Date(r.clockOutAt), "HH:mm") : "—"}</td>
+                  <td className={`px-2 py-2 text-center font-bold ${r.isOvertime ? "text-amber-700" : "text-slate-600"}`}>
+                    {r.clockOutAt ? format(new Date(r.clockOutAt), "HH:mm") : "—"}
+                    {r.shiftEnd && <span className="block text-[9px] font-normal text-slate-400">予定 {r.shiftEnd}</span>}
+                  </td>
                   <td className="px-3 py-2">
                     {r.isOvertime && r.judgment ? (
                       <div className="space-y-0.5">
@@ -371,13 +574,36 @@ export default function AttendanceAdminPage() {
                         {r.judgment === "wasteful" && (
                           <span className="block text-[11px] text-rose-600">
                             残業 {r.overtimeMinutes}分
-                            {r.fullPayYen != null ? ` ／ 満額${yen(r.fullPayYen)}・折半${yen(r.splitPayYen ?? 0)}` : "（時給未設定）"}
+                            {r.fullPayYen != null ? ` ／ 満額${yen(r.fullPayYen)}・折半${yen(r.splitPayYen ?? 0)}` : ""}
                           </span>
                         )}
                       </div>
                     ) : (
                       <span className="text-xs text-slate-400 inline-flex items-center gap-1"><CheckCircle2 className="w-3 h-3" />定時</span>
                     )}
+                    {/* できなかった業務（退勤時に「できない」で申告されたもの） */}
+                    {r.notDoneTasks.length > 0 && (
+                      <div className="mt-1 space-y-0.5">
+                        {r.notDoneTasks.map((t, i) => (
+                          <div key={i} className="text-[11px] text-orange-700 flex items-start gap-1">
+                            <AlertTriangle className="w-3 h-3 mt-0.5 shrink-0" />
+                            <span>
+                              <b>{t.title}</b>
+                              {t.reason && <span className="text-orange-600/80">（{t.reason}）</span>}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </td>
+                  <td className="px-2 py-2 text-center">
+                    <button
+                      onClick={() => openEditTimes(r)}
+                      title="出勤・退勤の時刻を修正（院長のみ）"
+                      className="inline-flex items-center justify-center w-8 h-8 rounded-lg text-slate-400 hover:text-blue-600 hover:bg-blue-50"
+                    >
+                      <Pencil className="w-3.5 h-3.5" />
+                    </button>
                   </td>
                 </tr>
               ))}
@@ -385,6 +611,46 @@ export default function AttendanceAdminPage() {
           </table>
         )}
       </div>
+
+      {/* 打刻の修正（院長のみ） */}
+      {editRec && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => !savingTimes && setEditRec(null)}>
+          <div className="bg-white rounded-2xl shadow-xl max-w-sm w-full p-5 space-y-4" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center gap-2 text-base font-black text-slate-800">
+              <Clock className="w-5 h-5 text-blue-600" /> 打刻の修正
+            </div>
+            <p className="text-xs text-slate-500">
+              {editRec.staffName}さん・{format(new Date(editRec.workDate), "M月d日(E)", { locale: ja })} の打刻を直します。
+              空欄にすると「打刻なし」になります。残業の判定も自動でやり直します。
+            </p>
+            <div className="grid grid-cols-2 gap-3">
+              <label className="block">
+                <span className="text-xs font-bold text-slate-600">出勤</span>
+                <input type="time" value={editIn} onChange={(e) => setEditIn(e.target.value)}
+                  className="mt-1.5 w-full h-11 rounded-xl border border-slate-300 px-3 text-sm bg-white" />
+              </label>
+              <label className="block">
+                <span className="text-xs font-bold text-slate-600">退勤</span>
+                <input type="time" value={editOut} onChange={(e) => setEditOut(e.target.value)}
+                  className="mt-1.5 w-full h-11 rounded-xl border border-slate-300 px-3 text-sm bg-white" />
+              </label>
+            </div>
+            <div className="flex gap-2">
+              <button onClick={() => setEditRec(null)} disabled={savingTimes}
+                className="flex-1 h-11 rounded-xl border border-slate-300 text-slate-600 font-bold text-sm hover:bg-slate-50">
+                やめる
+              </button>
+              <button onClick={saveTimes} disabled={savingTimes}
+                className="flex-1 h-11 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-bold text-sm">
+                {savingTimes ? "保存中..." : "保存する"}
+              </button>
+            </div>
+            <p className="text-[10px] text-slate-400 text-center">
+              直した記録は履歴（監査ログ）に残ります。
+            </p>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -401,11 +667,12 @@ function TimeField({ label, value, onChange }: { label: string; value: string; o
   );
 }
 
-function SummaryCard({ label, value, tone, hint }: { label: string; value: string; tone: "slate" | "amber" | "rose"; hint?: string }) {
+function SummaryCard({ label, value, tone, hint }: { label: string; value: string; tone: "slate" | "amber" | "rose" | "orange"; hint?: string }) {
   const cls = {
     slate: "bg-slate-50 border-slate-200 text-slate-700",
     amber: "bg-amber-50 border-amber-200 text-amber-700",
     rose: "bg-rose-50 border-rose-200 text-rose-700",
+    orange: "bg-orange-50 border-orange-200 text-orange-700",
   }[tone];
   return (
     <div className={`rounded-2xl border p-3 text-center ${cls}`}>
