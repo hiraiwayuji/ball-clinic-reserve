@@ -420,6 +420,38 @@ export async function updateCustomerCity(
 }
 
 /**
+ * 一括売上入力の各行から、患者の氏名・カルテ番号をその場で修正する。
+ * customerId で1人だけ更新する（同名巻き込みなし）。カルテ番号が他の患者と
+ * 重複したときは分かりやすい文言で弾く（unique 制約 23505）。
+ */
+export async function updateSalePatientIdentity(
+  customerId: string,
+  name: string,
+  medicalRecordNumber: string | null,
+): Promise<{ success: boolean; error?: string }> {
+  const { clinicId } = await checkAdminAuth();
+  if (!customerId) return { success: false, error: "顧客が特定できません" };
+  const nm = (name ?? "").trim();
+  if (!nm) return { success: false, error: "お名前を入力してください" };
+  const mrn = (medicalRecordNumber ?? "").trim() || null;
+  const sb = getAdminSupabase() ?? (await getSupabase());
+  if (!sb) return { success: false, error: "接続エラーが発生しました" };
+  const { error } = await sb
+    .from("customers")
+    .update({ name: nm, medical_record_number: mrn })
+    .eq("id", customerId)
+    .eq("clinic_id", clinicId);
+  if (error) {
+    if ((error as { code?: string }).code === "23505") {
+      return { success: false, error: `カルテ番号 ${mrn} は、すでに別の患者さんで使われています。` };
+    }
+    return { success: false, error: "保存に失敗しました: " + error.message };
+  }
+  revalidatePath("/admin/customers");
+  return { success: true };
+}
+
+/**
  * 売上修正ダイアログ等から、氏名で患者の市町村(city_name)を登録/更新する。
  * cash_sales は氏名ベースのため customerId が無い画面用。同名が複数いる場合は
  * その院の同名顧客すべてに同じ市町村が入る点に注意（実害は小・受給者証で最終確認）。

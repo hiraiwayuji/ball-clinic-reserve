@@ -8,6 +8,7 @@ import {
   getTodayPendingSales,
   bulkAddCashSales,
   updateCustomerCity,
+  updateSalePatientIdentity,
   type PendingSalePatient,
   type CashSalePaymentType,
 } from "@/app/actions/sales";
@@ -22,7 +23,7 @@ import Link from "next/link";
 import {
   Bot, CheckSquare, Square, Loader2, Zap, AlertTriangle,
   ChevronLeft, Save, RefreshCw, User, Clock, Info, ClipboardList,
-  Plus, X, SplitSquareHorizontal, UserX,
+  Plus, X, SplitSquareHorizontal, UserX, Pencil,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -422,6 +423,40 @@ function DraftRowItem({
   onNoShow: () => void;
   onClinicCancel: () => void;
 }) {
+  // 氏名・カルテ番号のその場修正
+  const [editingIdentity, setEditingIdentity] = useState(false);
+  const [nameDraft, setNameDraft] = useState(row.customerName);
+  const [mrnDraft, setMrnDraft] = useState(row.medicalRecordNumber ?? "");
+  const [savingIdentity, setSavingIdentity] = useState(false);
+
+  const openIdentityEdit = () => {
+    setNameDraft(row.customerName);
+    setMrnDraft(row.medicalRecordNumber ?? "");
+    setEditingIdentity(true);
+  };
+  const saveIdentity = async () => {
+    const nm = nameDraft.trim();
+    if (!nm) { toast.error("お名前を入力してください"); return; }
+    const mrn = mrnDraft.trim() || null;
+    // 予約に患者が紐付いていない行は、この売上に使う表示名だけ直す（DBの患者は無い）
+    if (!row.customerId) {
+      onChange({ ...row, customerName: nm });
+      setEditingIdentity(false);
+      toast.success("お名前を直しました（この会計の記録に使います）");
+      return;
+    }
+    setSavingIdentity(true);
+    const res = await updateSalePatientIdentity(row.customerId, nm, mrn);
+    setSavingIdentity(false);
+    if (res.success) {
+      onChange({ ...row, customerName: nm, medicalRecordNumber: mrn });
+      setEditingIdentity(false);
+      toast.success("患者情報を修正しました");
+    } else {
+      toast.error(res.error ?? "修正に失敗しました");
+    }
+  };
+
   // 「未来院」ボタンの押し間違い防止（1回目で確認、2回目で確定）
   const [confirmingNoShow, setConfirmingNoShow] = useState(false);
   // 「院都合」ボタンの押し間違い防止（1回目で確認、2回目で確定）
@@ -602,7 +637,62 @@ function DraftRowItem({
             {row.isFirstVisit && (
               <span className="text-[10px] font-black px-1.5 py-0.5 rounded-full bg-rose-500 text-white">初診</span>
             )}
+            {/* 氏名・カルテ番号をその場で修正 */}
+            <button
+              type="button"
+              onClick={editingIdentity ? () => setEditingIdentity(false) : openIdentityEdit}
+              title="お名前・カルテ番号を修正"
+              className="shrink-0 p-1 rounded-md text-slate-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/30"
+            >
+              <Pencil className="w-3.5 h-3.5" />
+            </button>
           </div>
+
+          {/* 氏名・カルテ番号の編集フォーム */}
+          {editingIdentity && (
+            <div className="mt-1.5 flex items-center gap-2 flex-wrap rounded-lg border border-blue-200 dark:border-blue-800 bg-blue-50/60 dark:bg-blue-950/20 px-2.5 py-2">
+              <label className="text-[11px] font-bold text-slate-600 dark:text-slate-300">お名前</label>
+              <Input
+                type="text"
+                value={nameDraft}
+                onChange={(e) => setNameDraft(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); saveIdentity(); } }}
+                className="h-8 w-40 text-sm"
+                autoFocus
+              />
+              {row.customerId ? (
+                <>
+                  <label className="text-[11px] font-bold text-slate-600 dark:text-slate-300">カルテ番号</label>
+                  <Input
+                    type="text"
+                    value={mrnDraft}
+                    onChange={(e) => setMrnDraft(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); saveIdentity(); } }}
+                    placeholder="例: 1563"
+                    className="h-8 w-24 text-sm tabular-nums"
+                  />
+                </>
+              ) : (
+                <span className="text-[10px] text-slate-400">※患者未紐付けのためカルテ番号はここでは変更できません</span>
+              )}
+              <Button
+                type="button"
+                size="sm"
+                onClick={saveIdentity}
+                disabled={savingIdentity || !nameDraft.trim()}
+                className="h-8 bg-blue-600 hover:bg-blue-700 text-white text-[11px] px-3"
+              >
+                {savingIdentity ? "保存中..." : "保存"}
+              </Button>
+              <button
+                type="button"
+                onClick={() => setEditingIdentity(false)}
+                className="text-[11px] text-slate-400 hover:text-slate-600"
+              >
+                やめる
+              </button>
+            </div>
+          )}
           <div className="flex items-center gap-1 mt-0.5 text-xs text-slate-400 flex-wrap">
             <Clock className="w-3 h-3" />
             {time}
