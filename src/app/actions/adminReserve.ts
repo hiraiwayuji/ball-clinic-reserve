@@ -684,14 +684,15 @@ export async function createManualReservation(formData: FormData) {
     // extraDateTimes（[{date,time}] の JSON）で届く。事故の患者さんのように来院日が
     // バラバラでも、1回の登録でまとめて取れるようにするため。
     // recurringWeeks（毎週N週連続）は各日時から週送りで展開する（後方互換）。
-    // staffId は行ごとに変えられる（日によって担当が違うケース）。空なら1件目と同じ担当。
-    let extraDateTimes: { date: string; time: string; staffId?: string }[] = [];
+    // staffId / courseId は行ごとに変えられる（日によって担当やメニューが違うケース）。
+    // 空なら1件目と同じ担当・同じメニュー。
+    let extraDateTimes: { date: string; time: string; staffId?: string; courseId?: string }[] = [];
     try {
       const raw = (formData.get("extraDateTimes") as string) || "";
       const parsed = raw ? JSON.parse(raw) : [];
       if (Array.isArray(parsed)) {
         extraDateTimes = parsed.filter(
-          (s: unknown): s is { date: string; time: string; staffId?: string } => {
+          (s: unknown): s is { date: string; time: string; staffId?: string; courseId?: string } => {
             const v = s as { date?: unknown; time?: unknown } | null;
             return (
               !!v &&
@@ -709,15 +710,19 @@ export async function createManualReservation(formData: FormData) {
 
     // 同じ日時が二重に入らないよう畳む（1件目と追加分が同じ日時、など）
     const seenSlotKeys = new Set<string>();
-    const baseStarts: { start: Date; staffId: string | null }[] = [];
-    for (const s of [{ date: rawDate, time, staffId: staffId ?? undefined }, ...extraDateTimes]) {
+    const baseStarts: { start: Date; staffId: string | null; courseId: string | null }[] = [];
+    for (const s of [
+      { date: rawDate, time, staffId: staffId ?? undefined, courseId: courseId ?? undefined },
+      ...extraDateTimes,
+    ]) {
       const key = `${s.date}T${s.time}`;
       if (seenSlotKeys.has(key)) continue;
       const d = new Date(`${s.date}T${s.time}:00+09:00`);
       if (Number.isNaN(d.getTime())) continue;
       seenSlotKeys.add(key);
       const rowStaffId = (typeof s.staffId === "string" && s.staffId.trim()) || staffId || null;
-      baseStarts.push({ start: d, staffId: rowStaffId });
+      const rowCourseId = (typeof s.courseId === "string" && s.courseId.trim()) || courseId || null;
+      baseStarts.push({ start: d, staffId: rowStaffId, courseId: rowCourseId });
     }
     if (baseStarts.length === 0) {
       return { success: false, error: "予約日時が正しくありません" };
@@ -726,12 +731,12 @@ export async function createManualReservation(formData: FormData) {
     // 毎週N週ぶんに展開したうえで、時系列に並べる。
     // 並べ替えるのは「初診フラグを一番早い予約に付ける」ため（追加した日の方が先、でも正しく動く）。
     const weeks = Number.isFinite(recurringWeeks) && recurringWeeks > 0 ? recurringWeeks : 1;
-    const allStarts: { start: Date; staffId: string | null }[] = [];
+    const allStarts: { start: Date; staffId: string | null; courseId: string | null }[] = [];
     for (const b of baseStarts) {
       for (let i = 0; i < weeks; i++) {
         const d = new Date(b.start.getTime());
         d.setDate(d.getDate() + i * 7);
-        allStarts.push({ start: d, staffId: b.staffId });
+        allStarts.push({ start: d, staffId: b.staffId, courseId: b.courseId });
       }
     }
     allStarts.sort((a, b) => a.start.getTime() - b.start.getTime());
@@ -769,6 +774,26 @@ export async function createManualReservation(formData: FormData) {
         .in("id", rowStaffIds)
         .eq("clinic_id", clinicId);
       (rows ?? []).forEach((r) => staffNameById.set(r.id as string, r.name as string));
+    }
+
+    // メニューも行ごとに変えられる（1回目は鍼灸、2回目は水素、など）。
+    // clinic_id 指定で引くので、自院にない ID はここで落ちてメニューなしで登録される。
+    const rowCourseIds = Array.from(
+      new Set(allStarts.map((s) => s.courseId).filter((v): v is string => !!v)),
+    );
+    const courseById = new Map<string, { name: string; durationMinutes: number }>();
+    if (rowCourseIds.length > 0) {
+      const { data: rows } = await supabase
+        .from("reservation_courses")
+        .select("id, name, duration_minutes")
+        .in("id", rowCourseIds)
+        .eq("clinic_id", clinicId);
+      (rows ?? []).forEach((r) =>
+        courseById.set(r.id as string, {
+          name: r.name as string,
+          durationMinutes: Number(r.duration_minutes) || durationMinutes,
+        }),
+      );
     }
 
     // 追加メニュー・追加担当（同一予約に複数項目を紐付け）
@@ -812,7 +837,17 @@ export async function createManualReservation(formData: FormData) {
 
     const appointmentsToInsert = allStarts.map((slot, i) => {
       const targetDate = slot.start;
-      const endDate = new Date(targetDate.getTime() + durationMinutes * 60 * 1000);
+      // メニューはこの行のもの（行で指定がなければ1件目と同じメニューが入っている）。
+      // 1件目と違うメニューにした行は、そのメニューの所要時間で終了時刻を決める。
+      // 1件目と同じメニューの行は、フォームで選ばれた所要時間（手で伸ばした分も含む）をそのまま使う。
+      const rowCourse = slot.courseId ? courseById.get(slot.courseId) ?? null : null;
+      const rowCourseExtra = slot.courseId && rowCourse
+        ? { course_id: slot.courseId, course_name: rowCourse.name }
+        : {};
+      const rowDuration = rowCourse && slot.courseId !== courseId
+        ? rowCourse.durationMinutes
+        : durationMinutes;
+      const endDate = new Date(targetDate.getTime() + rowDuration * 60 * 1000);
       const memoBase = `[院内追加] ${symptoms}`.trim();
       const memoWithReport = reassignReport ? `${memoBase} 【${reassignReport}】`.trim() : memoBase;
       const memoText = allStarts.length > 1
@@ -835,7 +870,7 @@ export async function createManualReservation(formData: FormData) {
         status: "confirmed",
         clinic_id: clinicId,
         series_id: seriesId,
-        ...courseExtra,
+        ...rowCourseExtra,
         ...rowStaffExtra,
         ...roomExtra,
         ...additionalCoursesExtra,

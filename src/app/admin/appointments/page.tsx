@@ -99,30 +99,29 @@ export default function AdminWeeklyGridPage() {
     setCurrentDate(today);
     setSelectedDay(today);
     getMyClinicId().then(setClinicId);
-    // 部門（サロン/カフェ）を取得。空の院ではタブを出さない。
-    getClinicSettings().then((s) => setDepartments(s?.departments ?? [])).catch(() => {});
 
-    // 院ごとのデフォルト表示モードを取得。ユーザーが過去に切り替えていれば
-    // localStorage を優先（個人の好みを優先）。
     (async () => {
       try {
-        const personal = typeof window !== "undefined"
-          ? localStorage.getItem("admin_appointments_view")
-          : null;
-        const isValid = (v: string | null): v is "week" | "day" | "month" | "timetable" =>
+        const settings = await getClinicSettings();
+        // 部門（サロン/カフェ）。空の院ではタブを出さない。
+        setDepartments(settings?.departments ?? []);
+
+        const isValid = (v: string | null | undefined): v is "week" | "day" | "month" | "timetable" =>
           v === "week" || v === "day" || v === "month" || v === "timetable";
 
-        if (isValid(personal)) {
-          setViewMode(personal);
-          setViewModeReady(true);
+        // 院の初期表示設定があれば、それを最優先にする。
+        // からだ院のように「予約を開いたら必ずスタッフ別から」という運用があるため、
+        // 個人の localStorage より院の設定を優先する（設定が無い院は今まで通り個人の記憶）。
+        const clinicDefault = settings?.default_appointments_view;
+        if (isValid(clinicDefault)) {
+          setViewMode(clinicDefault);
           return;
         }
 
-        const settings = await getClinicSettings();
-        const clinicDefault = settings?.default_appointments_view;
-        if (isValid(clinicDefault ?? null)) {
-          setViewMode(clinicDefault as "week" | "day" | "month" | "timetable");
-        }
+        const personal = typeof window !== "undefined"
+          ? localStorage.getItem("admin_appointments_view")
+          : null;
+        if (isValid(personal)) setViewMode(personal);
       } catch (e) {
         console.warn("[appointments] failed to load default view mode:", e);
       } finally {
@@ -131,7 +130,7 @@ export default function AdminWeeklyGridPage() {
     })();
   }, []);
 
-  // ユーザーが切り替えたら localStorage に保存（次回も同じビューで開く）
+  // ユーザーが切り替えたら localStorage に保存（院の初期表示設定が無い院では次回も同じビューで開く）
   const handleViewModeChange = (mode: "week" | "day" | "month" | "timetable") => {
     setViewMode(mode);
     if (typeof window !== "undefined") {
@@ -958,10 +957,18 @@ export default function AdminWeeklyGridPage() {
           </div>
         </Card>
 
+        {/* 院の初期表示設定を読み終わるまでは何も描かない。
+            先に週間を描いてからスタッフ別に切り替わると、画面がちらついて見えるため。 */}
+        {!viewModeReady && (
+          <div className="flex-1 flex items-center justify-center">
+            <Loader2 className="h-8 w-8 animate-spin text-blue-500" />
+          </div>
+        )}
+
         {/* タイムテーブルビュー（PC）: スタッフ別の縦軸×時間軸グリッド。
             ダッシュボードと同じ UI（TodayTimelineWidget）を流用。
             内部で日付ナビゲーション・データ取得・Realtime 更新を完結。 */}
-        {viewMode === "timetable" && (
+        {viewModeReady && viewMode === "timetable" && (
           <div className="flex-1 overflow-auto">
             {/* 予約画面のヘッダーに既に「仮予約」ボタンがあるので、ここでは重複表示しない */}
             <TodayTimelineWidget showPendingButton={false} />
@@ -969,7 +976,7 @@ export default function AdminWeeklyGridPage() {
         )}
 
         {/* 日別ビュー（PC）: 日付セレクターバー */}
-        {viewMode === "day" && (
+        {viewModeReady && viewMode === "day" && (
           <div className="shrink-0 flex gap-1.5 overflow-x-auto pb-1 px-1">
             {weekDays.map((date, i) => {
               const dayStr = format(date, "E", { locale: ja });
@@ -998,7 +1005,7 @@ export default function AdminWeeklyGridPage() {
         )}
 
         {/* Monthly grid（月モード）— 件数のみ表示、クリックで日別へ */}
-        {viewMode === "month" && (
+        {viewModeReady && viewMode === "month" && (
           <Card className="flex-1 overflow-auto rounded-t-none border-t bg-slate-50 p-3">
             {loading ? (
               <div className="h-full flex items-center justify-center">
@@ -1080,7 +1087,7 @@ export default function AdminWeeklyGridPage() {
         )}
 
         {/* Weekly grid（週間モード） */}
-        {viewMode === "week" && <Card className="flex-1 overflow-auto rounded-t-none border-t bg-slate-50">
+        {viewModeReady && viewMode === "week" && <Card className="flex-1 overflow-auto rounded-t-none border-t bg-slate-50">
           {loading ? (
             <div className="h-full flex items-center justify-center">
               <Loader2 className="h-8 w-8 animate-spin text-blue-500" />
@@ -1269,7 +1276,7 @@ export default function AdminWeeklyGridPage() {
         </Card>}
 
         {/* 日別リストビュー（日別モード） */}
-        {viewMode === "day" && (
+        {viewModeReady && viewMode === "day" && (
           <Card className="flex-1 overflow-auto rounded-t-none border-t bg-slate-50">
             {loading ? (
               <div className="h-full flex items-center justify-center">

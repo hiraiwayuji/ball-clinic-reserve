@@ -14,7 +14,7 @@ import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
 import { realtimeGuard } from "@/lib/realtime-guard";
 import { getTimelineForDate, type TimelineData, type TimelineAppointment } from "@/app/actions/timeline";
-import { updateCheckinStatus, addAddonToAppointment, getAddonCourseInfo, sendReviewRequest, getReviewRequestConfig, restoreCancelledAppointment, deleteAppointment, setCancelledGhostHidden, getMonthCrossingFirstVisits } from "@/app/actions/adminReserve";
+import { updateCheckinStatus, addAddonToAppointment, getAddonCourseInfo, sendReviewRequest, getReviewRequestConfig, restoreCancelledAppointment, deleteAppointment, setCancelledGhostHidden, getMonthCrossingFirstVisits, updateAppointmentDetails } from "@/app/actions/adminReserve";
 import { cancelKindLabel } from "@/components/admin/CancelledAppointmentDialog";
 import { getStaffSchedulesForDate, upsertStaffScheduleForDate, type StaffDaySchedule } from "@/app/actions/staff-schedule";
 import { getMyRole } from "@/app/actions/auth";
@@ -43,6 +43,26 @@ function fmtTime(iso: string): string {
   const { hour, minute } = jstHourMinute(iso);
   return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
 }
+
+/** 分（0時からの通算） → "HH:MM" */
+function minutesToHm(minuteOfDay: number): string {
+  const h = Math.floor(minuteOfDay / 60);
+  const m = minuteOfDay % 60;
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+}
+
+/** ドラッグで動かした予約の「移動先」。確認ダイアログに出してから実行する。 */
+type MovePlan = {
+  apt: TimelineAppointment;
+  toStaffId: string;
+  toStaffName: string;
+  fromStaffName: string;
+  /** 別の先生の行に落とした＝担当を付け替える */
+  staffChanged: boolean;
+  fromTimeLabel: string;
+  toTimeLabel: string;
+  durationMinutes: number;
+};
 
 function statusColor(status: string, checkin: string | null, isFirstVisit: boolean): string {
   // キャンセル済みは薄いゴースト表示（枠は空き扱い。誰がキャンセルしたか一目でわかるように残す）
@@ -93,6 +113,16 @@ export default function TodayTimelineWidget({
 
   // 受付・会計ボタンの非同期処理ロック
   const [actionLoading, setActionLoading] = useState(false);
+
+  // ── 予約バーのドラッグ＆ドロップ移動 ──
+  // ドラッグ中の予約ID（このあいだは全バーを pointer-events-none にして、
+  // バーの下に隠れているセルにも落とせるようにする）
+  const [draggingAptId, setDraggingAptId] = useState<string | null>(null);
+  // ドラッグが今どのセルの上にあるか（ハイライト用）
+  const [dropTarget, setDropTarget] = useState<{ staffId: string; minute: number } | null>(null);
+  // 落とした先の確認ダイアログ（誤ドラッグでそのまま動くと事故になるため一度確認する）
+  const [movePlan, setMovePlan] = useState<MovePlan | null>(null);
+  const [moving, setMoving] = useState(false);
 
   // スタッフ勤務スケジュール
   const [staffSchedules, setStaffSchedules] = useState<StaffDaySchedule[]>([]);
@@ -277,6 +307,81 @@ export default function TodayTimelineWidget({
 
   // 担当未設定の予約を表示するデフォルト行（先頭スタッフ＝sort_order 最小のメイン担当）
   const defaultStaffId = data?.staff[0]?.id ?? null;
+
+  // 複数担当の予約は行ごとに時間を分割して描いているので、1本だけ動かすと辻褄が合わない。
+  // キャンセル済みも動かす意味がないので、どちらもドラッグ不可にする。
+  const canDrag = (a: TimelineAppointment): boolean =>
+    a.status !== "cancelled" && (a.additional_staff?.length ?? 0) === 0;
+
+  // セルに落とした → 確認ダイアログ用の移動プランを作る
+  const handleDropOnCell = (toStaffId: string, toMinute: number) => {
+    setDropTarget(null);
+    const aptId = draggingAptId;
+    setDraggingAptId(null);
+    if (!aptId || !data) return;
+
+    const apt = data.appointments.find((a) => a.id === aptId);
+    if (!apt || !canDrag(apt)) return;
+
+    const fromMinute = minuteOfDayJst(apt.start_time);
+    // 担当未設定の予約は先頭スタッフの行に描いているので、その行を「今いる行」とみなす
+    const fromLaneId = apt.staff_id ?? defaultStaffId;
+    if (toStaffId === fromLaneId && toMinute === fromMinute) return; // 動いていない
+
+    const durationMinutes = apt.end_time
+      ? Math.max(
+          Math.round((new Date(apt.end_time).getTime() - new Date(apt.start_time).getTime()) / 60000),
+          data.slotMinutes,
+        )
+      : data.slotMinutes;
+
+    setMovePlan({
+      apt,
+      toStaffId,
+      toStaffName: staffRows.find((s) => s.id === toStaffId)?.name ?? "担当",
+      fromStaffName: apt.staff_name ?? staffRows.find((s) => s.id === fromLaneId)?.name ?? "担当未設定",
+      staffChanged: toStaffId !== fromLaneId,
+      fromTimeLabel: fmtTime(apt.start_time),
+      toTimeLabel: minutesToHm(toMinute),
+      durationMinutes,
+    });
+  };
+
+  // 確認ダイアログの「移動する」
+  const runMove = async () => {
+    if (!movePlan || !date) return;
+    const { apt, toStaffId, toStaffName, staffChanged, toTimeLabel, durationMinutes } = movePlan;
+    setMoving(true);
+    try {
+      const res = await updateAppointmentDetails(
+        apt.id,
+        format(date, "yyyy-MM-dd"),
+        toTimeLabel,
+        apt.memo ?? "",
+        apt.is_first_visit,
+        durationMinutes,
+        // 同じ先生の行のなかで時間だけ動かした場合は担当に触らない
+        // （担当未設定の予約を勝手に先頭スタッフの担当にしてしまわないため）
+        staffChanged ? { staffId: toStaffId } : undefined,
+      );
+      if (res.success) {
+        toast.success(
+          staffChanged
+            ? `${apt.customer_name ?? "患者"}様を ${toStaffName}・${toTimeLabel} に移しました`
+            : `${apt.customer_name ?? "患者"}様を ${toTimeLabel} に移しました`,
+        );
+        setMovePlan(null);
+        fetchData(date);
+      } else {
+        // 「その先生はその時間に別の予約が入っています」等はここに出る
+        toast.error(res.error ?? "移動に失敗しました");
+      }
+    } catch {
+      toast.error("通信エラーが発生しました");
+    } finally {
+      setMoving(false);
+    }
+  };
 
   // 時間軸の刻みリスト（営業終了時刻のラベルも末尾に含める）
   const timeMarks = useMemo(() => {
@@ -705,22 +810,40 @@ export default function TodayTimelineWidget({
                         </div>
                       )}
                     </div>
-                    {/* グリッドセル（クリックで新規予約） */}
-                    {timeMarks.map((m, i) => (
-                      <button
-                        key={i}
-                        type="button"
-                        onClick={() => handleEmptyCellClick(s.id, m.minute)}
-                        aria-label={`${s.name} ${m.label} に新規予約を追加`}
-                        title={`${s.name} ${m.label} ・クリックで新規予約`}
-                        style={{ gridRow: "1 / -1" }}
-                        className={`h-full hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors cursor-pointer ${
-                          m.label.includes(":00")
-                            ? "border-l border-slate-300 dark:border-slate-600"
-                            : "border-l border-slate-100 dark:border-slate-800"
-                        }`}
-                      />
-                    ))}
+                    {/* グリッドセル（クリックで新規予約 / 予約バーのドロップ先） */}
+                    {timeMarks.map((m, i) => {
+                      const isDropHere =
+                        dropTarget?.staffId === s.id && dropTarget?.minute === m.minute;
+                      return (
+                        <button
+                          key={i}
+                          type="button"
+                          onClick={() => handleEmptyCellClick(s.id, m.minute)}
+                          onDragOver={(e) => {
+                            if (!draggingAptId) return;
+                            e.preventDefault(); // これを呼ばないとドロップできない
+                            e.dataTransfer.dropEffect = "move";
+                            if (!isDropHere) setDropTarget({ staffId: s.id, minute: m.minute });
+                          }}
+                          onDrop={(e) => {
+                            e.preventDefault();
+                            handleDropOnCell(s.id, m.minute);
+                          }}
+                          aria-label={`${s.name} ${m.label} に新規予約を追加`}
+                          title={`${s.name} ${m.label} ・クリックで新規予約`}
+                          style={{ gridRow: "1 / -1" }}
+                          className={`h-full transition-colors cursor-pointer ${
+                            isDropHere
+                              ? "bg-blue-200 dark:bg-blue-800/60 ring-1 ring-inset ring-blue-500"
+                              : "hover:bg-blue-50 dark:hover:bg-blue-900/20"
+                          } ${
+                            m.label.includes(":00")
+                              ? "border-l border-slate-300 dark:border-slate-600"
+                              : "border-l border-slate-100 dark:border-slate-800"
+                          }`}
+                        />
+                      );
+                    })}
                     {/* 予約バー（absolute 配置） */}
                     {apts.map((a) => {
                       // 複数スタッフ予約は _displayStart/_displayEnd でずらした時刻を使う
@@ -752,12 +875,26 @@ export default function TodayTimelineWidget({
                       const isCancelled = a.status === "cancelled";
                       const displayStartLabel = fmtTime(dispA._displayStart ?? a.start_time);
                       const hasMultiStaff = (dispA._displayStart !== undefined);
+                      const draggable = canDrag(a);
                       return (
                         <button
                           key={`${a.id}-${s.id}`}
                           type="button"
                           onClick={() => setSelectedApt(a)}
-                          className={`text-[11px] leading-tight rounded border px-1 py-0.5 my-0.5 text-left truncate hover:ring-2 hover:ring-blue-400 transition-all ${cls}`}
+                          draggable={draggable}
+                          onDragStart={(e) => {
+                            e.dataTransfer.effectAllowed = "move";
+                            // Firefox はデータをセットしないとドラッグが始まらない
+                            e.dataTransfer.setData("text/plain", a.id);
+                            setDraggingAptId(a.id);
+                          }}
+                          onDragEnd={() => { setDraggingAptId(null); setDropTarget(null); }}
+                          className={`text-[11px] leading-tight rounded border px-1 py-0.5 my-0.5 text-left truncate hover:ring-2 hover:ring-blue-400 transition-all ${cls} ${
+                            draggable ? "cursor-grab active:cursor-grabbing" : ""
+                          } ${
+                            // ドラッグ中はバーを「透過」させ、下に隠れているセルにも落とせるようにする
+                            draggingAptId ? "pointer-events-none" : ""
+                          } ${draggingAptId === a.id ? "opacity-40" : ""}`}
                           style={{
                             gridColumn: `${gridColStart} / span ${colSpan}`,
                             gridRow: (laneOf.get(`${a.id}-${s.id}`) ?? laneOf.get(a.id) ?? 0) + 1,
@@ -767,7 +904,7 @@ export default function TodayTimelineWidget({
                           }}
                           title={isCancelled
                             ? `${displayStartLabel} ${a.customer_name ?? ""} ${cancelKindLabel(a.cancel_kind, a.no_show)}（タップで復活できます）`
-                            : `${displayStartLabel} ${a.customer_name ?? ""}${a.medical_record_number ? ` (No.${a.medical_record_number})` : ""} ${a.course_name ?? ""}${hasMultiStaff ? "（時間分割表示）" : ""}`}
+                            : `${displayStartLabel} ${a.customer_name ?? ""}${a.medical_record_number ? ` (No.${a.medical_record_number})` : ""} ${a.course_name ?? ""}${hasMultiStaff ? "（時間分割表示・ドラッグ移動はできません）" : "・ドラッグで時間や先生を変えられます"}`}
                         >
                           <div className={`truncate font-semibold ${isCancelled ? "line-through" : ""}`}>
                             {!a.staff_id && !isCancelled && (
@@ -813,6 +950,85 @@ export default function TodayTimelineWidget({
           </div>
         )}
       </CardContent>
+
+      {/* ドラッグで移動したときの確認 */}
+      {movePlan && (
+        <div
+          className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4"
+          onClick={() => !moving && setMovePlan(null)}
+        >
+          <div
+            className="bg-white dark:bg-slate-900 rounded-xl shadow-xl max-w-sm w-full p-5 space-y-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="text-base font-bold text-slate-900 dark:text-slate-100">
+              この予約を移しますか？
+            </div>
+            <div className="space-y-2 text-sm">
+              <div className="font-bold text-slate-800 dark:text-slate-100">
+                {movePlan.apt.customer_name ?? "(顧客名なし)"}
+                <span className="text-slate-400 font-normal">様</span>
+                {movePlan.apt.course_name && (
+                  <span className="ml-2 text-xs font-normal text-slate-500">{movePlan.apt.course_name}</span>
+                )}
+              </div>
+              <div className="rounded-lg bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 px-3 py-2 space-y-1">
+                <div className="flex items-center gap-2">
+                  <span className="text-slate-500 text-xs w-10 shrink-0">時間</span>
+                  <span className="tabular-nums text-slate-400 line-through">{movePlan.fromTimeLabel}</span>
+                  <span className="text-slate-400">→</span>
+                  <span className="tabular-nums font-bold text-blue-700 dark:text-blue-300">
+                    {movePlan.toTimeLabel}
+                  </span>
+                  <span className="text-[11px] text-slate-400">（{movePlan.durationMinutes}分）</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-slate-500 text-xs w-10 shrink-0">担当</span>
+                  {movePlan.staffChanged ? (
+                    <>
+                      <span className="text-slate-400 line-through">{movePlan.fromStaffName}</span>
+                      <span className="text-slate-400">→</span>
+                      <span className="font-bold text-blue-700 dark:text-blue-300">{movePlan.toStaffName}</span>
+                    </>
+                  ) : (
+                    <span className="text-slate-600 dark:text-slate-300">
+                      {movePlan.fromStaffName}
+                      <span className="ml-1 text-[11px] text-slate-400">（変わりません）</span>
+                    </span>
+                  )}
+                </div>
+              </div>
+              {movePlan.apt.status === "waiting" && (
+                <p className="text-[11px] text-amber-700 dark:text-amber-300">
+                  この予約はキャンセル待ちです。
+                </p>
+              )}
+              <p className="text-[11px] text-slate-500">
+                患者様へのLINEは自動では送られません。必要なときは予約変更の画面からお送りください。
+              </p>
+            </div>
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setMovePlan(null)}
+                disabled={moving}
+                className="flex-1"
+              >
+                やめる
+              </Button>
+              <Button
+                type="button"
+                onClick={runMove}
+                disabled={moving}
+                className="flex-1 bg-blue-600 hover:bg-blue-700 text-white"
+              >
+                {moving ? "移動中…" : "移動する"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 予約詳細モーダル（簡易） */}
       {selectedApt && (

@@ -66,11 +66,11 @@ export function AddAppointmentDialog({
   const [time, setTime] = useState<string>(defaultTime || "");
   const [visitType, setVisitType] = useState<string>("new");
   const [duration, setDuration] = useState<string>(String(slotMinutes));
-  // まとめ予約：1件目（上の予約日/時間）に加えて、同じ内容で押さえる追加の日時。
+  // まとめ予約：1件目（上の予約日/時間）に加えて、押さえる追加の日時。
   // 事故の患者さんなど来院日がバラバラなケースを、1回の登録でまとめて取れるようにする。
-  // staffId が "" の行は1件目と同じ担当（日によって担当が違うときだけ選び直す）。
+  // staffId / courseId が "" の行は1件目と同じ（日によって担当やメニューが違うときだけ選び直す）。
   const [extraSlots, setExtraSlots] = useState<
-    { key: string; date: Date | undefined; time: string; staffId: string }[]
+    { key: string; date: Date | undefined; time: string; staffId: string; courseId: string }[]
   >([]);
   // 「日付×担当」ごとの時間枠（そのレーンの埋まり具合つき）。key = "yyyy-MM-dd|staffId"
   const [daySlots, setDaySlots] = useState<Record<string, AdminDaySlot[]>>({});
@@ -264,7 +264,9 @@ export function AddAppointmentDialog({
 
   // 追加行の初期値は「直前の日時の1週間後・同じ時刻」。毎週通う人はそのまま押していける。
   const addExtraSlot = () => {
-    const last = extraSlots.length > 0 ? extraSlots[extraSlots.length - 1] : { date, time, staffId: "" };
+    const last = extraSlots.length > 0
+      ? extraSlots[extraSlots.length - 1]
+      : { date, time, staffId: "", courseId: "" };
     const from = last.date ?? date;
     setExtraSlots((v) => [
       ...v,
@@ -273,6 +275,7 @@ export function AddAppointmentDialog({
         date: from ? addDays(from, 7) : undefined,
         time: last.time || time,
         staffId: last.staffId,
+        courseId: last.courseId,
       },
     ]);
   };
@@ -283,10 +286,13 @@ export function AddAppointmentDialog({
       toast.error("先に1件目の日付と時間を選んでください");
       return;
     }
-    const last = extraSlots.length > 0 ? extraSlots[extraSlots.length - 1] : { date, time, staffId: "" };
+    const last = extraSlots.length > 0
+      ? extraSlots[extraSlots.length - 1]
+      : { date, time, staffId: "", courseId: "" };
     const from = last.date ?? date;
     const t = last.time || time;
     const sid = last.staffId;
+    const cid = last.courseId;
     setExtraSlots((v) => [
       ...v,
       ...Array.from({ length: weeks }, (_, i) => ({
@@ -294,13 +300,14 @@ export function AddAppointmentDialog({
         date: addDays(from, (i + 1) * 7),
         time: t,
         staffId: sid,
+        courseId: cid,
       })),
     ]);
   };
 
   const updateExtraSlot = (
     key: string,
-    patch: Partial<{ date: Date | undefined; time: string; staffId: string }>,
+    patch: Partial<{ date: Date | undefined; time: string; staffId: string; courseId: string }>,
   ) => setExtraSlots((v) => v.map((s) => (s.key === key ? { ...s, ...patch } : s)));
   const removeExtraSlot = (key: string) =>
     setExtraSlots((v) => v.filter((s) => s.key !== key));
@@ -384,6 +391,8 @@ export function AddAppointmentDialog({
   // 施術担当に出すスタッフ（受付助手＝show_in_timeline=false は除く）
   const treatmentStaff = staffList.filter((s) => s.is_active && s.show_in_timeline !== false);
   const commonStaffName = staffList.find((s) => s.id === staffId)?.name ?? null;
+  // まとめ予約の2件目以降で「1件目と同じ」と出すためのメニュー名
+  const commonCourseName = courses.find((c) => c.id === courseId)?.name ?? null;
 
   // ── ダブル施術（さみ整体 ↔ ボール担当を同時に） ──
   const samiStaff = staffList.find((s) => s.name === "さみ");
@@ -529,8 +538,8 @@ export function AddAppointmentDialog({
     formData.append("date", format(date, "yyyy-MM-dd"));
     formData.append("time", time);
     formData.append("visitType", visitType);
-    // まとめ予約：2件目以降の日時。サーバー側で1件目と束ねて同じ内容で登録する。
-    // staffId が空の行は1件目と同じ担当になる（サーバー側で補完）。
+    // まとめ予約：2件目以降の日時。サーバー側で1件目と束ねて登録する。
+    // staffId / courseId が空の行は1件目と同じものになる（サーバー側で補完）。
     formData.set(
       "extraDateTimes",
       JSON.stringify(
@@ -540,6 +549,7 @@ export function AddAppointmentDialog({
             date: format(s.date as Date, "yyyy-MM-dd"),
             time: s.time,
             staffId: s.staffId || "",
+            courseId: s.courseId || "",
           })),
       ),
     );
@@ -1257,6 +1267,9 @@ export function AddAppointmentDialog({
                   {date && time ? (
                     <span className="font-bold text-slate-800">
                       {format(date, "M/d（E）", { locale: ja })} {time}
+                      {commonCourseName && (
+                        <span className="font-normal text-slate-500">／{commonCourseName}</span>
+                      )}
                       {commonStaffName && (
                         <span className="font-normal text-slate-500">／{commonStaffName}</span>
                       )}
@@ -1308,6 +1321,27 @@ export function AddAppointmentDialog({
                       </button>
                     </div>
 
+                    {/* 日によってメニューが違うときだけ選び直す（未指定なら1件目と同じメニュー） */}
+                    {courses.length > 0 && (
+                      <div className="flex items-center gap-2">
+                        <span className="w-10 shrink-0 text-[11px] text-slate-400">メニュー</span>
+                        <select
+                          value={s.courseId}
+                          onChange={(e) => updateExtraSlot(s.key, { courseId: e.target.value })}
+                          className="flex h-9 flex-1 min-w-0 rounded-md border border-input bg-white px-2 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                        >
+                          <option value="">
+                            1件目と同じ{commonCourseName ? `（${commonCourseName}）` : "（指定なし）"}
+                          </option>
+                          {courses.filter((c) => c.is_active).map((c) => (
+                            <option key={c.id} value={c.id}>
+                              {c.name}（{c.duration_minutes}分{c.price != null ? ` / ¥${c.price.toLocaleString()}` : ""}）
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+
                     {/* 日によって担当が違うときだけ選び直す（未指定なら1件目と同じ担当） */}
                     {treatmentStaff.length > 0 && (
                       <div className="flex items-center gap-2">
@@ -1325,6 +1359,14 @@ export function AddAppointmentDialog({
                           ))}
                         </select>
                       </div>
+                    )}
+
+                    {/* 1件目と違うメニューにすると、そのメニューの所要時間で登録される */}
+                    {s.courseId && s.courseId !== courseId && (
+                      <p className="text-[10px] text-slate-400 pl-12">
+                        この回は
+                        {courses.find((c) => c.id === s.courseId)?.duration_minutes ?? 0}分で登録します。
+                      </p>
                     )}
                   </div>
                 ))}
