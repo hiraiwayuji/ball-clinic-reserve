@@ -167,12 +167,12 @@ export async function getTodayPendingSales(dateStr?: string): Promise<{ success:
         .map((a) => a.course_id ?? null)
         .filter((id): id is string => !!id)
     ));
-    type CourseMasterRow = { id: string; name: string; price: number | null; first_visit_price: number | null; free_with_jihi: boolean | null };
+    type CourseMasterRow = { id: string; name: string; price: number | null; first_visit_price: number | null; free_with_jihi: boolean | null; exclude_from_sales: boolean | null };
     let courseMaster: Map<string, CourseMasterRow> = new Map();
     if (courseIds.length > 0) {
       const { data: courseRows } = await supabase
         .from("reservation_courses")
-        .select("id, name, price, first_visit_price, free_with_jihi")
+        .select("id, name, price, first_visit_price, free_with_jihi, exclude_from_sales")
         .eq("clinic_id", clinicId)
         .in("id", courseIds);
       courseMaster = new Map((courseRows ?? []).map((c) => [c.id as string, c as CourseMasterRow]));
@@ -247,6 +247,9 @@ export async function getTodayPendingSales(dateStr?: string): Promise<{ success:
     }>) {
       const customerName = getAppointmentCustomerName(apt.customers);
       if (!customerName) continue;
+      // さみ整体など「売上に出さない」コースは一覧に出さない（お金は外部の施術者へ渡すため）。
+      // enteredCounts の消費より前に飛ばす＝既存売上との突合対象にもしない。
+      if (apt.course_id && courseMaster.get(apt.course_id)?.exclude_from_sales === true) continue;
       const custObj = Array.isArray(apt.customers) ? apt.customers[0] : apt.customers;
       const medicalRecordNumber = custObj?.medical_record_number ?? null;
       const custBirthDate = custObj?.birth_date ?? null;

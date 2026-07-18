@@ -21,6 +21,9 @@ export type ReservationCourse = {
    *  true だと、同じ患者が同日に実費施術を受けていて保険施術が無いとき、
    *  一括売上入力で「¥0（無料）」を自動提案する（ボールの水素：保険の人だけ¥500）。 */
   free_with_jihi?: boolean;
+  /** 売上に計上しない（お金が外部の施術者に渡るメニュー）。
+   *  true だと一括売上入力の一覧に出さない（記帳しない）。ボールのさみ整体用。 */
+  exclude_from_sales?: boolean;
   description: string | null;
   is_active: boolean;
   sort_order: number;
@@ -272,6 +275,10 @@ export async function saveCourse(course: Partial<ReservationCourse> & { name: st
   // 実費とセットなら無料（水素）。undefined は触らない（部分更新のフラグ消失を防ぐ）。
   if (course.free_with_jihi !== undefined) {
     payload.free_with_jihi = course.free_with_jihi;
+  }
+  // 売上に出さない（さみ整体）。undefined は触らない。
+  if (course.exclude_from_sales !== undefined) {
+    payload.exclude_from_sales = course.exclude_from_sales;
   }
 
   if (course.id) {

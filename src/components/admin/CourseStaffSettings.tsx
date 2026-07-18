@@ -234,6 +234,7 @@ function CourseRow({
   const [priceNote, setPriceNote] = useState(course.price_note ?? "");
   const [isBookableAddon, setIsBookableAddon] = useState(course.is_bookable_addon ?? false);
   const [freeWithJihi, setFreeWithJihi] = useState(course.free_with_jihi ?? false);
+  const [excludeFromSales, setExcludeFromSales] = useState(course.exclude_from_sales ?? false);
   const [badgeLabel, setBadgeLabel] = useState(course.badge_label ?? "");
   const [sortOrder, setSortOrder] = useState((course.sort_order ?? 0).toString());
   const [category, setCategory] = useState<"jusei" | "shinkyu" | "seitai" | "">(
@@ -263,6 +264,7 @@ function CourseRow({
       price_note: priceNote.trim() || null,
       is_bookable_addon: isBookableAddon,
       free_with_jihi: freeWithJihi,
+      exclude_from_sales: excludeFromSales,
       badge_label: badgeLabel.trim() || null,
       category: category || null,
     });
@@ -389,6 +391,20 @@ function CourseRow({
             <span className="font-bold">実費施術とセットのときは無料にする（保険施術のときは通常料金）</span>
             <span className="block text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
               ONにすると、その日に実費施術（部分施術・トレーニング・小中高実費 等）を受けた患者さんは、一括売上入力でこのメニューが自動で「¥0（無料）」になります。保険施術の人は通常料金のまま。受付で「未来院」にせず、無料の記録だけ残せます（ボールの水素用）。
+            </span>
+          </span>
+        </label>
+        <label className="flex items-start gap-2 text-sm text-slate-700 dark:text-slate-200 cursor-pointer border border-emerald-200 dark:border-emerald-800 bg-emerald-50/50 dark:bg-emerald-950/30 rounded-lg p-2.5">
+          <input
+            type="checkbox"
+            checked={excludeFromSales}
+            onChange={e => setExcludeFromSales(e.target.checked)}
+            className="w-4 h-4 accent-emerald-600 mt-0.5"
+          />
+          <span>
+            <span className="font-bold">売上に計上しない（お金が外部の施術者に渡るメニュー）</span>
+            <span className="block text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+              ONにすると、このメニューは一括売上入力の一覧に出なくなります（記帳しません）。お金を施術者にそのまま渡しているメニュー用（ボールのさみ整体：ダブル施術で追加された分も単体予約も、院の売上には入れません）。
             </span>
           </span>
         </label>
