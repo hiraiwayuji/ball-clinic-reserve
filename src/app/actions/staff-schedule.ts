@@ -991,24 +991,49 @@ export type StaffDaySchedule = {
   isOff: boolean;
 };
 
-export async function getStaffSchedulesForDate(
-  dateStr: string,
-): Promise<{ success: boolean; schedules?: StaffDaySchedule[]; error?: string }> {
+/**
+ * 複数日ぶんのスタッフ勤務状況をまとめて取得する。
+ *
+ * 週表示のタイムテーブルが1日ずつ問い合わせると認証＋クエリが7往復になるため、
+ * スタッフ・override・週次勤務を一度に引いて日ごとに組み立てる。
+ * 1日ぶんが欲しいときは getStaffSchedulesForDate（下のラッパー）を使う。
+ */
+export async function getStaffSchedulesForDates(
+  dateStrs: string[],
+): Promise<{ success: boolean; byDate?: Record<string, StaffDaySchedule[]>; error?: string }> {
   const auth = await checkAdminAuth();
   const sb = getServiceClient();
   if (!sb) return { success: false, error: "サーバー設定エラー" };
 
-  // 全スタッフを取得（show_in_timeline は reservation_staff の列）
-  const { data: staffData, error: staffError } = await sb
-    .from("reservation_staff")
-    .select("id, name, role, display_color, show_in_timeline")
-    .eq("clinic_id", auth.clinicId)
-    .eq("is_active", true)
-    .order("sort_order", { ascending: true });
+  const dates = [...new Set(dateStrs)].sort();
+  if (dates.length === 0) return { success: true, byDate: {} };
 
-  if (staffError) return { success: false, error: staffError.message };
+  // 曜日: 0=日、6=土
+  const dayOfWeekOf = (d: string) => new Date(d).getDay();
+  const dayOfWeeks = [...new Set(dates.map(dayOfWeekOf))];
 
-  const staffList = (staffData ?? []) as {
+  const [staffRes, overrideRes, weeklyRes] = await Promise.all([
+    // 全スタッフを取得（show_in_timeline は reservation_staff の列）
+    sb.from("reservation_staff")
+      .select("id, name, role, display_color, show_in_timeline")
+      .eq("clinic_id", auth.clinicId)
+      .eq("is_active", true)
+      .order("sort_order", { ascending: true }),
+    // 期間内の override を一括取得
+    sb.from("staff_working_overrides")
+      .select("date, staff_id, start_time, end_time, kind")
+      .eq("clinic_id", auth.clinicId)
+      .in("date", dates),
+    // 対象曜日の週次勤務時間を一括取得（休憩時間も含む）
+    sb.from("staff_working_hours")
+      .select("day_of_week, staff_id, start_time, end_time, break_start, break_end")
+      .eq("clinic_id", auth.clinicId)
+      .in("day_of_week", dayOfWeeks),
+  ]);
+
+  if (staffRes.error) return { success: false, error: staffRes.error.message };
+
+  const staffList = (staffRes.data ?? []) as {
     id: string;
     name: string;
     role: string | null;
@@ -1016,42 +1041,54 @@ export async function getStaffSchedulesForDate(
     show_in_timeline: boolean | null;
   }[];
 
-  // その日の override を一括取得
-  const { data: overrideData } = await sb
-    .from("staff_working_overrides")
-    .select("staff_id, start_time, end_time, kind")
-    .eq("clinic_id", auth.clinicId)
-    .eq("date", dateStr);
-
-  const overrideMap = new Map<string, { start_time: string | null; end_time: string | null; kind: string }>();
-  for (const o of (overrideData ?? []) as any[]) {
-    overrideMap.set(o.staff_id, { start_time: o.start_time, end_time: o.end_time, kind: o.kind });
+  // date → staff_id → override
+  const overridesByDate = new Map<string, Map<string, { start_time: string | null; end_time: string | null; kind: string }>>();
+  for (const o of (overrideRes.data ?? []) as any[]) {
+    // date が timestamptz 等で返ってきても "yyyy-MM-dd" に揃える
+    const key = String(o.date).slice(0, 10);
+    if (!overridesByDate.has(key)) overridesByDate.set(key, new Map());
+    overridesByDate.get(key)!.set(o.staff_id, { start_time: o.start_time, end_time: o.end_time, kind: o.kind });
   }
 
-  // 曜日: 0=日、6=土
-  const dayOfWeek = new Date(dateStr).getDay();
-
-  // その曜日の週次勤務時間を一括取得（休憩時間も含む）
-  const { data: weeklyData } = await sb
-    .from("staff_working_hours")
-    .select("staff_id, start_time, end_time, break_start, break_end")
-    .eq("clinic_id", auth.clinicId)
-    .eq("day_of_week", dayOfWeek);
-
-  const weeklyMap = new Map<string, { start_time: string; end_time: string; break_start: string | null; break_end: string | null }>();
-  for (const w of (weeklyData ?? []) as any[]) {
-    weeklyMap.set(w.staff_id, { start_time: w.start_time, end_time: w.end_time, break_start: w.break_start ?? null, break_end: w.break_end ?? null });
+  // day_of_week → staff_id → 週次勤務
+  const weeklyByDow = new Map<number, Map<string, { start_time: string; end_time: string; break_start: string | null; break_end: string | null }>>();
+  for (const w of (weeklyRes.data ?? []) as any[]) {
+    const dow = Number(w.day_of_week);
+    if (!weeklyByDow.has(dow)) weeklyByDow.set(dow, new Map());
+    weeklyByDow.get(dow)!.set(w.staff_id, {
+      start_time: w.start_time,
+      end_time: w.end_time,
+      break_start: w.break_start ?? null,
+      break_end: w.break_end ?? null,
+    });
   }
 
-  // 休憩オーバーライド（kind="break"）を別途取得
+  const byDate: Record<string, StaffDaySchedule[]> = {};
+  for (const dateStr of dates) {
+    byDate[dateStr] = buildSchedulesForDay(
+      staffList,
+      overridesByDate.get(dateStr) ?? new Map(),
+      weeklyByDow.get(dayOfWeekOf(dateStr)) ?? new Map(),
+    );
+  }
+  return { success: true, byDate };
+}
+
+/** その日の override と週次勤務から、スタッフごとの勤務状況を組み立てる（優先: override > weekly > なし） */
+function buildSchedulesForDay(
+  staffList: { id: string; name: string; role: string | null; display_color: string | null; show_in_timeline: boolean | null }[],
+  overrideMap: Map<string, { start_time: string | null; end_time: string | null; kind: string }>,
+  weeklyMap: Map<string, { start_time: string; end_time: string; break_start: string | null; break_end: string | null }>,
+): StaffDaySchedule[] {
+  // 休憩オーバーライド（kind="break"）は勤務時間の override とは別枠で効かせる
   const breakOverrideMap = new Map<string, { start_time: string; end_time: string }>();
-  for (const o of (overrideData ?? []) as any[]) {
+  for (const [staffId, o] of overrideMap) {
     if (o.kind === "break" && o.start_time && o.end_time) {
-      breakOverrideMap.set(o.staff_id, { start_time: o.start_time, end_time: o.end_time });
+      breakOverrideMap.set(staffId, { start_time: o.start_time, end_time: o.end_time });
     }
   }
 
-  const schedules: StaffDaySchedule[] = staffList.map((s) => {
+  return staffList.map((s) => {
     // 休憩: breakOverride > weeklyDefault
     const breakOverride = breakOverrideMap.get(s.id);
     const weeklyBreak = weeklyMap.get(s.id);
@@ -1109,8 +1146,15 @@ export async function getStaffSchedulesForDate(
       isOff: false,
     };
   });
+}
 
-  return { success: true, schedules };
+/** 1日ぶんのスタッフ勤務状況（中身は getStaffSchedulesForDates と同じロジック） */
+export async function getStaffSchedulesForDate(
+  dateStr: string,
+): Promise<{ success: boolean; schedules?: StaffDaySchedule[]; error?: string }> {
+  const res = await getStaffSchedulesForDates([dateStr]);
+  if (!res.success) return { success: false, error: res.error };
+  return { success: true, schedules: res.byDate?.[dateStr] ?? [] };
 }
 
 export async function upsertStaffScheduleForDate(

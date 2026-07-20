@@ -158,7 +158,7 @@ export default function AdminWeeklyGridPage() {
         // 入れ忘れとキャンセルを区別できるようにするため）。件数カウントからは除外する。
         const { data: aptData } = await supabase
           .from("appointments")
-          .select(`id, start_time, end_time, memo, is_first_visit, status, cancel_kind, no_show, cancel_hidden, customer_id, series_id, clinic_id, course_id, course_name, staff_id, staff_name, room_id, room_name, department, party_size, customers(name, phone, medical_record_number, birth_date)`)
+          .select(`id, start_time, end_time, memo, is_first_visit, status, cancel_kind, no_show, cancel_hidden, customer_id, series_id, clinic_id, course_id, course_name, staff_id, staff_name, room_id, room_name, additional_courses, additional_staff, department, party_size, customers(name, phone, medical_record_number, birth_date)`)
           .eq("clinic_id", clinicId)
           .gte("start_time", weekStart.toISOString())
           .lt("start_time", weekEnd.toISOString());

@@ -144,10 +144,8 @@ export function AddAppointmentDialog({
       if (defaultTime) setTime(defaultTime);
       if (defaultStaffId) setStaffId(defaultStaffId);
       if (defaultCourseId) {
+        // 所要時間はメニュー合計から自動で入る（下の useEffect）
         setCourseId(defaultCourseId);
-        // 既存コースの duration を反映
-        const c = courses.find((c) => c.id === defaultCourseId);
-        if (c) setDuration(String(c.duration_minutes));
       } else {
         setDuration(String(slotMinutes));
       }
@@ -205,10 +203,7 @@ export function AddAppointmentDialog({
   useEffect(() => {
     if (open && defaultCourseId) {
       const c = courses.find((c) => c.id === defaultCourseId);
-      if (c) {
-        setCourseId(defaultCourseId);
-        setDuration(String(c.duration_minutes));
-      }
+      if (c) setCourseId(defaultCourseId);
     }
   }, [open, defaultCourseId, courses]);
 
@@ -223,10 +218,7 @@ export function AddAppointmentDialog({
       // マスタ未ロード時は c が見つからない → courses ロード後に再実行される。
       // 廃止済み（is_active=false）コースはプルダウンに無いのでセットしない。
       const c = courses.find((c) => c.id === p.lastCourseId);
-      if (c && c.is_active) {
-        setCourseId(p.lastCourseId);
-        setDuration(String(c.duration_minutes));
-      }
+      if (c && c.is_active) setCourseId(p.lastCourseId);
     }
     if (p.lastStaffId && !staffId) {
       setStaffId(p.lastStaffId);
@@ -234,14 +226,27 @@ export function AddAppointmentDialog({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, selectedPatient, courses, staffList]);
 
-  // コース選択時に所要時間も連動して更新
-  const handleCourseChange = (id: string) => {
-    setCourseId(id);
-    if (id) {
-      const c = courses.find(c => c.id === id);
-      if (c) setDuration(String(c.duration_minutes));
-    }
-  };
+  const handleCourseChange = (id: string) => setCourseId(id);
+
+  // 選んでいるメニューの合計所要時間（メイン＋追加メニュー）。
+  // 追加メニューは同じ予約に連続で入るので、その分だけ枠を長く取る必要がある
+  // （保険施術20分＋鍼灸1部位20分 → 40分）。1つも選んでいないときは null。
+  const selectedCoursesDuration = (() => {
+    const ids = [courseId, ...additionalCourses].filter(Boolean);
+    if (ids.length === 0) return null;
+    const total = ids.reduce(
+      (sum, id) => sum + (courses.find((c) => c.id === id)?.duration_minutes ?? 0),
+      0,
+    );
+    return total > 0 ? total : null;
+  })();
+
+  // メニューが変わったら所要時間を自動で入れ直す。
+  // 手で選び直した所要時間は、次にメニューを変えるまでそのまま残る。
+  useEffect(() => {
+    if (selectedCoursesDuration == null) return;
+    setDuration(String(selectedCoursesDuration));
+  }, [selectedCoursesDuration]);
 
   // ── まとめ予約（1回で複数日を押さえる） ──
   // 1件目は上の「予約日」「時間」「担当スタッフ」。2件目以降が extraSlots。

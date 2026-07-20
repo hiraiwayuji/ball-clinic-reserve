@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState, useCallback } from "react";
+import { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { format } from "date-fns";
+import { format, startOfWeek, addDays, addWeeks, isSameDay } from "date-fns";
 import { ja } from "date-fns/locale";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -13,10 +13,10 @@ import {
 import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
 import { realtimeGuard } from "@/lib/realtime-guard";
-import { getTimelineForDate, type TimelineData, type TimelineAppointment } from "@/app/actions/timeline";
+import { getTimelineRange, type TimelineData, type TimelineDay, type TimelineAppointment } from "@/app/actions/timeline";
 import { updateCheckinStatus, addAddonToAppointment, getAddonCourseInfo, sendReviewRequest, getReviewRequestConfig, restoreCancelledAppointment, deleteAppointment, setCancelledGhostHidden, getMonthCrossingFirstVisits, updateAppointmentDetails } from "@/app/actions/adminReserve";
 import { cancelKindLabel } from "@/components/admin/CancelledAppointmentDialog";
-import { getStaffSchedulesForDate, upsertStaffScheduleForDate, type StaffDaySchedule } from "@/app/actions/staff-schedule";
+import { getStaffSchedulesForDates, upsertStaffScheduleForDate, type StaffDaySchedule } from "@/app/actions/staff-schedule";
 import { getMyRole } from "@/app/actions/auth";
 import type { ClinicRole } from "@/app/actions/auth";
 import { AddAppointmentDialog } from "@/components/admin/AddAppointmentDialog";
@@ -44,6 +44,11 @@ function fmtTime(iso: string): string {
   return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
 }
 
+/** ISO文字列 → JSTでの "yyyy-MM-dd"（その予約がどの日のブロックに属するか） */
+function jstDateKey(iso: string): string {
+  return new Date(new Date(iso).getTime() + 9 * 3600 * 1000).toISOString().slice(0, 10);
+}
+
 /** 分（0時からの通算） → "HH:MM" */
 function minutesToHm(minuteOfDay: number): string {
   const h = Math.floor(minuteOfDay / 60);
@@ -59,10 +64,32 @@ type MovePlan = {
   fromStaffName: string;
   /** 別の先生の行に落とした＝担当を付け替える */
   staffChanged: boolean;
+  /** 週表示で別の日のブロックに落とした＝日付も変える */
+  dateChanged: boolean;
+  fromDateLabel: string;
+  /** 移動先の日付 "yyyy-MM-dd" */
+  toDateKey: string;
+  toDateLabel: string;
   fromTimeLabel: string;
   toTimeLabel: string;
   durationMinutes: number;
 };
+
+/** 表示レンジ。"day"=1日だけ / "week"=月曜〜日曜を縦に7つ */
+type RangeMode = "day" | "week";
+const RANGE_MODE_STORAGE_KEY = "admin_timeline_range_mode";
+
+/** Date → "yyyy-MM-dd" */
+const dateKeyOf = (d: Date) => format(d, "yyyy-MM-dd");
+/** "yyyy-MM-dd" → その日のローカル 0:00 の Date */
+const dateFromKey = (key: string) => new Date(`${key}T00:00:00`);
+/** from〜to（両端含む）の "yyyy-MM-dd" 一覧 */
+function eachDateKey(fromKey: string, toKey: string): string[] {
+  const out: string[] = [];
+  const last = dateFromKey(toKey);
+  for (let d = dateFromKey(fromKey); d <= last; d = addDays(d, 1)) out.push(dateKeyOf(d));
+  return out;
+}
 
 function statusColor(status: string, checkin: string | null, isFirstVisit: boolean): string {
   // キャンセル済みは薄いゴースト表示（枠は空き扱い。誰がキャンセルしたか一目でわかるように残す）
@@ -78,7 +105,9 @@ export default function TodayTimelineWidget({
   showPendingButton = true,
 }: { showPendingButton?: boolean } = {}) {
   const router = useRouter();
+  // 基準日。week のときはこの日を含む「月曜〜日曜」を表示する。
   const [date, setDate] = useState<Date | null>(null);
+  const [rangeMode, setRangeMode] = useState<RangeMode>("day");
   const [data, setData] = useState<TimelineData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -119,16 +148,16 @@ export default function TodayTimelineWidget({
   // バーの下に隠れているセルにも落とせるようにする）
   const [draggingAptId, setDraggingAptId] = useState<string | null>(null);
   // ドラッグが今どのセルの上にあるか（ハイライト用）
-  const [dropTarget, setDropTarget] = useState<{ staffId: string; minute: number } | null>(null);
+  const [dropTarget, setDropTarget] = useState<{ dateKey: string; staffId: string; minute: number } | null>(null);
   // 落とした先の確認ダイアログ（誤ドラッグでそのまま動くと事故になるため一度確認する）
   const [movePlan, setMovePlan] = useState<MovePlan | null>(null);
   const [moving, setMoving] = useState(false);
 
-  // スタッフ勤務スケジュール
-  const [staffSchedules, setStaffSchedules] = useState<StaffDaySchedule[]>([]);
+  // スタッフ勤務スケジュール（"yyyy-MM-dd" → その日のスタッフ勤務）
+  const [schedulesByDate, setSchedulesByDate] = useState<Record<string, StaffDaySchedule[]>>({});
   const [userRole, setUserRole] = useState<ClinicRole | null>(null);
-  // 勤務時間編集ポップアップ
-  const [editingStaffId, setEditingStaffId] = useState<string | null>(null);
+  // 勤務時間編集ポップアップ。週表示では同じ先生が7日ぶん並ぶので "日付|staffId" で1つに絞る
+  const [editingKey, setEditingKey] = useState<string | null>(null);
   const [editStart, setEditStart] = useState<string>("");
   const [editEnd, setEditEnd] = useState<string>("");
   const [editBreakStart, setEditBreakStart] = useState<string>("");
@@ -140,7 +169,19 @@ export default function TodayTimelineWidget({
   // 月またぎ（先月から継続の患者様の今月最初の来院）バッジ対象の予約ID
   const [monthCrossIds, setMonthCrossIds] = useState<Set<string>>(new Set());
 
-  useEffect(() => { setDate(new Date()); }, []);
+  useEffect(() => {
+    setDate(new Date());
+    // 前回選んでいた表示（1日 / 1週間）を復元する
+    try {
+      const saved = localStorage.getItem(RANGE_MODE_STORAGE_KEY);
+      if (saved === "week" || saved === "day") setRangeMode(saved);
+    } catch {}
+  }, []);
+
+  const changeRangeMode = (mode: RangeMode) => {
+    setRangeMode(mode);
+    try { localStorage.setItem(RANGE_MODE_STORAGE_KEY, mode); } catch {}
+  };
 
   // ロール取得（owner のみスケジュール編集可）
   useEffect(() => { getMyRole().then(setUserRole).catch(() => {}); }, []);
@@ -164,58 +205,68 @@ export default function TodayTimelineWidget({
     }
   };
 
-  const fetchSchedules = useCallback(async (d: Date) => {
-    const dateStr = format(d, "yyyy-MM-dd");
-    const res = await getStaffSchedulesForDate(dateStr);
-    if (res.success && res.schedules) {
-      setStaffSchedules(res.schedules);
-    }
-  }, []);
+  // 表示する期間（両端含む）。week は月曜〜日曜。
+  const rangeFromKey = date
+    ? dateKeyOf(rangeMode === "week" ? startOfWeek(date, { weekStartsOn: 1 }) : date)
+    : null;
+  const rangeToKey = date
+    ? dateKeyOf(rangeMode === "week" ? addDays(startOfWeek(date, { weekStartsOn: 1 }), 6) : date)
+    : null;
 
-  const fetchData = useCallback(async (d: Date) => {
-    setLoading(true);
+  // 再取得は「期間が変わったとき」だけ。週表示なら週内の日移動では一切取り直さない。
+  const fetchRange = useCallback(async (fromKey: string, toKey: string) => {
     setError(null);
-    // 月またぎバッジ（先月から継続・今月最初の来院）はその日1日ぶんを取得
-    const dayStart = new Date(d);
-    dayStart.setHours(0, 0, 0, 0);
-    const dayEnd = new Date(dayStart.getTime() + 24 * 3600 * 1000);
-    getMonthCrossingFirstVisits(dayStart.toISOString(), dayEnd.toISOString())
+    // 月またぎバッジ（先月から継続・今月最初の来院）は期間ぶんまとめて取得
+    const rangeStartISO = new Date(`${fromKey}T00:00:00+09:00`).toISOString();
+    const rangeEndISO = new Date(`${toKey}T00:00:00+09:00`).toISOString();
+    getMonthCrossingFirstVisits(rangeStartISO, new Date(new Date(rangeEndISO).getTime() + 24 * 3600 * 1000).toISOString())
       .then((ids) => setMonthCrossIds(new Set(ids)))
       .catch(() => setMonthCrossIds(new Set()));
-    const [res] = await Promise.all([
-      getTimelineForDate(format(d, "yyyy-MM-dd")),
-      fetchSchedules(d),
+
+    const [res, schedRes] = await Promise.all([
+      getTimelineRange(fromKey, toKey),
+      getStaffSchedulesForDates(eachDateKey(fromKey, toKey)),
     ]);
     if (res.success && res.data) {
       setData(res.data);
     } else {
       setError(res.error ?? "取得失敗");
     }
+    if (schedRes.success && schedRes.byDate) setSchedulesByDate(schedRes.byDate);
     setLoading(false);
-  }, [fetchSchedules]);
+  }, []);
 
+  // 期間が変わったときだけ取り直す（画面は消さず、前の内容を残したまま差し替える）
   useEffect(() => {
-    if (!date) return;
-    fetchData(date);
-  }, [date, fetchData]);
+    if (!rangeFromKey || !rangeToKey) return;
+    fetchRange(rangeFromKey, rangeToKey);
+  }, [rangeFromKey, rangeToKey, fetchRange]);
 
-  // Realtime: appointments 変更で再取得
+  // 予約の追加・変更のあとに今の期間を取り直す
+  const rangeRef = useRef<{ from: string; to: string } | null>(null);
+  rangeRef.current = rangeFromKey && rangeToKey ? { from: rangeFromKey, to: rangeToKey } : null;
+  const refresh = useCallback(() => {
+    const r = rangeRef.current;
+    if (r) fetchRange(r.from, r.to);
+  }, [fetchRange]);
+
+  // Realtime: appointments 変更で再取得。
+  // 購読は張りっぱなしにし、日付が変わっても貼り直さない（毎回の再購読がもたつきの元だった）。
   useEffect(() => {
-    if (!date) return;
     const sb = createClient();
     const ch = sb.channel("timeline-realtime")
-      .on("postgres_changes", { event: "*", schema: "public", table: "appointments" }, realtimeGuard(() => fetchData(date)))
+      .on("postgres_changes", { event: "*", schema: "public", table: "appointments" }, realtimeGuard(() => refresh()))
       .subscribe();
     return () => { sb.removeChannel(ch); };
-  }, [date, fetchData]);
+  }, [refresh]);
 
-  const goPrev = () => date && setDate(new Date(date.getTime() - 24 * 3600 * 1000));
-  const goNext = () => date && setDate(new Date(date.getTime() + 24 * 3600 * 1000));
+  // 1日表示なら前後1日、週表示なら前後1週間ぶん動かす
+  const goPrev = () => date && setDate(rangeMode === "week" ? addWeeks(date, -1) : addDays(date, -1));
+  const goNext = () => date && setDate(rangeMode === "week" ? addWeeks(date, 1) : addDays(date, 1));
   const goToday = () => setDate(new Date());
 
   // 空きセルクリック → 新規予約ダイアログを開く
-  const handleEmptyCellClick = (staffId: string, minuteOfDay: number) => {
-    if (!date) return;
+  const handleEmptyCellClick = (dateKey: string, staffId: string, minuteOfDay: number) => {
     const hh = Math.floor(minuteOfDay / 60);
     const mm = minuteOfDay % 60;
     const timeStr = `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
@@ -223,7 +274,7 @@ export default function TodayTimelineWidget({
       open: true,
       staffId: staffId === UNASSIGNED_KEY ? undefined : staffId,
       time: timeStr,
-      date: date,
+      date: dateFromKey(dateKey),
     });
   };
 
@@ -236,7 +287,7 @@ export default function TodayTimelineWidget({
       if (res.success) {
         toast.success(`${apt.customer_name ?? "患者"} を受付しました`);
         setSelectedApt(null);
-        if (date) fetchData(date);
+        refresh();
       } else {
         toast.error(res.error ?? "受付処理に失敗しました");
       }
@@ -259,7 +310,7 @@ export default function TodayTimelineWidget({
             : `施術後に${label}を追加しました`,
         );
         setSelectedApt(null);
-        if (date) fetchData(date);
+        refresh();
       } else {
         toast.error(res.error ?? "追加に失敗しました");
       }
@@ -305,6 +356,12 @@ export default function TodayTimelineWidget({
     return rows;
   }, [data]);
 
+  /** 期間内の全予約（どの日のブロックから掴んだ予約でも引けるようにする） */
+  const allAppointments = useMemo(
+    () => (data?.days ?? []).flatMap((d) => d.appointments),
+    [data],
+  );
+
   // 担当未設定の予約を表示するデフォルト行（先頭スタッフ＝sort_order 最小のメイン担当）
   const defaultStaffId = data?.staff[0]?.id ?? null;
 
@@ -314,19 +371,21 @@ export default function TodayTimelineWidget({
     a.status !== "cancelled" && (a.additional_staff?.length ?? 0) === 0;
 
   // セルに落とした → 確認ダイアログ用の移動プランを作る
-  const handleDropOnCell = (toStaffId: string, toMinute: number) => {
+  // 週表示では別の日のブロックにも落とせるので、移動先の日付も受け取る。
+  const handleDropOnCell = (toDateKey: string, toStaffId: string, toMinute: number) => {
     setDropTarget(null);
     const aptId = draggingAptId;
     setDraggingAptId(null);
     if (!aptId || !data) return;
 
-    const apt = data.appointments.find((a) => a.id === aptId);
+    const apt = allAppointments.find((a) => a.id === aptId);
     if (!apt || !canDrag(apt)) return;
 
     const fromMinute = minuteOfDayJst(apt.start_time);
+    const fromDateKey = jstDateKey(apt.start_time);
     // 担当未設定の予約は先頭スタッフの行に描いているので、その行を「今いる行」とみなす
     const fromLaneId = apt.staff_id ?? defaultStaffId;
-    if (toStaffId === fromLaneId && toMinute === fromMinute) return; // 動いていない
+    if (toDateKey === fromDateKey && toStaffId === fromLaneId && toMinute === fromMinute) return; // 動いていない
 
     const durationMinutes = apt.end_time
       ? Math.max(
@@ -341,6 +400,10 @@ export default function TodayTimelineWidget({
       toStaffName: staffRows.find((s) => s.id === toStaffId)?.name ?? "担当",
       fromStaffName: apt.staff_name ?? staffRows.find((s) => s.id === fromLaneId)?.name ?? "担当未設定",
       staffChanged: toStaffId !== fromLaneId,
+      dateChanged: toDateKey !== fromDateKey,
+      fromDateLabel: format(dateFromKey(fromDateKey), "M/d(E)", { locale: ja }),
+      toDateKey,
+      toDateLabel: format(dateFromKey(toDateKey), "M/d(E)", { locale: ja }),
       fromTimeLabel: fmtTime(apt.start_time),
       toTimeLabel: minutesToHm(toMinute),
       durationMinutes,
@@ -349,13 +412,13 @@ export default function TodayTimelineWidget({
 
   // 確認ダイアログの「移動する」
   const runMove = async () => {
-    if (!movePlan || !date) return;
-    const { apt, toStaffId, toStaffName, staffChanged, toTimeLabel, durationMinutes } = movePlan;
+    if (!movePlan) return;
+    const { apt, toStaffId, toStaffName, staffChanged, dateChanged, toDateKey, toDateLabel, toTimeLabel, durationMinutes } = movePlan;
     setMoving(true);
     try {
       const res = await updateAppointmentDetails(
         apt.id,
-        format(date, "yyyy-MM-dd"),
+        toDateKey,
         toTimeLabel,
         apt.memo ?? "",
         apt.is_first_visit,
@@ -365,13 +428,14 @@ export default function TodayTimelineWidget({
         staffChanged ? { staffId: toStaffId } : undefined,
       );
       if (res.success) {
+        const whenLabel = dateChanged ? `${toDateLabel} ${toTimeLabel}` : toTimeLabel;
         toast.success(
           staffChanged
-            ? `${apt.customer_name ?? "患者"}様を ${toStaffName}・${toTimeLabel} に移しました`
-            : `${apt.customer_name ?? "患者"}様を ${toTimeLabel} に移しました`,
+            ? `${apt.customer_name ?? "患者"}様を ${toStaffName}・${whenLabel} に移しました`
+            : `${apt.customer_name ?? "患者"}様を ${whenLabel} に移しました`,
         );
         setMovePlan(null);
-        fetchData(date);
+        refresh();
       } else {
         // 「その先生はその時間に別の予約が入っています」等はここに出る
         toast.error(res.error ?? "移動に失敗しました");
@@ -383,14 +447,14 @@ export default function TodayTimelineWidget({
     }
   };
 
-  // 時間軸の刻みリスト（営業終了時刻のラベルも末尾に含める）
-  const timeMarks = useMemo(() => {
-    if (!data) return [] as { label: string; minute: number }[];
+  // 時間軸の刻みリスト（営業終了時刻のラベルも末尾に含める）。
+  // 土曜は営業時間が違うので、日ごとに作る。
+  const buildTimeMarks = (day: TimelineDay, slotMinutes: number) => {
     const out: { label: string; minute: number }[] = [];
-    const startMin = data.scheduleStartHour * 60;
-    const endMin = data.scheduleEndHour * 60;
+    const startMin = day.scheduleStartHour * 60;
+    const endMin = day.scheduleEndHour * 60;
     // <= で営業終了時刻のラベルも出す（例: close=20:00 なら 20:00 が最終マーク）
-    for (let m = startMin; m <= endMin; m += data.slotMinutes) {
+    for (let m = startMin; m <= endMin; m += slotMinutes) {
       const h = Math.floor(m / 60);
       const mm = m % 60;
       out.push({
@@ -399,18 +463,17 @@ export default function TodayTimelineWidget({
       });
     }
     return out;
-  }, [data]);
+  };
 
   // 予約をスタッフごとにグループ化
   // 複数スタッフの予約は、合計施術時間を等分してスタッフごとに時間帯をずらして表示する
   // （例: 17:00-17:40 を A先生・B先生で 17:00-17:20 / 17:20-17:40 に分割）
   // _displayStart / _displayEnd はタイムテーブル表示専用で、モーダルは元の start_time を使う
-  const aptsByStaff = useMemo(() => {
+  const buildAptsByStaff = (day: TimelineDay, slotMinutes: number) => {
     type DisplayApt = TimelineAppointment & { _displayStart?: string; _displayEnd?: string };
     const map = new Map<string, DisplayApt[]>();
-    if (!data) return map as Map<string, TimelineAppointment[]>;
 
-    for (const a of data.appointments) {
+    for (const a of day.appointments) {
       const allStaffIds: string[] = [];
       allStaffIds.push(a.staff_id ?? defaultStaffId ?? UNASSIGNED_KEY);
       for (const add of a.additional_staff ?? []) {
@@ -429,8 +492,8 @@ export default function TodayTimelineWidget({
 
       // 複数スタッフ: 合計時間をスタッフ数で等分し時間帯をずらす
       const startMin = minuteOfDayJst(a.start_time);
-      const endMinRaw = a.end_time ? minuteOfDayJst(a.end_time) : startMin + data.slotMinutes;
-      const totalDuration = Math.max(endMinRaw - startMin, data.slotMinutes * allStaffIds.length);
+      const endMinRaw = a.end_time ? minuteOfDayJst(a.end_time) : startMin + slotMinutes;
+      const totalDuration = Math.max(endMinRaw - startMin, slotMinutes * allStaffIds.length);
       const perStaff = Math.round(totalDuration / allStaffIds.length);
 
       // ISO 文字列を分単位でずらすヘルパー
@@ -446,31 +509,54 @@ export default function TodayTimelineWidget({
       });
     }
     return map as Map<string, TimelineAppointment[]>;
-  }, [data, defaultStaffId]);
+  };
 
   if (!date) return null;
 
   return (
     <Card className="shadow-sm border-slate-200 dark:border-white/10 dark:bg-slate-900/50">
-      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
+      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3 gap-2 flex-wrap">
         <div className="flex items-center gap-2">
           <CardTitle className="text-lg">
-            予約タイムテーブル ({format(date, "M/d (E)", { locale: ja })})
+            予約タイムテーブル
+            <span className="ml-1 font-normal text-slate-500">
+              {rangeMode === "week" && rangeFromKey && rangeToKey
+                ? `(${format(dateFromKey(rangeFromKey), "M/d(E)", { locale: ja })}〜${format(dateFromKey(rangeToKey), "M/d(E)", { locale: ja })})`
+                : `(${format(date, "M/d (E)", { locale: ja })})`}
+            </span>
           </CardTitle>
         </div>
         <div className="flex items-center gap-2">
           {/* 受付業務中でも仮予約が入ったらすぐ気づけるよう、タイムテーブル上にも件数を出す */}
           {showPendingButton && (
-            <PendingReservationsButton onChanged={() => date && fetchData(date)} />
+            <PendingReservationsButton onChanged={refresh} />
           )}
+          {/* 1日 / 1週間 の切替（選んだ方は次回も覚えている） */}
+          <div className="flex items-center rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden">
+            {([["day", "1日"], ["week", "1週間"]] as const).map(([mode, label]) => (
+              <button
+                key={mode}
+                type="button"
+                onClick={() => changeRangeMode(mode)}
+                aria-pressed={rangeMode === mode}
+                className={`px-3 py-1.5 text-xs font-bold transition-colors ${
+                  rangeMode === mode
+                    ? "bg-blue-600 text-white"
+                    : "bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
           <div className="flex items-center gap-1">
-            <Button variant="outline" size="sm" onClick={goPrev} aria-label="前日">
+            <Button variant="outline" size="sm" onClick={goPrev} aria-label={rangeMode === "week" ? "前の週" : "前日"}>
               <ChevronLeft className="w-4 h-4" />
             </Button>
             <Button variant="outline" size="sm" onClick={goToday}>
-              <RotateCcw className="w-3.5 h-3.5 mr-1" />今日
+              <RotateCcw className="w-3.5 h-3.5 mr-1" />{rangeMode === "week" ? "今週" : "今日"}
             </Button>
-            <Button variant="outline" size="sm" onClick={goNext} aria-label="翌日">
+            <Button variant="outline" size="sm" onClick={goNext} aria-label={rangeMode === "week" ? "次の週" : "翌日"}>
               <ChevronRight className="w-4 h-4" />
             </Button>
           </div>
@@ -489,7 +575,37 @@ export default function TodayTimelineWidget({
           </div>
         ) : data && (
           <div className="overflow-x-auto">
-            <div className="min-w-[900px]">
+            {/* 1日表示なら1ブロック、週表示なら月曜〜日曜の7ブロックを縦に積む（下スクロールで日曜まで） */}
+            {data.days.map((day) => {
+              const dayDate = dateFromKey(day.date);
+              const staffSchedules = schedulesByDate[day.date] ?? [];
+              const timeMarks = buildTimeMarks(day, data.slotMinutes);
+              const aptsByStaff = buildAptsByStaff(day, data.slotMinutes);
+              const monthCounts = data.staffMonthCounts[day.monthKey] ?? {};
+              const isToday = isSameDay(dayDate, new Date());
+              const dow = dayDate.getDay();
+              return (
+            <div className="min-w-[900px] mb-6 last:mb-0" key={day.date}>
+              {/* 週表示のときだけ日付の見出しを出す。
+                  横スクロール（overflow-x）と position:sticky は同じ入れ子では両立しないので、
+                  貼り付けずに各日の先頭へ普通の見出しとして置く。 */}
+              {rangeMode === "week" && (
+                <div
+                  className={`px-2 py-1.5 mb-1 rounded-md border text-sm font-bold flex items-center gap-2 ${
+                    isToday
+                      ? "bg-blue-50 border-blue-300 text-blue-800 dark:bg-blue-900/40 dark:border-blue-700 dark:text-blue-200"
+                      : "bg-white/95 dark:bg-slate-900/95 border-slate-200 dark:border-slate-700"
+                  }`}
+                >
+                  <span className={dow === 0 ? "text-rose-600" : dow === 6 ? "text-blue-600" : ""}>
+                    {format(dayDate, "M月d日(E)", { locale: ja })}
+                  </span>
+                  {isToday && <span className="text-[10px] font-black bg-blue-600 text-white px-1.5 py-0.5 rounded">今日</span>}
+                  <span className="ml-auto text-[11px] font-normal text-slate-400 tabular-nums">
+                    {day.appointments.filter((a) => a.status !== "cancelled").length}件
+                  </span>
+                </div>
+              )}
               {/* 時間軸ヘッダ */}
               <div
                 className="grid items-center text-[10px] text-slate-500 dark:text-slate-400 border-b border-slate-200 dark:border-slate-700"
@@ -498,7 +614,7 @@ export default function TodayTimelineWidget({
                 <div className="px-2 py-1 text-xs font-semibold text-slate-600 dark:text-slate-300 flex items-center justify-between gap-1">
                   <span>先生</span>
                   <span className="text-[9px] font-normal text-slate-400 normal-case">
-                    {data.monthLabel}実績/目標
+                    {day.monthLabel}実績/目標
                   </span>
                 </div>
                 {timeMarks.map((m, i) => (
@@ -515,8 +631,8 @@ export default function TodayTimelineWidget({
               {(() => {
                 const receptionSchedules = staffSchedules.filter((sc) => sc.role === "reception");
                 if (receptionSchedules.length === 0) return null;
-                const scheduleStart = data.scheduleStartHour * 60;
-                const scheduleEnd = data.scheduleEndHour * 60;
+                const scheduleStart = day.scheduleStartHour * 60;
+                const scheduleEnd = day.scheduleEndHour * 60;
                 const totalGridMinutes = scheduleEnd - scheduleStart;
                 // 9:00–18:00 がカバーされているか
                 const coverStart = 9 * 60;
@@ -539,7 +655,7 @@ export default function TodayTimelineWidget({
                             <button
                               type="button"
                               onClick={() => {
-                                const dateLabel = date ? format(date, "M月d日(E)", { locale: ja }) : "";
+                                const dateLabel = format(dayDate, "M月d日(E)", { locale: ja });
                                 const onDuty = receptionSchedules.filter((sc) => !sc.isOff && sc.startTime);
                                 const onDutyNames = onDuty.map((sc) => `${sc.staffName}（${sc.startTime}〜${sc.endTime}）`).join("、") || "なし";
                                 const offDuty = receptionSchedules.filter((sc) => sc.isOff || !sc.startTime);
@@ -586,8 +702,8 @@ export default function TodayTimelineWidget({
               {staffRows.map((s) => {
                 const apts = aptsByStaff.get(s.id) ?? [];
                 // 担当未設定分の実績はデフォルト行（先頭スタッフ）に合算する
-                const monthCount = (data.staffMonthCounts?.[s.id] ?? 0)
-                  + (s.id === defaultStaffId ? (data.staffMonthCounts?.[UNASSIGNED_KEY] ?? 0) : 0);
+                const monthCount = (monthCounts[s.id] ?? 0)
+                  + (s.id === defaultStaffId ? (monthCounts[UNASSIGNED_KEY] ?? 0) : 0);
                 const target = s.monthly_visit_target ?? 0;
                 // 達成率に応じてバッジ色を切替: 100%以上=緑、80%以上=青、それ未満=スレート
                 const achievementBadge = target > 0
@@ -625,8 +741,8 @@ export default function TodayTimelineWidget({
                 const sched = staffSchedules.find((sc) => sc.staffId === s.id);
                 const schedStart = sched?.startTime ? hmToMinutes(sched.startTime) : null;
                 const schedEnd = sched?.endTime ? hmToMinutes(sched.endTime) : null;
-                const scheduleStart = data.scheduleStartHour * 60;
-                const scheduleEnd = data.scheduleEndHour * 60;
+                const scheduleStart = day.scheduleStartHour * 60;
+                const scheduleEnd = day.scheduleEndHour * 60;
                 const totalGridMinutes = scheduleEnd - scheduleStart;
                 // 勤務時間バーの CSS left/width (%)
                 const barLeft = (schedStart !== null && totalGridMinutes > 0)
@@ -636,7 +752,8 @@ export default function TodayTimelineWidget({
                   ? Math.min(100, ((Math.min(schedEnd, scheduleEnd) - Math.max(schedStart, scheduleStart)) / totalGridMinutes) * 100)
                   : null;
 
-                const isEditing = editingStaffId === s.id;
+                const editKey = `${day.date}|${s.id}`;
+                const isEditing = editingKey === editKey;
 
                 return (
                   <div
@@ -693,9 +810,9 @@ export default function TodayTimelineWidget({
                           type="button"
                           onClick={() => {
                             if (isEditing) {
-                              setEditingStaffId(null);
+                              setEditingKey(null);
                             } else {
-                              setEditingStaffId(s.id);
+                              setEditingKey(editKey);
                               setEditStart(sched?.startTime ?? "09:00");
                               setEditEnd(sched?.endTime ?? "18:00");
                               setEditBreakStart(sched?.breakStart ?? "");
@@ -715,8 +832,8 @@ export default function TodayTimelineWidget({
                         <span
                           className={`shrink-0 text-[10px] font-black px-1.5 py-0.5 rounded-full tabular-nums ${achievementBadge}`}
                           title={target > 0
-                            ? `${data.monthLabel}実績 ${monthCount} / 目標 ${target}（達成率 ${Math.round((monthCount / target) * 100)}%）`
-                            : `${data.monthLabel}の予約件数（キャンセル除く）`}
+                            ? `${day.monthLabel}実績 ${monthCount} / 目標 ${target}（達成率 ${Math.round((monthCount / target) * 100)}%）`
+                            : `${day.monthLabel}の予約件数（キャンセル除く）`}
                         >
                           {target > 0 ? `${monthCount} / ${target}` : monthCount}
                         </span>
@@ -772,12 +889,11 @@ export default function TodayTimelineWidget({
                               type="button"
                               disabled={scheduleLoading}
                               onClick={async () => {
-                                if (!date) return;
                                 setScheduleLoading(true);
                                 try {
                                   const res = await upsertStaffScheduleForDate(
                                     s.id,
-                                    format(date, "yyyy-MM-dd"),
+                                    day.date,
                                     editIsOff ? null : editStart,
                                     editIsOff ? null : editEnd,
                                     editIsOff,
@@ -786,8 +902,8 @@ export default function TodayTimelineWidget({
                                   );
                                   if (res.success) {
                                     toast.success("勤務時間を更新しました");
-                                    setEditingStaffId(null);
-                                    await fetchSchedules(date);
+                                    setEditingKey(null);
+                                    refresh();
                                   } else {
                                     toast.error(res.error ?? "更新に失敗しました");
                                   }
@@ -801,7 +917,7 @@ export default function TodayTimelineWidget({
                             </button>
                             <button
                               type="button"
-                              onClick={() => setEditingStaffId(null)}
+                              onClick={() => setEditingKey(null)}
                               className="flex-1 text-[11px] border border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-300 rounded px-2 py-1 hover:bg-slate-50 dark:hover:bg-slate-700"
                             >
                               キャンセル
@@ -813,24 +929,24 @@ export default function TodayTimelineWidget({
                     {/* グリッドセル（クリックで新規予約 / 予約バーのドロップ先） */}
                     {timeMarks.map((m, i) => {
                       const isDropHere =
-                        dropTarget?.staffId === s.id && dropTarget?.minute === m.minute;
+                        dropTarget?.dateKey === day.date && dropTarget?.staffId === s.id && dropTarget?.minute === m.minute;
                       return (
                         <button
                           key={i}
                           type="button"
-                          onClick={() => handleEmptyCellClick(s.id, m.minute)}
+                          onClick={() => handleEmptyCellClick(day.date, s.id, m.minute)}
                           onDragOver={(e) => {
                             if (!draggingAptId) return;
                             e.preventDefault(); // これを呼ばないとドロップできない
                             e.dataTransfer.dropEffect = "move";
-                            if (!isDropHere) setDropTarget({ staffId: s.id, minute: m.minute });
+                            if (!isDropHere) setDropTarget({ dateKey: day.date, staffId: s.id, minute: m.minute });
                           }}
                           onDrop={(e) => {
                             e.preventDefault();
-                            handleDropOnCell(s.id, m.minute);
+                            handleDropOnCell(day.date, s.id, m.minute);
                           }}
-                          aria-label={`${s.name} ${m.label} に新規予約を追加`}
-                          title={`${s.name} ${m.label} ・クリックで新規予約`}
+                          aria-label={`${format(dayDate, "M月d日", { locale: ja })} ${s.name} ${m.label} に新規予約を追加`}
+                          title={`${format(dayDate, "M/d", { locale: ja })} ${s.name} ${m.label} ・クリックで新規予約`}
                           style={{ gridRow: "1 / -1" }}
                           className={`h-full transition-colors cursor-pointer ${
                             isDropHere
@@ -853,8 +969,8 @@ export default function TodayTimelineWidget({
                         ? minuteOfDayJst(dispA._displayEnd ?? a.end_time!)
                         : startMin + data.slotMinutes;
                       const endMin = Math.max(endMinRaw, startMin + data.slotMinutes);
-                      const scheduleStart = data.scheduleStartHour * 60;
-                      const scheduleEnd = data.scheduleEndHour * 60;
+                      const scheduleStart = day.scheduleStartHour * 60;
+                      const scheduleEnd = day.scheduleEndHour * 60;
                       // 範囲外ならスキップ
                       if (endMin <= scheduleStart || startMin >= scheduleEnd) return null;
                       const clippedStart = Math.max(startMin, scheduleStart);
@@ -947,6 +1063,8 @@ export default function TodayTimelineWidget({
                 );
               })}
             </div>
+              );
+            })}
           </div>
         )}
       </CardContent>
@@ -973,6 +1091,15 @@ export default function TodayTimelineWidget({
                 )}
               </div>
               <div className="rounded-lg bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 px-3 py-2 space-y-1">
+                {/* 週表示で別の日に落としたときだけ「日付」の行を出す */}
+                {movePlan.dateChanged && (
+                  <div className="flex items-center gap-2">
+                    <span className="text-slate-500 text-xs w-10 shrink-0">日付</span>
+                    <span className="text-slate-400 line-through">{movePlan.fromDateLabel}</span>
+                    <span className="text-slate-400">→</span>
+                    <span className="font-bold text-blue-700 dark:text-blue-300">{movePlan.toDateLabel}</span>
+                  </div>
+                )}
                 <div className="flex items-center gap-2">
                   <span className="text-slate-500 text-xs w-10 shrink-0">時間</span>
                   <span className="tabular-nums text-slate-400 line-through">{movePlan.fromTimeLabel}</span>
@@ -1123,7 +1250,7 @@ export default function TodayTimelineWidget({
                       if (res.success) {
                         toast.success(`${selectedApt.customer_name ?? "患者"}様の予約を元に戻しました`);
                         setSelectedApt(null);
-                        if (date) fetchData(date);
+                        refresh();
                       } else {
                         toast.error(res.error ?? "元に戻せませんでした");
                       }
@@ -1146,7 +1273,7 @@ export default function TodayTimelineWidget({
                         if (res.success) {
                           toast.success("カレンダーから隠しました（記録は残っています）");
                           setSelectedApt(null);
-                          if (date) fetchData(date);
+                          refresh();
                         } else {
                           toast.error(res.error ?? "更新に失敗しました");
                         }
@@ -1170,7 +1297,7 @@ export default function TodayTimelineWidget({
                       if (res.success) {
                         toast.success("キャンセル記録を削除しました");
                         setSelectedApt(null);
-                        if (date) fetchData(date);
+                        refresh();
                       } else {
                         toast.error(res.error ?? "削除に失敗しました");
                       }
@@ -1307,7 +1434,7 @@ export default function TodayTimelineWidget({
           onSuccess={() => {
             toast.success("次回予約を登録しました");
             setNextReserveDialog({ open: false });
-            if (date) fetchData(date);
+            refresh();
           }}
         />
       )}
@@ -1321,7 +1448,7 @@ export default function TodayTimelineWidget({
           defaultTime={reserveDialog.time}
           defaultStaffId={reserveDialog.staffId}
           hideTrigger
-          onSuccess={() => date && fetchData(date)}
+          onSuccess={refresh}
         />
       )}
 
@@ -1333,7 +1460,7 @@ export default function TodayTimelineWidget({
           appointment={editDialog.appointment}
           onSuccess={() => {
             setEditDialog({ open: false, appointment: null });
-            if (date) fetchData(date);
+            refresh();
           }}
         />
       )}

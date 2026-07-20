@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { format, parseISO, addDays } from "date-fns";
 import { ja } from "date-fns/locale";
-import { CalendarIcon, Trash2, MessageCircle, CheckCircle, X, Clock, CalendarRange, CalendarPlus, Bell } from "lucide-react";
+import { CalendarIcon, Trash2, MessageCircle, CheckCircle, X, Clock, CalendarRange, CalendarPlus, Bell, Plus } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
@@ -89,10 +89,16 @@ export function EditAppointmentDialog({
   const [courseId, setCourseId] = useState<string>("");
   const [staffId, setStaffId] = useState<string>("");
   const [roomId, setRoomId] = useState<string>("");
+  // 追加メニュー・追加担当（同じ予約にひもづく2件目以降）。
+  // 新規追加ダイアログと同じ形で、ここでも足したり外したりできる。
+  const [additionalCourses, setAdditionalCourses] = useState<string[]>([]);
+  const [additionalStaff, setAdditionalStaff] = useState<string[]>([]);
   // 元の値（変更検知用：未変更なら updateAppointmentDetails に options を渡さない）
   const [initialCourseId, setInitialCourseId] = useState<string>("");
   const [initialStaffId, setInitialStaffId] = useState<string>("");
   const [initialRoomId, setInitialRoomId] = useState<string>("");
+  const [initialAdditionalCourses, setInitialAdditionalCourses] = useState<string[]>([]);
+  const [initialAdditionalStaff, setInitialAdditionalStaff] = useState<string[]>([]);
 
   // slot サイズ刻みで 120分まで（既存予約が slot 倍数でないケースも拾えるよう現在値もマージ）
   const durationOptions = (() => {
@@ -182,6 +188,16 @@ export function EditAppointmentDialog({
       setInitialStaffId(sId);
       setInitialRoomId(rId);
 
+      // 追加メニュー・追加担当の既存値
+      const addC: string[] = (appointment.additional_courses ?? [])
+        .map((c: any) => c?.course_id).filter(Boolean);
+      const addS: string[] = (appointment.additional_staff ?? [])
+        .map((s: any) => s?.staff_id).filter(Boolean);
+      setAdditionalCourses(addC);
+      setAdditionalStaff(addS);
+      setInitialAdditionalCourses(addC);
+      setInitialAdditionalStaff(addS);
+
       // マスタ取得（既に取得済みなら再取得しない）
       if (courses.length === 0) {
         getCourses().then(setCourses).catch(() => {});
@@ -199,13 +215,27 @@ export function EditAppointmentDialog({
   // 追加メニュー設定を取得（「施術後に○○を追加」ボタン用）
   useEffect(() => { getAddonCourseInfo().then(setAddonInfo).catch(() => setAddonInfo(null)); }, []);
 
-  // コース選択時に所要時間も連動して更新
+  // メニューを選び直したときだけ所要時間を入れ直す。
+  // メイン＋追加メニューの合計にする（保険施術20分＋鍼灸1部位20分 → 40分）。
+  // 初期表示では動かさない：既存予約の所要時間を手で調整してある場合に上書きしないため。
+  const applyDurationFor = (mainId: string, addIds: string[]) => {
+    const ids = [mainId, ...addIds].filter(Boolean);
+    if (ids.length === 0) return;
+    const total = ids.reduce(
+      (sum, id) => sum + (courses.find((c) => c.id === id)?.duration_minutes ?? 0),
+      0,
+    );
+    if (total > 0) setDuration(String(total));
+  };
+
   const handleCourseChange = (id: string) => {
     setCourseId(id);
-    if (id) {
-      const c = courses.find(c => c.id === id);
-      if (c) setDuration(String(c.duration_minutes));
-    }
+    applyDurationFor(id, additionalCourses);
+  };
+
+  const changeAdditionalCourses = (next: string[]) => {
+    setAdditionalCourses(next);
+    applyDurationFor(courseId, next);
   };
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
@@ -214,13 +244,32 @@ export function EditAppointmentDialog({
       toast.error("日付と時間を選択してください");
       return;
     }
+    // メイン担当が空のまま追加担当だけ入れると、タイムテーブルで
+    // 「先頭スタッフ＋追加担当」の2レーンに分かれて誤解のもとになる。
+    if (additionalStaff.filter(Boolean).length > 0 && !staffId) {
+      toast.error("追加担当を入れるときは、担当スタッフも選んでください");
+      return;
+    }
     setIsSubmitting(true);
     try {
       // 変更があった項目だけ options に含める（"" は「解除」扱い → null）
-      const options: { courseId?: string | null; staffId?: string | null; roomId?: string | null } = {};
+      const options: {
+        courseId?: string | null;
+        staffId?: string | null;
+        roomId?: string | null;
+        additionalCourseIds?: string[];
+        additionalStaffIds?: string[];
+      } = {};
       if (courseId !== initialCourseId) options.courseId = courseId === "" ? null : courseId;
       if (staffId !== initialStaffId) options.staffId = staffId === "" ? null : staffId;
       if (roomId !== initialRoomId) options.roomId = roomId === "" ? null : roomId;
+      // 追加メニュー・追加担当は「置き換え」。空にした＝全部外す、も送れるようにする。
+      // 未選択の行（""）は送らない。
+      const addC = additionalCourses.filter(Boolean);
+      const addS = additionalStaff.filter(Boolean);
+      const sameList = (a: string[], b: string[]) => a.length === b.length && a.every((v, i) => v === b[i]);
+      if (!sameList(addC, initialAdditionalCourses)) options.additionalCourseIds = addC;
+      if (!sameList(addS, initialAdditionalStaff)) options.additionalStaffIds = addS;
 
       const result = await updateAppointmentDetails(
         appointment.id,
@@ -673,6 +722,45 @@ export function EditAppointmentDialog({
                     ))}
                 </select>
                 <p className="text-[10px] text-slate-500">変更すると売上一括入力の元情報も更新されます。</p>
+
+                {/* 追加メニュー（2部位目など・複数可）。削除して入れ直さなくてもここで足せる。 */}
+                {additionalCourses.map((cid, idx) => (
+                  <div key={`addc-${idx}`} className="flex gap-2 items-center mt-1.5">
+                    <span className="text-[10px] text-slate-400 w-10 shrink-0">＋{idx + 2}個目</span>
+                    <select
+                      value={cid}
+                      onChange={(e) => {
+                        const next = [...additionalCourses];
+                        next[idx] = e.target.value;
+                        changeAdditionalCourses(next);
+                      }}
+                      className={`${selectClass} flex-1`}
+                    >
+                      <option value="">追加メニューを選択</option>
+                      {courses
+                        .filter(c => c.is_active || initialAdditionalCourses.includes(c.id))
+                        .map(c => (
+                          <option key={c.id} value={c.id}>
+                            {c.name}（{c.duration_minutes}分{c.price != null ? ` / ¥${c.price.toLocaleString()}` : ""}）
+                            {!c.is_active ? "（非公開）" : ""}
+                          </option>
+                        ))}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={() => changeAdditionalCourses(additionalCourses.filter((_, i) => i !== idx))}
+                      className="px-2 py-1 text-rose-500 hover:bg-rose-50 rounded text-sm"
+                      aria-label="追加メニューを削除"
+                    >×</button>
+                  </div>
+                ))}
+                <button
+                  type="button"
+                  onClick={() => setAdditionalCourses([...additionalCourses, ""])}
+                  className="text-xs text-blue-600 hover:text-blue-700 inline-flex items-center gap-1 mt-1"
+                >
+                  <Plus className="w-3 h-3" /> メニューを追加
+                </button>
               </div>
             )}
 
@@ -693,6 +781,49 @@ export function EditAppointmentDialog({
                       </option>
                     ))}
                 </select>
+
+                {/* 追加担当（ダブル施術など・複数可） */}
+                {additionalStaff.map((sid, idx) => (
+                  <div key={`adds-${idx}`} className="flex gap-2 items-center mt-1.5">
+                    <span className="text-[10px] text-slate-400 w-10 shrink-0">＋{idx + 2}人目</span>
+                    <select
+                      value={sid}
+                      onChange={(e) => {
+                        const next = [...additionalStaff];
+                        next[idx] = e.target.value;
+                        setAdditionalStaff(next);
+                      }}
+                      className={`${selectClass} flex-1`}
+                    >
+                      <option value="">追加担当を選択</option>
+                      {staffList
+                        .filter(s => (s.is_active && s.show_in_timeline !== false) || initialAdditionalStaff.includes(s.id))
+                        .map(s => (
+                          <option key={s.id} value={s.id}>
+                            {s.name}{!s.is_active ? "（非公開）" : ""}
+                          </option>
+                        ))}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={() => setAdditionalStaff(additionalStaff.filter((_, i) => i !== idx))}
+                      className="px-2 py-1 text-rose-500 hover:bg-rose-50 rounded text-sm"
+                      aria-label="追加担当を削除"
+                    >×</button>
+                  </div>
+                ))}
+                <button
+                  type="button"
+                  onClick={() => setAdditionalStaff([...additionalStaff, ""])}
+                  className="text-xs text-blue-600 hover:text-blue-700 inline-flex items-center gap-1 mt-1"
+                >
+                  <Plus className="w-3 h-3" /> 担当を追加
+                </button>
+                {additionalStaff.filter(Boolean).length > 0 && !staffId && (
+                  <p className="text-[10px] text-amber-600 font-semibold">
+                    追加担当を入れるときは、上のメインの担当スタッフも選んでください。
+                  </p>
+                )}
               </div>
             )}
 

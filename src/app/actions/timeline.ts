@@ -47,16 +47,52 @@ export type TimelineAppointment = {
   party_size: number | null;
 };
 
-export type TimelineData = {
-  staff: TimelineStaff[];
+/** 1日ぶんのタイムテーブル。週表示ではこれが7個並ぶ。 */
+export type TimelineDay = {
+  /** "yyyy-MM-dd"（JST） */
+  date: string;
   appointments: TimelineAppointment[];
-  slotMinutes: number;
+  /** 表示レンジ。土曜は別設定を持つので日ごとに変わりうる */
   scheduleStartHour: number;
   scheduleEndHour: number;
-  /** 当月の予約件数（status != cancelled）を staff_id 別に集計。未指定分は __unassigned__ キー */
-  staffMonthCounts: Record<string, number>;
-  monthLabel: string; // "5月" など
+  /** "2026-07"。月次実績バッジの参照キー（週が月をまたぐため日ごとに持つ） */
+  monthKey: string;
+  monthLabel: string; // "7月" など
 };
+
+export type TimelineData = {
+  staff: TimelineStaff[];
+  slotMinutes: number;
+  /** 期間内の日を古い順に。1日表示なら要素1つ */
+  days: TimelineDay[];
+  /**
+   * 月次の予約件数（status != cancelled）を「月 → staff_id」で集計。
+   * 週が月をまたいでも各日が自分の月の実績を出せるように月キーで持つ。
+   * 担当未設定分は __unassigned__ キー。
+   */
+  staffMonthCounts: Record<string, Record<string, number>>;
+};
+
+const JST_MS = 9 * 3600 * 1000;
+
+/** ISO文字列 → JSTでの "yyyy-MM-dd" */
+function jstDateKey(iso: string): string {
+  return new Date(new Date(iso).getTime() + JST_MS).toISOString().slice(0, 10);
+}
+
+/** "yyyy-MM-dd" の from〜to（両端含む）を日付文字列の配列にする */
+function eachDateStr(fromDateStr: string, toDateStr: string): string[] {
+  const out: string[] = [];
+  // 正午起点で進めることで、DST等の影響を受けずに日付だけを繰り上げる
+  let cur = new Date(`${fromDateStr}T12:00:00Z`);
+  const last = new Date(`${toDateStr}T12:00:00Z`);
+  // 暴走防止（最大62日）
+  for (let i = 0; cur <= last && i < 62; i++) {
+    out.push(cur.toISOString().slice(0, 10));
+    cur = new Date(cur.getTime() + 24 * 3600 * 1000);
+  }
+  return out;
+}
 
 const DEFAULT_START_HOUR = 9;
 const DEFAULT_END_HOUR = 20;
@@ -79,24 +115,36 @@ function parseHourFloor(timeStr: string | null | undefined, fallback: number): n
   return parseInt(m[1], 10);
 }
 
-export async function getTimelineForDate(dateStr: string): Promise<{ success: boolean; data?: TimelineData; error?: string }> {
+/**
+ * 期間（両端含む）のタイムテーブルを1回で取得する。
+ *
+ * 1日表示でも週表示でもこの1本を使う。日を1つずらすたびに取り直していた頃は
+ * 「当月まるごとの件数集計」まで毎回引き直していて体感が重かったので、
+ * 週ぶんをまとめて1往復で取る形にしている（週内の日移動は再取得ゼロ）。
+ */
+export async function getTimelineRange(
+  fromDateStr: string,
+  toDateStr: string,
+): Promise<{ success: boolean; data?: TimelineData; error?: string }> {
   try {
     const { clinicId } = await checkAdminAuth();
     const sb = getAdminSupabase();
     if (!sb) return { success: false, error: "service role unavailable" };
 
-    const dayStart = `${dateStr}T00:00:00+09:00`;
-    const dayEnd = `${dateStr}T23:59:59+09:00`;
+    const dateStrs = eachDateStr(fromDateStr, toDateStr);
+    if (dateStrs.length === 0) return { success: false, error: "期間が不正です" };
+    const firstDate = dateStrs[0];
+    const lastDate = dateStrs[dateStrs.length - 1];
 
-    // 対象日の年月を計算（当月の合計件数取得用）
-    const [y, m] = dateStr.split("-").map((s) => parseInt(s, 10));
-    const monthStart = `${y}-${String(m).padStart(2, "0")}-01T00:00:00+09:00`;
-    const lastDay = new Date(y, m, 0).getDate();
-    const monthEnd = `${y}-${String(m).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}T23:59:59+09:00`;
+    const rangeStart = `${firstDate}T00:00:00+09:00`;
+    const rangeEnd = `${lastDate}T23:59:59+09:00`;
 
-    // 曜日判定（土曜は別の営業時間設定を使う）
-    const targetDay = new Date(`${dateStr}T12:00:00+09:00`);
-    const isSaturday = targetDay.getDay() === 6;
+    // 月次件数は「期間がまたぐ月」をまとめて1回で取る（週が月をまたぐケースに対応）
+    const [fy, fm] = firstDate.split("-").map((s) => parseInt(s, 10));
+    const [ly, lm] = lastDate.split("-").map((s) => parseInt(s, 10));
+    const monthStart = `${fy}-${String(fm).padStart(2, "0")}-01T00:00:00+09:00`;
+    const lastDayOfMonth = new Date(ly, lm, 0).getDate();
+    const monthEnd = `${ly}-${String(lm).padStart(2, "0")}-${String(lastDayOfMonth).padStart(2, "0")}T23:59:59+09:00`;
 
     const [staffRes, aptRes, monthAptRes, settingsRes] = await Promise.all([
       sb.from("reservation_staff")
@@ -111,13 +159,13 @@ export async function getTimelineForDate(dateStr: string): Promise<{ success: bo
       sb.from("appointments")
         .select("id, start_time, end_time, status, checkin_status, is_first_visit, memo, course_id, course_name, staff_id, staff_name, room_id, room_name, series_id, cancel_kind, no_show, cancel_hidden, customer_id, additional_courses, additional_staff, department, party_size, customers(name, medical_record_number)")
         .eq("clinic_id", clinicId)
-        .gte("start_time", dayStart)
-        .lte("start_time", dayEnd)
+        .gte("start_time", rangeStart)
+        .lte("start_time", rangeEnd)
         .order("start_time", { ascending: true }),
-      // 当月の予約（件数集計のため staff_id と additional_staff を取得）
+      // 月次の予約（件数集計のため staff_id と additional_staff を取得）
       // 担当が複数人の予約は、各スタッフの実績にそれぞれ +1 する
       sb.from("appointments")
-        .select("staff_id, additional_staff")
+        .select("staff_id, additional_staff, start_time")
         .eq("clinic_id", clinicId)
         .neq("status", "cancelled")
         .gte("start_time", monthStart)
@@ -176,21 +224,20 @@ export async function getTimelineForDate(dateStr: string): Promise<{ success: bo
     const slotV = settingsRes.data?.slot_duration_minutes;
     const slotMinutes = (slotV === 10 || slotV === 15 || slotV === 20 || slotV === 30) ? slotV : 30;
 
-    // 表示範囲は「管理画面タイムテーブル専用設定 (admin_timeline_*)」を最優先、
-    // 設定が無ければ患者LP用の営業時間 (business_*) にフォールバック。
-    // 土曜は別設定を持つ（admin_timeline_*_saturday → business_*_saturday の順）
-    const openStr = isSaturday
-      ? (settingsRes.data?.admin_timeline_open_saturday ?? settingsRes.data?.business_open_saturday)
-      : (settingsRes.data?.admin_timeline_open_weekday ?? settingsRes.data?.business_open_weekday);
-    const closeStr = isSaturday
-      ? (settingsRes.data?.admin_timeline_close_saturday ?? settingsRes.data?.business_close_saturday)
-      : (settingsRes.data?.admin_timeline_close_weekday ?? settingsRes.data?.business_close_weekday);
-    const scheduleStartHour = parseHourFloor(openStr, DEFAULT_START_HOUR);
-    const scheduleEndHour = parseHourCeil(closeStr, DEFAULT_END_HOUR);
+    // 予約を JST の日付ごとに振り分ける
+    const aptsByDate = new Map<string, TimelineAppointment[]>();
+    for (const a of appointments) {
+      const key = jstDateKey(a.start_time);
+      if (!aptsByDate.has(key)) aptsByDate.set(key, []);
+      aptsByDate.get(key)!.push(a);
+    }
 
-    // 当月件数を staff_id 別に集計（メイン担当 + 追加担当の各人に +1）
-    const staffMonthCounts: Record<string, number> = {};
+    // 月次件数を「月 → staff_id」で集計（メイン担当 + 追加担当の各人に +1）
+    const staffMonthCounts: Record<string, Record<string, number>> = {};
     (monthAptRes.data ?? []).forEach((row: any) => {
+      const monthKey = jstDateKey(row.start_time).slice(0, 7);
+      if (!staffMonthCounts[monthKey]) staffMonthCounts[monthKey] = {};
+      const bucket = staffMonthCounts[monthKey];
       const targetIds = new Set<string>();
       targetIds.add(row.staff_id ?? "__unassigned__");
       const add = row.additional_staff;
@@ -200,24 +247,38 @@ export async function getTimelineForDate(dateStr: string): Promise<{ success: bo
         }
       }
       for (const key of targetIds) {
-        staffMonthCounts[key] = (staffMonthCounts[key] ?? 0) + 1;
+        bucket[key] = (bucket[key] ?? 0) + 1;
       }
+    });
+
+    const days: TimelineDay[] = dateStrs.map((dateStr) => {
+      // 曜日判定（土曜は別の営業時間設定を使う）
+      const isSaturday = new Date(`${dateStr}T12:00:00+09:00`).getDay() === 6;
+      // 表示範囲は「管理画面タイムテーブル専用設定 (admin_timeline_*)」を最優先、
+      // 設定が無ければ患者LP用の営業時間 (business_*) にフォールバック。
+      const openStr = isSaturday
+        ? (settingsRes.data?.admin_timeline_open_saturday ?? settingsRes.data?.business_open_saturday)
+        : (settingsRes.data?.admin_timeline_open_weekday ?? settingsRes.data?.business_open_weekday);
+      const closeStr = isSaturday
+        ? (settingsRes.data?.admin_timeline_close_saturday ?? settingsRes.data?.business_close_saturday)
+        : (settingsRes.data?.admin_timeline_close_weekday ?? settingsRes.data?.business_close_weekday);
+      const monthKey = dateStr.slice(0, 7);
+      return {
+        date: dateStr,
+        appointments: aptsByDate.get(dateStr) ?? [],
+        scheduleStartHour: parseHourFloor(openStr, DEFAULT_START_HOUR),
+        scheduleEndHour: parseHourCeil(closeStr, DEFAULT_END_HOUR),
+        monthKey,
+        monthLabel: `${parseInt(monthKey.slice(5), 10)}月`,
+      };
     });
 
     return {
       success: true,
-      data: {
-        staff,
-        appointments,
-        slotMinutes,
-        scheduleStartHour,
-        scheduleEndHour,
-        staffMonthCounts,
-        monthLabel: `${m}月`,
-      },
+      data: { staff, slotMinutes, days, staffMonthCounts },
     };
   } catch (err: any) {
-    console.error("getTimelineForDate error:", err);
+    console.error("getTimelineRange error:", err);
     return { success: false, error: err?.message ?? "unknown" };
   }
 }

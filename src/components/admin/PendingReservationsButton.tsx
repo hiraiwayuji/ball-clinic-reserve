@@ -18,7 +18,7 @@ import { getMyClinicId } from "@/app/actions/auth";
 import { realtimeGuard } from "@/lib/realtime-guard";
 
 const PENDING_SELECT =
-  `id, start_time, end_time, memo, is_first_visit, status, customer_id, series_id, clinic_id, course_id, course_name, staff_id, staff_name, room_id, room_name, department, party_size, customers(name, phone, medical_record_number, birth_date)`;
+  `id, start_time, end_time, memo, is_first_visit, status, customer_id, series_id, clinic_id, course_id, course_name, staff_id, staff_name, room_id, room_name, additional_courses, additional_staff, department, party_size, customers(name, phone, medical_record_number, birth_date)`;
 
 interface PendingReservationsButtonProps {
   /** 確定・編集が反映されたとき、呼び出し元の画面も再取得させるためのコールバック */

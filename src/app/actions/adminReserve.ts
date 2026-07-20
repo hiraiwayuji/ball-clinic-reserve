@@ -1155,6 +1155,12 @@ export async function updateAppointmentDetails(
     courseId?: string | null;
     staffId?: string | null;
     roomId?: string | null;
+    // 追加メニュー・追加担当（同じ予約にひもづく2件目以降）
+    // - undefined  : 変更しない
+    // - []         : 全部外す
+    // - string[]   : この ID 群に置き換える（マスタにない ID は無視）
+    additionalCourseIds?: string[];
+    additionalStaffIds?: string[];
   }
 ) {
   const auth = await checkAdminAuth();
@@ -1164,7 +1170,7 @@ export async function updateAppointmentDetails(
       // 変更前を保存
       const { data: before } = await supabase
         .from("appointments")
-        .select("id, start_time, end_time, memo, is_first_visit, course_id, course_name, staff_id, staff_name, room_id, room_name, customers(name)")
+        .select("id, start_time, end_time, memo, is_first_visit, course_id, course_name, staff_id, staff_name, room_id, room_name, additional_courses, additional_staff, customers(name)")
         .eq("id", appointmentId)
         .eq("clinic_id", auth.clinicId)
         .maybeSingle();
@@ -1225,6 +1231,42 @@ export async function updateAppointmentDetails(
             updatePayload.room_name = name;
           }
         }
+      }
+
+      // 追加メニュー・追加担当の置き換え。
+      // 新規登録時（createManualReservation）と同じく、マスタから名前を引いて
+      // {course_id, course_name} / {staff_id, staff_name} の形で保存する。
+      // 他院の ID が混ざらないよう clinic_id 付きで引き、見つからない ID は落とす。
+      const resolveRefs = async (
+        table: "reservation_courses" | "reservation_staff",
+        ids: string[],
+      ): Promise<{ id: string; name: string }[]> => {
+        const uniq = [...new Set(ids.filter(Boolean))];
+        if (uniq.length === 0) return [];
+        const { data } = await supabase
+          .from(table)
+          .select("id, name")
+          .eq("clinic_id", auth.clinicId)
+          .in("id", uniq);
+        const byId = new Map((data ?? []).map((r: any) => [r.id as string, r.name as string]));
+        // 画面で並べた順を保つ（マスタの返却順ではなく、選ばれた順）
+        return uniq.flatMap((id) => {
+          const name = byId.get(id);
+          return name ? [{ id, name }] : [];
+        });
+      };
+
+      if (options && Array.isArray(options.additionalCourseIds)) {
+        const refs = await resolveRefs("reservation_courses", options.additionalCourseIds);
+        updatePayload.additional_courses = refs.length > 0
+          ? refs.map((r) => ({ course_id: r.id, course_name: r.name }))
+          : null;
+      }
+      if (options && Array.isArray(options.additionalStaffIds)) {
+        const refs = await resolveRefs("reservation_staff", options.additionalStaffIds);
+        updatePayload.additional_staff = refs.length > 0
+          ? refs.map((r) => ({ staff_id: r.id, staff_name: r.name }))
+          : null;
       }
 
       const { error } = await supabase
@@ -2842,19 +2884,26 @@ export async function getMonthCrossingFirstVisits(
     ).toISOString();
 
     // 対象患者の来院履歴（前月1日〜期間終わり）。IN句が長くなりすぎないよう分割。
-    const history: Array<{ customer_id: string; start_time: string }> = [];
+    // 週ぶんをまとめて見るときは分割数が増えるので、逐次ではなく並列で投げる。
+    const chunks: string[][] = [];
     for (let i = 0; i < customerIds.length; i += 200) {
-      const chunk = customerIds.slice(i, i + 200);
-      const { data } = await supabase
-        .from("appointments")
-        .select("customer_id, start_time")
-        .eq("clinic_id", clinicId)
-        .neq("status", "cancelled")
-        .in("customer_id", chunk)
-        .gte("start_time", historyStart)
-        .lt("start_time", rangeEndISO);
-      if (data) history.push(...(data as Array<{ customer_id: string; start_time: string }>));
+      chunks.push(customerIds.slice(i, i + 200));
     }
+    const chunkResults = await Promise.all(
+      chunks.map((chunk) =>
+        supabase
+          .from("appointments")
+          .select("customer_id, start_time")
+          .eq("clinic_id", clinicId)
+          .neq("status", "cancelled")
+          .in("customer_id", chunk)
+          .gte("start_time", historyStart)
+          .lt("start_time", rangeEndISO),
+      ),
+    );
+    const history: Array<{ customer_id: string; start_time: string }> = chunkResults.flatMap(
+      (r) => (r.data ?? []) as Array<{ customer_id: string; start_time: string }>,
+    );
 
     // 患者×月 → その月の最初の来院時刻
     const firstOfMonth = new Map<string, string>();
