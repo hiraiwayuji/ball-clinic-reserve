@@ -93,6 +93,13 @@ export type PendingSalePatient = {
   reservedCourseName: string | null;
   /** 予約コースから算出した提案金額。is_first_visit に応じて first_visit_price / price を選ぶ。 */
   reservedCoursePrice: number | null;
+  /** 予約に足されていた追加メニュー（2部位目など）の名前。売上に出さないコースは除く。 */
+  additionalCourseNames: string[];
+  /** 追加メニューの合計金額。価格未設定（保険）や水素は 0 として扱う。 */
+  additionalCoursesPrice: number;
+  /** その合計を initialAmount に足し込み済みか。
+   *  AI履歴/手入力/水素の無料提案では足していないので、画面で注意を出すのに使う。 */
+  additionalCoursesIncluded: boolean;
   /** 金額の元情報の出所。bulk画面で表示バッジを切り替えるのに使う。 */
   amountSource: "course" | "ai" | "empty";
   /** bulk画面で初期表示する金額（コース > AI > 空欄 の優先順位） */
@@ -151,7 +158,7 @@ export async function getTodayPendingSales(dateStr?: string): Promise<{ success:
     // 指定日の「会計完了」予約を取得（コース情報も snapshot として一緒に取る）
     const { data: appointments, error: aptError } = await supabase
       .from("appointments")
-      .select("id, is_first_visit, start_time, checkin_status, status, course_id, course_name, customers(id, name, medical_record_number, birth_date, city_name)")
+      .select("id, is_first_visit, start_time, checkin_status, status, course_id, course_name, additional_courses, customers(id, name, medical_record_number, birth_date, city_name)")
       .eq("clinic_id", clinicId)
       .neq("status", "cancelled")
       .gte("start_time", dayStart)
@@ -162,9 +169,13 @@ export async function getTodayPendingSales(dateStr?: string): Promise<{ success:
 
     // 予約で参照されている course_id の最新マスタ価格を一括取得（N+1 回避）。
     // course_id snapshot が削除済みコースを指していると null。その場合は AI 履歴フォールバック。
+    // 追加メニュー（2部位目など）の course_id も同じマスタ取得に混ぜる。
     const courseIds = Array.from(new Set(
-      (appointments as Array<{ course_id?: string | null }>)
-        .map((a) => a.course_id ?? null)
+      (appointments as Array<{ course_id?: string | null; additional_courses?: { course_id?: string }[] | null }>)
+        .flatMap((a) => [
+          a.course_id ?? null,
+          ...((a.additional_courses ?? []).map((c) => c?.course_id ?? null)),
+        ])
         .filter((id): id is string => !!id)
     ));
     type CourseMasterRow = { id: string; name: string; price: number | null; first_visit_price: number | null; free_with_jihi: boolean | null; exclude_from_sales: boolean | null };
@@ -243,6 +254,7 @@ export async function getTodayPendingSales(dateStr?: string): Promise<{ success:
       status: string;
       course_id: string | null;
       course_name: string | null;
+      additional_courses: { course_id?: string; course_name?: string }[] | null;
       customers: { id?: string; name?: string; medical_record_number?: string | null; birth_date?: string | null; city_name?: string | null } | { id?: string; name?: string; medical_record_number?: string | null; birth_date?: string | null; city_name?: string | null }[] | null;
     }>) {
       const customerName = getAppointmentCustomerName(apt.customers);
@@ -272,6 +284,25 @@ export async function getTodayPendingSales(dateStr?: string): Promise<{ success:
         } else {
           reservedCoursePrice = courseRow.price ?? null;
         }
+      }
+
+      // ── 追加メニュー（2部位目など）──
+      // 予約に足された追加メニューぶんを売上の元情報にも反映する。
+      // ・さみ整体など「売上に出さない」コースは金額にも名前にも入れない
+      // ・価格 null（保険施術）は窓口負担が手入力なので 0 として扱い、名前だけ残す
+      // ・水素（free_with_jihi）は無料/通常のトグルで別管理なので金額には足さない
+      const addonNames: string[] = [];
+      let additionalCoursesPrice = 0;
+      for (const add of apt.additional_courses ?? []) {
+        const addRow = add?.course_id ? courseMaster.get(add.course_id) ?? null : null;
+        if (addRow?.exclude_from_sales === true) continue;
+        const name = add?.course_name ?? addRow?.name ?? null;
+        if (name) addonNames.push(name);
+        if (!addRow || addRow.free_with_jihi) continue;
+        const addPrice = isFirstVisit
+          ? (addRow.first_visit_price ?? addRow.price ?? null)
+          : (addRow.price ?? null);
+        if (addPrice != null) additionalCoursesPrice += addPrice;
       }
 
       // ── 第2優先: AI履歴予測（コース価格が無い時だけ計算） ──
@@ -335,10 +366,13 @@ export async function getTodayPendingSales(dateStr?: string): Promise<{ success:
       let amountSource: "course" | "ai" | "empty";
       let initialAmount = "";
       let initialMemo = "";
+      let additionalCoursesIncluded = false;
       if (reservedCoursePrice != null) {
         amountSource = "course";
-        initialAmount = String(reservedCoursePrice);
-        initialMemo = reservedCourseName ?? "";
+        additionalCoursesIncluded = additionalCoursesPrice > 0;
+        // 追加メニューぶんも足した合計を初期表示する（保険施術¥900＋鍼灸1部位¥2,200＝¥3,100）
+        initialAmount = String(reservedCoursePrice + additionalCoursesPrice);
+        initialMemo = [reservedCourseName, ...addonNames].filter(Boolean).join("、");
       } else if (prediction) {
         amountSource = "ai";
         initialAmount = String(prediction.predictedAmount);
@@ -359,7 +393,9 @@ export async function getTodayPendingSales(dateStr?: string): Promise<{ success:
       const freeWithJihiNormalPrice = isFreeWithJihiCourse ? reservedCoursePrice : null;
       if (suisoFreeSuggested) {
         // 無料を提案：金額0・区分は「水素（無料）」・メモはコース名（無料）
+        // ここで金額を 0 に上書きするので、追加メニューぶんは含まれない扱いに戻す。
         amountSource = "course";
+        additionalCoursesIncluded = false;
         initialAmount = "0";
         initialMemo = reservedCourseName ? `${reservedCourseName}（無料）` : "水素（無料）";
         predictedPaymentTypes = ["suiso_free"];
@@ -377,6 +413,9 @@ export async function getTodayPendingSales(dateStr?: string): Promise<{ success:
         prediction,
         reservedCourseName,
         reservedCoursePrice,
+        additionalCourseNames: addonNames,
+        additionalCoursesPrice,
+        additionalCoursesIncluded,
         amountSource,
         initialAmount,
         initialMemo,

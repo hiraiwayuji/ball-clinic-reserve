@@ -716,6 +716,24 @@ function DraftRowItem({
               </span>
             )}
           </div>
+          {/* 予約に足された追加メニュー（2部位目など）。
+              金額に入っているか（予約コース基準のときだけ自動加算）を明示する。 */}
+          {row.additionalCourseNames.length > 0 && (
+            <div className="flex items-center gap-1 mt-1 flex-wrap">
+              <span className="text-[11px] font-bold text-cyan-700 dark:text-cyan-300">
+                ＋追加メニュー: {row.additionalCourseNames.join("、")}
+              </span>
+              {row.additionalCoursesIncluded ? (
+                <span className="text-[11px] text-cyan-600">
+                  （¥{row.additionalCoursesPrice.toLocaleString()} を金額に含めています）
+                </span>
+              ) : (
+                <span className="text-[11px] text-amber-600 font-semibold">
+                  （金額には入っていません。ご確認ください）
+                </span>
+              )}
+            </div>
+          )}
           {row.prediction?.warning && (
             <div className="flex items-center gap-1 mt-1">
               <AlertTriangle className="w-3 h-3 text-amber-500 shrink-0" />
