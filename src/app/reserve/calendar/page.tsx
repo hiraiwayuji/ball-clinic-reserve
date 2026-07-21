@@ -19,7 +19,7 @@ import { createClient } from "@/lib/supabase/client";
 
 import { getTimeSlots, getTimeSlotsForDate, getMaxSlots, isDateWithinAllowedRange, isTimeSlotWithinTwoHours, isTodayJST, type SlotMinutes, type Schedule, type SpecialDay } from "@/lib/time-slots";
 import { getSpecialDays } from "@/app/actions/special-days";
-import { findSpecialDay } from "@/lib/use-special-days";
+import { useSpecialDays, findSpecialDay } from "@/lib/use-special-days";
 import { useClinicSlotDuration } from "@/lib/use-clinic-slot-duration";
 import { useClinicSchedule } from "@/lib/use-clinic-schedule";
 import { useClinicPatientCanPickStaff } from "@/lib/use-clinic-patient-staff";
@@ -197,7 +197,9 @@ function ReserveCalendarContent() {
   const [currentMonth, setCurrentMonth] = useState<Date | null>(null);
   const [monthlyData, setMonthlyData] = useState<Record<string, number>>({});
   const [clinicHolidays, setClinicHolidays] = useState<ClinicHoliday[]>([]);
-  const [specialDays, setSpecialDays] = useState<SpecialDay[]>([]);
+  // 臨時営業日は全件hookで取得（お盆など）。以前は state を宣言だけして
+  // setSpecialDays を呼んでおらず、選択日パネルの時短判定が常に空＝効かなかった。
+  const specialDays = useSpecialDays();
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
   const [selectedLevel, setSelectedLevel] = useState<AvailabilityLevel | null>(null);
   const [dailySlots, setDailySlots] = useState<string[]>([]);
