@@ -601,7 +601,7 @@ export function AddAppointmentDialog({
   // 担当レーンの時間かぶりをサーバーで確認し、必要なら確認ダイアログを出す。
   // ・かぶりなし → そのまま登録。
   // ・ボールがかぶり＆さみ出勤日で空き → 「さみ整体へ振替」を提案。
-  // ・それ以外のかぶり → 警告（このままでも登録できる）。
+  // ・それ以外のかぶり → 「重複予約はできません」の案内（同一レーンの重複は DB が弾く）。
   const runOverlapGate = async (formData: FormData) => {
     setIsSubmitting(true);
     setDupWarning(null);
@@ -763,7 +763,7 @@ export function AddAppointmentDialog({
           </div>
         )}
 
-        {/* 担当かぶりの確認（さみ整体へ振替 / このままでも登録できる警告） */}
+        {/* 担当かぶりの確認（さみ整体へ振替 / 重複はできない案内） */}
         {overlapPrompt && (
           <div className="fixed inset-0 z-[310] flex items-center justify-center bg-black/50 p-4">
             <div className="w-full max-w-sm bg-white rounded-2xl shadow-2xl border border-amber-300 p-5 space-y-4">
@@ -790,15 +790,6 @@ export function AddAppointmentDialog({
                     </Button>
                     <Button
                       type="button"
-                      variant="outline"
-                      onClick={() => performSubmit(overlapPrompt.formData)}
-                      disabled={isSubmitting}
-                      className="h-11 rounded-xl"
-                    >
-                      ボールのまま登録する
-                    </Button>
-                    <Button
-                      type="button"
                       variant="ghost"
                       onClick={() => setOverlapPrompt(null)}
                       disabled={isSubmitting}
@@ -816,26 +807,17 @@ export function AddAppointmentDialog({
                     </p>
                     <p className="text-sm text-slate-600 mt-1 leading-relaxed">
                       {overlapPrompt.staffName}さんはこの時間にすでにご予約が入っています。<br />
-                      担当か時間を変えるのがおすすめですが、このまま登録することもできます。
+                      同じ担当の重複予約はできません。担当か時間を変えてください。
                     </p>
                   </div>
                   <div className="flex gap-2">
                     <Button
                       type="button"
-                      onClick={() => performSubmit(overlapPrompt.formData)}
-                      disabled={isSubmitting}
-                      className="flex-1 h-11 bg-amber-600 hover:bg-amber-700 rounded-xl font-bold text-white"
-                    >
-                      {isSubmitting ? "登録中..." : "それでも登録する"}
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="outline"
                       onClick={() => setOverlapPrompt(null)}
                       disabled={isSubmitting}
                       className="flex-1 h-11 rounded-xl"
                     >
-                      やめる
+                      閉じる
                     </Button>
                   </div>
                 </>

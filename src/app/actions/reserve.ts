@@ -1066,6 +1066,15 @@ export async function createReservation(formData: FormData) {
 
       if (appointmentErr || !appointmentData) {
         console.error("Appointment insertion error:", appointmentErr);
+        // 除外制約（同じ担当レーンの時間かぶり＝ダブルブッキング）は DB が最終防衛で弾く。
+        // PostgreSQL exclusion_violation = 23P01 / 制約名 appointments_single_resource_no_overlap。
+        // 画面の空き表示とタッチの差で埋まった場合などに到達しうるので、専用の分かりやすい文言にする。
+        const isOverlap =
+          (appointmentErr as { code?: string })?.code === "23P01" ||
+          /single_resource_no_overlap|exclusion/i.test((appointmentErr as { message?: string })?.message ?? "");
+        if (isOverlap) {
+          return { success: false, error: "申し訳ありません。そのお時間はすでにご予約が入っております。お手数ですが、別のお時間をお選びください。" };
+        }
         return { success: false, error: "予約の登録に失敗しました。時間をおいて再度お試しいただくか、お電話・LINEにてご予約ください。" };
       }
       
