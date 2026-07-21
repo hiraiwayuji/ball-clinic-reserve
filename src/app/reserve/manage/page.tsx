@@ -14,9 +14,10 @@ import {
   type MyReservation,
 } from "@/app/actions/manage-reservation";
 import { getDailyAvailability } from "@/app/actions/reserve";
-import { getTimeSlots, isTimeSlotWithinTwoHours } from "@/lib/time-slots";
+import { getTimeSlotsForDate, isTimeSlotWithinTwoHours } from "@/lib/time-slots";
 import { useClinicSlotDuration } from "@/lib/use-clinic-slot-duration";
 import { useClinicSchedule } from "@/lib/use-clinic-schedule";
+import { useSpecialDays, findSpecialDay } from "@/lib/use-special-days";
 
 function fmtDateTime(iso: string) {
   return format(new Date(iso), "M月d日（E） HH:mm", { locale: ja });
@@ -35,6 +36,7 @@ function ManageContent() {
   const lt = searchParams.get("lt");
   const slotMinutes = useClinicSlotDuration();
   const schedule = useClinicSchedule();
+  const specialDays = useSpecialDays();
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -123,6 +125,8 @@ function ManageContent() {
       const d = new Date(today.getFullYear(), today.getMonth(), today.getDate() + i);
       if (schedule.closedDays.includes(d.getDay())) continue;
       const value = format(d, "yyyy-MM-dd");
+      // 臨時休診日（お盆など）は変更先の候補に出さない
+      if (findSpecialDay(specialDays, value)?.closed) continue;
       out.push({ value, label: format(d, "M/d(E)", { locale: ja }) });
     }
     return out;
@@ -192,7 +196,7 @@ function ManageContent() {
                           <div className="flex items-center gap-2 text-zinc-400 text-sm py-3"><Loader2 className="w-4 h-4 animate-spin" />空き時間を確認中...</div>
                         ) : (
                           <div className="grid grid-cols-4 gap-1.5 mt-1">
-                            {getTimeSlots(new Date(`${reDate}T00:00:00`), { slotMinutes, schedule }).map((t) => {
+                            {getTimeSlotsForDate(new Date(`${reDate}T00:00:00`), reDate, { slotMinutes, schedule, special: findSpecialDay(specialDays, reDate) }).map((t) => {
                               const booked = bookedTimes.includes(t);
                               const tooClose = isTimeSlotWithinTwoHours(reDate, t);
                               const disabled = booked || tooClose || busyId === r.id;

@@ -1006,7 +1006,7 @@ function ReserveCalendarContent() {
                   <p className="text-zinc-300 text-sm font-bold">時間を読み込み中...</p>
                 </div>
               ) : (() => {
-                const allSlots = filterSlotsByStaffSchedule(getTimeSlots(selectedDate, { slotMinutes, schedule }), selectedDate, staffSchedule);
+                const allSlots = filterSlotsByStaffSchedule(getTimeSlotsForDate(selectedDate, format(selectedDate, "yyyy-MM-dd"), { slotMinutes, schedule, special: selectedSpecial }), selectedDate, staffSchedule);
                 const slotDuration = selectedCourse?.duration_minutes ?? 30;
                 const requiredSteps = Math.max(1, Math.ceil(slotDuration / slotMinutes));
 
@@ -1105,7 +1105,7 @@ function ReserveCalendarContent() {
                   既に埋まっている時間帯にどうしても来たい患者の動線確保のため。
               */}
               {!loadingDay && (() => {
-                const allSlotsForCheck = filterSlotsByStaffSchedule(getTimeSlots(selectedDate, { slotMinutes, schedule }), selectedDate, staffSchedule);
+                const allSlotsForCheck = filterSlotsByStaffSchedule(getTimeSlotsForDate(selectedDate, format(selectedDate, "yyyy-MM-dd"), { slotMinutes, schedule, special: selectedSpecial }), selectedDate, staffSchedule);
                 const availableSlotsCount = allSlotsForCheck.filter(s =>
                   !dailySlots.includes(s) &&
                   !blockedSlots.includes(s) &&
@@ -1203,7 +1203,7 @@ function ReserveCalendarContent() {
                         onChange={e => setWaitlistStart(e.target.value)}
                         className="flex-1 bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-3 text-white text-sm font-bold focus:outline-none focus:border-amber-500"
                       >
-                        {filterSlotsByStaffSchedule(getTimeSlots(selectedDate, { slotMinutes, schedule }), selectedDate, staffSchedule).map(t => {
+                        {filterSlotsByStaffSchedule(getTimeSlotsForDate(selectedDate, format(selectedDate, "yyyy-MM-dd"), { slotMinutes, schedule, special: selectedSpecial }), selectedDate, staffSchedule).map(t => {
                           const isTooClose = isTimeSlotWithinTwoHours(selectedDate, t);
                           return <option key={t} value={t} disabled={isTooClose}>{t}{isTooClose ? " (電話のみ)" : ""}</option>;
                         })}
@@ -1214,7 +1214,7 @@ function ReserveCalendarContent() {
                         onChange={e => setWaitlistEnd(e.target.value)}
                         className="flex-1 bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-3 text-white text-sm font-bold focus:outline-none focus:border-amber-500"
                       >
-                        {getTimeSlots(selectedDate, { slotMinutes, schedule }).filter(t => t > waitlistStart).concat([selectedDate.getDay() === 6 ? "18:00" : "23:00"]).map(t => (
+                        {getTimeSlotsForDate(selectedDate, format(selectedDate, "yyyy-MM-dd"), { slotMinutes, schedule, special: selectedSpecial }).filter(t => t > waitlistStart).concat([selectedSpecial?.closeTime || (selectedDate.getDay() === 6 ? "18:00" : "23:00")]).map(t => (
                           <option key={t} value={t}>{t}</option>
                         ))}
                       </select>

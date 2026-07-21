@@ -4,8 +4,9 @@ import { createClient } from "@supabase/supabase-js";
 import { PUBLIC_CLINIC_ID } from "@/lib/default-clinic-id";
 import { getLineUidFromCookie } from "@/app/actions/family-line";
 import { pushLineToOwners } from "@/lib/admin-notify";
-import { isDateWithinAllowedRange, isTimeSlotWithinTwoHours } from "@/lib/time-slots";
+import { isDateWithinAllowedRange, isTimeSlotWithinTwoHours, isTodayJST } from "@/lib/time-slots";
 import { getBookingHorizonDays } from "@/app/actions/clinic-slot";
+import { getSpecialDayForDate } from "@/app/actions/special-days";
 
 const CLINIC_ID = PUBLIC_CLINIC_ID;
 
@@ -126,6 +127,18 @@ export async function rescheduleMyReservation(
   const horizonDays = await getBookingHorizonDays();
   if (!isDateWithinAllowedRange(new Date(newDate), false, horizonDays)) return { ok: false, error: `${horizonDays}日より先の予約はできません。` };
   if (isTimeSlotWithinTwoHours(newDate, newTime)) return { ok: false, error: "直前（2時間以内）への変更はお電話・LINEでお願いします。" };
+
+  // 臨時営業日（お盆など）：休診・当日予約停止・時短の時間外への変更を弾く。
+  // 新規予約（createReservation）と同じルールを、時間変更にも適用する。
+  const special = await getSpecialDayForDate(newDate);
+  if (special?.closed) return { ok: false, error: "その日は休診です。別の日をお選びください。" };
+  if (special?.blockSameDay && isTodayJST(newDate)) return { ok: false, error: "当日のご予約への変更はお電話・LINEでお願いします。" };
+  if (special && (special.openTime || special.closeTime)) {
+    const toMin = (hm: string) => { const [h, m] = hm.slice(0, 5).split(":").map(Number); return h * 60 + m; };
+    const t = toMin(newTime);
+    if (special.openTime && t < toMin(special.openTime)) return { ok: false, error: `その日は ${special.openTime} 以降のご予約です。` };
+    if (special.closeTime && t >= toMin(special.closeTime)) return { ok: false, error: `その日は ${special.closeTime} までのご予約です。` };
+  }
 
   // 所要時間は元予約を維持
   const oldStart = new Date(apt.start_time);
