@@ -5,6 +5,7 @@ import { createClient as createAdminClient } from "@supabase/supabase-js";
 import { checkAdminAuth } from "./auth";
 import { revalidatePath } from "next/cache";
 import { getClinicSettings } from "./settings";
+import { writeAudit, type AuditActorRole } from "@/lib/audit";
 
 type CustomerWithStats = {
   id: string;
@@ -262,19 +263,43 @@ export async function updateCustomerInfo(
 }
 
 /**
+ * customers を参照している子テーブル（customer_id 列を持つテーブル）の一覧。
+ *
+ * ⚠️ ここに書き忘れたテーブルは、統合の最後に走る source 顧客の DELETE で
+ *    ON DELETE CASCADE により黙って消える。
+ *    （2026-07-18 にトレーニング評価が消失したのはこれが原因。予約だけ移していた）
+ *    customers を参照する子テーブルを増やしたら、必ずここにも足すこと。
+ *    足し忘れた場合も、統合の直前に残存チェックで止まるようにしてある。
+ */
+const CUSTOMER_CHILD_TABLES = [
+  "appointments",
+  "training_assessments",
+  "customer_line_links",
+] as const;
+
+const CHILD_TABLE_LABEL: Record<(typeof CUSTOMER_CHILD_TABLES)[number], string> = {
+  appointments: "予約",
+  training_assessments: "トレーニング評価",
+  customer_line_links: "LINE連携",
+};
+
+/**
  * 二つの顧客データを統合する（名寄せ）
  * - target に値が無いフィールド（カルテ番号・電話・LINE等）は source の値で埋める
- * - source の予約履歴を target へ移動
- * - source を削除
+ * - source にぶら下がる子データ（予約・トレーニング評価・LINE連携）を target へ移動
+ * - 移動漏れが1件も無いことを確認してから source を削除
  *
  * name と clinic_id は target を正として維持。id/created_at 等のシステム列は触らない。
  */
-export async function mergeCustomers(sourceId: string, targetId: string) {
+export async function mergeCustomers(
+  sourceId: string,
+  targetId: string,
+): Promise<{ success: boolean; error?: string }> {
   if (sourceId === targetId) {
     throw new Error("同じ患者同士は統合できません");
   }
 
-  const { clinicId } = await checkAdminAuth();
+  const { clinicId, userId, email, role } = await checkAdminAuth();
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !key) throw new Error("Supabase env missing");
@@ -354,19 +379,67 @@ export async function mergeCustomers(sourceId: string, targetId: string) {
     }
   }
 
-  // 5. 予約データの移行
-  const { error: moveError } = await supabase
-    .from("appointments")
-    .update({ customer_id: targetId })
-    .eq("customer_id", sourceId)
+  // 5. LINE連携は (customer_id, line_user_id, clinic_id) が unique。
+  //    target に同じ LINE アカウントが既にある分だけ、先に source 側を消して衝突を避ける。
+  const { data: targetLinks } = await supabase
+    .from("customer_line_links")
+    .select("line_user_id")
+    .eq("customer_id", targetId)
     .eq("clinic_id", clinicId);
-
-  if (moveError) {
-    console.error("Failed to move appointments:", moveError);
-    throw new Error("予約データの移行に失敗しました");
+  const dupLineIds = (targetLinks ?? [])
+    .map((r: { line_user_id: string | null }) => r.line_user_id)
+    .filter((v): v is string => !!v);
+  if (dupLineIds.length > 0) {
+    await supabase
+      .from("customer_line_links")
+      .delete()
+      .eq("customer_id", sourceId)
+      .eq("clinic_id", clinicId)
+      .in("line_user_id", dupLineIds);
   }
 
-  // 6. 元の顧客データを削除
+  // 6. 子データを target へ引っ越す（予約・トレーニング評価・LINE連携）
+  const movedCounts: Record<string, number> = {};
+  for (const table of CUSTOMER_CHILD_TABLES) {
+    const { data: moved, error: moveError } = await supabase
+      .from(table)
+      .update({ customer_id: targetId })
+      .eq("customer_id", sourceId)
+      .eq("clinic_id", clinicId)
+      .select("id");
+    if (moveError) {
+      console.error(`Failed to move ${table}:`, moveError);
+      // throw ではなく return。本番の Server Actions は throw したメッセージが
+      // 画面に出ない（伏せられる）ため、理由を先生に見せるには戻り値で返す必要がある。
+      return {
+        success: false,
+        error: `${CHILD_TABLE_LABEL[table]}の移行に失敗したため統合を中止しました。データは消えていません。`,
+      };
+    }
+    movedCounts[table] = moved?.length ?? 0;
+  }
+
+  // 7. 引っ越し漏れの確認。1件でも source 側に残っていたら削除しない。
+  //    source を消すと ON DELETE CASCADE で子データが道連れで消えるため、ここで必ず止める。
+  const leftovers: string[] = [];
+  for (const table of CUSTOMER_CHILD_TABLES) {
+    const { count } = await supabase
+      .from(table)
+      .select("id", { count: "exact", head: true })
+      .eq("customer_id", sourceId)
+      .eq("clinic_id", clinicId);
+    if ((count ?? 0) > 0) leftovers.push(`${CHILD_TABLE_LABEL[table]} ${count}件`);
+  }
+  if (leftovers.length > 0) {
+    return {
+      success: false,
+      error:
+        `統合を中止しました。移せなかったデータが残っています（${leftovers.join(" / ")}）。` +
+        `そのまま削除するとこのデータが消えてしまうため、元のカルテを残したまま止めています。`,
+    };
+  }
+
+  // 8. 元の顧客データを削除
   const { error: deleteError } = await supabase
     .from("customers")
     .delete()
@@ -375,8 +448,24 @@ export async function mergeCustomers(sourceId: string, targetId: string) {
 
   if (deleteError) {
     console.error("Failed to delete source customer:", deleteError);
-    // フィールド統合・予約移動は完了済みなのでここでは throw しない（手動削除で対応可能）
+    // フィールド統合・子データ移動は完了済みなのでここでは throw しない（手動削除で対応可能）
   }
+
+  // 9. 監査ログ（誰がどのカルテを統合したか。消えたデータを後から追えるように）
+  await writeAudit({
+    clinicId,
+    actorUserId: userId,
+    actorEmail: email,
+    actorRole: (role ?? "unknown") as AuditActorRole,
+    actionType: "customer.merge",
+    targetTable: "customers",
+    targetId,
+    before: {
+      source: { id: sourceId, name: sourceRow.name, medical_record_number: sourceRow.medical_record_number },
+      target: { id: targetId, name: targetRow.name, medical_record_number: targetRow.medical_record_number },
+    },
+    after: { movedCounts, mergedFields: Object.keys(mergePatch), sourceDeleted: !deleteError },
+  });
 
   revalidatePath("/admin/customers");
   return { success: true };

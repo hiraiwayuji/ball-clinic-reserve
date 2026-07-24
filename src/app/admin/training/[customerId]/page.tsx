@@ -8,7 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
   ChevronLeft, Plus, Loader2, Target, NotebookPen, Trash2, ChevronDown, ChevronUp,
-  TrendingUp, Scale, Home, Users, AlertTriangle, Send, Copy, Link2Off, CheckCircle2,
+  TrendingUp, Scale, Home, Users, AlertTriangle, Send, Copy, Link2Off, CheckCircle2, Pencil,
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
@@ -419,6 +419,7 @@ export default function PatientTrainingPage() {
                   onToggle={() => setOpenId(openId === a.id ? null : a.id)}
                   onDelete={() => handleDelete(a.id)}
                   onReport={() => openReport(a.id)}
+                  editHref={`/admin/training/${customerId}/edit/${a.id}`}
                 />
               ))}
             </div>
@@ -603,7 +604,7 @@ function MoversPanel({ movers }: { movers: Mover[] }) {
   );
 }
 
-function HistoryCard({ a, open, onToggle, onDelete, onReport }: { a: Assessment; open: boolean; onToggle: () => void; onDelete: () => void; onReport: () => void }) {
+function HistoryCard({ a, open, onToggle, onDelete, onReport, editHref }: { a: Assessment; open: boolean; onToggle: () => void; onDelete: () => void; onReport: () => void; editHref: string }) {
   const axisAvg = axisAverages(a.measurements);
   const map = toScoreMap(a.measurements);
   return (
@@ -625,6 +626,10 @@ function HistoryCard({ a, open, onToggle, onDelete, onReport }: { a: Assessment;
             className="px-2.5 py-1.5 rounded-lg text-xs font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 inline-flex items-center gap-1">
             <Send className="w-3.5 h-3.5" />レポート
           </button>
+          <Link href={editHref} title="この評価を修正する（誤字・点数の直し）"
+            className="px-2.5 py-1.5 rounded-lg text-xs font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 inline-flex items-center gap-1">
+            <Pencil className="w-3.5 h-3.5" />修正
+          </Link>
           <button onClick={onDelete} className="p-2 rounded-lg text-slate-300 hover:text-red-500 hover:bg-red-50"><Trash2 className="w-4 h-4" /></button>
           <button onClick={onToggle} className="p-2 rounded-lg text-slate-400">{open ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}</button>
         </div>

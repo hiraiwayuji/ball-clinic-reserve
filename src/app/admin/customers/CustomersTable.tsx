@@ -163,7 +163,8 @@ function MergeDialog({
       try {
         const res = await mergeCustomers(sourceId, targetCustomer.id);
         if (res.success) ok++;
-        else toast.error("統合に失敗した患者があります");
+        // 中止した理由（移せなかったデータが残っている等）はそのまま先生に見せる
+        else toast.error(res.error ?? "統合に失敗した患者があります", { duration: 10000 });
       } catch {
         toast.error("統合エラーが発生しました");
       }
@@ -209,7 +210,9 @@ function MergeDialog({
             重複候補の確認・統合
           </DialogTitle>
           <DialogDescription>
-            同じ名前または電話番号の患者が見つかりました。統合すると予約履歴が統合先に移動し、選択した患者は削除されます。
+            同じ名前または電話番号の患者が見つかりました。統合すると
+            <b>予約履歴・トレーニング評価・LINE連携</b>が統合先に移動し、選択した患者は削除されます。
+            移動できないデータが1件でも残った場合は、削除せずに統合を中止します。
           </DialogDescription>
         </DialogHeader>
 

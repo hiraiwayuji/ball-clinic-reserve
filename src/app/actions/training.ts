@@ -321,6 +321,135 @@ export async function saveAssessment(
   }
 }
 
+// ───────────────────────── 修正（あとから直す） ─────────────────────────
+
+export type AssessmentEditData = {
+  customerId: string;
+  patientName: string;
+  assessment: Assessment;
+  /** ひとつ前のセッション（前回値のゴースト表示用）。無ければ null */
+  prev: Assessment | null;
+};
+
+/** 保存済みの評価を編集画面へ読み込む。自院のものだけ。 */
+export async function getAssessmentEdit(assessmentId: string): Promise<AssessmentEditData | null> {
+  const { clinicId } = await auth();
+  const supabase = await createClient();
+
+  const { data: head } = await supabase
+    .from("training_assessments")
+    .select("customer_id")
+    .eq("id", assessmentId)
+    .eq("clinic_id", clinicId)
+    .maybeSingle();
+  if (!head) return null;
+
+  const data = await getPatientTraining(head.customer_id);
+  if (!data) return null;
+
+  const idx = data.assessments.findIndex((a) => a.id === assessmentId);
+  if (idx < 0) return null;
+
+  return {
+    customerId: head.customer_id,
+    patientName: data.patient.name,
+    assessment: data.assessments[idx],
+    // assessments は新しい順なので、ひとつ後ろが「前回」
+    prev: data.assessments[idx + 1] ?? null,
+  };
+}
+
+export type UpdateAssessmentInput = {
+  assessmentId: string;
+  assessedOn: string; // "yyyy-MM-dd"
+  assessorName?: string | null;
+  overallMemo?: string | null;
+  nextGoal?: string | null;
+  homework?: string | null;
+  measurements: SaveMeasurement[];
+};
+
+/**
+ * 保存済みの評価を上書きする（コメントの誤字直し・点数の入れ直し）。
+ * スコアは「入っているものを upsert → 消されたセルだけ delete」で反映する。
+ * 先に全消ししてから入れ直すと、途中で失敗したときに点数が飛ぶため。
+ */
+export async function updateAssessment(
+  input: UpdateAssessmentInput,
+): Promise<{ success: boolean; customerId?: string; error?: string }> {
+  const { clinicId } = await auth();
+  const supabase = await createClient();
+
+  try {
+    const { data: head } = await supabase
+      .from("training_assessments")
+      .select("id, customer_id")
+      .eq("id", input.assessmentId)
+      .eq("clinic_id", clinicId)
+      .maybeSingle();
+    if (!head) return { success: false, error: "評価が見つかりません。" };
+
+    const { error: headErr } = await supabase
+      .from("training_assessments")
+      .update({
+        assessed_on: input.assessedOn,
+        assessor_name: input.assessorName?.trim() || null,
+        overall_memo: input.overallMemo?.trim() || null,
+        next_goal: input.nextGoal?.trim() || null,
+        homework: input.homework?.trim() || null,
+      })
+      .eq("id", input.assessmentId)
+      .eq("clinic_id", clinicId);
+    if (headErr) throw headErr;
+
+    const rows = input.measurements
+      .filter((m) => m.score != null || (m.memo && m.memo.trim()))
+      .map((m) => ({
+        assessment_id: input.assessmentId,
+        clinic_id: clinicId,
+        item_key: m.item_key,
+        axis: m.axis,
+        side: m.side,
+        score: m.score ?? null,
+        memo: m.memo?.trim() || null,
+      }));
+
+    if (rows.length) {
+      // tenant-isolation-ignore: rows の各要素に clinic_id を含めて upsert している
+      const { error: upErr } = await supabase
+        .from("training_measurements")
+        .upsert(rows, { onConflict: "assessment_id,item_key,axis,side" });
+      if (upErr) throw upErr;
+    }
+
+    // 画面で解除されたセルを削除（残っている行 − 今回送られてきた行）
+    const keep = new Set(rows.map((r) => `${r.item_key}|${r.axis}|${r.side}`));
+    const { data: existing } = await supabase
+      .from("training_measurements")
+      .select("id, item_key, axis, side")
+      .eq("clinic_id", clinicId)
+      .eq("assessment_id", input.assessmentId);
+    const staleIds = (existing ?? [])
+      .filter((m: { item_key: string; axis: string; side: string }) => !keep.has(`${m.item_key}|${m.axis}|${m.side}`))
+      .map((m: { id: string }) => m.id);
+    if (staleIds.length) {
+      const { error: delErr } = await supabase
+        .from("training_measurements")
+        .delete()
+        .eq("clinic_id", clinicId)
+        .in("id", staleIds);
+      if (delErr) throw delErr;
+    }
+
+    revalidatePath("/admin/training");
+    revalidatePath(`/admin/training/${head.customer_id}`);
+    return { success: true, customerId: head.customer_id };
+  } catch (err) {
+    console.error("updateAssessment error:", err);
+    return { success: false, error: "保存に失敗しました。" };
+  }
+}
+
 // ───────────────────────── 患者レポート（LINE送信＋公開ページ） ─────────────────────────
 
 function reportBaseUrl(): string {
