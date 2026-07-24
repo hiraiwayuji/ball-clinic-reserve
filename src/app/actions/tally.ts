@@ -201,13 +201,32 @@ export async function saveTallySheet(
 
   const supabase = await createClient();
 
-  // 既存の tally 行をその日だけ削除（個別入力の cash_sales は触らない）
+  // 今回の保存で「触れてよい患者」の名前セット。
+  // 保存対象をこの患者だけに限定することで、別端末・別タブで入力された
+  // "この画面には載っていない別患者" の記帳を絶対に上書き削除しない。
+  const submittedNames = Array.from(
+    new Set(
+      rows
+        .map((r) => (r.customer_name ?? "").trim())
+        .filter((n) => n.length > 0),
+    ),
+  );
+
+  // 空データが送られてきた場合（画面ロード失敗・通信の巻き戻し等）に
+  // その日の記帳を全消去してしまう事故を防ぐ。何も送られなければ何もしない。
+  if (submittedNames.length === 0) {
+    return { success: true, saved: 0 };
+  }
+
+  // 既存の tally 行を「今回送信された患者の分だけ」削除して入れ替える。
+  // 個別入力の cash_sales（payment_type が tally: 以外）は触らない。
   const { error: delErr } = await supabase
     .from("cash_sales")
     .delete()
     .eq("clinic_id", clinicId)
     .eq("sale_date", dateStr)
-    .like("payment_type", `${TALLY_PREFIX}%`);
+    .like("payment_type", `${TALLY_PREFIX}%`)
+    .in("customer_name", submittedNames);
   if (delErr) {
     console.error("saveTallySheet delete error:", delErr);
     return { success: false, error: "保存準備に失敗しました: " + delErr.message };
