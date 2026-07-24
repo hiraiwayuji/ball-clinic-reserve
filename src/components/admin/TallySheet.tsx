@@ -78,6 +78,17 @@ const num = (s: string) => {
   return Number.isFinite(n) ? n : 0;
 };
 
+// ───────── 列幅（ドラッグでリサイズ＋localStorageに保存） ─────────
+// 各列ヘッダの右端をドラッグして幅を変えられる。変えた幅はこの端末に保存され、
+// 次に開いたときも同じ幅で表示される。合計・新患・会計済・次回予約・削除は固定。
+const WIDTHS_KEY = "tally-col-widths-v1";
+const MIN_COL_W = 44;
+const DEFAULT_COL_W = 112; // 支払い列の既定幅
+const DEFAULT_FIXED_W: Record<string, number> = {
+  __name: 132, __mrn: 82, __min: 54, __staff: 98,
+  __total: 92, __new: 48, __done: 58, __next: 86, __del: 36,
+};
+
 export default function TallySheet({ initialDate }: { initialDate?: string }) {
   const [date, setDate] = useState<string>(
     initialDate || format(new Date(), "yyyy-MM-dd"),
@@ -96,16 +107,87 @@ export default function TallySheet({ initialDate }: { initialDate?: string }) {
   // （行が多いと下端のスクロールバーまで遠いので、上からも横移動できるようにする）
   const tableScrollRef = useRef<HTMLDivElement>(null);
   const topScrollRef = useRef<HTMLDivElement>(null);
-  const [tableWidth, setTableWidth] = useState(1100);
+
+  // 列幅（緑=広げる/紫=狭める、を自由に。次回以降もこの端末で保持）
+  const [widths, setWidths] = useState<Record<string, number>>(DEFAULT_FIXED_W);
+  const widthsRef = useRef(widths);
+  useEffect(() => { widthsRef.current = widths; }, [widths]);
+  // 保存済みの幅を初期読み込み
   useEffect(() => {
-    const measure = () => {
-      const t = tableScrollRef.current?.querySelector("table");
-      if (t) setTableWidth(t.scrollWidth);
-    };
-    measure();
-    window.addEventListener("resize", measure);
-    return () => window.removeEventListener("resize", measure);
-  }, [columns, rows.length]);
+    try {
+      const raw = localStorage.getItem(WIDTHS_KEY);
+      if (raw) setWidths((prev) => ({ ...prev, ...JSON.parse(raw) }));
+    } catch {}
+  }, []);
+  // 動的な支払い列に既定幅を用意
+  useEffect(() => {
+    setWidths((prev) => {
+      const next = { ...prev };
+      let changed = false;
+      for (const c of columns) if (next[c.key] == null) { next[c.key] = DEFAULT_COL_W; changed = true; }
+      return changed ? next : prev;
+    });
+  }, [columns]);
+
+  const getW = useCallback(
+    (id: string) => widths[id] ?? DEFAULT_FIXED_W[id] ?? DEFAULT_COL_W,
+    [widths],
+  );
+
+  const resizing = useRef<{ id: string; startX: number; startW: number } | null>(null);
+  const onResizeMove = useCallback((e: PointerEvent) => {
+    const r = resizing.current;
+    if (!r) return;
+    const w = Math.max(MIN_COL_W, Math.round(r.startW + (e.clientX - r.startX)));
+    setWidths((prev) => ({ ...prev, [r.id]: w }));
+  }, []);
+  const onResizeEnd = useCallback(() => {
+    window.removeEventListener("pointermove", onResizeMove);
+    window.removeEventListener("pointerup", onResizeEnd);
+    document.body.style.userSelect = "";
+    document.body.style.cursor = "";
+    resizing.current = null;
+    try { localStorage.setItem(WIDTHS_KEY, JSON.stringify(widthsRef.current)); } catch {}
+  }, [onResizeMove]);
+  const onResizeStart = useCallback(
+    (id: string) => (e: React.PointerEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      resizing.current = { id, startX: e.clientX, startW: widthsRef.current[id] ?? DEFAULT_FIXED_W[id] ?? DEFAULT_COL_W };
+      window.addEventListener("pointermove", onResizeMove);
+      window.addEventListener("pointerup", onResizeEnd);
+      document.body.style.userSelect = "none";
+      document.body.style.cursor = "col-resize";
+    },
+    [onResizeMove, onResizeEnd],
+  );
+  // アンマウント時にドラッグ用リスナーが残らないように
+  useEffect(() => () => {
+    window.removeEventListener("pointermove", onResizeMove);
+    window.removeEventListener("pointerup", onResizeEnd);
+  }, [onResizeMove, onResizeEnd]);
+
+  const resetWidths = useCallback(() => {
+    setWidths({ ...DEFAULT_FIXED_W });
+    try { localStorage.removeItem(WIDTHS_KEY); } catch {}
+  }, []);
+
+  const resizeHandle = (id: string) => (
+    <span
+      onPointerDown={onResizeStart(id)}
+      className="absolute top-0 right-0 h-full w-2 cursor-col-resize touch-none select-none z-10 hover:bg-indigo-400/50 active:bg-indigo-500/60"
+      title="ドラッグで列幅を調整"
+      aria-hidden
+    />
+  );
+
+  const totalWidth = useMemo(() => {
+    let w = getW("__name") + getW("__mrn") + getW("__min") + getW("__staff");
+    for (const c of columns) w += getW(c.key);
+    w += getW("__total") + getW("__new") + getW("__done") + getW("__next") + getW("__del");
+    return w;
+  }, [columns, getW]);
+
   const syncTopToTable = () => {
     if (tableScrollRef.current && topScrollRef.current) tableScrollRef.current.scrollLeft = topScrollRef.current.scrollLeft;
   };
@@ -298,6 +380,14 @@ export default function TallySheet({ initialDate }: { initialDate?: string }) {
           >
             <RefreshCw className="w-4 h-4" />
           </button>
+          <button
+            type="button"
+            onClick={resetWidths}
+            className="hidden sm:inline-flex items-center px-2.5 py-2 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-500 hover:text-slate-700 text-xs font-medium"
+            title="列の幅を初期状態に戻す"
+          >
+            列幅リセット
+          </button>
           {isOwner && (
             <Link
               href="/admin/sales/analytics"
@@ -344,26 +434,55 @@ export default function TallySheet({ initialDate }: { initialDate?: string }) {
         style={{ height: 16 }}
         aria-hidden
       >
-        <div style={{ width: tableWidth, height: 1 }} />
+        <div style={{ width: totalWidth, height: 1 }} />
       </div>
 
       {/* グリッド */}
       <div ref={tableScrollRef} onScroll={syncTableToTop} className="overflow-x-auto rounded-b-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-sm">
-        <table className="w-full text-sm border-collapse min-w-[1100px]">
+        <table className="text-sm border-collapse table-fixed" style={{ width: totalWidth, minWidth: totalWidth }}>
+          <colgroup>
+            <col style={{ width: getW("__name") }} />
+            <col style={{ width: getW("__mrn") }} />
+            <col style={{ width: getW("__min") }} />
+            <col style={{ width: getW("__staff") }} />
+            {columns.map((c) => (
+              <col key={c.key} style={{ width: getW(c.key) }} />
+            ))}
+            <col style={{ width: getW("__total") }} />
+            <col style={{ width: getW("__new") }} />
+            <col style={{ width: getW("__done") }} />
+            <col style={{ width: getW("__next") }} />
+            <col style={{ width: getW("__del") }} />
+          </colgroup>
           <thead>
             <tr className="bg-slate-50 dark:bg-slate-900/50 text-slate-600 dark:text-slate-300">
-              <th className="px-2 py-2 text-left font-semibold sticky left-0 bg-slate-50 dark:bg-slate-900/50 min-w-[120px]">名前</th>
-              <th className="px-2 py-2 text-left font-semibold w-20">カルテNo</th>
-              <th className="px-2 py-2 text-center font-semibold w-14">min</th>
-              <th className="px-2 py-2 text-left font-semibold w-24">担当</th>
+              <th className="relative overflow-hidden px-2 py-2 text-left font-semibold sticky left-0 z-20 bg-slate-50 dark:bg-slate-900/50">
+                <span className="block overflow-hidden text-ellipsis whitespace-nowrap pr-1">名前</span>
+                {resizeHandle("__name")}
+              </th>
+              <th className="relative overflow-hidden px-2 py-2 text-left font-semibold">
+                <span className="block overflow-hidden text-ellipsis whitespace-nowrap pr-1">カルテNo</span>
+                {resizeHandle("__mrn")}
+              </th>
+              <th className="relative overflow-hidden px-2 py-2 text-center font-semibold">
+                <span className="block overflow-hidden text-ellipsis whitespace-nowrap">min</span>
+                {resizeHandle("__min")}
+              </th>
+              <th className="relative overflow-hidden px-2 py-2 text-left font-semibold">
+                <span className="block overflow-hidden text-ellipsis whitespace-nowrap pr-1">担当</span>
+                {resizeHandle("__staff")}
+              </th>
               {columns.map((c) => (
-                <th key={c.key} className="px-2 py-2 text-right font-semibold w-28 whitespace-nowrap">{c.label}</th>
+                <th key={c.key} className="relative overflow-hidden px-2 py-2 text-right font-semibold" title={c.label}>
+                  <span className="block overflow-hidden text-ellipsis whitespace-nowrap pr-1">{c.label}</span>
+                  {resizeHandle(c.key)}
+                </th>
               ))}
-              <th className="px-2 py-2 text-right font-semibold w-24">合計</th>
-              <th className="px-1 py-2 text-center font-semibold w-12">新患</th>
-              <th className="px-1 py-2 text-center font-semibold w-14">会計済</th>
-              <th className="px-1 py-2 text-center font-semibold w-20">次回予約</th>
-              <th className="px-1 py-2 w-8"></th>
+              <th className="px-2 py-2 text-right font-semibold overflow-hidden">合計</th>
+              <th className="px-1 py-2 text-center font-semibold overflow-hidden">新患</th>
+              <th className="px-1 py-2 text-center font-semibold overflow-hidden">会計済</th>
+              <th className="px-1 py-2 text-center font-semibold overflow-hidden">次回予約</th>
+              <th className="px-1 py-2"></th>
             </tr>
           </thead>
           <tbody>
@@ -517,7 +636,8 @@ export default function TallySheet({ initialDate }: { initialDate?: string }) {
       </div>
       <p className="mt-2 text-[11px] text-slate-400">
         ※ 保存するとこの日の日計表は入力内容で上書きされます。金額が入っていない行は登録されません。<br />
-        ※「会計済」は予約のある方は受付カウンターの「会計完了」と連動します（金額の保存ボタンとは別に、その場で反映されます）。
+        ※「会計済」は予約のある方は受付カウンターの「会計完了」と連動します（金額の保存ボタンとは別に、その場で反映されます）。<br />
+        ※ 各列の見出しの右端をドラッグすると列幅を変えられます。変えた幅はこの端末に保存され、次に開いたときも同じ幅になります（「列幅リセット」で初期化）。
       </p>
 
       {/* 次回予約ダイアログ（対象行の患者をプリフィル） */}
