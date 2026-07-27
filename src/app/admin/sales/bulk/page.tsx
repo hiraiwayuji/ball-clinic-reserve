@@ -494,7 +494,12 @@ function DraftRowItem({
       if (res.success) {
         // ローカルの行も更新 → その場で助成判定が走り、警告が消えて0/600円が出る
         onChange({ ...row, cityName: c });
-        toast.success(`${row.customerName}様の市町村を「${c}」に登録しました`);
+        // 同じ患者さんの重複レコードにも入れた場合は、次回から聞かれないことを伝える
+        toast.success(
+          res.alsoUpdated
+            ? `${row.customerName}様の市町村を「${c}」に登録しました（同じお名前の登録${res.alsoUpdated}件にも反映）`
+            : `${row.customerName}様の市町村を「${c}」に登録しました`,
+        );
       } else {
         toast.error(res.error || "市町村の登録に失敗しました");
       }

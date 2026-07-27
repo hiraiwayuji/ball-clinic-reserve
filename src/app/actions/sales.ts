@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { checkAdminAuth, requireRole } from "@/app/actions/auth";
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { revalidatePath } from "next/cache";
+import { normalizeNameForMatch } from "@/lib/booking-customer";
 
 async function getSupabase() {
   return await createClient();
@@ -439,23 +440,87 @@ export async function getTodayPendingSales(dateStr?: string): Promise<{ success:
 /**
  * 受付の売上入力画面から、患者の居住市町村(city_name)をその場で登録/更新する。
  * 医療助成（市町村×学年で窓口0/600円）の対象判定に使う。受付スタッフも実行可。
+ *
+ * 【同一人物の重複レコードにも反映する理由】
+ * 患者マスタには表記ゆれ等で同じ人が複数レコードできることがある（青木律人様・瀬戸恵深様の実例）。
+ * 予約が別レコードに紐づくと、せっかく登録した市町村が引き継がれず
+ * 「初診でもないのに毎回住所を聞かれる」状態になっていた（2026-07-27 指摘）。
+ * そこで、同院内の «同一人物とみなせる» レコードにも同じ市町村を入れる。
+ *
+ * 同名別人に誤って入れないための条件（fail-closed）:
+ *   - 正規化した氏名が一致（全半角スペース・大文字小文字の揺れは吸収）
+ *   - かつ 生年月日が一致する、または «どちらかが未登録»
+ * 生年月日が両方入っていて違う場合は別人とみなし、触らない。
  */
 export async function updateCustomerCity(
   customerId: string,
   cityName: string,
-): Promise<{ success: boolean; error?: string }> {
+): Promise<{ success: boolean; error?: string; alsoUpdated?: number }> {
   const { clinicId } = await checkAdminAuth();
   if (!customerId) return { success: false, error: "顧客が特定できません" };
   const city = (cityName ?? "").trim();
   const sb = getAdminSupabase() ?? (await getSupabase());
   if (!sb) return { success: false, error: "接続エラーが発生しました" };
-  const { error } = await sb
+
+  // まず本人のレコードを更新（ここが失敗したらエラー）
+  const { data: target, error } = await sb
     .from("customers")
     .update({ city_name: city || null })
     .eq("id", customerId)
-    .eq("clinic_id", clinicId);
+    .eq("clinic_id", clinicId)
+    .select("id, name, birth_date")
+    .maybeSingle();
   if (error) return { success: false, error: "保存に失敗しました: " + error.message };
-  return { success: true };
+  if (!target) return { success: true, alsoUpdated: 0 };
+
+  // 同一人物とみなせる重複レコードにも展開する（ここでの失敗は本人の保存を妨げない）
+  try {
+    // ① 完全一致（患者数が多い院でも取りこぼさない）
+    const { data: exactRows } = await sb
+      .from("customers")
+      .select("id, name, birth_date")
+      .eq("clinic_id", clinicId)
+      .eq("name", target.name as string)
+      .neq("id", customerId);
+    // ② 表記ゆれ（「山内 颯人」と「山内颯人」等）を拾うための正規化照合
+    const { data: fuzzyRows } = await sb
+      .from("customers")
+      .select("id, name, birth_date")
+      .eq("clinic_id", clinicId)
+      .neq("id", customerId)
+      .limit(5000);
+    const seen = new Set<string>();
+    const sameClinic = [...(exactRows ?? []), ...(fuzzyRows ?? [])].filter((c) => {
+      const id = c.id as string;
+      if (seen.has(id)) return false;
+      seen.add(id);
+      return true;
+    });
+
+    const targetName = normalizeNameForMatch(target.name as string);
+    const targetBirth = (target.birth_date as string | null) ?? null;
+    const duplicateIds = sameClinic
+      .filter((c) => normalizeNameForMatch(c.name as string) === targetName)
+      .filter((c) => {
+        const b = (c.birth_date as string | null) ?? null;
+        // 生年月日が両方入っていて違う → 別人なので触らない
+        return !b || !targetBirth || b === targetBirth;
+      })
+      .map((c) => c.id as string);
+
+    if (duplicateIds.length > 0) {
+      await sb
+        .from("customers")
+        .update({ city_name: city || null })
+        .eq("clinic_id", clinicId)
+        .in("id", duplicateIds);
+      return { success: true, alsoUpdated: duplicateIds.length };
+    }
+  } catch (err) {
+    console.error("updateCustomerCity: 重複レコードへの展開に失敗", err);
+  }
+
+  return { success: true, alsoUpdated: 0 };
 }
 
 /**
