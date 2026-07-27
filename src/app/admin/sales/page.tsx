@@ -1,21 +1,13 @@
 "use client";
 
 import { useState, useEffect, useTransition, useRef, useCallback, Suspense, useMemo } from "react";
+import { memoToDisplayText } from "@/lib/sale-memo";
 
 type SalesLineItem = { name: string; amount: number };
 
+// 一覧の備考セル。実装は @/lib/sale-memo に集約（記帳画面の備考欄と同じ表記にするため）
 function parseMemo(memoStr: string | null) {
-  if (!memoStr) return "-";
-  try {
-    const data = JSON.parse(memoStr);
-    if (data.jippi || data.buhan) {
-      const items = [...(data.jippi || []), ...(data.buhan || [])];
-      return items.map((i: any) => i.name).join(", ");
-    }
-  } catch (e) {
-    // not json
-  }
-  return memoStr;
+  return memoToDisplayText(memoStr) || "-";
 }
 
 // 「前回同様」を前回の項目名入りに展開する（例: 「前回同様（保険施術、鍼灸1部位）」）

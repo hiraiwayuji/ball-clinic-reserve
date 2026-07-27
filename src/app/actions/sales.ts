@@ -5,6 +5,7 @@ import { checkAdminAuth, requireRole } from "@/app/actions/auth";
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { revalidatePath } from "next/cache";
 import { normalizeNameForMatch } from "@/lib/booking-customer";
+import { memoToDisplayText } from "@/lib/sale-memo";
 
 async function getSupabase() {
   return await createClient();
@@ -57,7 +58,9 @@ export async function getSalesPrediction(customerName: string): Promise<SalesPre
   const memoFreq: Record<string, number> = {};
   for (const row of data) {
     amountFreq[row.treatment_fee] = (amountFreq[row.treatment_fee] || 0) + 1;
-    if (row.memo) memoFreq[row.memo] = (memoFreq[row.memo] || 0) + 1;
+    // 備考に生JSONを出さないよう、読める文字列に直してから集計する
+    const memoText = memoToDisplayText(row.memo);
+    if (memoText) memoFreq[memoText] = (memoFreq[memoText] || 0) + 1;
   }
 
   const topAmount = Object.entries(amountFreq).sort((a, b) => Number(b[1]) - Number(a[1]))[0];
@@ -325,7 +328,9 @@ export async function getTodayPendingSales(dateStr?: string): Promise<{ success:
           const ptFreq: Record<string, number> = {};
           for (const row of hist) {
             amtFreq[row.treatment_fee] = (amtFreq[row.treatment_fee] || 0) + 1;
-            if (row.memo) memoFreq[row.memo] = (memoFreq[row.memo] || 0) + 1;
+            // 備考に生JSONを出さないよう、読める文字列に直してから集計する
+            const memoText = memoToDisplayText(row.memo);
+            if (memoText) memoFreq[memoText] = (memoFreq[memoText] || 0) + 1;
             const sig = normalizePaymentTypes((row as any).payment_types)
               ?? (normalizePaymentType((row as any).payment_type) ? [normalizePaymentType((row as any).payment_type)!] : null);
             // self_pay 単独は「区分なし＝通常自費」と同義なので予測対象外（ボタン押下を要求しない）
