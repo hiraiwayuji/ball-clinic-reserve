@@ -2196,6 +2196,7 @@ export type EndingSeriesAlert = {
  * 連続予約はまとめて N 週分の行を作る仕組みなので、最終回が近づいたら
  * 次のぶんを入れ忘れないようカレンダー上部にお知らせを出すために使う。
  * 対象: シリーズの最終回が「今日の7日前〜7日後」にあり、2回以上来ている患者。
+ * ただし、そのシリーズの最終回より後に予約が入っている人は「対応済み」として除外する。
  */
 export async function getEndingSeriesAlerts(): Promise<EndingSeriesAlert[]> {
   try {
@@ -2234,7 +2235,7 @@ export async function getEndingSeriesAlerts(): Promise<EndingSeriesAlert[]> {
     const now = Date.now();
     const windowMs = 7 * 24 * 3600 * 1000;
     const weekdays = ["日", "月", "火", "水", "木", "金", "土"];
-    const out: EndingSeriesAlert[] = [];
+    let out: EndingSeriesAlert[] = [];
     for (const [seriesId, s] of bySeries) {
       if (s.count < 2) continue; // 単発〜2回未満は「毎週の人」とみなさない
       const lastMs = new Date(s.last).getTime();
@@ -2252,6 +2253,36 @@ export async function getEndingSeriesAlerts(): Promise<EndingSeriesAlert[]> {
         occurrenceCount: s.count,
       });
     }
+    // すでに「次の予約」が入っている方は対応済みとみなして一覧から外す。
+    // 判定: そのシリーズの最終回より後に、キャンセル以外の予約が1件でもあるか。
+    // （別シリーズの継続でも、単発の次回予約でも、どちらも対応済み扱い）
+    const customerIds = Array.from(
+      new Set(out.map((o) => o.customerId).filter((id): id is string => !!id)),
+    );
+    if (customerIds.length > 0) {
+      const { data: laterRows } = await supabase
+        .from("appointments")
+        .select("customer_id, start_time")
+        .eq("clinic_id", clinicId)
+        .neq("status", "cancelled")
+        .in("customer_id", customerIds)
+        .gt("start_time", new Date(now - windowMs).toISOString());
+
+      // 日時の表記ゆれで取りこぼさないよう、比較はミリ秒に直して行う
+      const latestByCustomer = new Map<string, number>();
+      for (const row of (laterRows ?? []) as any[]) {
+        const ms = new Date(row.start_time).getTime();
+        const cur = latestByCustomer.get(row.customer_id);
+        if (cur === undefined || ms > cur) latestByCustomer.set(row.customer_id, ms);
+      }
+
+      out = out.filter((o) => {
+        if (!o.customerId) return true; // 患者未紐付けは判定できないので残す
+        const latest = latestByCustomer.get(o.customerId);
+        return !(latest !== undefined && latest > new Date(o.lastStartTime).getTime());
+      });
+    }
+
     // 最終回が近い順
     out.sort((a, b) => a.lastStartTime.localeCompare(b.lastStartTime));
     return out;
