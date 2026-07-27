@@ -4,6 +4,7 @@ import { PUBLIC_CLINIC_ID } from "@/lib/default-clinic-id";
 import { normalizePhone } from "@/lib/phone";
 import { writeAudit } from "@/lib/audit";
 import { pushLineToOwners, pushLineToCustomer } from "@/lib/admin-notify";
+import { formatDateJa, formatTimeRange, formatVisitLabel } from "@/lib/appointment-summary";
 
 const DEFAULT_CLINIC_ID = PUBLIC_CLINIC_ID;
 const TWO_HOURS_MS = 2 * 60 * 60 * 1000;
@@ -16,14 +17,14 @@ function getSupabase() {
 }
 
 function formatApt(apt: any) {
-  const startTime = new Date(apt.start_time);
   const customer = Array.isArray(apt.customers) ? apt.customers[0] : apt.customers;
   return {
     aptId: apt.id,
     name: customer?.name || "不明",
-    date: startTime.toLocaleDateString("ja-JP", { year: "numeric", month: "long", day: "numeric", weekday: "short", timeZone: "Asia/Tokyo" }),
-    time: startTime.toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Tokyo" }),
-    visitType: apt.is_first_visit ? "初診" : "再診",
+    date: formatDateJa(apt.start_time),
+    // 実データの時間帯＋施術時間。決め打ちの分数は出さない（appointment-summary.ts 参照）
+    time: formatTimeRange(apt),
+    visitType: formatVisitLabel(apt),
     status: apt.status,
   };
 }
@@ -50,7 +51,7 @@ export async function GET(req: NextRequest) {
   if (id) {
     const { data: appointments } = await supabase
       .from("appointments")
-      .select("id, start_time, is_first_visit, status, customers(name)")
+      .select("id, start_time, end_time, is_first_visit, status, course_name, additional_courses, customers(name)")
       .eq("clinic_id", DEFAULT_CLINIC_ID)
       .in("status", ["pending", "confirmed", "waiting"])
       .order("created_at", { ascending: false });
@@ -71,7 +72,7 @@ export async function GET(req: NextRequest) {
     const customerIds = customers.map((c: any) => c.id);
     const { data: appointments } = await supabase
       .from("appointments")
-      .select("id, start_time, is_first_visit, status, customers(name)")
+      .select("id, start_time, end_time, is_first_visit, status, course_name, additional_courses, customers(name)")
       .eq("clinic_id", DEFAULT_CLINIC_ID)
       .in("customer_id", customerIds)
       .in("status", ["pending", "confirmed", "waiting"])
@@ -125,7 +126,7 @@ export async function POST(req: NextRequest) {
   // キャンセル対象の予約が本人のものかチェック
   const { data: targetApts } = await supabase
     .from("appointments")
-    .select("id, customer_id, start_time, is_first_visit, customers(name)")
+    .select("id, customer_id, start_time, end_time, is_first_visit, course_name, additional_courses, customers(name)")
     .in("id", ids)
     .eq("clinic_id", DEFAULT_CLINIC_ID);
 
@@ -181,10 +182,9 @@ export async function POST(req: NextRequest) {
   if (apts) {
     for (const apt of apts) {
       const customer = Array.isArray(apt.customers) ? apt.customers[0] : apt.customers;
-      const startTime = new Date(apt.start_time);
-      const date = startTime.toLocaleDateString("ja-JP", { year: "numeric", month: "long", day: "numeric", weekday: "short", timeZone: "Asia/Tokyo" });
-      const time = startTime.toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Tokyo" });
-      const visitType = apt.is_first_visit ? "初診" : "再診";
+      const date = formatDateJa(apt.start_time);
+      const time = formatTimeRange(apt);
+      const visitType = formatVisitLabel(apt);
       const lineInfo = lineMap.get(apt.customer_id);
 
       await Promise.all([

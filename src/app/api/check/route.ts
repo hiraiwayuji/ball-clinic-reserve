@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { PUBLIC_CLINIC_ID } from "@/lib/default-clinic-id";
 import { normalizePhone } from "@/lib/phone";
+import { formatDateJa, formatTimeRange, formatVisitLabel } from "@/lib/appointment-summary";
 
 const DEFAULT_CLINIC_ID = PUBLIC_CLINIC_ID;
 
@@ -13,14 +14,14 @@ function getSupabase() {
 }
 
 function formatApt(apt: any, waitlistPosition?: number) {
-  const startTime = new Date(apt.start_time);
   const customer = Array.isArray(apt.customers) ? apt.customers[0] : apt.customers;
   return {
     aptId: apt.id,
     name: customer?.name || "不明",
-    date: startTime.toLocaleDateString("ja-JP", { year: "numeric", month: "long", day: "numeric", weekday: "short", timeZone: "Asia/Tokyo" }),
-    time: startTime.toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Tokyo" }),
-    visitType: apt.is_first_visit ? "初診" : "再診",
+    date: formatDateJa(apt.start_time),
+    // 実データの時間帯＋施術時間。決め打ちの分数は出さない（appointment-summary.ts 参照）
+    time: formatTimeRange(apt),
+    visitType: formatVisitLabel(apt),
     status: apt.status,
     waitlistPosition: waitlistPosition ?? null,
   };
@@ -48,7 +49,7 @@ export async function GET(req: NextRequest) {
   if (id) {
     const { data: appointments } = await supabase
       .from("appointments")
-      .select("id, start_time, is_first_visit, status, customers(name)")
+      .select("id, start_time, end_time, is_first_visit, status, course_name, additional_courses, customers(name)")
       .eq("clinic_id", DEFAULT_CLINIC_ID)
       .in("status", ["pending", "confirmed", "waiting"])
       .order("created_at", { ascending: false });
@@ -70,7 +71,7 @@ export async function GET(req: NextRequest) {
     const customerIds = customers.map((c: any) => c.id);
     const { data: appointments } = await supabase
       .from("appointments")
-      .select("id, start_time, is_first_visit, status, customers(name)")
+      .select("id, start_time, end_time, is_first_visit, status, course_name, additional_courses, customers(name)")
       .eq("clinic_id", DEFAULT_CLINIC_ID)
       .in("customer_id", customerIds)
       .in("status", ["pending", "confirmed", "waiting"])
@@ -96,7 +97,7 @@ export async function GET(req: NextRequest) {
     const customerIds = customers.map((c: any) => c.id);
     const { data: appointments } = await supabase
       .from("appointments")
-      .select("id, start_time, is_first_visit, status, customers(name)")
+      .select("id, start_time, end_time, is_first_visit, status, course_name, additional_courses, customers(name)")
       .eq("clinic_id", DEFAULT_CLINIC_ID)
       .in("customer_id", customerIds)
       .in("status", ["pending", "confirmed", "waiting"])

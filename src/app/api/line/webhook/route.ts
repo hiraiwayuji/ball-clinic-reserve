@@ -5,6 +5,7 @@ import { randomBytes } from "crypto";
 import { PUBLIC_CLINIC_ID } from "@/lib/default-clinic-id";
 import { linkLineToCustomer } from "@/lib/line-links";
 import { getLineAccessToken } from "@/lib/admin-notify";
+import { formatDateTimeLine, formatVisitLabel } from "@/lib/appointment-summary";
 
 function generateReserveToken(): string {
   return randomBytes(16).toString("hex");
@@ -396,7 +397,7 @@ export async function POST(req: NextRequest) {
 
       const { data: appointments, error } = await supabase
         .from("appointments")
-        .select(`id, start_time, status, is_first_visit, customer_id, customers ( id, name, phone, line_user_id )`)
+        .select(`id, start_time, end_time, status, is_first_visit, course_name, additional_courses, customer_id, customers ( id, name, phone, line_user_id )`)
         .eq("clinic_id", DEFAULT_CLINIC_ID)
         .in("status", ["pending", "confirmed", "waiting"])
         .order("created_at", { ascending: false });
@@ -419,18 +420,13 @@ export async function POST(req: NextRequest) {
       }
 
       const customer = apt.customers as { id?: string; name?: string; phone?: string; line_user_id?: string } | null;
-      const startTime = new Date(apt.start_time);
-      const dateStr = startTime.toLocaleDateString("ja-JP", {
-        year: "numeric", month: "long", day: "numeric", weekday: "short", timeZone: "Asia/Tokyo",
-      });
-      const timeStr = startTime.toLocaleTimeString("ja-JP", {
-        hour: "2-digit", minute: "2-digit", timeZone: "Asia/Tokyo",
-      });
+      // 日時・受診内容は実データから（決め打ちの分数を出さない。appointment-summary.ts 参照）
+      const dateTimeStr = formatDateTimeLine(apt);
 
       const statusLabel =
         apt.status === "confirmed" ? "✅ 予約確定" :
         apt.status === "waiting"   ? "🕐 キャンセル待ち" : "⏳ 確認待ち";
-      const visitLabel = apt.is_first_visit ? "初診" : "再診";
+      const visitLabel = formatVisitLabel(apt);
 
       // LINE User ID を customer_id で紐づけ（家族として追加 or 主紐付け）
       let linkMessage = "";
@@ -465,7 +461,7 @@ export async function POST(req: NextRequest) {
           `📋 予約番号「${userMessage}」の内容`,
           "─────────────",
           `👤 お名前: ${customer?.name || "不明"}`,
-          `📅 日時: ${dateStr} ${timeStr}`,
+          `📅 日時: ${dateTimeStr}`,
           `🏥 受診: ${visitLabel}`,
           `📌 ステータス: ${statusLabel}`,
           "─────────────",

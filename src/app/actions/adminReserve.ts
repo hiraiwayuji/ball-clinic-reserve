@@ -9,6 +9,7 @@ import { awardPoints } from "@/lib/gamification";
 import { getLineAccessToken, pushLineToCustomer } from "@/lib/admin-notify";
 import { getLineUserIdsForCustomer } from "@/lib/line-links";
 import { isTimeWithinStaffHoursYmd, type StaffSchedule } from "@/lib/staff-availability";
+import { formatDateTimeLine, formatVisitLabel } from "@/lib/appointment-summary";
 
 /** DB の "HH:MM:SS" / "HH:MM" を "HH:MM" に正規化（未設定は null）。reserve.ts と同じ挙動。 */
 function normStaffTime(v: string | null | undefined): string | null {
@@ -1336,7 +1337,7 @@ export async function sendLineConfirmation(appointmentId: string) {
     // 予約と顧客情報（line_user_id含む）を取得（自院のみ）
     const { data: apt, error } = await supabase
       .from("appointments")
-      .select("id, start_time, is_first_visit, status, customers(name, line_user_id)")
+      .select("id, start_time, end_time, is_first_visit, status, course_name, additional_courses, customers(name, line_user_id)")
       .eq("clinic_id", clinicId)
       .eq("id", appointmentId)
       .single();
@@ -1356,18 +1357,13 @@ export async function sendLineConfirmation(appointmentId: string) {
       return { success: false, error: "LINE トークンが取得できません。env LINE_CHANNEL_ID/SECRET または LINE_CHANNEL_ACCESS_TOKEN を確認してください。" };
     }
 
-    const startTime = new Date(apt.start_time);
-    const dateStr = startTime.toLocaleDateString("ja-JP", {
-      year: "numeric", month: "long", day: "numeric", weekday: "short", timeZone: "Asia/Tokyo",
-    });
-    const timeStr = startTime.toLocaleTimeString("ja-JP", {
-      hour: "2-digit", minute: "2-digit", timeZone: "Asia/Tokyo",
-    });
-    const visitLabel = apt.is_first_visit ? "初診（60分）" : "再診（30分）";
+    // 施術時間は end_time から実データで出す。初診/再診からの決め打ちは事故のもと（appointment-summary.ts 参照）
+    const dateTimeStr = formatDateTimeLine(apt);
+    const visitLabel = formatVisitLabel(apt);
     const statusLabel = apt.status === "confirmed" ? "✅ 予約確定" : "⏳ 確認待ち";
     const reservationNumber = apt.id.split("-")[0].toUpperCase();
 
-    const messageText = `${statusLabel}\n\n${customer?.name || ""}様の予約内容をお知らせします。\n\n📅 日時: ${dateStr} ${timeStr}\n🏥 種別: ${visitLabel}\n📋 予約番号: ${reservationNumber}\n\nご来院をお待ちしております。`;
+    const messageText = `${statusLabel}\n\n${customer?.name || ""}様の予約内容をお知らせします。\n\n📅 日時: ${dateTimeStr}\n🏥 種別: ${visitLabel}\n📋 予約番号: ${reservationNumber}\n\nご来院をお待ちしております。`;
 
     const res = await fetch("https://api.line.me/v2/bot/message/push", {
       method: "POST",
