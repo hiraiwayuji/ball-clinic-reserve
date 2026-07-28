@@ -2417,16 +2417,31 @@ export async function bulkCreateManualReservations(reservations: any[]) {
       const hasPhone = phoneTrimmed.length > 0;
 
       let existing: { id: string } | null = null;
+      // ① 電話＋氏名（createManualReservation と同じ優先順位）
+      //    電話単独の maybeSingle だと、"080" だけの仮番号を大勢が共有している院で
+      //    「複数行ヒット→エラー→既存なし扱い→新規作成」となり、同じ患者さんの
+      //    レコードが受診のたびに増えていた（2026-07-28 修正）。
       if (hasPhone) {
         const { data } = await supabase
           .from("customers")
           .select("id")
           .eq("phone", phoneTrimmed)
+          .eq("name", nameTrimmed)
           .eq("clinic_id", clinicId)
-          .maybeSingle();
-        existing = data ?? null;
-      } else {
-        // 同名検索 - 1件のみヒットなら既存扱い、複数なら新規作成（別人混同を避けるため）
+          .limit(1);
+        if (data && data.length > 0) existing = data[0];
+      }
+      // ② 電話単独 - 1件のみヒットなら既存扱い（複数なら親子で共有中とみなし採用しない）
+      if (!existing && hasPhone) {
+        const { data } = await supabase
+          .from("customers")
+          .select("id")
+          .eq("phone", phoneTrimmed)
+          .eq("clinic_id", clinicId);
+        if (data && data.length === 1) existing = data[0];
+      }
+      // ③ 同名検索 - 1件のみヒットなら既存扱い、複数なら新規作成（別人混同を避けるため）
+      if (!existing) {
         const { data } = await supabase
           .from("customers")
           .select("id")

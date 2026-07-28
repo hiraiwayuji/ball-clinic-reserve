@@ -994,8 +994,15 @@ export async function getCashSales(dateStr: string) {
 
     const sales = data ?? [];
 
-    // カルテ番号を引く: memo(JSON) の medicalRecordNumber を最優先、
-    // 無ければ customer_name で customers テーブルを bulk fetch → 同名 1 名のみ確定で採用
+    // カルテ番号・市町村・生年月日を customer_name で customers から引く。
+    //
+    // 【同名レコードが複数あっても値を出す理由】(2026-07-28)
+    // 患者マスタには同じ人が二重登録されていることがある（青木律人様・瀬戸恵深様の実例）。
+    // 以前は「同名が2件以上 → 曖昧なので null」としていたため、売上画面で修正した
+    // カルテ番号・住所が DB には保存されているのに「—」と表示され、
+    // 「編集しても保存されない」ように見えていた。
+    // そこで «値» を見て判断する: 同名レコードの中で空でない値が1種類しか無ければ
+    // （＝重複登録なだけ）採用し、2種類以上あるときだけ別人の可能性ありとして出さない。
     const uniqueNames = Array.from(
       new Set(sales.map((s: any) => s.customer_name).filter(Boolean)),
     );
@@ -1010,24 +1017,27 @@ export async function getCashSales(dateStr: string) {
         .select("name, medical_record_number, city_name, birth_date")
         .eq("clinic_id", clinicId)
         .in("name", uniqueNames);
-      const tally = new Map<string, { mrn: string | null; city: string | null; birth: string | null; count: number }>();
+      const buckets = new Map<string, { mrn: Set<string>; city: Set<string>; birth: Set<string> }>();
       (customers ?? []).forEach((c: any) => {
         const name = c.name as string;
-        const mrn = c.medical_record_number ?? null;
-        const city = c.city_name ?? null;
-        const birth = c.birth_date ?? null;
-        const prev = tally.get(name);
-        if (prev) {
-          tally.set(name, { mrn: prev.mrn, city: prev.city, birth: prev.birth, count: prev.count + 1 });
-        } else {
-          tally.set(name, { mrn, city, birth, count: 1 });
+        let b = buckets.get(name);
+        if (!b) {
+          b = { mrn: new Set<string>(), city: new Set<string>(), birth: new Set<string>() };
+          buckets.set(name, b);
         }
+        const mrn = String(c.medical_record_number ?? "").trim();
+        const city = String(c.city_name ?? "").trim();
+        const birth = String(c.birth_date ?? "").slice(0, 10);
+        if (mrn) b.mrn.add(mrn);
+        if (city) b.city.add(city);
+        if (birth) b.birth.add(birth);
       });
-      tally.forEach((v, name) => {
-        // 同名複数が居る場合は曖昧なので null
-        nameToMrn.set(name, v.count === 1 ? v.mrn : null);
-        nameToCity.set(name, v.count === 1 ? v.city : null);
-        nameToBirth.set(name, v.count === 1 ? v.birth : null);
+      // 値が1種類だけなら採用（重複登録でも中身が同じなら安全）。2種類以上＝別人の可能性 → null。
+      const pickUnanimous = (s: Set<string>) => (s.size === 1 ? Array.from(s)[0] : null);
+      buckets.forEach((b, name) => {
+        nameToMrn.set(name, pickUnanimous(b.mrn));
+        nameToCity.set(name, pickUnanimous(b.city));
+        nameToBirth.set(name, pickUnanimous(b.birth));
       });
     }
 
@@ -1045,8 +1055,11 @@ export async function getCashSales(dateStr: string) {
         ...s,
         city_name: nameToCity.get(s.customer_name) ?? null,
         birth_date: nameToBirth.get(s.customer_name) ?? null,
+        // 患者マスタ（customers）を優先し、無いときだけ記帳時の memo スナップショットを使う。
+        // memo を優先していた頃は、修正ダイアログでカルテ番号を直しても
+        // 画面が記帳時の古い番号を出し続け、こちらも「保存されない」ように見えていた。
         medical_record_number:
-          mrnFromMemo ?? nameToMrn.get(s.customer_name) ?? null,
+          nameToMrn.get(s.customer_name) ?? mrnFromMemo ?? null,
       };
     });
 
