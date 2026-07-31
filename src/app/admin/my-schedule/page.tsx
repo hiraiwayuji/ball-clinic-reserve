@@ -853,7 +853,7 @@ export default function ShiftCoordinationPage() {
                     }
                   }}
                   className={[
-                    "min-h-[84px] rounded-lg border p-1.5 transition-all",
+                    "min-h-[84px] rounded-lg border p-1.5 transition-all overflow-hidden",
                     inMonth
                       ? "cursor-pointer"
                       : "bg-slate-50 dark:bg-slate-950 border-transparent",
@@ -873,25 +873,21 @@ export default function ShiftCoordinationPage() {
                   </div>
                   {inMonth && (
                     <div className="mt-1 space-y-0.5">
-                      {avail.slice(0, 5).map((a, i) => (
-                        <div key={i} className="flex items-center gap-1 text-[9px] leading-tight rounded px-1 py-0.5 font-bold text-white truncate" style={{ background: a.color }} title={`${a.name} ${a.start ?? ""}〜${a.end ?? ""}`}>
-                          {a.name}
+                      {/* 全員そのまま出す。以前は5人までで残りを「＋他N名（タップで表示）」に
+                          隠していたが、誰がいるのか・何時なのかが分からず使いづらかった。 */}
+                      {avail.map((a, i) => (
+                        <div
+                          key={i}
+                          className="flex items-baseline justify-between gap-1 text-[9px] leading-tight rounded px-1 py-0.5 font-bold text-white"
+                          style={{ background: a.color }}
+                          title={a.start && a.end ? `${a.name} ${a.start}〜${a.end}` : a.name}
+                        >
+                          <span className="truncate">{a.name}</span>
+                          {a.start && a.end && (
+                            <span className="shrink-0 tabular-nums opacity-90">{a.start}-{a.end}</span>
+                          )}
                         </div>
                       ))}
-                      {/* 6人目以降は「＋他N名」。マスをタップすると DayDetailPanel が開き
-                          その日の全出勤者が見えるので、タップで確認できると分かる見た目にする。
-                          hidden分の名前も title に入れてホバーでも確認可能。 */}
-                      {avail.length > 5 && (
-                        <div
-                          className="text-[9px] font-bold text-blue-500 dark:text-blue-400 underline decoration-dotted underline-offset-2"
-                          title={avail
-                            .slice(5)
-                            .map((a) => (a.start && a.end ? `${a.name} ${a.start}〜${a.end}` : a.name))
-                            .join("\n")}
-                        >
-                          ＋他{avail.length - 5}名（タップで表示）
-                        </div>
-                      )}
                     </div>
                   )}
                 </div>

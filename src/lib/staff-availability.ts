@@ -29,6 +29,22 @@ export type StaffSchedule = {
    * false = 曜日は院の休診日どおり（毎日いる常勤）。受付時間・休憩だけ効かせたいときに使う。
    */
   restrictDays?: boolean;
+  /**
+   * 勤務表（staff_working_hours）から作った曜日ごとの受付時間・休憩。
+   * 0=日..6=土 をキーに、その曜日の勤務がある日だけ入る。
+   * 勤務表に行が無い曜日は入らない＝院の営業時間どおり（従来挙動を壊さないため）。
+   * defaultStart/defaultEnd（手入力の受付時間）があればそちらが優先。
+   */
+  weekly?: Record<number, { start: string; end: string; breakStart: string | null; breakEnd: string | null }>;
+};
+
+/** staff_working_hours の1行 */
+export type StaffWeeklyHoursRow = {
+  day_of_week: number | string;
+  start_time?: string | null;
+  end_time?: string | null;
+  break_start?: string | null;
+  break_end?: string | null;
 };
 
 function toMin(hm: string): number {
@@ -67,6 +83,8 @@ export type StaffScheduleRow = {
 export function buildStaffSchedule(
   row: StaffScheduleRow | null | undefined,
   dates: StaffScheduleDate[] = [],
+  weeklyRows: StaffWeeklyHoursRow[] = [],
+  prepMinutes: number = 0,
 ): StaffSchedule | null {
   if (!row) return null;
   const restrictDays = !!row.schedule_based_booking;
@@ -76,7 +94,9 @@ export function buildStaffSchedule(
   const breakEnd = hhmm(row.booking_break_end);
   const hasHours = !!(defaultStart && defaultEnd);
   const hasBreak = !!(breakStart && breakEnd);
-  if (!restrictDays && !hasHours && !hasBreak) return null;
+  const weekly = buildWeeklyFromWorkingHours(weeklyRows, prepMinutes);
+  const hasWeekly = Object.keys(weekly).length > 0;
+  if (!restrictDays && !hasHours && !hasBreak && !hasWeekly) return null;
   return {
     weekdays: String(row.booking_weekdays ?? "")
       .split(",").map((s) => s.trim()).filter(Boolean).map(Number)
@@ -87,7 +107,54 @@ export function buildStaffSchedule(
     breakStart: hasBreak ? breakStart : null,
     breakEnd: hasBreak ? breakEnd : null,
     restrictDays,
+    weekly: hasWeekly ? weekly : undefined,
   };
+}
+
+function minToHHMM(n: number): string {
+  const c = Math.max(0, Math.min(24 * 60, n));
+  return `${String(Math.floor(c / 60)).padStart(2, "0")}:${String(c % 60).padStart(2, "0")}`;
+}
+
+/**
+ * 勤務表（staff_working_hours）→ 曜日ごとの「受付できる時間帯」。
+ *
+ * 勤務時間の前後 prepMinutes 分は準備・片付け・事務にあてるため受付から外す
+ * （からだ鍼灸整骨院: 勤務 9:30〜20:30 → 受付 10:00〜20:00）。
+ * 休憩はそのまま引き継ぐ。
+ * 前後を削って時間が無くなる短い勤務は、削らずそのまま使う（枠が消えるほうが事故）。
+ */
+function buildWeeklyFromWorkingHours(
+  rows: StaffWeeklyHoursRow[],
+  prepMinutes: number,
+): Record<number, { start: string; end: string; breakStart: string | null; breakEnd: string | null }> {
+  const out: Record<number, { start: string; end: string; breakStart: string | null; breakEnd: string | null }> = {};
+  const prep = Number.isFinite(prepMinutes) && prepMinutes > 0 ? Math.floor(prepMinutes) : 0;
+  for (const r of rows ?? []) {
+    const dow = Number(r.day_of_week);
+    if (!Number.isInteger(dow) || dow < 0 || dow > 6) continue;
+    const s = hhmm(r.start_time);
+    const e = hhmm(r.end_time);
+    if (!s || !e) continue;
+    let startMin = toMin(s) + prep;
+    let endMin = toMin(e) - prep;
+    if (endMin <= startMin) { startMin = toMin(s); endMin = toMin(e); }
+    if (endMin <= startMin) continue;
+    out[dow] = {
+      start: minToHHMM(startMin),
+      end: minToHHMM(endMin),
+      breakStart: hhmm(r.break_start),
+      breakEnd: hhmm(r.break_end),
+    };
+  }
+  return out;
+}
+
+/** "yyyy-MM-dd" → 曜日(0=日..6=土)。不正なら null。 */
+function weekdayOfYmd(ymd: string): number | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(ymd);
+  if (!m) return null;
+  return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])).getDay();
 }
 
 /** "yyyy-MM-dd"（ローカル日付）を返す。タイムゾーンずれを避けるため getFullYear 等で組み立てる。 */
@@ -133,7 +200,10 @@ export function getStaffHoursForDate(
   return getStaffHoursForYmd(toYmd(date), schedule);
 }
 
-/** "yyyy-MM-dd" 文字列で出勤時間を返す（サーバー側用）。 */
+/**
+ * "yyyy-MM-dd" 文字列で出勤時間を返す（サーバー側用）。
+ * 優先順位: ①個別日の上書き → ②手入力の受付時間 → ③勤務表から作った曜日別 → ④なし（院の営業時間どおり）
+ */
 export function getStaffHoursForYmd(
   ymd: string,
   schedule: StaffSchedule,
@@ -145,14 +215,32 @@ export function getStaffHoursForYmd(
   if (schedule.defaultStart && schedule.defaultEnd) {
     return { start: schedule.defaultStart, end: schedule.defaultEnd };
   }
+  const wd = weekdayOfYmd(ymd);
+  const w = wd === null ? undefined : schedule.weekly?.[wd];
+  if (w) return { start: w.start, end: w.end };
+  return null;
+}
+
+/** その日の休憩（手入力があればそれ、無ければ勤務表の曜日別）。無ければ null。 */
+function getStaffBreakForYmd(
+  ymd: string,
+  schedule: StaffSchedule,
+): { start: string; end: string } | null {
+  if (schedule.breakStart && schedule.breakEnd) {
+    return { start: schedule.breakStart, end: schedule.breakEnd };
+  }
+  const wd = weekdayOfYmd(ymd);
+  const w = wd === null ? undefined : schedule.weekly?.[wd];
+  if (w?.breakStart && w?.breakEnd) return { start: w.breakStart, end: w.breakEnd };
   return null;
 }
 
 /** その時刻がスタッフの休憩中（breakStart <= t < breakEnd）か。休憩未設定なら常に false。 */
-function isDuringStaffBreak(time: string, schedule: StaffSchedule): boolean {
-  if (!schedule.breakStart || !schedule.breakEnd) return false;
+function isDuringStaffBreak(ymd: string, time: string, schedule: StaffSchedule): boolean {
+  const b = getStaffBreakForYmd(ymd, schedule);
+  if (!b) return false;
   const t = toMin(time);
-  return t >= toMin(schedule.breakStart) && t < toMin(schedule.breakEnd);
+  return t >= toMin(b.start) && t < toMin(b.end);
 }
 
 /**
@@ -168,11 +256,12 @@ export function filterSlotsByStaffSchedule(
   schedule: StaffSchedule | null | undefined,
 ): string[] {
   if (!schedule) return slots;
-  const hours = getStaffHoursForDate(date, schedule);
+  const ymd = toYmd(date);
+  const hours = getStaffHoursForYmd(ymd, schedule);
   const startMin = hours ? toMin(hours.start) : null;
   const endMin = hours ? toMin(hours.end) : null;
   return slots.filter((s) => {
-    if (isDuringStaffBreak(s, schedule)) return false;
+    if (isDuringStaffBreak(ymd, s, schedule)) return false;
     if (startMin === null || endMin === null) return true;
     const t = toMin(s);
     return t >= startMin && t < endMin;
@@ -185,7 +274,7 @@ export function isTimeWithinStaffHoursYmd(
   time: string,
   schedule: StaffSchedule,
 ): boolean {
-  if (isDuringStaffBreak(time, schedule)) return false;
+  if (isDuringStaffBreak(ymd, time, schedule)) return false;
   const hours = getStaffHoursForYmd(ymd, schedule);
   if (!hours) return true;
   const t = toMin(time);
@@ -209,9 +298,10 @@ export function isStaffSpanBookableYmd(
   const end = start + Math.max(1, durationMinutes);
   const hours = getStaffHoursForYmd(ymd, schedule);
   if (hours && (start < toMin(hours.start) || end > toMin(hours.end))) return false;
-  if (schedule.breakStart && schedule.breakEnd) {
-    const bs = toMin(schedule.breakStart);
-    const be = toMin(schedule.breakEnd);
+  const b = getStaffBreakForYmd(ymd, schedule);
+  if (b) {
+    const bs = toMin(b.start);
+    const be = toMin(b.end);
     // 施術時間と休憩が少しでも重なったら不可
     if (start < be && end > bs) return false;
   }

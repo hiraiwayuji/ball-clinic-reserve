@@ -49,6 +49,34 @@ function normStaffTime(v: string | null | undefined): string | null {
   if (!t) return null;
   return t.length >= 5 ? t.slice(0, 5) : t;
 }
+
+/**
+ * スタッフの勤務表（曜日ごとの勤務時間・休憩）と、院の「準備・片付け分数」をまとめて取る。
+ * 受付時間を勤務表から自動で出すために使う（手入力の受付時間があればそちらが優先）。
+ * booking_follow_work_schedule が false の院では勤務表を返さない＝従来どおりの挙動。
+ */
+async function getStaffWeeklyHours(
+  db: any,
+  staffId: string,
+): Promise<{ weekly: any[]; prep: number }> {
+  try {
+    const [{ data: weekly }, { data: settings }] = await Promise.all([
+      db.from("staff_working_hours")
+        .select("day_of_week, start_time, end_time, break_start, break_end")
+        .eq("clinic_id", PUBLIC_CLINIC_ID)
+        .eq("staff_id", staffId),
+      db.from("clinic_settings")
+        .select("booking_follow_work_schedule, booking_prep_minutes")
+        .eq("id", PUBLIC_CLINIC_ID)
+        .maybeSingle(),
+    ]);
+    if (!settings?.booking_follow_work_schedule) return { weekly: [], prep: 0 };
+    const n = Number(settings?.booking_prep_minutes ?? 0);
+    return { weekly: weekly ?? [], prep: Number.isFinite(n) && n > 0 ? n : 0 };
+  } catch {
+    return { weekly: [], prep: 0 };
+  }
+}
 import { getBookingHorizonDays, getCurrentSchedule, getCurrentSlotDuration, getRequireLineLink } from "@/app/actions/clinic-slot";
 import { getCustomerLineState } from "@/lib/line-links";
 import { unstable_noStore as noStore } from "next/cache";
@@ -668,9 +696,12 @@ export async function createReservation(formData: FormData) {
               .eq("staff_id", reqStaffId)
               .eq("date", rawDate)
               .maybeSingle();
+            const { weekly: reqWeekly, prep: reqPrep } = await getStaffWeeklyHours(adminDb, reqStaffId);
             const sched = buildStaffSchedule(
               reqStaff,
               ovr ? [{ date: rawDate, available: !!ovr.available, start: normStaffTime(ovr.start_time), end: normStaffTime(ovr.end_time) }] : [],
+              reqWeekly,
+              reqPrep,
             );
             if (sched) {
               // 出勤日制（さみ・ヘッドスパ等）はその日に出勤していなければ予約不可
@@ -719,9 +750,12 @@ export async function createReservation(formData: FormData) {
             .eq("staff_id", staffId)
             .eq("date", rawDate)
             .maybeSingle();
+          const { weekly: namedWeekly, prep: namedPrep } = await getStaffWeeklyHours(adminDb, staffId);
           const sched = buildStaffSchedule(
             st,
             ovr ? [{ date: rawDate, available: !!ovr.available, start: normStaffTime(ovr.start_time), end: normStaffTime(ovr.end_time) }] : [],
+            namedWeekly,
+            namedPrep,
           );
           if (sched) {
             if (!isStaffAvailableOnYmd(rawDate, sched)) {
@@ -1187,9 +1221,12 @@ export async function createReservation(formData: FormData) {
                 .eq("staff_id", hStaffId)
                 .eq("date", rawDate)
                 .maybeSingle();
+              const { weekly: hsWeekly, prep: hsPrep } = await getStaffWeeklyHours(adminDb, hStaffId);
               hsSched = buildStaffSchedule(
                 st,
                 ovr ? [{ date: rawDate, available: !!ovr.available, start: normStaffTime(ovr.start_time), end: normStaffTime(ovr.end_time) }] : [],
+                hsWeekly,
+                hsPrep,
               );
               if (hsSched) staffOk = isStaffAvailableOnYmd(rawDate, hsSched);
             }

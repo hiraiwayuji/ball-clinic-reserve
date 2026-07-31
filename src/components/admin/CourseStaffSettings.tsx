@@ -163,7 +163,10 @@ function StaffScheduleEditor({ staff, onChanged }: { staff: ReservationStaff; on
           )}
         </div>
         <p className="text-[10px] text-slate-500 mt-1">
-          ※ 空欄なら院の営業時間どおりです。院の営業時間より外の時間は入れても広がりません。
+          ※ <strong>空欄のままで大丈夫です。</strong>空欄なら「出勤調整」の勤務表から自動で決まります
+          （勤務時間の前後の準備・片付けぶんを除いた時間）。<br />
+          ※ 勤務表と違う時間で受け付けたいときだけ、ここに入れてください（入れた方が優先されます）。
+          院の営業時間より外の時間は入れても広がりません。
         </p>
       </div>
 
@@ -196,6 +199,7 @@ function StaffScheduleEditor({ staff, onChanged }: { staff: ReservationStaff; on
           )}
         </div>
         <p className="text-[10px] text-slate-500 mt-1">
+          ※ こちらも<strong>空欄で大丈夫です</strong>。勤務表に入れた休憩がそのまま使われます。<br />
           ※ 例: 12:00〜14:00 と入れると、その間はこの人のメニューがネット予約で選べなくなります。
         </p>
       </div>

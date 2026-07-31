@@ -380,7 +380,7 @@ function ReserveCalendarContent() {
     // 担当固定コースなら、そのスタッフの出勤日スケジュールを取得（さみ整体など）
     getCourseRequiredStaffSchedule(courseIdParam).then(res => {
       if (!mounted) return;
-      if (res) { setStaffSchedule({ weekdays: res.weekdays, dates: res.dates, defaultStart: res.defaultStart, defaultEnd: res.defaultEnd, breakStart: res.breakStart, breakEnd: res.breakEnd, restrictDays: res.restrictDays }); setStaffScheduleName(res.staffName); }
+      if (res) { setStaffSchedule({ weekdays: res.weekdays, dates: res.dates, defaultStart: res.defaultStart, defaultEnd: res.defaultEnd, breakStart: res.breakStart, breakEnd: res.breakEnd, restrictDays: res.restrictDays, weekly: res.weekly }); setStaffScheduleName(res.staffName); }
       else { setStaffSchedule(null); setStaffScheduleName(""); }
     }).catch(() => { if (mounted) { setStaffSchedule(null); setStaffScheduleName(""); } });
     return () => { mounted = false; };
@@ -414,7 +414,7 @@ function ReserveCalendarContent() {
               weekdays: r.weekdays, dates: r.dates,
               defaultStart: r.defaultStart, defaultEnd: r.defaultEnd,
               breakStart: r.breakStart, breakEnd: r.breakEnd,
-              restrictDays: r.restrictDays,
+              restrictDays: r.restrictDays, weekly: r.weekly,
             };
           } catch {}
           laneList.push({ staffId: sid, staffName: st.name, courses: cs, schedule });
