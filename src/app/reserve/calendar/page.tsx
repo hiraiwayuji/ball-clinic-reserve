@@ -190,6 +190,9 @@ function ReserveCalendarContent() {
   // 担当固定コース（さみ整体など）のスタッフ出勤日。設定時は出勤日以外を選べなくする。
   const [staffSchedule, setStaffSchedule] = useState<StaffSchedule | null>(null);
   const [staffScheduleName, setStaffScheduleName] = useState<string>("");
+  // 「出勤日のみ受付」の注記は、出勤日制のスタッフ（さみ等）のときだけ出す。
+  // 受付時間・休憩だけ設定した常勤スタッフに出すと「出勤日が限られている」と誤解される。
+  const showStaffDayNote = staffScheduleName !== "" && staffSchedule?.restrictDays !== false;
   // 選択コースの最短の空き日（"yyyy-MM-dd" / null=空き無し / undefined=未取得）
   const [courseNextDate, setCourseNextDate] = useState<string | null | undefined>(undefined);
   // 日付を押したら時間帯パネルへ自動スクロールするための ref
@@ -783,13 +786,13 @@ function ReserveCalendarContent() {
               <p className="mt-0.5 leading-relaxed">
                 最短 <span className="font-bold text-white">{formatShortDate(courseNextDate)}</span> に空きあり。
                 下のカレンダーで <span className="text-emerald-300 font-bold">緑の◯</span> の日を選んでください。
-                {staffScheduleName ? `（${staffScheduleName}さんの出勤日のみ受付）` : ""}
+                {showStaffDayNote ? `（${staffScheduleName}さんの出勤日のみ受付）` : ""}
               </p>
             </div>
           ) : (
             <div className="mt-4 bg-amber-500/15 border border-amber-500/40 rounded-2xl p-3.5 text-sm text-amber-100">
               {selectedCourse.name} の直近{schedule.bookingHorizonDays}日の空きはお問い合わせください
-              {staffScheduleName ? `（${staffScheduleName}さんの出勤日のみ受付）` : ""}。
+              {showStaffDayNote ? `（${staffScheduleName}さんの出勤日のみ受付）` : ""}。
             </div>
           )
         )}
