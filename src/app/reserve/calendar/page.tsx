@@ -847,7 +847,8 @@ function ReserveCalendarContent() {
               {calDays.map((day, idx) => {
                 const dateStr = format(day, "yyyy-MM-dd");
                 const bookedCount = monthlyData[dateStr] || 0;
-                const level = getAvailabilityLevel(dateStr, bookedCount, day, clinicHolidays, slotMinutes, schedule, staffSchedule);
+                // 臨時営業日を渡さないと、定休曜日に臨時営業を入れた日（お盆など）が「休」のまま押せない
+                const level = getAvailabilityLevel(dateStr, bookedCount, day, clinicHolidays, slotMinutes, schedule, staffSchedule, findSpecialDay(specialDays, dateStr));
                 const isSelected = selectedDate && isSameDay(day, selectedDate);
                 const isCurrentMonth = isSameMonth(day, currentMonth);
                 const isClickable = level !== "closed" && level !== "past" && isCurrentMonth;
