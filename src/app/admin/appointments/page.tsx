@@ -21,6 +21,7 @@ import { AddAppointmentDialog } from "@/components/admin/AddAppointmentDialog";
 import { AddBreakDialog } from "@/components/admin/AddBreakDialog";
 import { PatientSearchPanel } from "@/components/admin/PatientSearchPanel";
 import { getAdminTimeSlots, isWithinBusinessHours } from "@/lib/time-slots";
+import { useSpecialDays, findSpecialDay } from "@/lib/use-special-days";
 import { getBlockedSlots, deleteBlockedSlot, type BlockedSlot } from "@/app/actions/blocked-slots";
 import { toast } from "sonner";
 import { useClinicSlotDuration } from "@/lib/use-clinic-slot-duration";
@@ -39,6 +40,8 @@ export default function AdminWeeklyGridPage() {
   const [selectedDay, setSelectedDay] = useState<Date | null>(null);
   const [appointments, setAppointments] = useState<any[]>([]);
   const [holidays, setHolidays] = useState<any[]>([]);
+  // 臨時営業日（お盆など）。白/灰セル判定と休診日表示に使う
+  const specialDays = useSpecialDays();
   const [blockedSlots, setBlockedSlots] = useState<BlockedSlot[]>([]);
   const [loading, setLoading] = useState(true);
   // 休憩モード: ON のときカレンダーの枠をタップすると「予約」ではなく「休憩」を追加する
@@ -258,14 +261,29 @@ export default function AdminWeeklyGridPage() {
     }
   };
 
+  // 臨時営業日（お盆など）は、定休曜日でもその時間帯を「営業中（白セル）」として扱う。
+  // 患者側は既に対応済みなので、ここを見ないと管理画面だけ灰色のままでズレる。
+  const toMinHHMM = (hm: string) => { const [h, m] = hm.split(":").map(Number); return h * 60 + m; };
+
   const isBusinessHour = (date: Date, timeSlot: string) => {
     if (holidays.some(h => isSameDay(parseISO(h.date), date))) return false;
+    const special = findSpecialDay(specialDays, format(date, "yyyy-MM-dd"));
+    if (special?.closed) return false;
+    if (special && (special.openTime || special.closeTime)) {
+      const t = toMinHHMM(timeSlot);
+      if (special.openTime && t < toMinHHMM(special.openTime)) return false;
+      if (special.closeTime && t >= toMinHHMM(special.closeTime)) return false;
+      return true;
+    }
     return isWithinBusinessHours(date, timeSlot, schedule);
   };
 
   const isDayOff = (date: Date) => {
     const day = date.getDay();
     if (holidays.some(h => isSameDay(parseISO(h.date), date))) return true;
+    const special = findSpecialDay(specialDays, format(date, "yyyy-MM-dd"));
+    if (special?.closed) return true;
+    if (special && (special.openTime || special.closeTime)) return false;
     return schedule.closedDays.includes(day);
   };
 
