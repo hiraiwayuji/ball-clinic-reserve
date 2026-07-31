@@ -884,7 +884,10 @@ export default function ShiftCoordinationPage() {
                       {avail.length > 5 && (
                         <div
                           className="text-[9px] font-bold text-blue-500 dark:text-blue-400 underline decoration-dotted underline-offset-2"
-                          title={avail.slice(5).map((a) => a.name).join("、")}
+                          title={avail
+                            .slice(5)
+                            .map((a) => (a.start && a.end ? `${a.name} ${a.start}〜${a.end}` : a.name))
+                            .join("\n")}
                         >
                           ＋他{avail.length - 5}名（タップで表示）
                         </div>
