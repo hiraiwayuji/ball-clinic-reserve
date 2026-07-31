@@ -377,7 +377,7 @@ function ReserveCalendarContent() {
     // 担当固定コースなら、そのスタッフの出勤日スケジュールを取得（さみ整体など）
     getCourseRequiredStaffSchedule(courseIdParam).then(res => {
       if (!mounted) return;
-      if (res) { setStaffSchedule({ weekdays: res.weekdays, dates: res.dates, defaultStart: res.defaultStart, defaultEnd: res.defaultEnd }); setStaffScheduleName(res.staffName); }
+      if (res) { setStaffSchedule({ weekdays: res.weekdays, dates: res.dates, defaultStart: res.defaultStart, defaultEnd: res.defaultEnd, breakStart: res.breakStart, breakEnd: res.breakEnd, restrictDays: res.restrictDays }); setStaffScheduleName(res.staffName); }
       else { setStaffSchedule(null); setStaffScheduleName(""); }
     }).catch(() => { if (mounted) { setStaffSchedule(null); setStaffScheduleName(""); } });
     return () => { mounted = false; };
@@ -404,12 +404,16 @@ function ReserveCalendarContent() {
         for (const [sid, cs] of byStaff) {
           const st = staffById.get(sid)!;
           let schedule: StaffSchedule | null = null;
-          if (st.schedule_based_booking) {
-            try {
-              const r = await getCourseRequiredStaffSchedule(cs[0].id);
-              if (r) schedule = { weekdays: r.weekdays, dates: r.dates, defaultStart: r.defaultStart, defaultEnd: r.defaultEnd };
-            } catch {}
-          }
+          // 出勤日制だけでなく、受付時間・休憩だけ設定した常勤スタッフもここで拾う
+          try {
+            const r = await getCourseRequiredStaffSchedule(cs[0].id);
+            if (r) schedule = {
+              weekdays: r.weekdays, dates: r.dates,
+              defaultStart: r.defaultStart, defaultEnd: r.defaultEnd,
+              breakStart: r.breakStart, breakEnd: r.breakEnd,
+              restrictDays: r.restrictDays,
+            };
+          } catch {}
           laneList.push({ staffId: sid, staffName: st.name, courses: cs, schedule });
         }
         if (mounted) setLanes(laneList);

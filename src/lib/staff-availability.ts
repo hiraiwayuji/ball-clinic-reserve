@@ -19,11 +19,75 @@ export type StaffSchedule = {
   defaultStart?: string | null;
   /** 既定の出勤終了時刻 "HH:MM"（全出勤日に適用。NULL=院の営業時間どおり） */
   defaultEnd?: string | null;
+  /** 毎日の休憩開始 "HH:MM"（NULL=休憩なし）。この間は予約を受け付けない */
+  breakStart?: string | null;
+  /** 毎日の休憩終了 "HH:MM"（NULL=休憩なし） */
+  breakEnd?: string | null;
+  /**
+   * 出勤曜日で予約可否を絞るか。
+   * true（既定・schedule_based_booking のスタッフ）= 出勤日以外は予約不可。
+   * false = 曜日は院の休診日どおり（毎日いる常勤）。受付時間・休憩だけ効かせたいときに使う。
+   */
+  restrictDays?: boolean;
 };
 
 function toMin(hm: string): number {
   const [h, m] = hm.split(":").map(Number);
   return h * 60 + m;
+}
+
+/** "HH:MM:SS" / "HH:MM" / null → "HH:MM" / null */
+function hhmm(v: string | null | undefined): string | null {
+  if (!v) return null;
+  const s = String(v);
+  return s.length >= 5 ? s.slice(0, 5) : s;
+}
+
+/** reservation_staff の1行（スケジュール関連カラムだけ） */
+export type StaffScheduleRow = {
+  schedule_based_booking?: boolean | null;
+  booking_weekdays?: string | null;
+  booking_start_time?: string | null;
+  booking_end_time?: string | null;
+  booking_break_start?: string | null;
+  booking_break_end?: string | null;
+};
+
+/**
+ * reservation_staff の行から StaffSchedule を組み立てる共通ビルダー。
+ *
+ * 「出勤日だけ予約を受け付ける（schedule_based_booking）」と
+ * 「受付時間・休憩（booking_start_time / booking_end_time / booking_break_*）」は別物。
+ * 毎日いる常勤スタッフでも、受付時間や休憩だけ効かせたいことがあるため、
+ * どちらか一方だけでもスケジュールを返す。
+ *
+ * どの設定も無い（＝院の営業時間どおり・制限なし）スタッフには null を返す。
+ * 呼び出し側は null をそのまま「制限なし」として扱ってよい。
+ */
+export function buildStaffSchedule(
+  row: StaffScheduleRow | null | undefined,
+  dates: StaffScheduleDate[] = [],
+): StaffSchedule | null {
+  if (!row) return null;
+  const restrictDays = !!row.schedule_based_booking;
+  const defaultStart = hhmm(row.booking_start_time);
+  const defaultEnd = hhmm(row.booking_end_time);
+  const breakStart = hhmm(row.booking_break_start);
+  const breakEnd = hhmm(row.booking_break_end);
+  const hasHours = !!(defaultStart && defaultEnd);
+  const hasBreak = !!(breakStart && breakEnd);
+  if (!restrictDays && !hasHours && !hasBreak) return null;
+  return {
+    weekdays: String(row.booking_weekdays ?? "")
+      .split(",").map((s) => s.trim()).filter(Boolean).map(Number)
+      .filter((n) => Number.isInteger(n) && n >= 0 && n <= 6),
+    dates,
+    defaultStart: hasHours ? defaultStart : null,
+    defaultEnd: hasHours ? defaultEnd : null,
+    breakStart: hasBreak ? breakStart : null,
+    breakEnd: hasBreak ? breakEnd : null,
+    restrictDays,
+  };
 }
 
 /** "yyyy-MM-dd"（ローカル日付）を返す。タイムゾーンずれを避けるため getFullYear 等で組み立てる。 */
@@ -40,6 +104,8 @@ export function isStaffAvailableOn(date: Date, schedule: StaffSchedule): boolean
   const ymd = toYmd(date);
   const override = schedule.dates.find((o) => o.date === ymd);
   if (override) return override.available;
+  // 受付時間・休憩だけ設定した常勤スタッフは曜日で絞らない（院の休診日は呼び出し側が判定済み）
+  if (schedule.restrictDays === false) return true;
   return schedule.weekdays.includes(date.getDay());
 }
 
@@ -47,6 +113,7 @@ export function isStaffAvailableOn(date: Date, schedule: StaffSchedule): boolean
 export function isStaffAvailableOnYmd(ymd: string, schedule: StaffSchedule): boolean {
   const override = schedule.dates.find((o) => o.date === ymd);
   if (override) return override.available;
+  if (schedule.restrictDays === false) return true;
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(ymd);
   if (!m) return false;
   const wd = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])).getDay();
@@ -81,10 +148,19 @@ export function getStaffHoursForYmd(
   return null;
 }
 
+/** その時刻がスタッフの休憩中（breakStart <= t < breakEnd）か。休憩未設定なら常に false。 */
+function isDuringStaffBreak(time: string, schedule: StaffSchedule): boolean {
+  if (!schedule.breakStart || !schedule.breakEnd) return false;
+  const t = toMin(time);
+  return t >= toMin(schedule.breakStart) && t < toMin(schedule.breakEnd);
+}
+
 /**
  * 時刻スロット一覧（"HH:MM"）を、そのスタッフの出勤時間内だけに絞り込む。
  * 出勤時間が未設定（null）の日はそのまま全スロットを返す（院の営業時間どおり）。
  * 院の営業終了が exclusive なのに合わせ、開始 < 出勤終了 で判定（例: 終了18:00なら最終17:30）。
+ * 休憩（breakStart〜breakEnd）が設定されていれば、その間の枠は落とす。
+ * 休憩をまたぐ長さのコースは、呼び出し側の「連続枠が確保できるか」判定で自動的に弾かれる。
  */
 export function filterSlotsByStaffSchedule(
   slots: string[],
@@ -93,10 +169,11 @@ export function filterSlotsByStaffSchedule(
 ): string[] {
   if (!schedule) return slots;
   const hours = getStaffHoursForDate(date, schedule);
-  if (!hours) return slots;
-  const startMin = toMin(hours.start);
-  const endMin = toMin(hours.end);
+  const startMin = hours ? toMin(hours.start) : null;
+  const endMin = hours ? toMin(hours.end) : null;
   return slots.filter((s) => {
+    if (isDuringStaffBreak(s, schedule)) return false;
+    if (startMin === null || endMin === null) return true;
     const t = toMin(s);
     return t >= startMin && t < endMin;
   });
@@ -108,6 +185,7 @@ export function isTimeWithinStaffHoursYmd(
   time: string,
   schedule: StaffSchedule,
 ): boolean {
+  if (isDuringStaffBreak(time, schedule)) return false;
   const hours = getStaffHoursForYmd(ymd, schedule);
   if (!hours) return true;
   const t = toMin(time);

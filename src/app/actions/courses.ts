@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { checkAdminAuth } from "./auth";
 import { PUBLIC_CLINIC_ID } from "@/lib/default-clinic-id";
+import { buildStaffSchedule } from "@/lib/staff-availability";
 
 export type ReservationCourse = {
   id: string;
@@ -80,6 +81,10 @@ export type ReservationStaff = {
   booking_start_time?: string | null;
   /** 既定の出勤終了時刻 "HH:MM(:SS)"（schedule_based 時。NULL=院の営業時間どおり） */
   booking_end_time?: string | null;
+  /** 休憩開始 "HH:MM(:SS)"（この間はネット予約を受けない。NULL=休憩なし） */
+  booking_break_start?: string | null;
+  /** 休憩終了 "HH:MM(:SS)"（NULL=休憩なし） */
+  booking_break_end?: string | null;
   /** オンライン予約の対象スタッフか（予約サイトのレーン/担当に出すか） */
   available_for_online_booking?: boolean | null;
 };
@@ -383,6 +388,8 @@ export async function saveStaff(staff: Partial<ReservationStaff> & { name: strin
   if (staff.booking_weekdays !== undefined) payload.booking_weekdays = staff.booking_weekdays || null;
   if (staff.booking_start_time !== undefined) payload.booking_start_time = normalizeTimeHHMM(staff.booking_start_time);
   if (staff.booking_end_time !== undefined) payload.booking_end_time = normalizeTimeHHMM(staff.booking_end_time);
+  if (staff.booking_break_start !== undefined) payload.booking_break_start = normalizeTimeHHMM(staff.booking_break_start);
+  if (staff.booking_break_end !== undefined) payload.booking_break_end = normalizeTimeHHMM(staff.booking_break_end);
 
   if (staff.id) {
     const { error } = await supabase
@@ -495,7 +502,7 @@ export async function removeStaffBookingDate(staffId: string, date: string) {
 // 患者予約フロー用：コースに担当固定があり、そのスタッフが出勤日ベースなら
 // 出勤曜日・個別日を返す。無ければ null（＝日付制限なし）。
 export async function getCourseRequiredStaffSchedule(courseId: string): Promise<
-  { staffId: string; staffName: string; weekdays: number[]; dates: StaffBookingDate[]; defaultStart: string | null; defaultEnd: string | null } | null
+  { staffId: string; staffName: string; weekdays: number[]; dates: StaffBookingDate[]; defaultStart: string | null; defaultEnd: string | null; breakStart: string | null; breakEnd: string | null; restrictDays: boolean } | null
 > {
   if (!courseId) return null;
   const { createClient: createAdminClient } = await import("@supabase/supabase-js");
@@ -511,30 +518,37 @@ export async function getCourseRequiredStaffSchedule(courseId: string): Promise<
   if (!staffId) return null;
   const { data: staff } = await admin
     .from("reservation_staff")
-    .select("id, name, schedule_based_booking, booking_weekdays, booking_start_time, booking_end_time")
+    .select("id, name, schedule_based_booking, booking_weekdays, booking_start_time, booking_end_time, booking_break_start, booking_break_end")
     .eq("id", staffId)
     .eq("clinic_id", DEFAULT_CLINIC_ID)
     .maybeSingle();
-  if (!staff || !staff.schedule_based_booking) return null;
-  const weekdays = String(staff.booking_weekdays ?? "")
-    .split(",").map((s) => s.trim()).filter(Boolean).map(Number).filter((n) => n >= 0 && n <= 6);
+  if (!staff) return null;
   const { data: dates } = await admin
     .from("staff_booking_dates")
     .select("date, available, start_time, end_time")
     .eq("clinic_id", DEFAULT_CLINIC_ID)
     .eq("staff_id", staffId);
-  return {
-    staffId: staff.id as string,
-    staffName: staff.name as string,
-    weekdays,
-    defaultStart: normalizeTimeHHMM(staff.booking_start_time as string | null),
-    defaultEnd: normalizeTimeHHMM(staff.booking_end_time as string | null),
-    dates: (dates ?? []).map((d: { date: string; available: boolean; start_time?: string | null; end_time?: string | null }) => ({
+  const sched = buildStaffSchedule(
+    staff,
+    (dates ?? []).map((d: { date: string; available: boolean; start_time?: string | null; end_time?: string | null }) => ({
       date: String(d.date).slice(0, 10),
       available: !!d.available,
       start: normalizeTimeHHMM(d.start_time),
       end: normalizeTimeHHMM(d.end_time),
     })),
+  );
+  // 出勤日制でも受付時間・休憩でもない＝院の営業時間どおり（制限なし）
+  if (!sched) return null;
+  return {
+    staffId: staff.id as string,
+    staffName: staff.name as string,
+    weekdays: sched.weekdays,
+    defaultStart: sched.defaultStart ?? null,
+    defaultEnd: sched.defaultEnd ?? null,
+    breakStart: sched.breakStart ?? null,
+    breakEnd: sched.breakEnd ?? null,
+    restrictDays: sched.restrictDays !== false,
+    dates: sched.dates,
   };
 }
 
@@ -542,18 +556,18 @@ export async function getCourseRequiredStaffSchedule(courseId: string): Promise<
 // 予約フォームの指名欄で「その日お休みのスタッフを出さない」ために使う。
 // schedule_based でない常勤スタッフはこのマップに含まれない（＝常に指名可）。
 export async function getPublicStaffSchedules(): Promise<
-  Record<string, { weekdays: number[]; dates: StaffBookingDate[]; defaultStart: string | null; defaultEnd: string | null }>
+  Record<string, { weekdays: number[]; dates: StaffBookingDate[]; defaultStart: string | null; defaultEnd: string | null; breakStart: string | null; breakEnd: string | null; restrictDays: boolean }>
 > {
   try {
     const { createClient: createAdminClient } = await import("@supabase/supabase-js");
     const DEFAULT_CLINIC_ID = PUBLIC_CLINIC_ID;
     const admin = createAdminClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
+    // 出勤日制のスタッフだけでなく、受付時間・休憩だけ設定した常勤スタッフも対象にする
     const { data: staff } = await admin
       .from("reservation_staff")
-      .select("id, booking_weekdays, booking_start_time, booking_end_time")
+      .select("id, schedule_based_booking, booking_weekdays, booking_start_time, booking_end_time, booking_break_start, booking_break_end")
       .eq("clinic_id", DEFAULT_CLINIC_ID)
-      .eq("is_active", true)
-      .eq("schedule_based_booking", true);
+      .eq("is_active", true);
     if (!staff || staff.length === 0) return {};
     const ids = staff.map((s) => s.id as string);
     const { data: dates } = await admin
@@ -561,14 +575,11 @@ export async function getPublicStaffSchedules(): Promise<
       .select("staff_id, date, available, start_time, end_time")
       .eq("clinic_id", DEFAULT_CLINIC_ID)
       .in("staff_id", ids);
-    const out: Record<string, { weekdays: number[]; dates: StaffBookingDate[]; defaultStart: string | null; defaultEnd: string | null }> = {};
+    const out: Record<string, { weekdays: number[]; dates: StaffBookingDate[]; defaultStart: string | null; defaultEnd: string | null; breakStart: string | null; breakEnd: string | null; restrictDays: boolean }> = {};
     for (const s of staff) {
-      out[s.id as string] = {
-        weekdays: String(s.booking_weekdays ?? "")
-          .split(",").map((x) => x.trim()).filter(Boolean).map(Number).filter((n) => n >= 0 && n <= 6),
-        defaultStart: normalizeTimeHHMM((s as { booking_start_time?: string | null }).booking_start_time),
-        defaultEnd: normalizeTimeHHMM((s as { booking_end_time?: string | null }).booking_end_time),
-        dates: (dates ?? [])
+      const sched = buildStaffSchedule(
+        s,
+        (dates ?? [])
           .filter((d: { staff_id: string }) => d.staff_id === s.id)
           .map((d: { date: string; available: boolean; start_time?: string | null; end_time?: string | null }) => ({
             date: String(d.date).slice(0, 10),
@@ -576,6 +587,17 @@ export async function getPublicStaffSchedules(): Promise<
             start: normalizeTimeHHMM(d.start_time),
             end: normalizeTimeHHMM(d.end_time),
           })),
+      );
+      // 何の制限も無いスタッフはマップに入れない（＝常に指名可・院の営業時間どおり）
+      if (!sched) continue;
+      out[s.id as string] = {
+        weekdays: sched.weekdays,
+        defaultStart: sched.defaultStart ?? null,
+        defaultEnd: sched.defaultEnd ?? null,
+        breakStart: sched.breakStart ?? null,
+        breakEnd: sched.breakEnd ?? null,
+        restrictDays: sched.restrictDays !== false,
+        dates: sched.dates,
       };
     }
     return out;
@@ -645,24 +667,19 @@ export async function getCoursesAvailability(): Promise<CourseAvailability[]> {
     const staffSched = new Map<string, import("@/lib/staff-availability").StaffSchedule>();
     if (staffIds.length > 0) {
       const { data: staffRows } = await admin
-        .from("reservation_staff").select("id, schedule_based_booking, booking_weekdays, booking_start_time, booking_end_time")
+        .from("reservation_staff").select("id, schedule_based_booking, booking_weekdays, booking_start_time, booking_end_time, booking_break_start, booking_break_end")
         .eq("clinic_id", DEFAULT_CLINIC_ID).in("id", staffIds);
       const { data: dateRows } = await admin
         .from("staff_booking_dates").select("staff_id, date, available, start_time, end_time")
         .eq("clinic_id", DEFAULT_CLINIC_ID).in("staff_id", staffIds);
       for (const s of staffRows ?? []) {
-        if (!(s as { schedule_based_booking?: boolean }).schedule_based_booking) continue;
-        const weekdays = String((s as { booking_weekdays?: string }).booking_weekdays ?? "").split(",").map((x) => x.trim()).filter(Boolean).map(Number);
         const dates = (dateRows ?? []).filter((d: { staff_id: string }) => d.staff_id === (s as { id: string }).id)
           .map((d: { date: string; available: boolean; start_time?: string | null; end_time?: string | null }) => ({
             date: String(d.date).slice(0, 10), available: !!d.available,
             start: normalizeTimeHHMM(d.start_time), end: normalizeTimeHHMM(d.end_time),
           }));
-        staffSched.set((s as { id: string }).id, {
-          weekdays, dates,
-          defaultStart: normalizeTimeHHMM((s as { booking_start_time?: string | null }).booking_start_time),
-          defaultEnd: normalizeTimeHHMM((s as { booking_end_time?: string | null }).booking_end_time),
-        });
+        const built = buildStaffSchedule(s, dates);
+        if (built) staffSched.set((s as { id: string }).id, built);
       }
     }
 
