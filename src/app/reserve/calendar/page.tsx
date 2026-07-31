@@ -1017,13 +1017,18 @@ function ReserveCalendarContent() {
                 const slotDuration = selectedCourse?.duration_minutes ?? 30;
                 const requiredSteps = Math.max(1, Math.ceil(slotDuration / slotMinutes));
 
-                // 連続枠が確保できるか判定
+                // 連続枠が確保できるか判定。
+                // 配列の隣ではなく「時刻が slotMinutes ずつ続いているか」で見る。
+                // 昼休みなどで枠が飛んでいるとき、休憩をまたぐ長いメニューを通さないため。
+                const toMinutes = (hm: string) => { const [h, m] = hm.split(":").map(Number); return h * 60 + m; };
                 const canFitDuration = (slot: string): boolean => {
                   const idx = allSlots.indexOf(slot);
                   if (idx < 0) return false;
+                  const base = toMinutes(slot);
                   for (let i = 0; i < requiredSteps; i++) {
                     const next = allSlots[idx + i];
                     if (!next) return false;
+                    if (toMinutes(next) !== base + i * slotMinutes) return false;
                     if (dailySlots.includes(next)) return false;
                   }
                   return true;

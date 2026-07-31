@@ -698,12 +698,15 @@ export async function getCoursesAvailability(): Promise<CourseAvailability[]> {
         if (sched) slots = filterSlotsByStaffSchedule(slots, d, sched);
         if (slots.length === 0) continue;
         const booked = bookedByDate.get(key) ?? new Set<string>();
+        // 昼休みなどで枠が飛ぶので「配列の隣」ではなく時刻の連続で連続枠を判定する
+        const toMinutes = (hm: string) => { const [h, m] = hm.split(":").map(Number); return h * 60 + m; };
         for (let idx = 0; idx < slots.length; idx++) {
           if (isTimeSlotWithinTwoHours(d, slots[idx])) continue;
+          const base = toMinutes(slots[idx]);
           let fits = true;
           for (let k = 0; k < steps; k++) {
             const sl = slots[idx + k];
-            if (!sl || booked.has(sl)) { fits = false; break; }
+            if (!sl || toMinutes(sl) !== base + k * slotMinutes || booked.has(sl)) { fits = false; break; }
           }
           if (fits) { next = key; break; }
         }

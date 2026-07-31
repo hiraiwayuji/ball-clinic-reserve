@@ -40,7 +40,7 @@ import { createClient as createServerClient } from "@/lib/supabase/server";
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { getTimeSlots, isDateWithinAllowedRange, isTimeSlotWithinTwoHours, isTodayJST } from "@/lib/time-slots";
 import { getSpecialDayForDate } from "@/app/actions/special-days";
-import { isTimeWithinStaffHoursYmd, isStaffAvailableOnYmd, buildStaffSchedule, type StaffSchedule } from "@/lib/staff-availability";
+import { isTimeWithinStaffHoursYmd, isStaffAvailableOnYmd, isStaffSpanBookableYmd, buildStaffSchedule, type StaffSchedule } from "@/lib/staff-availability";
 
 /** "HH:MM:SS"/"HH:MM"/null → "HH:MM"/null。スタッフ出勤時間（TIMEカラム）の正規化用 */
 function normStaffTime(v: string | null | undefined): string | null {
@@ -681,6 +681,11 @@ export async function createReservation(formData: FormData) {
               if (!isTimeWithinStaffHoursYmd(rawDate, time, sched)) {
                 return { success: false, error: `${reqStaff.name ?? "担当"}さんのその日の受付時間外です。お手数ですが受付時間内の時間をお選びください。` };
               }
+              // 施術の終わりまで受付時間内か（休憩直前から始まる長いメニュー対策）
+              const reqDur = Number(courseDurationStr) || 30;
+              if (!isStaffSpanBookableYmd(rawDate, time, reqDur, sched)) {
+                return { success: false, error: `このメニューは ${reqDur}分 かかるため、この時間から始めると${reqStaff.name ?? "担当"}さんの受付時間・休憩にかかってしまいます。別の時間をお選びください。` };
+              }
             }
             // 担当(レーン)をそのスタッフに確定（schedule有無に関わらず）。
             // これにより各レーンが下部の「スタッフ重複チェック」で同時1名に制限される
@@ -725,6 +730,10 @@ export async function createReservation(formData: FormData) {
             // 受付時間・休憩が設定されていれば、その時間外は弾く
             if (!isTimeWithinStaffHoursYmd(rawDate, time, sched)) {
               return { success: false, error: `${st.name ?? "ご指名の担当"}さんのその日の受付時間外です。受付時間内の時間をお選びください。` };
+            }
+            const namedDur = Number(courseDurationStr) || 30;
+            if (!isStaffSpanBookableYmd(rawDate, time, namedDur, sched)) {
+              return { success: false, error: `このメニューは ${namedDur}分 かかるため、この時間から始めると${st.name ?? "ご指名の担当"}さんの受付時間・休憩にかかってしまいます。別の時間をお選びください。` };
             }
           }
         }

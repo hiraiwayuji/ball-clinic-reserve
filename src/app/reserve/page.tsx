@@ -711,13 +711,17 @@ function ReserveContent() {
     const allSlots = filterSlotsByStaffSchedule(getTimeSlotsForDate(date, listDateStr, { slotMinutes, schedule, special: listSpecial }), date, activeStaffSchedule);
     const selCourse = courses.find(c => c.id === selectedCourseId);
     const requiredSteps = Math.max(1, Math.ceil((selCourse?.duration_minutes ?? slotMinutes) / slotMinutes));
-    // コースの施術時間ぶんの連続枠が確保できるか（カレンダー画面と同じ判定）
+    // コースの施術時間ぶんの連続枠が確保できるか（カレンダー画面と同じ判定）。
+    // 昼休みで枠が飛ぶので、配列の隣ではなく時刻が slotMinutes ずつ続いているかで見る。
+    const toMinutes = (hm: string) => { const [h, m] = hm.split(":").map(Number); return h * 60 + m; };
     const canFit = (slot: string): boolean => {
       const idx = allSlots.indexOf(slot);
       if (idx < 0) return false;
+      const base = toMinutes(slot);
       for (let i = 0; i < requiredSteps; i++) {
         const next = allSlots[idx + i];
         if (!next) return false;
+        if (toMinutes(next) !== base + i * slotMinutes) return false;
         if (bookedTimes.includes(next)) return false;
       }
       return true;

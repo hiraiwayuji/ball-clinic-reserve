@@ -191,3 +191,29 @@ export function isTimeWithinStaffHoursYmd(
   const t = toMin(time);
   return t >= toMin(hours.start) && t < toMin(hours.end);
 }
+
+/**
+ * 施術の「開始〜終了まで丸ごと」がそのスタッフの受付時間内で、休憩をまたがないか。
+ *
+ * 開始時刻だけ見ていると、休憩直前の枠から始まる長いメニュー
+ * （例: 休憩12:00〜14:00 で 11:20 開始の60分）が通ってしまうため、
+ * 予約を確定する前に必ずこちらで検証する。
+ */
+export function isStaffSpanBookableYmd(
+  ymd: string,
+  startTime: string,
+  durationMinutes: number,
+  schedule: StaffSchedule,
+): boolean {
+  const start = toMin(startTime);
+  const end = start + Math.max(1, durationMinutes);
+  const hours = getStaffHoursForYmd(ymd, schedule);
+  if (hours && (start < toMin(hours.start) || end > toMin(hours.end))) return false;
+  if (schedule.breakStart && schedule.breakEnd) {
+    const bs = toMin(schedule.breakStart);
+    const be = toMin(schedule.breakEnd);
+    // 施術時間と休憩が少しでも重なったら不可
+    if (start < be && end > bs) return false;
+  }
+  return true;
+}
