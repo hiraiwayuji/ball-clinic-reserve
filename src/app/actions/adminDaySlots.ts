@@ -30,7 +30,7 @@ function normTime(v: string | null | undefined): string | null {
 
 export type AdminDaySlot = {
   time: string; // "HH:MM"
-  /** true = 選ばせない（担当レーンにすでに予約が入っている枠） */
+  /** true = 選ばせない（重複NG(prevent_overlap)の担当レーンにすでに予約が入っている枠） */
   blocked: boolean;
   /** 補足ラベル（"予約あり" / "休憩" / "休診日"）。null なら普通の空き。 */
   note: string | null;
@@ -39,9 +39,12 @@ export type AdminDaySlot = {
 /**
  * 指定日の時間スロットを「担当レーンの埋まり具合」つきで返す。
  *
- * ・担当レーン（担当指定 > コースの required_staff_id）に予約が重なる枠は blocked=true にして選ばせない。
- *   ボールは prevent_overlap=false で DB の除外制約が効かないため、ここで選ばせないことが
- *   ダブルブッキングの実質的な防波堤になる（checkAddAppointmentOverlap と同じレーン判定）。
+ * ・担当レーン（担当指定 > コースの required_staff_id）に予約が重なる枠は note="予約あり" を付ける。
+ *   選ばせないか（blocked=true）は担当の prevent_overlap で決まる。
+ *   - prevent_overlap=true（ボール）: 1人ずつしか診ない運用。DB の除外制約も効く担当なので、
+ *     ここで選ばせないことがダブルブッキングの手前の防波堤になる。
+ *   - prevent_overlap=false（からだ・マッスル等）: 同時に複数人を診る運用で、DB の除外制約も
+ *     掛からない。埋まっていても正当な枠なので blocked にせず「予約あり」と添えるだけにする。
  * ・休憩枠・休診日は note を付けるだけで blocked にしない。院内は「休憩中でも例外的にねじ込む」
  *   運用があり、これまで院内追加はこの2つを一切見ていなかったため、止めずに注意だけ促す。
  * ・レーンが決まらない（担当もコースも未選択）ときは埋まり判定ができないので全枠を空きとして返す。
@@ -105,6 +108,19 @@ export async function getAdminDaySlots(params: {
       .eq("clinic_id", clinicId)
       .eq("date", dateStr);
 
+    // その担当が「同じ時間に1人まで」か。false の担当（からだ・マッスル等、同時に複数人を
+    // 診る運用）は DB の除外制約も掛からないので、埋まっていても選べるようにする。
+    let laneExclusive = false;
+    if (effStaffId) {
+      const { data: st } = await supabase
+        .from("reservation_staff")
+        .select("prevent_overlap")
+        .eq("id", effStaffId)
+        .eq("clinic_id", clinicId)
+        .maybeSingle();
+      laneExclusive = !!st?.prevent_overlap;
+    }
+
     // レーンの既存予約。キャンセルは無視。
     // C待ち(waiting)は「その時間帯に空きが出たら」の希望登録で枠を持たないので除外する
     // （reserve.ts の getDailyAvailability と同じ考え方）。
@@ -140,7 +156,7 @@ export async function getAdminDaySlots(params: {
       const s = new Date(`${dateStr}T${t}:00+09:00`).getTime();
       const e = s + durationMinutes * 60 * 1000;
       if (booked.some((b) => s < b.end && e > b.start)) {
-        return { time: t, blocked: true, note: "予約あり" };
+        return { time: t, blocked: laneExclusive, note: "予約あり" };
       }
       const hitBreak = breaks.find((b) => s < b.end && e > b.start);
       if (hitBreak) return { time: t, blocked: false, note: hitBreak.reason };
