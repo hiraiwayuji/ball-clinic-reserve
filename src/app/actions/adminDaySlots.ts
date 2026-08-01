@@ -32,17 +32,23 @@ export type AdminDaySlot = {
   time: string; // "HH:MM"
   /** true = 選ばせない（重複NG(prevent_overlap)の担当レーンにすでに予約が入っている枠） */
   blocked: boolean;
-  /** 補足ラベル（"予約あり" / "休憩" / "休診日"）。null なら普通の空き。 */
+  /** 補足ラベル（"12:00に予約あり・20分ならOK" / "休憩" / "休診日"）。null なら普通の空き。 */
   note: string | null;
+  /**
+   * 予約とぶつかる枠で「この所要時間までなら重ならない」分数。
+   * 枠の頭からすでに施術中なら null（時間を短くしても入らない）。
+   */
+  fitMinutes?: number | null;
 };
 
 /**
  * 指定日の時間スロットを「担当レーンの埋まり具合」つきで返す。
  *
  * ・担当レーン（担当指定 > コースの required_staff_id）に予約が重なる枠は
- *   note="10:00〜11:00に予約あり" のように、ぶつかっている予約の時間そのものを添える。
- *   所要時間の長い枠は「選んだ時刻には何も無いのに後ろでぶつかる」ことがあり、
- *   ただ"予約あり"とだけ出すと理由が分からないため（からだの10:40が入らない件）。
+ *   ぶつかっている予約の時間そのものを note に添える。ただ"予約あり"とだけ出すと、
+ *   所要時間が長いときに「選んだ時刻には何も無いのに後ろでぶつかる」理由が分からないため。
+ *   - 枠の頭からすでに施術中: "10:00〜11:00に予約あり"
+ *   - 後ろの予約に食い込むだけ: "12:00に予約あり・20分ならOK"（短くすれば取れる）
  *   選ばせないか（blocked=true）は担当の prevent_overlap で決まる。
  *   - prevent_overlap=true（ボール）: 1人ずつしか診ない運用。DB の除外制約も効く担当なので、
  *     ここで選ばせないことがダブルブッキングの手前の防波堤になる。
@@ -163,14 +169,28 @@ export async function getAdminDaySlots(params: {
     return times.map((t) => {
       const s = new Date(`${dateStr}T${t}:00+09:00`).getTime();
       const e = s + durationMinutes * 60 * 1000;
-      // ぶつかっている予約の時間をそのまま出す（複数なら一番早いもの＋「他N件」）。
+      // ぶつかっている予約の時間をそのまま出す。
       const hits = booked.filter((b) => s < b.end && e > b.start).sort((x, y) => x.start - y.start);
       if (hits.length > 0) {
+        // 枠の頭からすでに施術中か（＝時間を短くしても入らない）。
+        const covering = hits.find((b) => b.start <= s);
+        if (covering) {
+          const more = hits.length > 1 ? ` 他${hits.length - 1}件` : "";
+          return { time: t, blocked: laneExclusive, note: `${covering.label}に予約あり${more}`, fitMinutes: null };
+        }
+        // 枠の頭は空いていて、後ろの予約に食い込んでいるだけ。
+        // 「何分までなら重ならないか」を、実際に選べる所要時間（slotMinutes の倍数）に丸めて出す。
+        const next = hits[0];
+        const gapMinutes = Math.floor((next.start - s) / 60000);
+        const fit = Math.floor(gapMinutes / slotMinutes) * slotMinutes;
+        const head = `${jstHm.format(next.start)}に予約あり`;
         const note =
-          hits.length > 1
-            ? `${hits[0].label}に予約あり 他${hits.length - 1}件`
-            : `${hits[0].label}に予約あり`;
-        return { time: t, blocked: laneExclusive, note };
+          fit >= slotMinutes
+            ? laneExclusive
+              ? `${head}・${fit}分ならOK`
+              : `${head}・${fit}分なら重なりません`
+            : head;
+        return { time: t, blocked: laneExclusive, note, fitMinutes: fit >= slotMinutes ? fit : null };
       }
       const hitBreak = breaks.find((b) => s < b.end && e > b.start);
       if (hitBreak) return { time: t, blocked: false, note: hitBreak.reason };

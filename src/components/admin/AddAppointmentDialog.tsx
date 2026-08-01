@@ -363,11 +363,25 @@ export function AddAppointmentDialog({
     };
   }, [open, slotFetchKey, courseId, duration, slotMinutes]);
 
-  const isSlotBlocked = (d: Date | undefined, t: string, sid: string) => {
-    if (!d || !t) return false;
-    const slots = daySlots[slotKeyOf(d, sid)];
-    return !!slots?.some((s) => s.time === t && s.blocked);
+  const slotInfoOf = (d: Date | undefined, t: string, sid: string): AdminDaySlot | null => {
+    if (!d || !t) return null;
+    return daySlots[slotKeyOf(d, sid)]?.find((s) => s.time === t) ?? null;
   };
+
+  const isSlotBlocked = (d: Date | undefined, t: string, sid: string) =>
+    !!slotInfoOf(d, t, sid)?.blocked;
+
+  // 選んだ日時が既存予約とぶつかっているものだけを拾う（休憩・休診日はここでは出さない）。
+  // 重ねて取れる院（prevent_overlap=false）でも、気づかず重ねてしまわないよう必ず知らせる。
+  const overlapAlerts = pickedSlots
+    .map((p) => ({ p, slot: slotInfoOf(p.date, p.time, p.staffId) }))
+    .filter((x) => !!x.slot?.note?.includes("予約あり"))
+    .map((x) => ({
+      key: `${x.p.date ? format(x.p.date as Date, "M/d") : ""} ${x.p.time}`,
+      note: x.slot!.note as string,
+      blocked: x.slot!.blocked,
+      fitMinutes: x.slot!.fitMinutes ?? null,
+    }));
 
   // 時間プルダウンの中身。その行の担当がすでに埋まっている枠は選ばせない。
   // 休憩・休診日は「（休憩）」等と添えるだけで選べる（院内は例外的にねじ込む運用があるため）。
@@ -495,10 +509,18 @@ export function AddAppointmentDialog({
     // （時間を選んだあとに担当やメニューを変えると、埋まりに変わることがある）
     const blockedPicked = pickedSlots.filter((s) => isSlotBlocked(s.date, s.time, s.staffId));
     if (blockedPicked.length > 0) {
+      // どの予約とぶつかっているか・何分なら入るかまで出す（ただ「埋まっています」だと直しようがない）
       const label = blockedPicked
-        .map((s) => `${format(s.date as Date, "M/d")} ${s.time}`)
-        .join("、");
-      toast.error(`${label} は担当がすでに埋まっています。時間を選び直してください。`);
+        .map((s) => {
+          const head = `${format(s.date as Date, "M/d")} ${s.time}`;
+          const info = slotInfoOf(s.date, s.time, s.staffId);
+          if (!info?.note) return `${head} は担当がすでに埋まっています`;
+          return info.fitMinutes
+            ? `${head} は ${info.note}（所要時間を${info.fitMinutes}分にすれば入ります）`
+            : `${head} は ${info.note}`;
+        })
+        .join("／");
+      toast.error(`${label}。時間か所要時間を選び直してください。`);
       return;
     }
 
@@ -876,6 +898,35 @@ export function AddAppointmentDialog({
                 </select>
               </div>
             </div>
+
+            {/* 選んだ日時が既存予約とぶつかっているときの注意（重ねて取れる院でも必ず出す） */}
+            {overlapAlerts.length > 0 && (
+              <div
+                className={`rounded-md border px-3 py-2 text-xs space-y-1 ${
+                  overlapAlerts.some((a) => a.blocked)
+                    ? "border-red-200 bg-red-50 text-red-800"
+                    : "border-amber-200 bg-amber-50 text-amber-900"
+                }`}
+              >
+                {overlapAlerts.map((a) => (
+                  <div key={a.key}>
+                    <span className="font-semibold">⚠ {a.key}</span> は {a.note}
+                    {a.blocked ? (
+                      a.fitMinutes ? (
+                        <>。所要時間を <b>{a.fitMinutes}分</b> にすれば入ります。</>
+                      ) : (
+                        <>。この時間は施術中なので、別の時間を選んでください。</>
+                      )
+                    ) : (
+                      <>。このまま登録すると予約が重なります。</>
+                    )}
+                  </div>
+                ))}
+                {!overlapAlerts.some((a) => a.blocked) && (
+                  <div className="pt-0.5 opacity-80">重ねて診る予定ならこのまま登録して大丈夫です。</div>
+                )}
+              </div>
+            )}
 
             {/* 患者名（サジェスト付き） */}
             <div className="space-y-1.5">
