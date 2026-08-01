@@ -130,7 +130,7 @@ async function getDayCapacity(
 
     const { data: staff } = await db
       .from("reservation_staff")
-      .select("id, schedule_based_booking, booking_weekdays")
+      .select("id, schedule_based_booking, booking_weekdays, booking_until")
       .eq("clinic_id", clinicId)
       .eq("is_active", true)
       .or("available_for_online_booking.is.null,available_for_online_booking.eq.true");
@@ -147,7 +147,9 @@ async function getDayCapacity(
     );
 
     let count = 0;
-    for (const s of staff as Array<{ id: string; schedule_based_booking?: boolean; booking_weekdays?: string }>) {
+    for (const s of staff as Array<{ id: string; schedule_based_booking?: boolean; booking_weekdays?: string; booking_until?: string | null }>) {
+      // 退職などで受付終了日を過ぎたスタッフは定員に数えない
+      if (s.booking_until && dateStr > String(s.booking_until).slice(0, 10)) continue;
       if (!s.schedule_based_booking) { count++; continue; }
       if (ovrMap.has(s.id)) { if (ovrMap.get(s.id)) count++; continue; }
       const wds = String(s.booking_weekdays ?? "")
@@ -684,7 +686,7 @@ export async function createReservation(formData: FormData) {
         if (reqStaffId) {
           const { data: reqStaff } = await adminDb
             .from("reservation_staff")
-            .select("id, name, schedule_based_booking, booking_weekdays, booking_start_time, booking_end_time, booking_break_start, booking_break_end")
+            .select("id, name, schedule_based_booking, booking_weekdays, booking_start_time, booking_end_time, booking_break_start, booking_break_end, booking_until")
             .eq("id", reqStaffId)
             .eq("clinic_id", PUBLIC_CLINIC_ID)
             .maybeSingle();
@@ -734,7 +736,7 @@ export async function createReservation(formData: FormData) {
       if (staffId && !staffViaRequiredCourse) {
         const { data: st } = await adminDb
           .from("reservation_staff")
-          .select("name, schedule_based_booking, booking_weekdays, booking_start_time, booking_end_time, booking_break_start, booking_break_end")
+          .select("name, schedule_based_booking, booking_weekdays, booking_start_time, booking_end_time, booking_break_start, booking_break_end, booking_until")
           .eq("id", staffId)
           .eq("clinic_id", PUBLIC_CLINIC_ID)
           .maybeSingle();
@@ -1210,7 +1212,7 @@ export async function createReservation(formData: FormData) {
             if (hStaffId) {
               const { data: st } = await adminDb
                 .from("reservation_staff")
-                .select("schedule_based_booking, booking_weekdays, booking_start_time, booking_end_time, booking_break_start, booking_break_end")
+                .select("schedule_based_booking, booking_weekdays, booking_start_time, booking_end_time, booking_break_start, booking_break_end, booking_until")
                 .eq("id", hStaffId)
                 .eq("clinic_id", DEFAULT_CLINIC_ID)
                 .maybeSingle();

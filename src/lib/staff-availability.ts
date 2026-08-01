@@ -36,6 +36,11 @@ export type StaffSchedule = {
    * defaultStart/defaultEnd（手入力の受付時間）があればそちらが優先。
    */
   weekly?: Record<number, { start: string; end: string; breakStart: string | null; breakEnd: string | null }>;
+  /**
+   * 予約の受付をやめる日 "yyyy-MM-dd"（最終出勤日）。この日までは予約可、翌日から不可。
+   * 退職・産休など。null/undefined = 期限なし。
+   */
+  bookingUntil?: string | null;
 };
 
 /** staff_working_hours の1行 */
@@ -67,6 +72,7 @@ export type StaffScheduleRow = {
   booking_end_time?: string | null;
   booking_break_start?: string | null;
   booking_break_end?: string | null;
+  booking_until?: string | null;
 };
 
 /**
@@ -96,7 +102,8 @@ export function buildStaffSchedule(
   const hasBreak = !!(breakStart && breakEnd);
   const weekly = buildWeeklyFromWorkingHours(weeklyRows, prepMinutes);
   const hasWeekly = Object.keys(weekly).length > 0;
-  if (!restrictDays && !hasHours && !hasBreak && !hasWeekly) return null;
+  const bookingUntil = row.booking_until ? String(row.booking_until).slice(0, 10) : null;
+  if (!restrictDays && !hasHours && !hasBreak && !hasWeekly && !bookingUntil) return null;
   return {
     weekdays: String(row.booking_weekdays ?? "")
       .split(",").map((s) => s.trim()).filter(Boolean).map(Number)
@@ -108,7 +115,14 @@ export function buildStaffSchedule(
     breakEnd: hasBreak ? breakEnd : null,
     restrictDays,
     weekly: hasWeekly ? weekly : undefined,
+    bookingUntil,
   };
+}
+
+/** その日が「予約の受付をやめる日」を過ぎているか。 */
+export function isAfterBookingUntil(ymd: string, schedule: StaffSchedule | null | undefined): boolean {
+  if (!schedule?.bookingUntil) return false;
+  return ymd > schedule.bookingUntil;
 }
 
 function minToHHMM(n: number): string {
@@ -169,6 +183,8 @@ export function toYmd(d: Date): string {
  */
 export function isStaffAvailableOn(date: Date, schedule: StaffSchedule): boolean {
   const ymd = toYmd(date);
+  // 退職などで受付終了日を過ぎていたら、他の設定に関わらず予約不可
+  if (isAfterBookingUntil(ymd, schedule)) return false;
   const override = schedule.dates.find((o) => o.date === ymd);
   if (override) return override.available;
   // 受付時間・休憩だけ設定した常勤スタッフは曜日で絞らない（院の休診日は呼び出し側が判定済み）
@@ -178,6 +194,7 @@ export function isStaffAvailableOn(date: Date, schedule: StaffSchedule): boolean
 
 /** "yyyy-MM-dd" 文字列で判定（サーバー側で Date を作らず安全に比較したい時用） */
 export function isStaffAvailableOnYmd(ymd: string, schedule: StaffSchedule): boolean {
+  if (isAfterBookingUntil(ymd, schedule)) return false;
   const override = schedule.dates.find((o) => o.date === ymd);
   if (override) return override.available;
   if (schedule.restrictDays === false) return true;

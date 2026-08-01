@@ -29,6 +29,8 @@ function StaffScheduleEditor({ staff, onChanged }: { staff: ReservationStaff; on
   // 休憩（この時間帯はオンライン予約を受け付けない）
   const [breakStart, setBreakStart] = useState(toHHMM(staff.booking_break_start));
   const [breakEnd, setBreakEnd] = useState(toHHMM(staff.booking_break_end));
+  // 予約の受付をやめる日（最終出勤日）。翌日から予約枠に出なくなる
+  const [bookingUntil, setBookingUntil] = useState(staff.booking_until ? String(staff.booking_until).slice(0, 10) : "");
   const [dates, setDates] = useState<StaffBookingDate[]>([]);
   const [newDate, setNewDate] = useState("");
   const [newStart, setNewStart] = useState("");
@@ -39,13 +41,14 @@ function StaffScheduleEditor({ staff, onChanged }: { staff: ReservationStaff; on
     getStaffBookingDates(staff.id).then(setDates).catch(() => {});
   }, [staff.id]);
 
-  const persistBase = async (next: { scheduleBased?: boolean; weekdays?: number[]; defaultStart?: string; defaultEnd?: string; breakStart?: string; breakEnd?: string }) => {
+  const persistBase = async (next: { scheduleBased?: boolean; weekdays?: number[]; defaultStart?: string; defaultEnd?: string; breakStart?: string; breakEnd?: string; bookingUntil?: string }) => {
     const sb = next.scheduleBased ?? scheduleBased;
     const wd = next.weekdays ?? weekdays;
     const ds = next.defaultStart ?? defaultStart;
     const de = next.defaultEnd ?? defaultEnd;
     const bs = next.breakStart ?? breakStart;
     const be = next.breakEnd ?? breakEnd;
+    const bu = next.bookingUntil ?? bookingUntil;
     setBusy(true);
     const res = await saveStaff({
       id: staff.id, name: staff.name,
@@ -55,6 +58,7 @@ function StaffScheduleEditor({ staff, onChanged }: { staff: ReservationStaff; on
       booking_end_time: de || null,
       booking_break_start: bs || null,
       booking_break_end: be || null,
+      booking_until: bu || null,
     });
     setBusy(false);
     if (res.success) onChanged(); else toast.error(res.error ?? "保存に失敗しました");
@@ -201,6 +205,32 @@ function StaffScheduleEditor({ staff, onChanged }: { staff: ReservationStaff; on
         <p className="text-[10px] text-slate-500 mt-1">
           ※ こちらも<strong>空欄で大丈夫です</strong>。勤務表に入れた休憩がそのまま使われます。<br />
           ※ 例: 12:00〜14:00 と入れると、その間はこの人のメニューがネット予約で選べなくなります。
+        </p>
+      </div>
+
+      <div>
+        <Label className="text-xs text-slate-600 dark:text-slate-300 flex items-center gap-1">
+          <CalendarDays className="w-3 h-3" /> 予約を受ける最終日（退職・産休など）
+        </Label>
+        <div className="flex flex-wrap items-center gap-2 mt-1">
+          <Input
+            type="date" value={bookingUntil} disabled={busy}
+            onChange={(e) => { setBookingUntil(e.target.value); persistBase({ bookingUntil: e.target.value }); }}
+            className="h-9 w-40"
+          />
+          {bookingUntil && (
+            <Button
+              size="sm" variant="outline" disabled={busy}
+              onClick={() => { setBookingUntil(""); persistBase({ bookingUntil: "" }); }}
+              className="h-9 text-xs"
+            >
+              クリア（期限なし）
+            </Button>
+          )}
+        </div>
+        <p className="text-[10px] text-slate-500 mt-1">
+          ※ この日までは今までどおり予約が入り、<strong>翌日から予約枠に出なくなります</strong>。<br />
+          ※ 空欄なら期限なしです。過去の予約や売上はそのまま残ります。
         </p>
       </div>
 

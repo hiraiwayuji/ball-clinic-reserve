@@ -249,7 +249,7 @@ function ReserveContent() {
       .then((res) => {
         if (cancelled) return;
         if (res) {
-          setRequiredStaff({ staffId: res.staffId, staffName: res.staffName, schedule: { weekdays: res.weekdays, dates: res.dates, defaultStart: res.defaultStart, defaultEnd: res.defaultEnd, breakStart: res.breakStart, breakEnd: res.breakEnd, restrictDays: res.restrictDays, weekly: res.weekly } });
+          setRequiredStaff({ staffId: res.staffId, staffName: res.staffName, schedule: { weekdays: res.weekdays, dates: res.dates, defaultStart: res.defaultStart, defaultEnd: res.defaultEnd, breakStart: res.breakStart, breakEnd: res.breakEnd, restrictDays: res.restrictDays, weekly: res.weekly, bookingUntil: res.bookingUntil } });
           setSelectedStaffId(res.staffId);
         } else {
           setRequiredStaff(null);

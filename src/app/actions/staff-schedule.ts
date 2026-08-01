@@ -1015,7 +1015,7 @@ export async function getStaffSchedulesForDates(
   const [staffRes, overrideRes, weeklyRes] = await Promise.all([
     // 全スタッフを取得（show_in_timeline は reservation_staff の列）
     sb.from("reservation_staff")
-      .select("id, name, role, display_color, show_in_timeline")
+      .select("id, name, role, display_color, show_in_timeline, booking_until")
       .eq("clinic_id", auth.clinicId)
       .eq("is_active", true)
       .order("sort_order", { ascending: true }),
@@ -1039,6 +1039,7 @@ export async function getStaffSchedulesForDates(
     role: string | null;
     display_color: string | null;
     show_in_timeline: boolean | null;
+    booking_until?: string | null;
   }[];
 
   // date → staff_id → override
@@ -1065,8 +1066,12 @@ export async function getStaffSchedulesForDates(
 
   const byDate: Record<string, StaffDaySchedule[]> = {};
   for (const dateStr of dates) {
+    // 退職などで「予約を受ける最終日」を過ぎたスタッフは、その日以降の勤務表・タイムラインに出さない
+    const activeStaff = staffList.filter(
+      (s) => !s.booking_until || dateStr <= String(s.booking_until).slice(0, 10),
+    );
     byDate[dateStr] = buildSchedulesForDay(
-      staffList,
+      activeStaff,
       overridesByDate.get(dateStr) ?? new Map(),
       weeklyByDow.get(dayOfWeekOf(dateStr)) ?? new Map(),
     );
