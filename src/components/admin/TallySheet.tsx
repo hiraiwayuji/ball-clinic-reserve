@@ -81,11 +81,16 @@ const num = (s: string) => {
 // ───────── 列幅（ドラッグでリサイズ＋localStorageに保存） ─────────
 // 各列ヘッダの右端をドラッグして幅を変えられる。変えた幅はこの端末に保存され、
 // 次に開いたときも同じ幅で表示される。合計・新患・会計済・次回予約・削除は固定。
-const WIDTHS_KEY = "tally-col-widths-v1";
+// 2026-08-04: 藤川先生の要望「横スライドせずに1画面で見たい」に合わせて既定幅を見直し。
+// 担当と施術メニュー（物販含む）を従来の半分にした。既定幅の合計は約1141pxで、
+// サイドバーのある管理画面でも横スクロールなしに収まる。
+// ※ 幅は端末のlocalStorageに保存されるため、既定値を変えたら必ずキーの版数も上げること
+//   （上げないと以前ドラッグ調整した端末に古い幅が残り、変更が反映されない）。
+const WIDTHS_KEY = "tally-col-widths-v2";
 const MIN_COL_W = 44;
-const DEFAULT_COL_W = 112; // 支払い列の既定幅
+const DEFAULT_COL_W = 56; // 施術メニュー・物販の既定幅（旧112の半分）
 const DEFAULT_FIXED_W: Record<string, number> = {
-  __name: 132, __mrn: 82, __min: 54, __staff: 98,
+  __name: 132, __mrn: 82, __min: 54, __staff: 49, // 担当は旧98の半分
   __total: 92, __new: 48, __done: 58, __next: 86, __del: 36,
 };
 
@@ -187,6 +192,20 @@ export default function TallySheet({ initialDate }: { initialDate?: string }) {
     w += getW("__total") + getW("__new") + getW("__done") + getW("__next") + getW("__del");
     return w;
   }, [columns, getW]);
+
+  // 表が画面幅に収まっているかを見て、収まっている時は上の横スライドバーを出さない
+  // （既定幅なら1画面に収まるので、余計なバーが「まだ横に何かある」と誤解させないように）
+  const [viewportW, setViewportW] = useState(0);
+  useEffect(() => {
+    const el = tableScrollRef.current;
+    if (!el) return;
+    const measure = () => setViewportW(el.clientWidth);
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [loading]);
+  const needsHScroll = viewportW > 0 && totalWidth > viewportW + 1;
 
   const syncTopToTable = () => {
     if (tableScrollRef.current && topScrollRef.current) tableScrollRef.current.scrollLeft = topScrollRef.current.scrollLeft;
@@ -426,19 +445,21 @@ export default function TallySheet({ initialDate }: { initialDate?: string }) {
         </div>
       </div>
 
-      {/* 横スクロール用スライドバー（表の上）。下端まで行かなくても横に動かせる */}
-      <div
-        ref={topScrollRef}
-        onScroll={syncTopToTable}
-        className="overflow-x-auto rounded-t-xl border border-b-0 border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800"
-        style={{ height: 16 }}
-        aria-hidden
-      >
-        <div style={{ width: totalWidth, height: 1 }} />
-      </div>
+      {/* 横スクロール用スライドバー（表の上）。列幅を広げて1画面に収まらない時だけ出す */}
+      {needsHScroll && (
+        <div
+          ref={topScrollRef}
+          onScroll={syncTopToTable}
+          className="overflow-x-auto rounded-t-xl border border-b-0 border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800"
+          style={{ height: 16 }}
+          aria-hidden
+        >
+          <div style={{ width: totalWidth, height: 1 }} />
+        </div>
+      )}
 
       {/* グリッド */}
-      <div ref={tableScrollRef} onScroll={syncTableToTop} className="overflow-x-auto rounded-b-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-sm">
+      <div ref={tableScrollRef} onScroll={syncTableToTop} className={`overflow-x-auto border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-sm ${needsHScroll ? "rounded-b-2xl" : "rounded-2xl"}`}>
         <table className="text-sm border-collapse table-fixed" style={{ width: totalWidth, minWidth: totalWidth }}>
           <colgroup>
             <col style={{ width: getW("__name") }} />
@@ -473,7 +494,7 @@ export default function TallySheet({ initialDate }: { initialDate?: string }) {
                 {resizeHandle("__staff")}
               </th>
               {columns.map((c) => (
-                <th key={c.key} className="relative overflow-hidden px-2 py-2 text-right font-semibold" title={c.label}>
+                <th key={c.key} className="relative overflow-hidden px-1 py-2 text-right font-semibold text-[11px]" title={c.label}>
                   <span className="block overflow-hidden text-ellipsis whitespace-nowrap pr-1">{c.label}</span>
                   {resizeHandle(c.key)}
                 </th>
@@ -522,7 +543,8 @@ export default function TallySheet({ initialDate }: { initialDate?: string }) {
                     <select
                       value={r.staff_id ?? ""}
                       onChange={(e) => updateRow(r._id, { staff_id: e.target.value || null })}
-                      className="w-full px-1 py-1.5 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-600 dark:text-slate-200 outline-none focus:border-indigo-400"
+                      className="w-full px-0.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-[11px] text-slate-600 dark:text-slate-300 outline-none focus:border-indigo-400"
+                      title={staff.find((s) => s.id === r.staff_id)?.name ?? "担当を選択"}
                     >
                       <option value="">—</option>
                       {staff.map((s) => (
@@ -539,8 +561,8 @@ export default function TallySheet({ initialDate }: { initialDate?: string }) {
                             <select
                               value={r.variants[c.key] ?? ""}
                               onChange={(e) => updateVariant(r._id, c.key, e.target.value)}
-                              className="w-full px-1 py-1 rounded-lg border border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-700/60 text-[11px] text-slate-600 dark:text-slate-300 outline-none focus:border-indigo-400"
-                              title="種別を選択"
+                              className="w-full px-0.5 py-1 rounded-lg border border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-700/60 text-[10px] text-slate-600 dark:text-slate-300 outline-none focus:border-indigo-400"
+                              title={r.variants[c.key] ? `${c.label}：${r.variants[c.key]}` : "種別を選択"}
                             >
                               <option value="">種別</option>
                               {c.variants!.map((v) => (
@@ -553,7 +575,7 @@ export default function TallySheet({ initialDate }: { initialDate?: string }) {
                             onChange={(e) => updateAmount(r._id, c.key, e.target.value)}
                             inputMode="numeric"
                             placeholder="0"
-                            className="w-full px-2 py-1.5 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-right text-slate-800 dark:text-slate-100 outline-none focus:border-indigo-400"
+                            className="w-full px-1 py-1.5 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-right text-[13px] text-slate-800 dark:text-slate-100 outline-none focus:border-indigo-400"
                           />
                         </div>
                       </td>
@@ -611,7 +633,7 @@ export default function TallySheet({ initialDate }: { initialDate?: string }) {
             <tr className="border-t-2 border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-900/50 font-bold text-slate-700 dark:text-slate-200">
               <td className="px-2 py-2.5 sticky left-0 bg-slate-50 dark:bg-slate-900/50" colSpan={4}>小計</td>
               {columns.map((c) => (
-                <td key={c.key} className="px-2 py-2.5 text-right whitespace-nowrap">
+                <td key={c.key} className="px-1 py-2.5 text-right text-[11px] whitespace-nowrap overflow-hidden" title={c.label}>
                   {colSubtotals[c.key] ? yen(colSubtotals[c.key]) : <span className="text-slate-300">—</span>}
                 </td>
               ))}
