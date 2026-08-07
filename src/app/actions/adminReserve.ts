@@ -7,7 +7,7 @@ import { checkAdminAuth } from "./auth";
 import { writeAudit, notifyOwnerOfStaffAction } from "@/lib/audit";
 import { awardPoints } from "@/lib/gamification";
 import { getLineAccessToken, pushLineToCustomer } from "@/lib/admin-notify";
-import { getLineUserIdsForCustomer } from "@/lib/line-links";
+import { getPushTargetsForCustomer, getPushTargetsForCustomers } from "@/lib/line-links";
 import { isTimeWithinStaffHoursYmd, type StaffSchedule } from "@/lib/staff-availability";
 import { formatDateTimeLine, formatVisitLabel } from "@/lib/appointment-summary";
 
@@ -281,7 +281,7 @@ export async function sendReviewRequest(appointmentId: string): Promise<{ succes
     .maybeSingle();
   if (!apt || !apt.customer_id) return { success: false, error: "予約が見つかりません" };
 
-  const lineUids = await getLineUserIdsForCustomer(apt.customer_id as string);
+  const lineUids = await getPushTargetsForCustomer(apt.customer_id as string, clinicId);
   if (lineUids.length === 0) return { success: false, error: "この患者さんはLINE未連携のため送れません" };
 
   const cust = Array.isArray((apt as any).customers) ? (apt as any).customers[0] : (apt as any).customers;
@@ -984,6 +984,88 @@ export async function createManualReservation(formData: FormData) {
       }
     }
 
+    // ── 追加メニュー（担当つき）：施術の直後に、その担当の枠として連続で別レコードを作る ──
+    // 同じ予約に additional_staff で2人ぶら下げると「誰が何分やったか」が分からず、
+    // AI秘書の「複数担当が同時刻」アラートになる。メニュー単位で時間を分けて持たせる。
+    const chainWarnings: string[] = [];
+    try {
+      const rawChain = (formData.get("chainedMenus") as string) || "";
+      const items: { courseId: string; staffId: string }[] = rawChain
+        ? (JSON.parse(rawChain) as { courseId?: string; staffId?: string }[])
+            .filter((it) => it && it.courseId && it.staffId)
+            .map((it) => ({ courseId: String(it.courseId), staffId: String(it.staffId) }))
+        : [];
+      if (items.length > 0) {
+        const { data: chainCourses } = await supabase
+          .from("reservation_courses")
+          .select("id, name, duration_minutes")
+          .in("id", [...new Set(items.map((it) => it.courseId))])
+          .eq("clinic_id", clinicId);
+        const { data: chainStaff } = await supabase
+          .from("reservation_staff")
+          .select("id, name")
+          .in("id", [...new Set(items.map((it) => it.staffId))])
+          .eq("clinic_id", clinicId);
+        const courseMap = new Map((chainCourses ?? []).map((c) => [c.id as string, c]));
+        const staffMap = new Map((chainStaff ?? []).map((s) => [s.id as string, s]));
+
+        // まとめ予約では各回の施術それぞれに付ける（1回目だけ、では困るため）
+        for (const slot of allStarts) {
+          // 主施術の終わりから積み上げる
+          let cursor = new Date(slot.start.getTime() + durationMinutes * 60 * 1000);
+          for (const it of items) {
+            const c = courseMap.get(it.courseId);
+            const s = staffMap.get(it.staffId);
+            // 他院IDや無効値は無視（fail-closed）
+            if (!c || !s) continue;
+            const dur = Number(c.duration_minutes ?? durationMinutes) || durationMinutes;
+            const startIso = cursor.toISOString();
+            const endIso = new Date(cursor.getTime() + dur * 60 * 1000).toISOString();
+            cursor = new Date(cursor.getTime() + dur * 60 * 1000);
+
+            // その担当の枠が空いているか（ダブルブッキング防止）
+            const { data: conf } = await supabase
+              .from("appointments")
+              .select("id")
+              .eq("clinic_id", clinicId)
+              .eq("staff_id", it.staffId)
+              .neq("status", "cancelled")
+              .lt("start_time", endIso)
+              .gt("end_time", startIso)
+              .limit(1);
+            if (conf && conf.length > 0) {
+              const t = new Date(startIso).toLocaleTimeString("ja-JP", {
+                timeZone: "Asia/Tokyo", hour: "2-digit", minute: "2-digit", hour12: false,
+              });
+              chainWarnings.push(`${s.name}／${c.name}（${t}〜）は先約があるため登録していません`);
+              continue;
+            }
+
+            const { error: chainErr } = await supabase.from("appointments").insert([{
+              customer_id: customerId,
+              start_time: startIso,
+              end_time: endIso,
+              memo: `【${c.name} 続けて施術】`,
+              is_first_visit: false,
+              status: "confirmed",
+              clinic_id: clinicId,
+              series_id: seriesId,
+              course_id: c.id,
+              course_name: c.name,
+              staff_id: s.id,
+              staff_name: s.name,
+            }]);
+            if (chainErr) {
+              console.error("chained menu insert failed", chainErr);
+              chainWarnings.push(`${s.name}／${c.name} の登録に失敗しました`);
+            }
+          }
+        }
+      }
+    } catch (e) {
+      console.error("chained menus add failed", e);
+    }
+
     // ── ダブル施術：相方の施術を「主施術の直後に連続」で別レコード作成する ──
     // 同時刻に2人で相乗りさせず、相方ぶんの時間をきちんと確保する（前後に時間が要るため）。
     const doublePartnerStaffId = (formData.get("doublePartnerStaffId") as string) || "";
@@ -1081,7 +1163,9 @@ export async function createManualReservation(formData: FormData) {
 
     revalidatePath("/admin/appointments");
     revalidatePath("/admin");
-    return { success: true };
+    return chainWarnings.length > 0
+      ? { success: true, warning: chainWarnings.join("\n") }
+      : { success: true };
   } catch (err: any) {
     console.error(err);
     return { success: false, error: err?.message ?? "予期せぬエラーが発生しました" };
@@ -1334,10 +1418,10 @@ export async function sendLineConfirmation(appointmentId: string) {
     const supabase = await getSupabase();
     if (!supabase) return { success: false, error: "DB接続エラー" };
 
-    // 予約と顧客情報（line_user_id含む）を取得（自院のみ）
+    // 予約と顧客情報を取得（自院のみ）
     const { data: apt, error } = await supabase
       .from("appointments")
-      .select("id, start_time, end_time, is_first_visit, status, course_name, additional_courses, customers(name, line_user_id)")
+      .select("id, customer_id, start_time, end_time, is_first_visit, status, course_name, additional_courses, customers(name)")
       .eq("clinic_id", clinicId)
       .eq("id", appointmentId)
       .single();
@@ -1345,9 +1429,12 @@ export async function sendLineConfirmation(appointmentId: string) {
     if (error || !apt) return { success: false, error: "予約情報の取得に失敗しました" };
 
     const customer = Array.isArray(apt.customers) ? apt.customers[0] : apt.customers;
-    const lineUserId = customer?.line_user_id;
 
-    if (!lineUserId) {
+    // 送信先は customer_line_links（家族紐付け）と customers.line_user_id の両方から取る。
+    // 片方だけ見ると、兄弟の2人目など is_primary=false の人が「未連携」で送れなくなる。
+    const lineUserIds = await getPushTargetsForCustomer(apt.customer_id as string, clinicId);
+
+    if (lineUserIds.length === 0) {
       return { success: false, error: "この患者のLINE IDが未登録です。患者がLINE公式アカウントにメッセージを送ると登録されます。" };
     }
 
@@ -1365,25 +1452,35 @@ export async function sendLineConfirmation(appointmentId: string) {
 
     const messageText = `${statusLabel}\n\n${customer?.name || ""}様の予約内容をお知らせします。\n\n📅 日時: ${dateTimeStr}\n🏥 種別: ${visitLabel}\n📋 予約番号: ${reservationNumber}\n\nご来院をお待ちしております。`;
 
-    const res = await fetch("https://api.line.me/v2/bot/message/push", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ to: lineUserId, messages: [{ type: "text", text: messageText }] }),
-    });
+    // 紐付いている LINE すべてへ送る（親のLINEに兄弟2人分が紐付いている場合など）
+    let sent = 0;
+    let lastError: { success: false; error: string } | null = null;
+    for (const lineUserId of lineUserIds) {
+      const res = await fetch("https://api.line.me/v2/bot/message/push", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ to: lineUserId, messages: [{ type: "text", text: messageText }] }),
+      });
 
-    if (!res.ok) {
+      if (res.ok) {
+        sent++;
+        continue;
+      }
+
       const errBody = await res.json().catch(() => ({}));
       console.error(`[LINE送信失敗] status=${res.status}`, errBody);
       // status code に応じた具体的なエラー（友だち追加してないと一律で返さない）
       if (res.status === 401) {
-        return { success: false, error: "LINE 認証エラー。設定の LINE_CHANNEL_ID/SECRET が正しいか確認してください。" };
+        lastError = { success: false, error: "LINE 認証エラー。設定の LINE_CHANNEL_ID/SECRET が正しいか確認してください。" };
+      } else if (res.status === 403) {
+        lastError = { success: false, error: "この患者は LINE 公式アカウントの友だち登録が解除されているか、まだ追加していません。患者に友だち追加を案内してください。" };
+      } else {
+        const detail = errBody?.message ? `（${errBody.message}）` : "";
+        lastError = { success: false, error: `LINE 送信失敗 (HTTP ${res.status})${detail}` };
       }
-      if (res.status === 403) {
-        return { success: false, error: "この患者は LINE 公式アカウントの友だち登録が解除されているか、まだ追加していません。患者に友だち追加を案内してください。" };
-      }
-      const detail = errBody?.message ? `（${errBody.message}）` : "";
-      return { success: false, error: `LINE 送信失敗 (HTTP ${res.status})${detail}` };
     }
+
+    if (sent === 0 && lastError) return lastError;
 
     return { success: true };
   } catch (err) {
@@ -1978,18 +2075,23 @@ async function findWaitlistCandidatesForDay(
     const dayEndUtc = new Date(Date.UTC(y, mo, da + 1, 0, 0, 0) - 9 * 3600 * 1000);
     const { data: waiting } = await supabase
       .from("appointments")
-      .select("id, start_time, is_first_visit, customers(name, line_user_id)")
+      .select("id, customer_id, start_time, is_first_visit, customers(name)")
       .eq("clinic_id", clinicId)
       .eq("status", "waiting")
       .gte("start_time", dayStartUtc.toISOString())
       .lt("start_time", dayEndUtc.toISOString())
       .order("start_time");
+    // LINE連携の有無は links と customers.line_user_id の両方で判定（片方だけだと未連携表示になる）
+    const targets = await getPushTargetsForCustomers(
+      (waiting ?? []).map((w: any) => w.customer_id as string).filter(Boolean),
+      clinicId,
+    );
     return (waiting ?? []).map((w: any) => {
       const c = Array.isArray(w.customers) ? w.customers[0] : w.customers;
       return {
         appointmentId: w.id as string,
         customerName: (c?.name as string) ?? "(お名前未登録)",
-        hasLine: !!c?.line_user_id,
+        hasLine: (targets.get(w.customer_id as string) ?? []).length > 0,
         startTime: w.start_time as string,
         isFirstVisit: !!w.is_first_visit,
       };
@@ -2300,15 +2402,16 @@ export async function notifyWaitlistOpening(waitingAppointmentId: string) {
 
     const { data: apt, error } = await supabase
       .from("appointments")
-      .select("id, customers(name, line_user_id)")
+      .select("id, customer_id, customers(name)")
       .eq("clinic_id", clinicId)
       .eq("id", waitingAppointmentId)
       .single();
     if (error || !apt) return { success: false, error: "キャンセル待ち情報の取得に失敗しました" };
 
     const customer = Array.isArray(apt.customers) ? apt.customers[0] : apt.customers;
-    const lineUserId = customer?.line_user_id;
-    if (!lineUserId) {
+    // 家族紐付け（is_primary=false）も送信先に含める
+    const lineUserIds = await getPushTargetsForCustomer(apt.customer_id as string, clinicId);
+    if (lineUserIds.length === 0) {
       return { success: false, error: "この方のLINE IDが未登録のため自動送信できません。お電話でご連絡ください。" };
     }
 
@@ -2337,21 +2440,31 @@ export async function notifyWaitlistOpening(waitingAppointmentId: string) {
       `先着順でのご案内となりますので、あらかじめご了承ください。\n\n` +
       `スタッフ一同、ご来院を心よりお待ちしております。`;
 
-    const res = await fetch("https://api.line.me/v2/bot/message/push", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ to: lineUserId, messages: [{ type: "text", text: messageText }] }),
-    });
+    let sent = 0;
+    let lastError: { success: false; error: string } | null = null;
+    for (const lineUserId of lineUserIds) {
+      const res = await fetch("https://api.line.me/v2/bot/message/push", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ to: lineUserId, messages: [{ type: "text", text: messageText }] }),
+      });
 
-    if (!res.ok) {
+      if (res.ok) {
+        sent++;
+        continue;
+      }
+
       const errBody = await res.json().catch(() => ({}));
       console.error(`[キャンセル待ちLINE送信失敗] status=${res.status}`, errBody);
       if (res.status === 403) {
-        return { success: false, error: "この方はLINE公式アカウントの友だち登録がないため送信できません。お電話でご連絡ください。" };
+        lastError = { success: false, error: "この方はLINE公式アカウントの友だち登録がないため送信できません。お電話でご連絡ください。" };
+      } else {
+        const detail = errBody?.message ? `（${errBody.message}）` : "";
+        lastError = { success: false, error: `LINE送信に失敗しました (HTTP ${res.status})${detail}` };
       }
-      const detail = errBody?.message ? `（${errBody.message}）` : "";
-      return { success: false, error: `LINE送信に失敗しました (HTTP ${res.status})${detail}` };
     }
+
+    if (sent === 0 && lastError) return lastError;
 
     return { success: true };
   } catch (err) {

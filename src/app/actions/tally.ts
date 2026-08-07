@@ -104,6 +104,25 @@ export async function getTallySheet(dateStr: string): Promise<TallySheetData> {
     .lte("start_time", dayEnd)
     .order("start_time", { ascending: true });
 
+  // その日のキャンセル分（名前だけ）。
+  // 受付でキャンセルにしたのに、保存済みの0円行が「飛び込み」として復活し、
+  // 来院人数に数えられてしまう事故を防ぐために使う（2026-08-07 藤川先生の指摘）。
+  const { data: cancelledAppts } = await sb
+    .from("appointments")
+    .select("customers(name)")
+    .eq("clinic_id", clinicId)
+    .eq("status", "cancelled")
+    .gte("start_time", dayStart)
+    .lte("start_time", dayEnd);
+  const cancelledNames = new Set<string>(
+    (cancelledAppts ?? [])
+      .map((a: any) => {
+        const cust = Array.isArray(a.customers) ? a.customers[0] : a.customers;
+        return (cust?.name ?? "").trim();
+      })
+      .filter(Boolean),
+  );
+
   // 保存済みの日計表行（tally:）を顧客名でまとめてプリフィル
   const { data: savedRows } = await sb
     .from("cash_sales")
@@ -162,6 +181,13 @@ export async function getTallySheet(dateStr: string): Promise<TallySheetData> {
   // 予約に無い保存済み患者（飛び込み）も行として追加
   saved.forEach((agg, name) => {
     if (usedNames.has(name)) return;
+    // その日の予約が全部キャンセルになっていて、金額も入っていない行は出さない。
+    // （受付でキャンセルにした人が0円のまま残り、来院人数に1名として数えられていた）
+    // お金が入っている行は「実際に来て会計した」ので必ず残す。
+    if (cancelledNames.has(name)) {
+      const total = Object.values(agg.amounts).reduce((s, v) => s + (Number(v) || 0), 0);
+      if (total === 0) return;
+    }
     rows.push({
       customer_name: name,
       medical_record_number: agg.mrn,

@@ -296,18 +296,19 @@ export default function TallySheet({ initialDate }: { initialDate?: string }) {
     [colSubtotals],
   );
 
-  // 人数（名前あり＆金額あり）と新患
+  // 人数（名前あり＆金額あり）と新患。
+  // 同じ人が同じ日に2行になることがある（保険→鍼灸を担当を分けて続けて入れた場合など）ので、
+  // 行数ではなく「お名前の数」で数える。行数で数えると来院人数が水増しになる。
   const stats = useMemo(() => {
-    let people = 0;
-    let newPatients = 0;
+    const people = new Set<string>();
+    const newPatients = new Set<string>();
     for (const r of rows) {
-      const hasName = r.customer_name.trim().length > 0;
-      if (hasName && rowEntered(r)) {
-        people++;
-        if (r.is_first_visit) newPatients++;
-      }
+      const name = r.customer_name.trim();
+      if (!name || !rowEntered(r)) continue;
+      people.add(name);
+      if (r.is_first_visit) newPatients.add(name);
     }
-    return { people, newPatients };
+    return { people: people.size, newPatients: newPatients.size };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rows, columns]);
 

@@ -117,9 +117,11 @@ export function AddAppointmentDialog({
   const [courseId, setCourseId] = useState<string>("");
   const [staffId, setStaffId] = useState<string>("");
   const [roomId, setRoomId] = useState<string>("");
-  // 追加メニュー・追加担当（同じ予約に複数項目を紐付け）
-  const [additionalCourses, setAdditionalCourses] = useState<string[]>([]);
-  const [additionalStaff, setAdditionalStaff] = useState<string[]>([]);
+  // 追加メニュー（メニュー＋担当のセットで積む）。
+  // ・担当が空 → 同じ予約に合算（保険施術20分＋鍼灸20分＝40分の1枠）
+  // ・担当を選んだ → その担当の枠として「施術の直後に連続」する別レコードにする。
+  //   同じ時刻に2人をぶら下げると AI秘書の「複数担当が同時刻」アラートになるため、時間で分ける。
+  const [additionalItems, setAdditionalItems] = useState<{ courseId: string; staffId: string }[]>([]);
   // ダブル施術：さみ整体↔ボール担当を同時に組む（相方を additional に自動セット）
   const [doubleOn, setDoubleOn] = useState(false);
   // 施術前/後に○○を追加：設定された追加メニュー（before=施術前 / after=施術後 / same=同時刻）
@@ -181,8 +183,7 @@ export function AddAppointmentDialog({
       setCourseId("");
       setStaffId("");
       setRoomId("");
-      setAdditionalCourses([]);
-      setAdditionalStaff([]);
+      setAdditionalItems([]);
       setDoubleOn(false);
       setAddAddon(false);
       setAddonTiming("after");
@@ -228,11 +229,15 @@ export function AddAppointmentDialog({
 
   const handleCourseChange = (id: string) => setCourseId(id);
 
-  // 選んでいるメニューの合計所要時間（メイン＋追加メニュー）。
+  // 担当を指定した追加メニュー＝別レコードにするので、この枠の所要時間には含めない。
+  const chainedItems = additionalItems.filter((it) => it.courseId && it.staffId);
+  const mergedCourseIds = additionalItems.filter((it) => it.courseId && !it.staffId).map((it) => it.courseId);
+
+  // 選んでいるメニューの合計所要時間（メイン＋担当なしの追加メニュー）。
   // 追加メニューは同じ予約に連続で入るので、その分だけ枠を長く取る必要がある
   // （保険施術20分＋鍼灸1部位20分 → 40分）。1つも選んでいないときは null。
   const selectedCoursesDuration = (() => {
-    const ids = [courseId, ...additionalCourses].filter(Boolean);
+    const ids = [courseId, ...mergedCourseIds].filter(Boolean);
     if (ids.length === 0) return null;
     const total = ids.reduce(
       (sum, id) => sum + (courses.find((c) => c.id === id)?.duration_minutes ?? 0),
@@ -541,8 +546,10 @@ export function AddAppointmentDialog({
         ? defaultCustomerId
         : null);
     if (resolvedCustomerId) formData.set("customerId", resolvedCustomerId);
-    formData.set("additionalCourseIds", JSON.stringify(additionalCourses.filter(Boolean)));
-    formData.set("additionalStaffIds", JSON.stringify(additionalStaff.filter(Boolean)));
+    // 担当なしの追加メニュー＝同じ予約にぶら下げる（所要時間も合算済み）
+    formData.set("additionalCourseIds", JSON.stringify(mergedCourseIds));
+    // 担当つきの追加メニュー＝施術の直後に続けて、その担当の別枠として作る
+    formData.set("chainedMenus", JSON.stringify(chainedItems));
     // ダブル施術：相方の施術を「主施術の直後に連続」でサーバに作らせる（同時刻NG）
     if (doubleOn && canDouble) {
       if (isSamiPrimary && ballStaff) {
@@ -663,7 +670,7 @@ export function AddAppointmentDialog({
     // 振替後は「ボールが主役」の前提が崩れるので、ダブル施術・追加メニューは解除する。
     formData.delete("doublePartnerStaffId");
     formData.delete("doublePartnerCourseId");
-    formData.delete("additionalStaffIds");
+    formData.delete("chainedMenus");
     formData.delete("addAddon");
     formData.delete("addonTiming");
     await performSubmit(formData, `さみ整体（${sami.staffName}）に振り替えて登録しました`);
@@ -681,6 +688,10 @@ export function AddAppointmentDialog({
             ? `${pickedCount}件の予約をまとめて追加しました`
             : "予約を追加しました")
         );
+        // 追加メニューの担当が先約とぶつかった等、登録できなかったぶんはここで知らせる
+        if ("warning" in result && result.warning) {
+          toast.warning(String(result.warning), { duration: 10000 });
+        }
         setDupWarning(null);
         setOverlapPrompt(null);
         setOpen(false);
@@ -693,6 +704,7 @@ export function AddAppointmentDialog({
         setCourseId("");
         setStaffId("");
         setRoomId("");
+        setAdditionalItems([]);
         onSuccess?.();
       } else {
         toast.error(result.error || "エラーが発生しました");
@@ -1151,37 +1163,66 @@ export function AddAppointmentDialog({
                   </button>
                 )}
 
-                {/* 追加メニュー（複数選択可） */}
-                {additionalCourses.map((cid, idx) => (
-                  <div key={`addc-${idx}`} className="flex gap-2 items-center mt-1.5">
-                    <span className="text-[10px] text-slate-400 w-10 shrink-0">＋{idx + 2}個目</span>
-                    <select
-                      value={cid}
-                      onChange={(e) => {
-                        const next = [...additionalCourses];
-                        next[idx] = e.target.value;
-                        setAdditionalCourses(next);
-                      }}
-                      className={`${selectClass} flex-1`}
-                    >
-                      <option value="">追加メニューを選択</option>
-                      {courses.filter(c => c.is_active).map(c => (
-                        <option key={c.id} value={c.id}>
-                          {c.name}（{c.duration_minutes}分{c.price != null ? ` / ¥${c.price.toLocaleString()}` : ""}）
-                        </option>
-                      ))}
-                    </select>
-                    <button
-                      type="button"
-                      onClick={() => setAdditionalCourses(additionalCourses.filter((_, i) => i !== idx))}
-                      className="px-2 py-1 text-rose-500 hover:bg-rose-50 rounded text-sm"
-                      aria-label="追加メニューを削除"
-                    >×</button>
-                  </div>
-                ))}
+                {/* 追加メニュー（メニュー＋担当のセットで積む） */}
+                {additionalItems.map((item, idx) => {
+                  const itemCourse = courses.find((c) => c.id === item.courseId);
+                  return (
+                    <div key={`addc-${idx}`} className="mt-1.5 rounded-lg border border-slate-200 bg-slate-50/70 p-2 space-y-1.5">
+                      <div className="flex gap-2 items-center">
+                        <span className="text-[10px] text-slate-400 w-10 shrink-0">＋{idx + 2}個目</span>
+                        <select
+                          value={item.courseId}
+                          onChange={(e) => {
+                            const next = [...additionalItems];
+                            next[idx] = { ...next[idx], courseId: e.target.value };
+                            setAdditionalItems(next);
+                          }}
+                          className={`${selectClass} flex-1`}
+                        >
+                          <option value="">追加メニューを選択</option>
+                          {courses.filter(c => c.is_active).map(c => (
+                            <option key={c.id} value={c.id}>
+                              {c.name}（{c.duration_minutes}分{c.price != null ? ` / ¥${c.price.toLocaleString()}` : ""}）
+                            </option>
+                          ))}
+                        </select>
+                        <button
+                          type="button"
+                          onClick={() => setAdditionalItems(additionalItems.filter((_, i) => i !== idx))}
+                          className="px-2 py-1 text-rose-500 hover:bg-rose-50 rounded text-sm"
+                          aria-label="追加メニューを削除"
+                        >×</button>
+                      </div>
+                      {treatmentStaff.length > 0 && (
+                        <div className="flex gap-2 items-center">
+                          <span className="text-[10px] text-slate-400 w-10 shrink-0">担当</span>
+                          <select
+                            value={item.staffId}
+                            onChange={(e) => {
+                              const next = [...additionalItems];
+                              next[idx] = { ...next[idx], staffId: e.target.value };
+                              setAdditionalItems(next);
+                            }}
+                            className={`${selectClass} flex-1`}
+                          >
+                            <option value="">上と同じ担当（時間もまとめる）</option>
+                            {treatmentStaff.map(s => (
+                              <option key={s.id} value={s.id}>{s.name}</option>
+                            ))}
+                          </select>
+                        </div>
+                      )}
+                      <p className="text-[11px] text-slate-500 pl-12">
+                        {item.staffId
+                          ? `施術の直後に、この担当の枠として続けて登録します${itemCourse ? `（${itemCourse.duration_minutes}分）` : ""}`
+                          : "上の施術と同じ枠にまとめます（所要時間に足されます）"}
+                      </p>
+                    </div>
+                  );
+                })}
                 <button
                   type="button"
-                  onClick={() => setAdditionalCourses([...additionalCourses, ""])}
+                  onClick={() => setAdditionalItems([...additionalItems, { courseId: "", staffId: "" }])}
                   className="text-xs text-blue-600 hover:text-blue-700 inline-flex items-center gap-1 mt-1"
                 >
                   <Plus className="w-3 h-3" /> メニューを追加
@@ -1242,39 +1283,12 @@ export function AddAppointmentDialog({
                   ))}
                 </select>
 
-                {/* 追加担当（複数選択可） */}
-                {additionalStaff.map((sid, idx) => (
-                  <div key={`adds-${idx}`} className="flex gap-2 items-center mt-1.5">
-                    <span className="text-[10px] text-slate-400 w-10 shrink-0">＋{idx + 2}人目</span>
-                    <select
-                      value={sid}
-                      onChange={(e) => {
-                        const next = [...additionalStaff];
-                        next[idx] = e.target.value;
-                        setAdditionalStaff(next);
-                      }}
-                      className={`${selectClass} flex-1`}
-                    >
-                      <option value="">追加担当を選択</option>
-                      {treatmentStaff.map(s => (
-                        <option key={s.id} value={s.id}>{s.name}</option>
-                      ))}
-                    </select>
-                    <button
-                      type="button"
-                      onClick={() => setAdditionalStaff(additionalStaff.filter((_, i) => i !== idx))}
-                      className="px-2 py-1 text-rose-500 hover:bg-rose-50 rounded text-sm"
-                      aria-label="追加担当を削除"
-                    >×</button>
-                  </div>
-                ))}
-                <button
-                  type="button"
-                  onClick={() => setAdditionalStaff([...additionalStaff, ""])}
-                  className="text-xs text-blue-600 hover:text-blue-700 inline-flex items-center gap-1 mt-1"
-                >
-                  <Plus className="w-3 h-3" /> 担当を追加
-                </button>
+                {/* 2人目の担当は「メニューを追加」→ その行で担当を選ぶ形に一本化した。
+                    同じ時刻に2人をぶら下げると、施術時間が分からず AI秘書の
+                    「複数担当が同時刻」アラートになるため（2026-08-07 藤川先生の指摘）。 */}
+                <p className="text-[11px] text-slate-500 mt-1">
+                  別の先生が続けて入るときは、上の「メニューを追加」でメニューと担当を選んでください。
+                </p>
               </div>
             )}
 

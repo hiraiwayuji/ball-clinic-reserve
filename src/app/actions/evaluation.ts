@@ -184,10 +184,14 @@ export async function getMonthlyEvaluation(year: number, month: number) {
     // 売上記帳モード（窓口日計表は1患者→複数行になるため、患者×日でまとめる）
     const isTally = (await getSalesInputMode()) === "tally";
     const visitBreakdown = buildVisitBreakdown(allSales ?? [], isTally);
-    // 「来院数」指標（と1日平均来院数）は従来どおり記帳ベースの「のべ来院数」を使用。
-    // 「実来院数（患者×日）」は内訳カードで別表示する（数字を変えない）。
-    const actualPatients = visitBreakdown.grossVisits;
-    const actualNewPatients = allSales ? allSales.filter((s: any) => s.is_first_visit).length : 0;
+    // 「来院数」は患者×日で数える（2026-08-07 変更）。
+    // 以前は記帳の行数だったため、窓口日計表で1人が保険＋自費の2行になると
+    // 1回の来院が2回に数えられ、実際より3〜5割多い数字が出ていた
+    // （からだ 2026-07: 行数834 に対して 実来院567）。
+    // 記帳画面の「来院人数」も同じ数え方（お名前ベース）に揃えてある。
+    const actualPatients = visitBreakdown.dailyUniqueVisits;
+    // 新規患者数も同じ理由で行数ではなく「人」で数える
+    const actualNewPatients = visitBreakdown.newVisits;
 
     // Actual SNS Tasks (Count completed daily_tasks for the month)
     const { data: snsTasks } = await supabase

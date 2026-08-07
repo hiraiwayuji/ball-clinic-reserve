@@ -146,12 +146,31 @@ async function getDayCapacity(
       (overrides ?? []).map((o: { staff_id: string; available: boolean }) => [o.staff_id, !!o.available]),
     );
 
+    // その日「休み」で登録されているスタッフ（予約カレンダーのスタッフ別で名前をクリック→休み）。
+    // 終日休みだけを対象にする（時間指定の私用・研修は枠を丸ごと閉じない）。
+    // これを見ないと、先生が休みでも同時受付人数が減らず、院ごと休診にするしかなかった。
+    const { data: offRows } = await db
+      .from("staff_working_overrides")
+      .select("staff_id, kind, start_time, blocks_booking")
+      .eq("clinic_id", clinicId)
+      .eq("date", dateStr);
+    const offSet = new Set(
+      (offRows ?? [])
+        .filter((o: { kind?: string; start_time?: string | null; blocks_booking?: boolean | null }) =>
+          (o.kind === "off" || o.kind === "leave") && !o.start_time && o.blocks_booking !== false)
+        .map((o: { staff_id: string }) => o.staff_id),
+    );
+
     let count = 0;
     for (const s of staff as Array<{ id: string; schedule_based_booking?: boolean; booking_weekdays?: string; booking_until?: string | null }>) {
       // 退職などで受付終了日を過ぎたスタッフは定員に数えない
       if (s.booking_until && dateStr > String(s.booking_until).slice(0, 10)) continue;
-      if (!s.schedule_based_booking) { count++; continue; }
+      // その日が休み → 定員から外す（曜日設定や schedule_based_booking より優先）
+      if (offSet.has(s.id)) continue;
+      // 日付ごとの上書き（staff_booking_dates）は schedule_based_booking の ON/OFF に関係なく効かせる。
+      // 「この日は受付しない」と明示したのに枠が減らない、という事故を防ぐため。
       if (ovrMap.has(s.id)) { if (ovrMap.get(s.id)) count++; continue; }
+      if (!s.schedule_based_booking) { count++; continue; }
       const wds = String(s.booking_weekdays ?? "")
         .split(",").map((x) => x.trim()).filter(Boolean).map(Number);
       if (wds.includes(wd)) count++;

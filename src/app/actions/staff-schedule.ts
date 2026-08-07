@@ -1228,8 +1228,33 @@ export async function upsertStaffScheduleForDate(
     await sb.from("staff_working_overrides").delete().eq("id", existingBreak.id).eq("clinic_id", auth.clinicId);
   }
 
+  // 3) 「休み」はネット予約側の受付日にも反映する（2026-08-07 追加）。
+  //    患者側の空き計算は staff_booking_dates を見ているので、ここに入れないと
+  //    先生が休みでも指名コース（保険施術＝森川先生 など）のWeb予約が取れてしまう。
+  //    休みを外したときは行ごと削除して、通常の勤務表どおりに戻す。
+  if (isOff) {
+    const { error: bdErr } = await sb
+      .from("staff_booking_dates")
+      .upsert(
+        { clinic_id: auth.clinicId, staff_id: staffId, date: dateStr, available: false, start_time: null, end_time: null },
+        // UNIQUE 制約は (staff_id, date)。clinic_id を混ぜると upsert が失敗する
+        { onConflict: "staff_id,date" },
+      );
+    if (bdErr) console.error("staff_booking_dates upsert failed:", bdErr);
+  } else {
+    const { error: bdDelErr } = await sb
+      .from("staff_booking_dates")
+      .delete()
+      .eq("clinic_id", auth.clinicId)
+      .eq("staff_id", staffId)
+      .eq("date", dateStr)
+      .eq("available", false);
+    if (bdDelErr) console.error("staff_booking_dates delete failed:", bdDelErr);
+  }
+
   revalidatePath("/admin/dashboard");
   revalidatePath("/admin/settings/staff-schedule");
+  revalidatePath("/admin/appointments");
   return { success: true };
 }
 

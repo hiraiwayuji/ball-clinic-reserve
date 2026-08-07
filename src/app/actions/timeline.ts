@@ -15,6 +15,8 @@ export type TimelineStaff = {
   name: string;
   sort_order: number;
   monthly_visit_target?: number | null;
+  /** 退職などで「予約を受ける最終日」。この日を過ぎた日付では予約表のレーンに出さない */
+  booking_until?: string | null;
 };
 
 export type TimelineAppointment = {
@@ -58,6 +60,8 @@ export type TimelineDay = {
   /** "2026-07"。月次実績バッジの参照キー（週が月をまたぐため日ごとに持つ） */
   monthKey: string;
   monthLabel: string; // "7月" など
+  /** 休診日（clinic_holidays に登録された日 or 定休曜日）。タイムテーブルで一目で分かるようにする */
+  isHoliday: boolean;
 };
 
 export type TimelineData = {
@@ -146,9 +150,9 @@ export async function getTimelineRange(
     const lastDayOfMonth = new Date(ly, lm, 0).getDate();
     const monthEnd = `${ly}-${String(lm).padStart(2, "0")}-${String(lastDayOfMonth).padStart(2, "0")}T23:59:59+09:00`;
 
-    const [staffRes, aptRes, monthAptRes, settingsRes] = await Promise.all([
+    const [staffRes, aptRes, monthAptRes, settingsRes, holidayRes] = await Promise.all([
       sb.from("reservation_staff")
-        .select("id, name, sort_order, monthly_visit_target")
+        .select("id, name, sort_order, monthly_visit_target, booking_until")
         .eq("clinic_id", clinicId)
         .eq("is_active", true)
         .eq("show_in_timeline", true)
@@ -171,9 +175,15 @@ export async function getTimelineRange(
         .gte("start_time", monthStart)
         .lte("start_time", monthEnd),
       sb.from("clinic_settings")
-        .select("slot_duration_minutes, business_open_weekday, business_close_weekday, business_open_saturday, business_close_saturday, admin_timeline_open_weekday, admin_timeline_close_weekday, admin_timeline_open_saturday, admin_timeline_close_saturday")
+        .select("slot_duration_minutes, business_open_weekday, business_close_weekday, business_open_saturday, business_close_saturday, admin_timeline_open_weekday, admin_timeline_close_weekday, admin_timeline_open_saturday, admin_timeline_close_saturday, closed_weekdays")
         .eq("id", clinicId)
         .maybeSingle(),
+      // 休診日（臨時）。タイムテーブルで斜線＋バッジ表示するため
+      sb.from("clinic_holidays")
+        .select("date")
+        .eq("clinic_id", clinicId)
+        .gte("date", rangeStart.slice(0, 10))
+        .lte("date", rangeEnd.slice(0, 10)),
     ]);
 
     if (staffRes.error) return { success: false, error: staffRes.error.message };
@@ -184,6 +194,7 @@ export async function getTimelineRange(
       name: s.name,
       sort_order: s.sort_order ?? 0,
       monthly_visit_target: s.monthly_visit_target ?? null,
+      booking_until: (s as { booking_until?: string | null }).booking_until ?? null,
     }));
 
     // 「隠す」にしたキャンセルはタイムテーブルには出さない（予約カレンダー側のトグルでのみ再表示できる）
@@ -251,6 +262,15 @@ export async function getTimelineRange(
       }
     });
 
+    // 休診日セット（臨時休診＋定休曜日）
+    const holidaySet = new Set<string>(
+      (holidayRes?.data ?? []).map((h: { date: string }) => String(h.date).slice(0, 10)),
+    );
+    const closedWeekdays = new Set<number>(
+      String(settingsRes.data?.closed_weekdays ?? "")
+        .split(",").map((x) => x.trim()).filter(Boolean).map(Number),
+    );
+
     const days: TimelineDay[] = dateStrs.map((dateStr) => {
       // 曜日判定（土曜は別の営業時間設定を使う）
       const isSaturday = new Date(`${dateStr}T12:00:00+09:00`).getDay() === 6;
@@ -263,6 +283,7 @@ export async function getTimelineRange(
         ? (settingsRes.data?.admin_timeline_close_saturday ?? settingsRes.data?.business_close_saturday)
         : (settingsRes.data?.admin_timeline_close_weekday ?? settingsRes.data?.business_close_weekday);
       const monthKey = dateStr.slice(0, 7);
+      const dow = new Date(`${dateStr}T12:00:00+09:00`).getDay();
       return {
         date: dateStr,
         appointments: aptsByDate.get(dateStr) ?? [],
@@ -270,6 +291,7 @@ export async function getTimelineRange(
         scheduleEndHour: parseHourCeil(closeStr, DEFAULT_END_HOUR),
         monthKey,
         monthLabel: `${parseInt(monthKey.slice(5), 10)}月`,
+        isHoliday: holidaySet.has(dateStr) || closedWeekdays.has(dow),
       };
     });
 

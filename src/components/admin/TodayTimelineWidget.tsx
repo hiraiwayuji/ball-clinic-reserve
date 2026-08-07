@@ -351,8 +351,13 @@ export default function TodayTimelineWidget({
   // 担当未設定の予約は先頭スタッフ＝院のメイン担当（ボール/院長）の行に表示する）
   const staffRows = useMemo(() => {
     if (!data) return [];
-    const rows: { id: string; name: string; monthly_visit_target?: number | null }[] =
-      data.staff.map(s => ({ id: s.id, name: s.name, monthly_visit_target: s.monthly_visit_target ?? null }));
+    const rows: { id: string; name: string; monthly_visit_target?: number | null; booking_until?: string | null }[] =
+      data.staff.map(s => ({
+        id: s.id,
+        name: s.name,
+        monthly_visit_target: s.monthly_visit_target ?? null,
+        booking_until: s.booking_until ?? null,
+      }));
     return rows;
   }, [data]);
 
@@ -592,14 +597,19 @@ export default function TodayTimelineWidget({
               {rangeMode === "week" && (
                 <div
                   className={`px-2 py-1.5 mb-1 rounded-md border text-sm font-bold flex items-center gap-2 ${
-                    isToday
-                      ? "bg-blue-50 border-blue-300 text-blue-800 dark:bg-blue-900/40 dark:border-blue-700 dark:text-blue-200"
-                      : "bg-white/95 dark:bg-slate-900/95 border-slate-200 dark:border-slate-700"
+                    day.isHoliday
+                      ? "bg-slate-100 border-slate-300 text-slate-500 dark:bg-slate-800 dark:border-slate-600 dark:text-slate-400"
+                      : isToday
+                        ? "bg-blue-50 border-blue-300 text-blue-800 dark:bg-blue-900/40 dark:border-blue-700 dark:text-blue-200"
+                        : "bg-white/95 dark:bg-slate-900/95 border-slate-200 dark:border-slate-700"
                   }`}
                 >
-                  <span className={dow === 0 ? "text-rose-600" : dow === 6 ? "text-blue-600" : ""}>
+                  <span className={day.isHoliday ? "" : dow === 0 ? "text-rose-600" : dow === 6 ? "text-blue-600" : ""}>
                     {format(dayDate, "M月d日(E)", { locale: ja })}
                   </span>
+                  {day.isHoliday && (
+                    <span className="text-[10px] font-black bg-slate-500 text-white px-1.5 py-0.5 rounded">休診日</span>
+                  )}
                   {isToday && <span className="text-[10px] font-black bg-blue-600 text-white px-1.5 py-0.5 rounded">今日</span>}
                   <span className="ml-auto text-[11px] font-normal text-slate-400 tabular-nums">
                     {day.appointments.filter((a) => a.status !== "cancelled").length}件
@@ -698,8 +708,12 @@ export default function TodayTimelineWidget({
                 );
               })()}
 
-              {/* スタッフ行 */}
-              {staffRows.map((s) => {
+              {/* スタッフ行。
+                  退職などで「受付最終日」を過ぎた先生は、その日以降のレーンを出さない
+                  （空のレーンが残ると、まだ入れられると勘違いするため）。 */}
+              {staffRows
+                .filter((s) => !s.booking_until || day.date <= String(s.booking_until).slice(0, 10))
+                .map((s) => {
                 const apts = aptsByStaff.get(s.id) ?? [];
                 // 担当未設定分の実績はデフォルト行（先頭スタッフ）に合算する
                 const monthCount = (monthCounts[s.id] ?? 0)
@@ -765,8 +779,23 @@ export default function TodayTimelineWidget({
                       minHeight: "48px",
                     }}
                   >
+                    {/* 休みの日は行まるごとに斜線をかけて一目で分かるようにする（2026-08-07 藤川先生の要望）。
+                        名前の下の小さい「休み」文字だけだと見落とすため。 */}
+                    {(sched?.isOff || day.isHoliday) && (
+                      <div
+                        className="absolute top-0 bottom-0 pointer-events-none"
+                        style={{
+                          left: "140px",
+                          right: 0,
+                          zIndex: 0,
+                          backgroundColor: "rgba(148, 163, 184, 0.14)",
+                          backgroundImage:
+                            "repeating-linear-gradient(-45deg, rgba(100,116,139,0.20) 0px, rgba(100,116,139,0.20) 2px, transparent 2px, transparent 9px)",
+                        }}
+                      />
+                    )}
                     {/* 勤務時間バー（予約バーの後ろ、z-index 低め） */}
-                    {barLeft !== null && barWidth !== null && !sched?.isOff && (
+                    {barLeft !== null && barWidth !== null && !sched?.isOff && !day.isHoliday && (
                       <div
                         className="absolute top-0 bottom-0 pointer-events-none"
                         style={{
@@ -849,7 +878,9 @@ export default function TodayTimelineWidget({
                         </span>
                       )}
                       {sched?.isOff && (
-                        <span className="text-[9px] text-rose-400 font-semibold">休み</span>
+                        <span className="self-start text-[10px] font-bold text-rose-600 bg-rose-50 border border-rose-200 rounded px-1.5 py-px dark:bg-rose-900/30 dark:text-rose-300 dark:border-rose-800">
+                          休み
+                        </span>
                       )}
                       {/* 勤務時間編集ポップアップ（owner のみ） */}
                       {isEditing && (

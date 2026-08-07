@@ -399,7 +399,10 @@ function ReserveCalendarContent() {
           const sid = c.required_staff_id;
           if (!sid) continue;
           const st = staffById.get(sid);
-          if (!st || st.is_active === false || st.available_for_online_booking === false) continue;
+          // available_for_online_booking は「担当なしメニューの同時受付人数に数えるか」の設定。
+          // 指名メニューの担当はここで弾かない（弾くと、その先生の受付時間・休みが
+          // 患者さんの空き表示に反映されなくなる）。2026-08-07 修正。
+          if (!st || st.is_active === false) continue;
           if (!byStaff.has(sid)) byStaff.set(sid, []);
           byStaff.get(sid)!.push(c);
         }
