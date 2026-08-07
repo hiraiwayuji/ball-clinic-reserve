@@ -57,23 +57,68 @@ export async function getCustomersForLineUserId(
   return rows;
 }
 
-/** 特定 customer に紐付いている全 LINE userId を返す。通知の同報先取得に使う。 */
-export async function getLineUserIdsForCustomer(
+// 通知の送信先取得は getPushTargetsForCustomer / getPushTargetsForCustomers を使うこと。
+// （customer_line_links だけを見る旧ヘルパーは「連携済みなのに送れない」事故のもとなので廃止）
+
+/**
+ * この customer へ通知を送るべき LINE userId を全部返す（送信先の唯一の入口）。
+ *
+ * customer_line_links（家族・複数紐付け）と customers.line_user_id（旧・主紐付け）の和集合。
+ * 片方だけ見ると「連携済みなのに未連携です と出て送れない」事故になる：
+ *   - 兄弟の2人目など is_primary=false の紐付けは customers.line_user_id が NULL
+ *   - 昔から居る患者は customers.line_user_id だけで links 行が無い
+ */
+export async function getPushTargetsForCustomer(
   customerId: string,
+  clinicId: string,
   client?: SupabaseClient,
 ): Promise<string[]> {
+  const map = await getPushTargetsForCustomers([customerId], clinicId, client);
+  return map.get(customerId) ?? [];
+}
+
+/** getPushTargetsForCustomer の一括版。一覧画面の「LINE連携あり/なし」表示にも使う。 */
+export async function getPushTargetsForCustomers(
+  customerIds: string[],
+  clinicId: string,
+  client?: SupabaseClient,
+): Promise<Map<string, string[]>> {
+  const result = new Map<string, string[]>();
+  const ids = Array.from(new Set(customerIds.filter(Boolean)));
+  if (ids.length === 0) return result;
   const sb = client ?? getServiceClient();
-  if (!sb) return [];
-  // tenant-isolation-ignore: customer_id は UUID v4 でグローバルにユニーク（衝突しない）
-  const { data, error } = await sb
+  if (!sb) return result;
+
+  const add = (customerId: string, lineUserId: string | null | undefined) => {
+    if (!lineUserId) return;
+    const cur = result.get(customerId) ?? [];
+    if (!cur.includes(lineUserId)) cur.push(lineUserId);
+    result.set(customerId, cur);
+  };
+
+  const { data: links, error: linkErr } = await sb
     .from("customer_line_links")
-    .select("line_user_id")
-    .eq("customer_id", customerId);
-  if (error) {
-    console.error("[line-links] getLineUserIdsForCustomer error:", error.message);
-    return [];
+    .select("customer_id, line_user_id, is_primary")
+    .eq("clinic_id", clinicId)
+    .in("customer_id", ids)
+    .order("is_primary", { ascending: false });
+  if (linkErr) console.error("[line-links] getPushTargetsForCustomers links error:", linkErr.message);
+  for (const row of links ?? []) {
+    add((row as any).customer_id as string, (row as any).line_user_id as string);
   }
-  return (data ?? []).map((r: { line_user_id: string }) => r.line_user_id).filter(Boolean);
+
+  const { data: customers, error: custErr } = await sb
+    .from("customers")
+    .select("id, line_user_id")
+    .eq("clinic_id", clinicId)
+    .in("id", ids)
+    .not("line_user_id", "is", null);
+  if (custErr) console.error("[line-links] getPushTargetsForCustomers customers error:", custErr.message);
+  for (const row of customers ?? []) {
+    add((row as any).id as string, (row as any).line_user_id as string);
+  }
+
+  return result;
 }
 
 export type CustomerLineState = {

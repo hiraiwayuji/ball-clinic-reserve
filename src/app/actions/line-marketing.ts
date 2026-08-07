@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { checkAdminAuth } from "@/app/actions/auth";
 import { getClinicSettings } from "./settings";
 import { pushLineText } from "@/lib/admin-notify";
+import { getPushTargetsForCustomers } from "@/lib/line-links";
 import {
   CAMPAIGN_INFO,
   buildCampaignSamples,
@@ -113,7 +114,7 @@ export async function sendAppointmentReminders(testLineId: string | null = null)
   // 本日の予約を取得（自院のみ）
   const { data: appointments, error } = await supabase
     .from("appointments")
-    .select("*, customers(name, phone, line_user_id)")
+    .select("*, customers(name, phone)")
     .eq("clinic_id", clinicId)
     .gte("start_time", todayStart.toISOString())
     .lte("start_time", todayEnd.toISOString())
@@ -122,6 +123,12 @@ export async function sendAppointmentReminders(testLineId: string | null = null)
   if (error) {
     throw new Error("予約データの取得に失敗しました: " + error.message);
   }
+
+  // 送信先は links（家族紐付け）+ customers.line_user_id の和集合で解決する
+  const pushTargets = await getPushTargetsForCustomers(
+    (appointments ?? []).map((a: any) => a.customer_id as string).filter(Boolean),
+    clinicId,
+  );
 
   // 実際にはLINE Messaging APIを呼び出すが、今回はモックとして配列に結果を格納
   const sentTo = [];
@@ -133,36 +140,40 @@ export async function sendAppointmentReminders(testLineId: string | null = null)
     if (customer && customer.name) {
        // 時間のフォーマット
        const timeMatch = new Date(apt.start_time).toLocaleString("ja-JP", {timeZone: "Asia/Tokyo", hour: '2-digit', minute: '2-digit'});
-       
+
        const messageText = reminderMessage(clinicName, customer.name, timeMatch);
-       
+
        debugLogs.push(`【宛先: ${customer.name}様】\n${messageText}`);
-       
+
+       const linkedIds = pushTargets.get(apt.customer_id as string) ?? [];
+
        console.log(`\n========== LINE送信シミュレーション ==========`);
        console.log(`宛先: ${customer.name} 様`);
        if (effectiveTestId) {
          console.log(`[TEST MODE] 送信先LINE ID: ${effectiveTestId} に上書き送信します。`);
-       } else if (customer.line_user_id) {
-         console.log(`送信先LINE ID: ${customer.line_user_id}`);
+       } else if (linkedIds.length > 0) {
+         console.log(`送信先LINE ID: ${linkedIds.join(", ")}`);
        } else {
          console.log(`(LINEが未連携のためスキップ扱い)`);
        }
        console.log(`[メッセージ内容]\n${messageText}`);
        console.log(`============================================\n`);
-       
+
        sentTo.push(`${customer.name}様 (${timeMatch}〜)`);
 
        // --- 実際の送信処理（共通経路：発行トークン優先・認証エラー時のみフォールバック） ---
-       const targetId = effectiveTestId || customer.line_user_id;
+       const targetIds = effectiveTestId ? [effectiveTestId] : linkedIds;
 
-       if (targetId) {
-         const push = await pushLineText(targetId, messageText, clinicId);
-         if (push.ok) {
-           console.log(`✅ LINE送信成功: ${customer.name}`);
-           debugLogs[debugLogs.length-1] += `\n(→ 実機送信: 成功)`;
-         } else {
-           console.error(`LINE送信失敗 (${customer.name}):`, push.detail);
-           debugLogs.push(`⚠️ LINE送信失敗 (${customer.name}): ${push.detail ?? "原因不明"}`);
+       if (targetIds.length > 0) {
+         for (const targetId of targetIds) {
+           const push = await pushLineText(targetId, messageText, clinicId);
+           if (push.ok) {
+             console.log(`✅ LINE送信成功: ${customer.name}`);
+             debugLogs[debugLogs.length-1] += `\n(→ 実機送信: 成功)`;
+           } else {
+             console.error(`LINE送信失敗 (${customer.name}):`, push.detail);
+             debugLogs.push(`⚠️ LINE送信失敗 (${customer.name}): ${push.detail ?? "原因不明"}`);
+           }
          }
        } else {
          debugLogs[debugLogs.length-1] += `\n(→ シミュレーションのみ: 宛先のLINE IDがありません)`;

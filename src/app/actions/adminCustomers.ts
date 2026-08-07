@@ -139,6 +139,23 @@ export async function getCustomers(): Promise<CustomerWithStats[]> {
 
     const customerRows = customers ?? [];
 
+    // LINE連携の表示は customers.line_user_id だけでは足りない。
+    // 家族紐付け（customer_line_links の is_primary=false）の人が「未連携」に見えてしまうため、
+    // 自院の links を1回で引いて補完する。
+    const linkByCustomer = new Map<string, string>();
+    try {
+      const { data: links } = await supabase
+        .from("customer_line_links")
+        .select("customer_id, line_user_id, is_primary")
+        .eq("clinic_id", clinicId)
+        .order("is_primary", { ascending: false });
+      for (const l of (links ?? []) as { customer_id: string; line_user_id: string }[]) {
+        if (!linkByCustomer.has(l.customer_id)) linkByCustomer.set(l.customer_id, l.line_user_id);
+      }
+    } catch (e) {
+      console.warn("customer_line_links fetch failed (LINE連携表示は customers.line_user_id のみ):", e);
+    }
+
     const formattedCustomers: CustomerWithStats[] = customerRows.map((c) => {
       const appointments = c.appointments || [];
       // セット解除（cancel_kind='set_removed'）と院都合（cancel_kind='clinic_reason'）は
@@ -177,7 +194,7 @@ export async function getCustomers(): Promise<CustomerWithStats[]> {
         lastVisit,
         booking_suspended: c.booking_suspended ?? false,
         booking_suspended_until: c.booking_suspended_until ?? null,
-        line_user_id: c.line_user_id ?? null,
+        line_user_id: c.line_user_id ?? linkByCustomer.get(c.id) ?? null,
         line_display_name: c.line_display_name ?? null,
         birth_month: c.birth_month ?? null,
         gender: c.gender ?? null,
@@ -753,7 +770,16 @@ export async function getRecentUnlinkedLineLogs(): Promise<{ user_id: string; me
     .eq("clinic_id", clinicId)
     .not("line_user_id", "is", null);
 
-  const linkedIds = new Set((linked || []).map((c: { line_user_id: string | null }) => c.line_user_id));
+  // 家族紐付け（customer_line_links）だけの LINE も「紐づけ済み」に含める
+  const { data: linkRows } = await supabase
+    .from("customer_line_links")
+    .select("line_user_id")
+    .eq("clinic_id", clinicId);
+
+  const linkedIds = new Set<string | null>([
+    ...(linked || []).map((c: { line_user_id: string | null }) => c.line_user_id),
+    ...(linkRows || []).map((l: { line_user_id: string }) => l.line_user_id),
+  ]);
 
   // ユニーク化（最新のメッセージのみ）& 未紐づけのみ
   const seen = new Set<string>();

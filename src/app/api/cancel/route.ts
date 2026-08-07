@@ -4,6 +4,7 @@ import { PUBLIC_CLINIC_ID } from "@/lib/default-clinic-id";
 import { normalizePhone } from "@/lib/phone";
 import { writeAudit } from "@/lib/audit";
 import { pushLineToOwners, pushLineToCustomer } from "@/lib/admin-notify";
+import { getPushTargetsForCustomers } from "@/lib/line-links";
 import { formatDateJa, formatTimeRange, formatVisitLabel } from "@/lib/appointment-summary";
 
 const DEFAULT_CLINIC_ID = PUBLIC_CLINIC_ID;
@@ -34,11 +35,13 @@ async function notifyOwnerCancelled(name: string, date: string, time: string, vi
   await pushLineToOwners(DEFAULT_CLINIC_ID, text);
 }
 
-/** 患者本人の LINE にキャンセル完了の確認を送信（line_user_id が登録されている場合のみ） */
-async function notifyPatientCancelled(lineUserId: string | null | undefined, name: string, date: string, time: string) {
-  if (!lineUserId) return;
+/** 患者本人の LINE にキャンセル完了の確認を送信（紐付いている LINE すべてへ） */
+async function notifyPatientCancelled(lineUserIds: string[], name: string, date: string, time: string) {
+  if (lineUserIds.length === 0) return;
   const text = `✅ 予約キャンセル完了\n\n${name}様の以下の予約をキャンセルしました。\n\n📅 日時: ${date} ${time}\n\nまたのご予約をお待ちしております。`;
-  await pushLineToCustomer(lineUserId, text);
+  for (const lineUserId of lineUserIds) {
+    await pushLineToCustomer(lineUserId, text);
+  }
 }
 
 export async function GET(req: NextRequest) {
@@ -154,19 +157,10 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // キャンセル前に line_user_id を取得（患者本人通知用）
+  // キャンセル前に送信先 LINE を取得（患者本人通知用）。
+  // links（家族紐付け）と customers.line_user_id の両方を見る（片方だけだと家族2人目に届かない）。
   const customerIdsForLine = Array.from(new Set(targetApts.map((a: any) => a.customer_id))).filter(Boolean);
-  const { data: customersWithLine } = customerIdsForLine.length
-    ? await supabase
-        .from("customers")
-        .select("id, name, line_user_id")
-        .in("id", customerIdsForLine)
-        .eq("clinic_id", DEFAULT_CLINIC_ID)
-    : { data: [] as { id: string; name: string; line_user_id: string | null }[] };
-  const lineMap = new Map<string, { name: string; line_user_id: string | null }>();
-  (customersWithLine ?? []).forEach((c: any) =>
-    lineMap.set(c.id, { name: c.name, line_user_id: c.line_user_id }),
-  );
+  const lineMap = await getPushTargetsForCustomers(customerIdsForLine as string[], DEFAULT_CLINIC_ID, supabase);
 
   const apts = targetApts;
 
@@ -185,11 +179,11 @@ export async function POST(req: NextRequest) {
       const date = formatDateJa(apt.start_time);
       const time = formatTimeRange(apt);
       const visitType = formatVisitLabel(apt);
-      const lineInfo = lineMap.get(apt.customer_id);
+      const lineUserIds = lineMap.get(apt.customer_id) ?? [];
 
       await Promise.all([
         notifyOwnerCancelled(customer?.name || "不明", date, time, visitType),
-        notifyPatientCancelled(lineInfo?.line_user_id ?? null, customer?.name || "お客様", date, time),
+        notifyPatientCancelled(lineUserIds, customer?.name || "お客様", date, time),
         writeAudit({
           clinicId: DEFAULT_CLINIC_ID,
           actorRole: "system",
