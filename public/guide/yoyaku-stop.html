@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>ネット予約を止めたいとき｜操作ガイド</title>
+<style>
+  :root{
+    --bg:#fdf8f3; --card:#fff; --ink:#3b2f2a; --sub:#7a6a60;
+    --line:#ecdfd4; --accent:#d97706; --accent-soft:#fef3c7;
+    --rose:#e11d48; --rose-soft:#ffe4e6; --ok:#15803d; --ok-soft:#dcfce7;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; background:var(--bg); color:var(--ink);
+    font-family:"Hiragino Kaku Gothic ProN","Yu Gothic",system-ui,sans-serif;
+    line-height:1.85; font-size:16px;
+  }
+  .wrap{max-width:720px; margin:0 auto; padding:24px 18px 64px}
+  header{text-align:center; padding:14px 0 22px}
+  .eyebrow{font-size:13px; color:var(--sub); letter-spacing:.08em}
+  h1{font-size:23px; margin:6px 0 10px; line-height:1.5}
+  .lead{font-size:15px; color:var(--sub); margin:0}
+
+  .quick{
+    background:var(--card); border:1px solid var(--line); border-radius:18px;
+    padding:16px 16px 6px; margin:18px 0 26px; box-shadow:0 2px 10px rgba(180,140,100,.08);
+  }
+  .quick h2{font-size:15px; margin:0 0 12px; color:var(--accent)}
+  .qrow{display:flex; gap:12px; align-items:flex-start; padding:10px 0; border-top:1px dashed var(--line)}
+  .qrow:first-of-type{border-top:none}
+  .qrow b{display:block; font-size:15px}
+  .qrow span{font-size:14px; color:var(--sub)}
+  .qtag{
+    flex:0 0 auto; font-size:12px; font-weight:700; padding:4px 10px; border-radius:999px;
+    background:var(--accent-soft); color:#92400e; white-space:nowrap; margin-top:3px;
+  }
+
+  section{
+    background:var(--card); border:1px solid var(--line); border-radius:18px;
+    padding:20px 18px; margin:0 0 22px; box-shadow:0 2px 10px rgba(180,140,100,.08);
+  }
+  .badge{
+    display:inline-block; font-size:12px; font-weight:700; color:#fff; background:var(--accent);
+    padding:4px 12px; border-radius:999px; margin-bottom:10px;
+  }
+  h2{font-size:19px; margin:0 0 6px; line-height:1.5}
+  .when{font-size:14px; color:var(--sub); margin:0 0 16px}
+
+  ol.steps{margin:0; padding:0; list-style:none; counter-reset:s}
+  ol.steps>li{
+    counter-increment:s; position:relative; padding:0 0 18px 46px; margin:0;
+  }
+  ol.steps>li::before{
+    content:counter(s); position:absolute; left:0; top:1px;
+    width:30px; height:30px; border-radius:50%; background:var(--accent); color:#fff;
+    font-weight:700; font-size:15px; display:flex; align-items:center; justify-content:center;
+  }
+  ol.steps>li::after{
+    content:""; position:absolute; left:14px; top:34px; bottom:4px; width:2px; background:var(--line);
+  }
+  ol.steps>li:last-child::after{display:none}
+  ol.steps>li>b{display:block; font-size:16px}
+  ol.steps p{margin:2px 0 0; font-size:14px; color:var(--sub)}
+
+  figure{margin:14px 0 4px}
+  figure svg{width:100%; height:auto; display:block}
+  figcaption{font-size:12.5px; color:var(--sub); text-align:center; margin-top:6px}
+
+  .note{
+    border-radius:14px; padding:12px 14px; font-size:14px; margin:14px 0 0;
+    background:var(--accent-soft); border:1px solid #fcd34d;
+  }
+  .warn{background:var(--rose-soft); border:1px solid #fda4af}
+  .good{background:var(--ok-soft); border:1px solid #86efac}
+  .note>b:first-child{display:block; margin-bottom:2px}
+
+  .kbd{
+    display:inline-block; background:#fff7ed; border:1px solid #fdba74; color:#9a3412;
+    border-radius:8px; padding:1px 8px; font-weight:700; font-size:14px;
+  }
+  footer{text-align:center; font-size:13px; color:var(--sub); padding-top:10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <div class="eyebrow">からだ鍼灸整骨院｜予約システム 操作ガイド</div>
+  <h1>ネット予約を<br>止めたいとき</h1>
+  <p class="lead">早退・急な用事・研修のときの手順です。<br>スマホの管理画面だけで完結します。</p>
+</header>
+
+<div class="quick">
+  <h2>まずは早見表</h2>
+  <div class="qrow">
+    <span class="qtag">数時間だけ</span>
+    <div><b>予約カレンダーの「休憩」で塞ぐ</b><span>早退・急用はこれ。いちばん使います</span></div>
+  </div>
+  <div class="qrow">
+    <span class="qtag">1日まるごと</span>
+    <div><b>「休診日設定」で日付を選ぶ</b><span>研修・臨時休診・お盆など</span></div>
+  </div>
+  <div class="qrow">
+    <span class="qtag">ずっと</span>
+    <div><b>勤務表を直す（設定 → スタッフ予定・勤怠）</b><span>受付時間そのものを変えるとき</span></div>
+  </div>
+</div>
+
+<!-- ケース1 -->
+<section>
+  <span class="badge">ケース1</span>
+  <h2>今日の15時から止めたい（早退・急用）</h2>
+  <p class="when">「この時間から先はネット予約を受けたくない」というとき。所要 約30秒。</p>
+
+  <figure>
+    <svg viewBox="0 0 640 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="予約カレンダー右上の休憩ボタンの位置">
+      <rect x="0" y="0" width="640" height="300" rx="16" fill="#fffdfa" stroke="#ecdfd4"/>
+      <rect x="16" y="16" width="608" height="46" rx="10" fill="#f8fafc" stroke="#e2e8f0"/>
+      <text x="34" y="45" font-size="17" font-weight="700" fill="#334155">予約カレンダー</text>
+
+      <rect x="330" y="26" width="96" height="28" rx="8" fill="#fff" stroke="#cbd5e1"/>
+      <text x="378" y="45" font-size="13" fill="#64748b" text-anchor="middle">確認待ち</text>
+
+      <rect x="436" y="26" width="86" height="28" rx="8" fill="#fff7ed" stroke="#d97706" stroke-width="2.5"/>
+      <text x="479" y="45" font-size="13.5" font-weight="700" fill="#b45309" text-anchor="middle">☕ 休憩</text>
+
+      <rect x="532" y="26" width="76" height="28" rx="8" fill="#fff" stroke="#cbd5e1"/>
+      <text x="570" y="45" font-size="12" fill="#64748b" text-anchor="middle">待ち</text>
+
+      <circle cx="479" cy="40" r="30" fill="none" stroke="#e11d48" stroke-width="3"/>
+      <path d="M479 78 L479 104" stroke="#e11d48" stroke-width="3" stroke-linecap="round"/>
+      <path d="M479 104 l-7 -10 M479 104 l7 -10" stroke="#e11d48" stroke-width="3" stroke-linecap="round" fill="none"/>
+      <rect x="384" y="108" width="192" height="34" rx="10" fill="#e11d48"/>
+      <text x="480" y="130" font-size="14" font-weight="700" fill="#fff" text-anchor="middle">ここを押す（右上）</text>
+
+      <rect x="16" y="160" width="608" height="120" rx="10" fill="#fff" stroke="#e2e8f0"/>
+      <text x="34" y="186" font-size="13" fill="#94a3b8">14:00</text>
+      <rect x="90" y="170" width="516" height="26" rx="6" fill="#f1f5f9"/>
+      <text x="34" y="222" font-size="13" fill="#94a3b8">15:00</text>
+      <rect x="90" y="206" width="516" height="26" rx="6" fill="#fef3c7" stroke="#d97706" stroke-dasharray="5 4"/>
+      <text x="348" y="224" font-size="13" font-weight="700" fill="#b45309" text-anchor="middle">この空き枠をタップ → 休憩になる</text>
+      <text x="34" y="258" font-size="13" fill="#94a3b8">16:00</text>
+      <rect x="90" y="242" width="516" height="26" rx="6" fill="#fef3c7" stroke="#d97706" stroke-dasharray="5 4"/>
+    </svg>
+    <figcaption>予約カレンダー画面（パソコン表示）</figcaption>
+  </figure>
+
+  <ol class="steps">
+    <li><b>予約カレンダーを開く</b><p>管理画面の左メニュー →「予約」</p></li>
+    <li><b>右上の <span class="kbd">☕ 休憩</span> を押す</b><p>ボタンがオレンジ色に変わります（＝休憩モード ON）</p></li>
+    <li><b>止めたい時間の枠をタップ</b><p>開始と終了の時刻を確認する画面が出るので「保存」。<br>スマホのときは日付の右上にある <span class="kbd">☕ 休憩</span> から、開始15:00・終了20:00 のように指定します</p></li>
+    <li><b>もう一度 <span class="kbd">☕ 休憩</span> を押してOFFに戻す</b><p>ONのままだと、次にタップした枠も休憩になってしまいます</p></li>
+  </ol>
+
+  <div class="note good">
+    <b>これで起きること</b>
+    その時間は患者さんのネット予約画面から消えて、予約できなくなります（受付は今までどおり手入力できます）。
+  </div>
+  <div class="note">
+    <b>元に戻すとき</b>
+    カレンダーの休憩ブロックにある <b>×</b> を押すだけ。すぐネット予約が再開します。
+  </div>
+</section>
+
+<!-- ケース2 -->
+<section>
+  <span class="badge">ケース2</span>
+  <h2>1日まるごと止めたい（臨時休診・研修）</h2>
+  <p class="when">その日は朝から晩までネット予約を受けない、というとき。</p>
+
+  <figure>
+    <svg viewBox="0 0 640 250" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="休診日設定でカレンダーの日付を押す">
+      <rect x="0" y="0" width="640" height="250" rx="16" fill="#fffdfa" stroke="#ecdfd4"/>
+      <text x="30" y="42" font-size="17" font-weight="700" fill="#334155">休診日設定</text>
+      <text x="30" y="66" font-size="13" fill="#94a3b8">日付を押すと休診／もう一度押すと解除</text>
+
+      <g font-size="13" fill="#64748b" text-anchor="middle">
+        <text x="80" y="100">日</text><text x="152" y="100">月</text><text x="224" y="100">火</text>
+        <text x="296" y="100">水</text><text x="368" y="100">木</text><text x="440" y="100">金</text><text x="512" y="100">土</text>
+      </g>
+      <g>
+        <rect x="52" y="112" width="56" height="42" rx="9" fill="#f8fafc" stroke="#e2e8f0"/>
+        <rect x="124" y="112" width="56" height="42" rx="9" fill="#f8fafc" stroke="#e2e8f0"/>
+        <rect x="196" y="112" width="56" height="42" rx="9" fill="#f8fafc" stroke="#e2e8f0"/>
+        <rect x="268" y="112" width="56" height="42" rx="9" fill="#f8fafc" stroke="#e2e8f0"/>
+        <rect x="340" y="112" width="56" height="42" rx="9" fill="#d97706"/>
+        <rect x="412" y="112" width="56" height="42" rx="9" fill="#f8fafc" stroke="#e2e8f0"/>
+        <rect x="484" y="112" width="56" height="42" rx="9" fill="#f8fafc" stroke="#e2e8f0"/>
+        <g font-size="15" text-anchor="middle" fill="#475569">
+          <text x="80" y="139">10</text><text x="152" y="139">11</text><text x="224" y="139">12</text>
+          <text x="296" y="139">13</text><text x="368" y="139" fill="#fff" font-weight="700">14</text>
+          <text x="440" y="139">15</text><text x="512" y="139">16</text>
+        </g>
+      </g>
+      <circle cx="368" cy="133" r="33" fill="none" stroke="#e11d48" stroke-width="3"/>
+      <path d="M368 172 L368 190" stroke="#e11d48" stroke-width="3" stroke-linecap="round"/>
+      <path d="M368 190 l-7 -10 M368 190 l7 -10" stroke="#e11d48" stroke-width="3" stroke-linecap="round" fill="none"/>
+      <rect x="252" y="194" width="232" height="32" rx="10" fill="#e11d48"/>
+      <text x="368" y="215" font-size="13.5" font-weight="700" fill="#fff" text-anchor="middle">押すとオレンジ＝休診日</text>
+    </svg>
+    <figcaption>休診日設定画面</figcaption>
+  </figure>
+
+  <ol class="steps">
+    <li><b>左メニューの「休診日設定」を開く</b></li>
+    <li><b>止めたい日付を押す</b><p>オレンジ色になれば設定完了。保存ボタンは不要です</p></li>
+    <li><b>戻すときは、もう一度その日付を押す</b></li>
+  </ol>
+
+  <div class="note">
+    <b>水曜・日曜のような毎週の休みは登録不要</b>
+    定休日はすでに設定済みなので、ネット予約には出てきません。ここで登録するのは「今週だけ休む日」です。
+  </div>
+</section>
+
+<!-- ケース3 -->
+<section>
+  <span class="badge">ケース3</span>
+  <h2>もう入っている予約はどうなる？</h2>
+  <p class="when">早退が決まったとき、いちばん大事なところです。</p>
+
+  <div class="note warn">
+    <b>自動ではキャンセルされません</b>
+    休憩や休診日を設定しても、<b>すでに入っている予約はそのまま残ります</b>。止めたのは「これから新しく入ってくる予約」だけです。
+  </div>
+
+  <ol class="steps">
+    <li><b>まず休憩で塞ぐ</b><p>これ以上増えないようにするのが先。ケース1の手順です</p></li>
+    <li><b>残っている予約を確認する</b><p>予約カレンダーで、止めた時間帯に予約が残っていないか見ます</p></li>
+    <li><b>残っていたら、予約を押して日時を変更する</b><p>担当を他の先生に変えるだけで済むこともあります</p></li>
+    <li><b>患者さんに連絡する</b><p>日時を変更すると、LINE連携している患者さんには新しい日時のお知らせが届きます</p></li>
+  </ol>
+</section>
+
+<!-- ケース4 -->
+<section>
+  <span class="badge">ケース4</span>
+  <h2>受付時間そのものを変えたい</h2>
+  <p class="when">「これから毎週この時間は受けない」など、ずっと変えるとき。</p>
+
+  <ol class="steps">
+    <li><b>設定 →「スタッフ予定・勤怠」を開く</b><p>院長先生（オーナー）のアカウントだけが開ける画面です</p></li>
+    <li><b>「基本勤務時間」のタブで勤務時間を直す</b><p>からだ鍼灸整骨院は勤務表とネット予約が連動する設定です。<br>勤務時間の<b>前後30分</b>は準備・片付けとして自動で受付から外れます</p></li>
+  </ol>
+
+  <div class="note warn">
+    <b>ここだけ注意</b>
+    同じ画面の「スポット予定（ミーティング・休み・研修）」は<b>出勤調整のためのメモ</b>です。ここに登録しても<b>ネット予約の枠は消えません</b>。<br>
+    予約を止めたいときは、必ず<b>ケース1の休憩</b>か<b>ケース2の休診日</b>を使ってください。
+  </div>
+</section>
+
+<footer>
+  分からないところがあれば、いつものLINEで平岩までご連絡ください。<br>
+  その場で画面を見ながらお手伝いします。
+</footer>
+
+</div>
+</body>
+</html>
