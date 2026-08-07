@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>8月7日 アップデートのお知らせ｜予約システム</title>
+<style>
+  :root{
+    --bg:#fdf8f3; --card:#fff; --ink:#3b2f2a; --sub:#7a6a60;
+    --line:#ecdfd4; --accent:#d97706; --accent-soft:#fef3c7;
+    --rose:#e11d48; --rose-soft:#ffe4e6; --ok:#15803d; --ok-soft:#dcfce7;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font-family:"Hiragino Kaku Gothic ProN","Yu Gothic",system-ui,sans-serif;
+    line-height:1.85;font-size:16px}
+  .wrap{max-width:720px;margin:0 auto;padding:24px 18px 64px}
+  header{text-align:center;padding:14px 0 20px}
+  .eyebrow{font-size:13px;color:var(--sub);letter-spacing:.08em}
+  h1{font-size:23px;margin:6px 0 10px;line-height:1.5}
+  .lead{font-size:15px;color:var(--sub);margin:0}
+
+  .toc{background:var(--card);border:1px solid var(--line);border-radius:18px;
+    padding:16px 18px;margin:18px 0 26px;box-shadow:0 2px 10px rgba(180,140,100,.08)}
+  .toc h2{font-size:15px;margin:0 0 10px;color:var(--accent)}
+  .toc ol{margin:0;padding-left:1.2em;font-size:15px}
+  .toc li{padding:3px 0}
+  .toc a{color:var(--ink);text-decoration:none;border-bottom:1px dotted var(--line)}
+
+  section{background:var(--card);border:1px solid var(--line);border-radius:18px;
+    padding:20px 18px;margin:0 0 22px;box-shadow:0 2px 10px rgba(180,140,100,.08);
+    scroll-margin-top:16px}
+  .badge{display:inline-block;font-size:12px;font-weight:700;color:#fff;background:var(--accent);
+    padding:4px 12px;border-radius:999px;margin-bottom:10px}
+  h2{font-size:19px;margin:0 0 6px;line-height:1.5}
+  .when{font-size:14px;color:var(--sub);margin:0 0 16px}
+
+  ol.steps{margin:0;padding:0;list-style:none;counter-reset:s}
+  ol.steps>li{counter-increment:s;position:relative;padding:0 0 18px 46px;margin:0}
+  ol.steps>li::before{content:counter(s);position:absolute;left:0;top:1px;
+    width:30px;height:30px;border-radius:50%;background:var(--accent);color:#fff;
+    font-weight:700;font-size:15px;display:flex;align-items:center;justify-content:center}
+  ol.steps>li::after{content:"";position:absolute;left:14px;top:34px;bottom:4px;width:2px;background:var(--line)}
+  ol.steps>li:last-child::after{display:none}
+  ol.steps>li>b{display:block;font-size:16px}
+  ol.steps p{margin:2px 0 0;font-size:14px;color:var(--sub)}
+
+  figure{margin:14px 0 4px}
+  figure svg{width:100%;height:auto;display:block}
+  figcaption{font-size:12.5px;color:var(--sub);text-align:center;margin-top:6px}
+
+  .note{border-radius:14px;padding:12px 14px;font-size:14px;margin:14px 0 0;
+    background:var(--accent-soft);border:1px solid #fcd34d}
+  .warn{background:var(--rose-soft);border:1px solid #fda4af}
+  .good{background:var(--ok-soft);border:1px solid #86efac}
+  .note>b:first-child{display:block;margin-bottom:2px}
+
+  table{width:100%;border-collapse:collapse;font-size:14px;margin:12px 0 0}
+  th,td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}
+  th{background:#faf3ec;font-size:13px;white-space:nowrap}
+  td:first-child{white-space:nowrap}
+  .tw{overflow-x:auto}
+
+  .kbd{display:inline-block;background:#fff7ed;border:1px solid #fdba74;color:#9a3412;
+    border-radius:8px;padding:1px 8px;font-weight:700;font-size:14px}
+  footer{text-align:center;font-size:13px;color:var(--sub);padding-top:10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <div class="eyebrow">からだ鍼灸整骨院｜予約システム</div>
+  <h1>8月7日<br>アップデートのお知らせ</h1>
+  <p class="lead">いただいたご指摘を反映しました。<br>変わったところを画面の絵で説明します。</p>
+</header>
+
+<div class="toc">
+  <h2>変わったところ</h2>
+  <ol>
+    <li><a href="#a1">メニューごとに担当を選べるようになりました</a></li>
+    <li><a href="#a2">先生のお休みが一目で分かるようになりました</a></li>
+    <li><a href="#a3">メニューごとの担当を設定しました</a></li>
+    <li><a href="#a4">馬場さんのネット予約を終了しました</a></li>
+    <li><a href="#a5">キャンセルが売上記帳に反映されるようになりました</a></li>
+    <li><a href="#a6">経営評価の来院数を実際の人数に直しました</a></li>
+  </ol>
+</div>
+
+<!-- 1 -->
+<section id="a1">
+  <span class="badge">1</span>
+  <h2>メニューごとに担当を選べます</h2>
+  <p class="when">「複数担当が同時刻で設定されています」の警告が出ていた件です。</p>
+
+  <figure>
+    <svg viewBox="0 0 780 400" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="メニューと担当をセットで選ぶと、予約表では時間が分かれた2つの枠になる">
+      <style>
+        .lbl{font:600 12px sans-serif;fill:#7a6a60}
+        .ttl{font:700 14px sans-serif;fill:#3b2f2a}
+        .val{font:600 13px sans-serif;fill:#3b2f2a}
+        .sm{font:500 11px sans-serif;fill:#7a6a60}
+        .tm{font:600 11px sans-serif;fill:#8a8a8a}
+      </style>
+      <text x="16" y="24" class="ttl">入力（新規予約の手動追加）</text>
+      <rect x="12" y="36" width="330" height="150" rx="12" fill="none" stroke="#e8a33d" stroke-width="2"/>
+      <text x="28" y="60" class="lbl">メニュー / コース</text>
+      <rect x="28" y="68" width="290" height="30" rx="7" fill="#faf7f3" stroke="#e8a33d"/>
+      <text x="40" y="88" class="val">保険施術（再診） 20分</text>
+      <text x="28" y="120" class="lbl">担当スタッフ</text>
+      <rect x="28" y="128" width="290" height="30" rx="7" fill="#faf7f3" stroke="#e8a33d"/>
+      <text x="40" y="148" class="val">森川 和紀</text>
+      <text x="28" y="176" class="sm">↑ この2つで1セット</text>
+
+      <rect x="12" y="200" width="330" height="150" rx="12" fill="none" stroke="#4b9d6e" stroke-width="2"/>
+      <text x="28" y="224" class="lbl">＋2個目のメニュー</text>
+      <rect x="28" y="232" width="290" height="30" rx="7" fill="#faf7f3" stroke="#4b9d6e"/>
+      <text x="40" y="252" class="val">鍼灸 3部位 40分</text>
+      <text x="28" y="284" class="lbl">担当</text>
+      <rect x="28" y="292" width="290" height="30" rx="7" fill="#faf7f3" stroke="#4b9d6e"/>
+      <text x="40" y="312" class="val">森藤 瑞穂香</text>
+      <text x="28" y="340" class="sm">↑ ここが新しく選べるようになりました</text>
+
+      <path d="M356 195 L406 195" stroke="#8a8a8a" stroke-width="2"/>
+      <path d="M406 195 l-9 -6 M406 195 l-9 6" stroke="#8a8a8a" stroke-width="2" fill="none"/>
+
+      <text x="424" y="24" class="ttl">予約表</text>
+      <line x1="424" y1="36" x2="768" y2="36" stroke="#dcdcd8"/>
+      <text x="424" y="76" class="tm">19:00</text>
+      <rect x="472" y="52" width="290" height="52" rx="9" fill="#fbf0dc" stroke="#e8a33d" stroke-width="2"/>
+      <text x="488" y="74" class="val">◯◯様／保険施術（再診）</text>
+      <text x="488" y="93" class="sm">森川 和紀　19:00〜19:20</text>
+      <text x="424" y="140" class="tm">19:20</text>
+      <rect x="472" y="116" width="290" height="92" rx="9" fill="#e4f2ea" stroke="#4b9d6e" stroke-width="2"/>
+      <text x="488" y="138" class="val">◯◯様／鍼灸 3部位</text>
+      <text x="488" y="157" class="sm">森藤 瑞穂香　19:20〜20:00</text>
+      <text x="424" y="240" class="tm">20:00</text>
+      <line x1="472" y1="220" x2="762" y2="220" stroke="#dcdcd8" stroke-dasharray="4 4"/>
+      <rect x="424" y="262" width="338" height="88" rx="10" fill="#f3f0ec"/>
+      <text x="440" y="288" class="lbl">これまで（同じ時刻に2人）</text>
+      <text x="440" y="310" class="sm">19:00に2人がまとめて入り、</text>
+      <text x="440" y="328" class="sm">何分ずつか分からず警告になっていました</text>
+    </svg>
+    <figcaption>メニューと担当をセットで選ぶと、時間が分かれて登録されます</figcaption>
+  </figure>
+
+  <ol class="steps">
+    <li><b>「＋ メニューを追加」を押す</b><p>メニューを選ぶ欄が増えます</p></li>
+    <li><b>その行で担当を選ぶ</b><p>「上と同じ担当」のままなら、今までどおり1つの枠にまとまります</p></li>
+    <li><b>別の先生を選ぶと、施術の直後に続けて登録されます</b><p>その先生の枠が、メニューの時間ぶん埋まります</p></li>
+  </ol>
+
+  <div class="note warn">
+    <b>「担当を追加」ボタンはなくなりました</b>
+    同じ時刻に2人をぶら下げると、誰が何分やったか記録に残らないためです。別の先生が続けて入るときは、上の「メニューを追加」をお使いください。
+  </div>
+  <div class="note good">
+    <b>追加した先生に先約があるとき</b>
+    登録せずに「◯◯先生／◯◯（19:20〜）は先約があるため登録していません」と画面に出ます。黙って二重予約にはなりません。
+  </div>
+</section>
+
+<!-- 2 -->
+<section id="a2">
+  <span class="badge">2</span>
+  <h2>先生のお休みが一目で分かります</h2>
+  <p class="when">予約カレンダーの「スタッフ別」表示です。</p>
+
+  <figure>
+    <svg viewBox="0 0 760 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="休みの先生の行と休診日に斜線が入る">
+      <defs>
+        <pattern id="off" width="9" height="9" patternTransform="rotate(-45)" patternUnits="userSpaceOnUse">
+          <rect width="9" height="9" fill="rgba(148,163,184,0.14)"/>
+          <rect width="2" height="9" fill="rgba(100,116,139,0.28)"/>
+        </pattern>
+      </defs>
+      <style>
+        .nm{font:600 12px sans-serif;fill:#3b2f2a}
+        .t2{font:500 10px sans-serif;fill:#8a8a8a}
+        .bg2{font:700 9px sans-serif}
+        .hd{font:700 12px sans-serif;fill:#3b2f2a}
+      </style>
+      <rect x="12" y="12" width="360" height="24" rx="6" fill="#f3f0ec" stroke="#dcdcd8"/>
+      <text x="24" y="29" class="hd">8月13日(木)</text>
+      <rect x="104" y="17" width="44" height="15" rx="4" fill="#7c8698"/>
+      <text x="126" y="28" class="bg2" fill="#fff" text-anchor="middle">休診日</text>
+      <text x="160" y="29" class="t2">← 休診日は見出しにも出ます</text>
+
+      <line x1="12" y1="48" x2="748" y2="48" stroke="#dcdcd8"/>
+      <text x="24" y="64" class="t2">先生</text>
+      <text x="150" y="64" class="t2">10:00</text>
+      <text x="290" y="64" class="t2">13:00</text>
+      <text x="430" y="64" class="t2">16:00</text>
+      <text x="570" y="64" class="t2">19:00</text>
+
+      <rect x="120" y="76" width="620" height="40" fill="#dcfce7" opacity="0.55"/>
+      <text x="24" y="94" class="nm">藤川 雅之</text>
+      <text x="24" y="108" class="t2">10:00–20:00</text>
+      <rect x="180" y="82" width="70" height="28" rx="5" fill="#dbeafe" stroke="#93c5fd"/>
+      <rect x="330" y="82" width="70" height="28" rx="5" fill="#dbeafe" stroke="#93c5fd"/>
+      <line x1="12" y1="120" x2="748" y2="120" stroke="#e6e6e2"/>
+
+      <rect x="120" y="124" width="620" height="40" fill="url(#off)"/>
+      <text x="24" y="142" class="nm">森川 和紀</text>
+      <rect x="24" y="148" width="30" height="14" rx="3" fill="#fee2e2" stroke="#fca5a5"/>
+      <text x="39" y="159" class="bg2" fill="#b91c1c" text-anchor="middle">休み</text>
+      <line x1="12" y1="168" x2="748" y2="168" stroke="#e6e6e2"/>
+
+      <rect x="120" y="172" width="620" height="40" fill="#dcfce7" opacity="0.55"/>
+      <text x="24" y="190" class="nm">森藤 瑞穂香</text>
+      <text x="24" y="204" class="t2">10:00–18:00</text>
+      <rect x="220" y="178" width="70" height="28" rx="5" fill="#dbeafe" stroke="#93c5fd"/>
+      <line x1="12" y1="216" x2="748" y2="216" stroke="#e6e6e2"/>
+
+      <rect x="120" y="220" width="620" height="40" fill="url(#off)"/>
+      <text x="24" y="238" class="nm">島田 卓也</text>
+      <rect x="24" y="244" width="30" height="14" rx="3" fill="#fee2e2" stroke="#fca5a5"/>
+      <text x="39" y="255" class="bg2" fill="#b91c1c" text-anchor="middle">休み</text>
+
+      <text x="24" y="284" class="t2">名前を押して「休み」にチェックするだけ。斜線とネット予約の締めが同時にかかります。</text>
+    </svg>
+    <figcaption>お休みの先生の行は斜線とグレー、休診日は全員の行に斜線</figcaption>
+  </figure>
+
+  <ol class="steps">
+    <li><b>予約カレンダーの <span class="kbd">スタッフ別</span> を開く</b></li>
+    <li><b>先生の名前を押す</b><p>勤務時間の入力欄が開きます</p></li>
+    <li><b>「休み」にチェックを入れる</b><p>行に斜線が入り、その先生ぶんのネット予約も締まります</p></li>
+  </ol>
+
+  <div class="note good">
+    <b>ここが変わりました</b>
+    これまでは「休み」にしても、ネット予約の枠は開いたままでした。今回から、休みにするとその先生の担当メニューはネットから予約できなくなります。院ごと休診にする必要はありません。
+  </div>
+  <div class="note">
+    <b>休診日について</b>
+    休診日にした日は、日付の見出しに「休診日」と出て、その日は全員の行に斜線が入ります。水曜・日曜の定休日も同じ見え方です。
+  </div>
+</section>
+
+<!-- 3 -->
+<section id="a3">
+  <span class="badge">3</span>
+  <h2>メニューごとの担当を設定しました</h2>
+  <p class="when">ご指示いただいた内容で登録しています。</p>
+
+  <div class="tw">
+  <table>
+    <tr><th>担当</th><th>メニュー</th></tr>
+    <tr><td>森川 和紀</td><td>保険施術（初診・再診）／じっくり全身調整／整体 半身・全身</td></tr>
+    <tr><td>森藤 瑞穂香</td><td>鍼灸 1部位・2部位・3部位／経絡治療（初回・2回目以降）</td></tr>
+    <tr><td>藤川 雅之</td><td>院長トータルリメイク 4種／ピラティス 20・40・60分</td></tr>
+  </table>
+  </div>
+
+  <div class="note good">
+    <b>時間ぶん枠が埋まります</b>
+    鍼灸3部位（40分）を19:00にお取りすると、森藤先生は19:40まで埋まり、その間は次のご予約が入りません。
+  </div>
+  <div class="note good">
+    <b>院長施術以外は入らなくなりました</b>
+    藤川先生は、院長トータルリメイクとピラティスのときだけネット予約が入ります。
+  </div>
+  <div class="note warn">
+    <b>まだできていないこと</b>
+    1つのメニューに担当をお二人（マッサージ＝森川先生・森藤先生、トレーニング＝森川先生・藤川先生）持たせる形は、いま作っています。<br>
+    それまでは、マッサージとパーソナルトレーニングは森川先生・森藤先生の2人ぶんで受ける形になります。<br>
+    また、鍼灸 全身／小児鍼／置鍼／電気鍼／スパイラルテーピング（一般・学生）の担当がまだ決まっていません。教えていただけると設定します。
+  </div>
+</section>
+
+<!-- 4 -->
+<section id="a4">
+  <span class="badge">4</span>
+  <h2>馬場さんのネット予約を終了しました</h2>
+  <p class="when">8月は11日・14日・15日のみのご勤務とうかがいました。</p>
+  <ol class="steps">
+    <li><b>ネット予約の受付は終了済みです</b><p>患者さんから馬場さん枠に予約が入ることはありません</p></li>
+    <li><b>11日・14日・15日は予約表に残ります</b><p>受付での手入力はこれまでどおりできます</p></li>
+    <li><b>8月16日以降は予約表からも消えます</b><p>空の行が残って迷わないようにしています</p></li>
+  </ol>
+  <div class="note">
+    <b>ホームページ</b>
+    スタッフ紹介ページからも削除済みです。
+  </div>
+</section>
+
+<!-- 5 -->
+<section id="a5">
+  <span class="badge">5</span>
+  <h2>キャンセルが売上記帳に反映されます</h2>
+  <p class="when">「受付でキャンセルにしたのに来院人数が合わない」の件です。</p>
+
+  <div class="note warn">
+    <b>何が起きていたか</b>
+    キャンセルにしても、記帳画面に保存された0円の行が「飛び込みの患者さん」として残り、来院人数に1名として数えられていました。
+  </div>
+
+  <ol class="steps">
+    <li><b>キャンセルにした方は記帳画面から消えます</b><p>その日のご予約が全部キャンセルで、金額も入っていない場合です</p></li>
+    <li><b>お会計がある方は必ず残ります</b><p>自賠責などの窓口0円は、来院の記録として残す必要があるためです</p></li>
+    <li><b>来院人数はお名前の数で数えます</b><p>保険と自費で2行になっても1名です</p></li>
+  </ol>
+
+  <div class="note">
+    <b>過去に残っていたぶん</b>
+    6月9日・7月20日・7月30日・8月7日（2件）の計5件を整理しました。いずれも金額は0円で、別の日にご来院いただいていることを1件ずつ確認しています。
+  </div>
+</section>
+
+<!-- 6 -->
+<section id="a6">
+  <span class="badge">6</span>
+  <h2>経営評価の来院数を実際の人数に直しました</h2>
+  <p class="when">数字が下がって見えますが、こちらが正しい数字です。</p>
+
+  <div class="note warn">
+    <b>これまでの数え方</b>
+    記帳の「行数」を数えていました。お一人が保険と自費を使うと2行になるため、2人と数えていました。
+  </div>
+
+  <div class="tw">
+  <table>
+    <tr><th>月</th><th>これまでの表示</th><th>実際の来院</th></tr>
+    <tr><td>6月</td><td>911</td><td>602</td></tr>
+    <tr><td>7月</td><td>834</td><td>567</td></tr>
+  </table>
+  </div>
+
+  <div class="note">
+    <b>目標人数について</b>
+    数え方が変わったぶん、これまでの目標値のままだと達成率が低く見えます。目標人数の見直しは改めてご相談させてください。
+  </div>
+</section>
+
+<footer>
+  ご不明な点があれば、いつものLINEでお知らせください。<br>
+  画面を見ながらご説明します。
+</footer>
+
+</div>
+</body>
+</html>
