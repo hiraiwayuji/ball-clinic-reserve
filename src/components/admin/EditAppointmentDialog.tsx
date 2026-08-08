@@ -50,6 +50,9 @@ export function EditAppointmentDialog({
   onSuccess,
 }: EditAppointmentDialogProps) {
   const slotMinutes = useClinicSlotDuration();
+  // スタッフ別（タイムテーブル）から開くと customers ではなく customer_name で渡ってくる。
+  // 名前が空のまま「次回予約」へ進むと患者が紐付かず、別レコードが作られてしまう。
+  const patientName: string = appointment?.customers?.name ?? appointment?.customer_name ?? "";
   const [date, setDate] = useState<Date | undefined>();
   const [time, setTime] = useState<string>("");
   const [duration, setDuration] = useState<string>("30");
@@ -156,13 +159,13 @@ export function EditAppointmentDialog({
           .eq("id", appointment.customer_id)
           .maybeSingle()
           .then(({ data }) => {
-            setCustPhone(data?.phone ?? appointment.customers?.phone ?? "");
+            setCustPhone(data?.phone ?? appointment.customers?.phone ?? appointment.customer_phone ?? "");
             setCustMrn(data?.medical_record_number ?? "");
           });
       } else {
         setLastVisitDate(null);
         setVisitCount(null);
-        setCustPhone(appointment.customers?.phone ?? "");
+        setCustPhone(appointment.customers?.phone ?? appointment.customer_phone ?? "");
         setCustMrn("");
       }
 
@@ -564,7 +567,7 @@ export function EditAppointmentDialog({
             <div>
               <DialogTitle className="text-base font-bold">予約の編集</DialogTitle>
               <p className="text-sm text-slate-500 mt-0.5">
-                {appointment.customers?.name}
+                {patientName}
                 <span className="text-slate-400">様</span>
                 {custMrn && (
                   <span className="ml-2 text-[10px] font-bold text-slate-600 bg-slate-100 px-1.5 py-0.5 rounded-full border border-slate-200 tabular-nums">
@@ -1049,7 +1052,7 @@ export function EditAppointmentDialog({
         defaultDate={nextDefaultDate}
         defaultTime={nextDefaultTime}
         defaultCustomerId={appointment.customer_id ?? undefined}
-        defaultName={appointment.customers?.name ?? ""}
+        defaultName={patientName}
         defaultPhone={custPhone}
         defaultMedicalRecordNumber={custMrn || undefined}
         defaultCourseId={appointment.course_id ?? undefined}
@@ -1067,7 +1070,7 @@ export function EditAppointmentDialog({
               予約確定のLINEを送りますか？
             </DialogTitle>
             <DialogDescription>
-              {appointment.customers?.name}
+              {patientName}
               <span className="text-slate-400">様</span>
               に、予約が確定したことをLINEでお知らせできます。
               <br />
@@ -1128,21 +1131,6 @@ export function EditAppointmentDialog({
                 カレンダーに薄く「キャンセル」と残るので、あとから見ても分かります。枠は空きに戻ります。
               </p>
             </button>
-            {appointment.series_id && (
-              <button
-                type="button"
-                onClick={() => runDelete("future")}
-                disabled={isSubmitting}
-                className="w-full text-left rounded-xl border-2 border-rose-200 hover:border-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/30 px-4 py-3 transition-all disabled:opacity-50"
-              >
-                <p className="font-bold text-sm text-rose-700 dark:text-rose-300">
-                  この日以降の連続予約をすべて削除（{seriesFutureCount}件）
-                </p>
-                <p className="text-xs text-rose-500 dark:text-rose-400 mt-0.5">
-                  毎週の通院が終わりになったときなど。「この日およびそれ以降」の予約をまとめて削除します。元に戻せません。
-                </p>
-              </button>
-            )}
             <button
               type="button"
               onClick={() => {
@@ -1157,6 +1145,33 @@ export function EditAppointmentDialog({
                 間違えて入れた予約を消すとき用。カレンダーには何も残りません。
               </p>
             </button>
+
+            {/* まとめ削除は一番下・区切りの下に置く。すぐ上のキャンセルを押すつもりで
+                触れてしまうと、以降の通院予約が全部消えるため */}
+            {appointment.series_id && (
+              <>
+                <div className="border-t border-slate-200 dark:border-slate-700 pt-2 mt-1" />
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!confirm(
+                      `この日以降の連続予約 ${seriesFutureCount} 件をまとめて削除します。\n`
+                      + `元に戻せません。本当によろしいですか？`,
+                    )) return;
+                    runDelete("future");
+                  }}
+                  disabled={isSubmitting}
+                  className="w-full text-left rounded-xl border-2 border-rose-200 hover:border-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/30 px-4 py-3 transition-all disabled:opacity-50"
+                >
+                  <p className="font-bold text-sm text-rose-700 dark:text-rose-300">
+                    この日以降の連続予約をすべて削除（{seriesFutureCount}件）
+                  </p>
+                  <p className="text-xs text-rose-500 dark:text-rose-400 mt-0.5">
+                    毎週の通院が終わりになったときなど。「この日およびそれ以降」の予約をまとめて削除します。元に戻せません。
+                  </p>
+                </button>
+              </>
+            )}
           </div>
           <DialogFooter>
             <Button

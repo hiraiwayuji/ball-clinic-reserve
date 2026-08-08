@@ -452,6 +452,35 @@ export default function TodayTimelineWidget({
     }
   };
 
+  // 予約の詳細から時間だけをその場でずらす。
+  // これまでは「予約変更」を開いてプルダウンを選んで保存、と5タップ必要だった。
+  const [shiftingTime, setShiftingTime] = useState(false);
+  const shiftAppointmentTime = async (apt: TimelineAppointment, deltaMinutes: number) => {
+    const start = new Date(apt.start_time);
+    const end = apt.end_time ? new Date(apt.end_time) : new Date(start.getTime() + 30 * 60000);
+    const durationMinutes = Math.max(1, Math.round((end.getTime() - start.getTime()) / 60000));
+    const next = new Date(start.getTime() + deltaMinutes * 60000);
+    const dateKey = next.toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" });
+    const timeLabel = next.toLocaleTimeString("ja-JP", { timeZone: "Asia/Tokyo", hour: "2-digit", minute: "2-digit", hour12: false });
+    setShiftingTime(true);
+    try {
+      const res = await updateAppointmentDetails(
+        apt.id, dateKey, timeLabel, apt.memo ?? "", apt.is_first_visit, durationMinutes,
+      );
+      if (res.success) {
+        toast.success(`${apt.customer_name ?? "患者"}様を ${timeLabel} に変更しました`);
+        setSelectedApt(null);
+        refresh();
+      } else {
+        toast.error(res.error ?? "時間の変更に失敗しました");
+      }
+    } catch {
+      toast.error("通信エラーが発生しました");
+    } finally {
+      setShiftingTime(false);
+    }
+  };
+
   // 時間軸の刻みリスト（営業終了時刻のラベルも末尾に含める）。
   // 土曜は営業時間が違うので、日ごとに作る。
   const buildTimeMarks = (day: TimelineDay, slotMinutes: number) => {
@@ -1346,6 +1375,21 @@ export default function TodayTimelineWidget({
               </div>
             ) : (
             <div className="flex flex-col gap-2 pt-3 border-t border-slate-200 dark:border-slate-700">
+              {/* 時間だけを動かす。予約変更ダイアログを開かずに済むように */}
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-bold text-slate-500 dark:text-slate-400 shrink-0">時間をずらす</span>
+                {[-30, -20, -10, 10, 20, 30].map((d) => (
+                  <button
+                    key={d}
+                    type="button"
+                    disabled={shiftingTime || actionLoading}
+                    onClick={() => shiftAppointmentTime(selectedApt, d)}
+                    className="flex-1 px-1 py-1.5 rounded-lg text-xs font-bold border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700 disabled:opacity-50 tabular-nums"
+                  >
+                    {d > 0 ? `+${d}` : d}
+                  </button>
+                ))}
+              </div>
               <div className="flex gap-2">
                 <Button
                   onClick={() => handleCheckin(selectedApt)}

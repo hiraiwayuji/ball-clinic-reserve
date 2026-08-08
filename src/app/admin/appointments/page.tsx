@@ -1232,7 +1232,9 @@ export default function AdminWeeklyGridPage() {
                               ? new Date(apt.end_time)
                               : new Date(startTime.getTime() + 30 * 60000);
                             const durationMinutes = (endTime.getTime() - startTime.getTime()) / 60000;
-                            const slotCount = Math.max(1, Math.ceil(durationMinutes / 30));
+                            // 1行の高さは院の予約枠（20分刻みの院で30分決め打ちにすると
+                            // 60分の予約が40分ぶんの高さで描かれ、空いていると勘違いする）
+                            const slotCount = Math.max(1, Math.ceil(durationMinutes / (slotMinutes || 30)));
                             const heightPx = slotCount * 50 - 4;
                             const widthPercent = 100 / (slotAppts.length || 1);
                             const leftOffset = index * widthPercent;
@@ -1280,6 +1282,9 @@ export default function AdminWeeklyGridPage() {
                                   <span>{isCancelled ? `${cancelKindLabel(apt.cancel_kind, apt.no_show)}${apt.cancel_hidden ? "・非表示中" : ""}` : getStatusText(apt.status)}</span>
                                   {mrn && !isCancelled && <span className="tabular-nums font-semibold">No.{mrn}</span>}
                                 </div>
+                                {!isCancelled && apt.staff_name && (
+                                  <div className="text-[10px] opacity-70 truncate">担当: {apt.staff_name}</div>
+                                )}
                               </div>
                             );
                           })}
