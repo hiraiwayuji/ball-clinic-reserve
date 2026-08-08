@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Gift, BellElectric, Trophy, MessageCircle, Loader2, CheckCircle2, Sparkles, ClipboardList, MapIcon, MapPin, Globe, ArrowRight, Share2, ExternalLink, QrCode } from "lucide-react";
+import { Gift, BellElectric, Trophy, MessageCircle, MessageCircleMore, Loader2, CheckCircle2, Sparkles, ClipboardList, MapIcon, MapPin, Globe, ArrowRight, Share2, ExternalLink, QrCode } from "lucide-react";
 import {
   Select,
   SelectContent,
@@ -547,8 +547,24 @@ export default function MarketingDashboardPage() {
         </div>
       )}
 
+      {/* 条件をその場で決めて自分の文面を送る（決まった施策に無いものはここから） */}
+      <Link
+        href="/admin/marketing/message"
+        className="flex items-center gap-4 p-5 rounded-2xl border-2 border-green-200 dark:border-green-800 bg-green-50/70 dark:bg-green-900/20 hover:bg-green-100/70 dark:hover:bg-green-900/30 transition-colors"
+      >
+        <div className="w-12 h-12 rounded-full bg-green-600 flex items-center justify-center text-white shrink-0">
+          <MessageCircleMore className="h-6 w-6" />
+        </div>
+        <div className="min-w-0">
+          <p className="font-black text-slate-900 dark:text-slate-100">LINEでお知らせ（条件を決めて送る）</p>
+          <p className="text-xs text-slate-600 dark:text-slate-400 mt-0.5">
+            「60日以上ごぶさたの方」「10回以上の常連さん」など条件でしぼって、自分で書いた文面を送れます。送る前に人数とお名前を確認できます。
+          </p>
+        </div>
+      </Link>
+
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        
+
         {/* 1. 初診アンケート */}
         <Card className="border-t-4 border-t-purple-500 hover:shadow-md transition-shadow h-full flex flex-col dark:bg-slate-900/50 dark:border-x-white/5 dark:border-b-white/5">
           <CardHeader className="pb-3">

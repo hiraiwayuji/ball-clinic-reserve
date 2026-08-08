@@ -43,6 +43,7 @@ const CLINIC_NAV_ITEMS: NavItem[] = [
   { href: "/admin/sales", label: "売上記帳", icon: Coins, allow: ["owner"], group: "売上・経営", description: "その日の売上を記帳する画面" },
   { href: "/admin/evaluation", label: "経営評価", icon: TrendingUp, allow: ["owner"], group: "売上・経営", description: "月ごとの売上・来院数などの成績表" },
   { href: "/admin/marketing", label: "SNS・LINE等", icon: MessageSquare, allow: ["owner", "admin"], group: "集客", description: "LINE配信・SNS投稿などの集客ツール" },
+  { href: "/admin/marketing/message", label: "LINEでお知らせ", icon: MessageSquare, allow: ["owner", "admin"], group: "集客", description: "「60日以上ごぶさたの方」など条件で対象をしぼって、自分で書いた文面をLINEで送る" },
   { href: "/admin/leaderboard", label: "ランキング", icon: Trophy, allow: ["owner", "admin", "staff"], group: "集客", description: "スタッフの頑張りポイントランキング" },
   { href: "/admin/settings/external-signals", label: "時事ネタ", icon: Newspaper, allow: ["owner", "admin"], group: "集客", description: "季節・地域の話題を投稿ネタに活用" },
   { href: "/admin/approvals", label: "承認", icon: ShieldCheck, allow: ["owner"], group: "スタッフ管理", description: "スタッフの休み希望・変更申請をOK/NGする画面" },
