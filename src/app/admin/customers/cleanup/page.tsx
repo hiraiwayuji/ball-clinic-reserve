@@ -18,6 +18,15 @@ import {
 
 type CleanupRow = NameCleanupRow & { similar: SimilarCandidate[] };
 
+const WEEKDAYS = ["日", "月", "火", "水", "木", "金", "土"];
+
+/** "2026-06-23" → "6/23(火)"。曜日があると「あの火曜日の人か」と思い出しやすい */
+function formatVisitDate(date: string): string {
+  const d = new Date(`${date}T00:00:00+09:00`);
+  if (isNaN(d.getTime())) return date;
+  return `${d.getMonth() + 1}/${d.getDate()}(${WEEKDAYS[d.getDay()]})`;
+}
+
 function VisitSummary({ c }: { c: { visitDays: number; salesRows: number; lastVisit: string | null } }) {
   if (c.visitDays === 0 && c.salesRows === 0) {
     return <span className="text-xs text-slate-400">来院なし・売上なし</span>;
@@ -89,7 +98,13 @@ export default function CustomerNameCleanupPage() {
     const lines = [`「${row.name}」のカルテを削除します。`, ""];
     if (row.visitDays > 0) {
       lines.push(`⚠ この方の予約（来院${row.visitDays}日ぶん）も一緒に消えます。`);
-      if (row.recentVisits.length > 0) lines.push(`　来院日: ${row.recentVisits.join("・")}`);
+      for (const v of row.recentVisits) {
+        lines.push(
+          `　${formatVisitDate(v.date)} ${v.time}`
+          + (v.courseName ? ` ${v.courseName}` : "")
+          + (v.staffName ? ` / 担当 ${v.staffName}` : ""),
+        );
+      }
     }
     if (row.salesRows > 0) {
       lines.push(`※ 売上${row.salesRows}件は「${row.name}」名義のまま残ります（消えません）。`);
@@ -220,10 +235,29 @@ export default function CustomerNameCleanupPage() {
                     </p>
                     <VisitSummary c={row} />
                     {row.recentVisits.length > 0 && (
-                      <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                        来院日: {row.recentVisits.join("・")}
-                        <span className="text-slate-400">（どなたか思い出す手がかりに）</span>
-                      </p>
+                      <div className="mt-1.5">
+                        <p className="text-[11px] font-bold text-slate-500 dark:text-slate-400">
+                          来院の記録（どなたか思い出す手がかりに）
+                        </p>
+                        <ul className="mt-0.5 space-y-0.5">
+                          {row.recentVisits.map((v, i) => (
+                            <li key={i} className="text-xs text-slate-600 dark:text-slate-300 flex flex-wrap items-center gap-x-2">
+                              <span className="font-mono font-bold tabular-nums">
+                                {formatVisitDate(v.date)} {v.time}
+                              </span>
+                              {v.courseName && (
+                                <span className="text-emerald-700 dark:text-emerald-300">{v.courseName}</span>
+                              )}
+                              {v.staffName && (
+                                <span className="text-slate-500 dark:text-slate-400">担当: {v.staffName}</span>
+                              )}
+                              {v.memo && (
+                                <span className="text-slate-500 dark:text-slate-400">「{v.memo}」</span>
+                              )}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
                     )}
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
@@ -282,6 +316,14 @@ export default function CustomerNameCleanupPage() {
                             )}
                             <span className="ml-2 text-xs text-indigo-600 dark:text-indigo-300">{s.reason}</span>
                             <div><VisitSummary c={s} /></div>
+                            {s.recentVisits.length > 0 && (
+                              <p className="text-xs text-slate-500 dark:text-slate-400">
+                                {s.recentVisits.slice(0, 2).map((v) => (
+                                  `${formatVisitDate(v.date)} ${v.time}`
+                                  + (v.courseName ? ` ${v.courseName}` : "")
+                                )).join(" / ")}
+                              </p>
+                            )}
                           </div>
                           <Button
                             size="sm"

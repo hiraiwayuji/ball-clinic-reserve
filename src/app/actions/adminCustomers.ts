@@ -530,8 +530,16 @@ export type NameCandidate = {
   phone: string | null;
   visitDays: number;
   lastVisit: string | null;
-  /** 直近の来院日（最大3件）。「この人は誰だったか」を思い出す手がかりに使う */
-  recentVisits: string[];
+  /** 直近の来院（最大4件）。「この人は誰だったか」を思い出す手がかりに使う。
+   *  日付だけだと思い出せないので、時間・担当・メニューも添える。 */
+  recentVisits: {
+    date: string;
+    time: string;
+    staffName: string | null;
+    courseName: string | null;
+    /** 予約メモ。「膝が痛い」等が入っていれば思い出す手がかりになる */
+    memo: string | null;
+  }[];
   salesRows: number;
   /** 予約も売上も無い＝消しても何も失わない */
   isEmpty: boolean;
@@ -551,7 +559,7 @@ async function loadNameCandidates(clinicId: string): Promise<NameCandidate[]> {
       .eq("clinic_id", clinicId),
     supabase
       .from("appointments")
-      .select("customer_id, start_time, status")
+      .select("customer_id, start_time, status, staff_name, course_name, memo")
       .eq("clinic_id", clinicId)
       .neq("status", "cancelled"),
     supabase
@@ -560,17 +568,37 @@ async function loadNameCandidates(clinicId: string): Promise<NameCandidate[]> {
       .eq("clinic_id", clinicId),
   ]);
 
+  type VisitDetail = { date: string; time: string; staffName: string | null; courseName: string | null; memo: string | null };
   const daysByCustomer = new Map<string, Set<string>>();
   const lastByCustomer = new Map<string, string>();
+  const visitsByCustomer = new Map<string, VisitDetail[]>();
   for (const a of (appts ?? []) as any[]) {
     if (!a.customer_id) continue;
-    const d = String(a.start_time ?? "").slice(0, 10);
-    if (!d) continue;
+    const iso = String(a.start_time ?? "");
+    if (!iso) continue;
+    // 日本時間で「何日の何時に来たか」を出す（思い出す手がかりなので必ず JST）
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) continue;
+    const date = d.toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" });
+    const time = d.toLocaleTimeString("ja-JP", {
+      timeZone: "Asia/Tokyo", hour: "2-digit", minute: "2-digit", hour12: false,
+    });
+
     const set = daysByCustomer.get(a.customer_id) ?? new Set<string>();
-    set.add(d);
+    set.add(date);
     daysByCustomer.set(a.customer_id, set);
     const prev = lastByCustomer.get(a.customer_id);
-    if (!prev || d > prev) lastByCustomer.set(a.customer_id, d);
+    if (!prev || date > prev) lastByCustomer.set(a.customer_id, date);
+
+    const list = visitsByCustomer.get(a.customer_id) ?? [];
+    list.push({
+      date,
+      time,
+      staffName: a.staff_name ?? null,
+      courseName: a.course_name ?? null,
+      memo: (a.memo ?? "").trim() || null,
+    });
+    visitsByCustomer.set(a.customer_id, list);
   }
 
   // 売上は名前の文字列で結びついているので、正規化した名前で数える
@@ -592,7 +620,9 @@ async function loadNameCandidates(clinicId: string): Promise<NameCandidate[]> {
       phone: c.phone ?? null,
       visitDays,
       lastVisit: lastByCustomer.get(c.id) ?? null,
-      recentVisits: Array.from(days ?? []).sort().reverse().slice(0, 3),
+      recentVisits: (visitsByCustomer.get(c.id) ?? [])
+        .sort((a, b) => (b.date + b.time).localeCompare(a.date + a.time))
+        .slice(0, 4),
       salesRows,
       isEmpty: visitDays === 0 && salesRows === 0,
     };
