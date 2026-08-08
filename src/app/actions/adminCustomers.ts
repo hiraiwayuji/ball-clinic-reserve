@@ -650,8 +650,12 @@ export async function getNameCleanupList(): Promise<{
 /**
  * 患者カルテを消す。
  *
- * 予約がぶら下がっていると ON DELETE CASCADE で一緒に消えるので、
  * 消す直前の姿を deleted_customers_archive に丸ごと退避してから消す。
+ *
+ * ⚠ appointments.customer_id の外部キーは ON DELETE CASCADE ではない（NO ACTION）ため、
+ *   予約が1件でも残っていると customers の削除が外部キー違反で失敗する。
+ *   退避したあとに予約を明示的に消してから患者を消すこと。
+ *   （customer_line_links と training_assessments は CASCADE なので自動で消える）
  * （売上 cash_sales は customer_id を持たず名前で結びついているので消えない）
  */
 export async function deleteCustomerRecord(
@@ -697,6 +701,21 @@ export async function deleteCustomerRecord(
   });
   if (archiveError) {
     return { success: false, error: "退避に失敗したため削除を中止しました: " + archiveError.message };
+  }
+
+  // 予約を先に消す（外部キーが CASCADE ではないため）。退避済みなので復元できる。
+  if ((appts?.length ?? 0) > 0) {
+    const { error: apptError } = await supabase
+      .from("appointments")
+      .delete()
+      .eq("clinic_id", clinicId)
+      .eq("customer_id", customerId);
+    if (apptError) {
+      return {
+        success: false,
+        error: "予約の削除に失敗したため中止しました: " + apptError.message,
+      };
+    }
   }
 
   const { error } = await supabase
