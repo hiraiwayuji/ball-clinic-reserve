@@ -85,7 +85,9 @@ function BulkSalesPageInner() {
           .sort((a, b) => CONFIDENCE_ORDER[a.confidence] - CONFIDENCE_ORDER[b.confidence])
           .map((p) => ({
             ...p,
-            checked: p.confidence === "certain" || p.confidence === "likely",
+            // 同じ方の2件目は最初からチェックを外しておく。
+            // うっかり保存すると同じ会計が二重に立つため。
+            checked: !p.sameDaySecondVisit && (p.confidence === "certain" || p.confidence === "likely"),
             editAmount: p.initialAmount,
             editMemo: p.initialMemo,
             // AI履歴から予測した支払区分を事前選択（ぼーるくんは確認・修正だけ）。
@@ -213,9 +215,13 @@ function BulkSalesPageInner() {
     .reduce((sum, r) => sum + rowTotal(r), 0);
 
   const warningRows = rows.filter(r => r.prediction?.warning);
-  const certainCount = rows.filter(r => r.confidence === "certain").length;
-  const likelyCount = rows.filter(r => r.confidence === "likely").length;
-  const unknownCount = rows.filter(r => r.confidence === "unknown").length;
+  // 「◯名」は患者の数。行は予約ごと（メニュー別に金額を入れるため）なので、
+  // 行数で数えると同じ方が2人に見える。
+  const countPatients = (pred: (r: DraftRow) => boolean) =>
+    new Set(rows.filter(pred).map(r => r.customerId ?? `name:${r.customerName.replace(/[\s　]/g, "")}`)).size;
+  const certainCount = countPatients(r => r.confidence === "certain");
+  const likelyCount = countPatients(r => r.confidence === "likely");
+  const unknownCount = countPatients(r => r.confidence === "unknown");
 
   return (
     <div className="space-y-6 max-w-3xl mx-auto">
@@ -660,6 +666,14 @@ function DraftRowItem({
                 title="先月から続けて来られている方の今月1回目です。保険証の確認と署名をお願いします"
               >
                 月初
+              </span>
+            )}
+            {row.sameDaySecondVisit && (
+              <span
+                className="text-[10px] font-black px-1.5 py-0.5 rounded-full bg-amber-500 text-white shrink-0"
+                title="本日この方の2件目です。別会計なら金額を入れてチェックしてください。1件目にまとめるならこの行は空のままで大丈夫です"
+              >
+                同じ方の2件目
               </span>
             )}
             {/* 氏名・カルテ番号をその場で修正 */}

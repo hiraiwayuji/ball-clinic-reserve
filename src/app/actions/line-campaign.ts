@@ -50,7 +50,9 @@ async function collectTargets(
   const ids = all.map((c: any) => c.id as string);
 
   // 来院履歴（キャンセル除く）。過去＝最終来院、未来＝次回予約あり。
-  const visitByCustomer = new Map<string, { last: Date | null; upcoming: Date | null; count: number }>();
+  // 来院回数は「予約の件数」ではなく「来院した日数」で数える。
+  // 同じ日に保険＋鍼灸で2予約取る方が多く、件数で数えると1回の来院が2回になる。
+  const visitByCustomer = new Map<string, { last: Date | null; upcoming: Date | null; days: Set<string> }>();
   const CHUNK = 500;
   for (let i = 0; i < ids.length; i += CHUNK) {
     const slice = ids.slice(i, i + CHUNK);
@@ -64,9 +66,9 @@ async function collectTargets(
       const cid = (a as any).customer_id as string | null;
       if (!cid) continue;
       const t = new Date((a as any).start_time);
-      const prev = visitByCustomer.get(cid) ?? { last: null, upcoming: null, count: 0 };
+      const prev = visitByCustomer.get(cid) ?? { last: null, upcoming: null, days: new Set<string>() };
       if (t.getTime() <= Date.now()) {
-        prev.count += 1;
+        prev.days.add(t.toLocaleDateString("sv-SE", { timeZone: JST }));
         if (!prev.last || t > prev.last) prev.last = t;
       } else if (!prev.upcoming || t < prev.upcoming) {
         prev.upcoming = t;
@@ -77,7 +79,7 @@ async function collectTargets(
 
   const matched: { id: string; name: string; lastVisitDate: string | null; daysSinceLastVisit: number | null; visitCount: number }[] = [];
   for (const c of all as any[]) {
-    const v = visitByCustomer.get(c.id) ?? { last: null, upcoming: null, count: 0 };
+    const v = visitByCustomer.get(c.id) ?? { last: null, upcoming: null, days: new Set<string>() };
     const days = v.last ? daysBetween(v.last, today) : null;
 
     if (filters.excludeWithUpcoming && v.upcoming) continue;
@@ -90,7 +92,7 @@ async function collectTargets(
         if (days == null || days > filters.maxDaysSinceVisit) continue;
       }
     }
-    if (filters.minVisitCount != null && v.count < filters.minVisitCount) continue;
+    if (filters.minVisitCount != null && v.days.size < filters.minVisitCount) continue;
 
     if (filters.birthMonth != null) {
       if (!c.birth_date) continue;
@@ -103,7 +105,7 @@ async function collectTargets(
       name: c.name ?? "",
       lastVisitDate: v.last ? v.last.toLocaleDateString("sv-SE", { timeZone: JST }) : null,
       daysSinceLastVisit: days,
-      visitCount: v.count,
+      visitCount: v.days.size,
     });
   }
 

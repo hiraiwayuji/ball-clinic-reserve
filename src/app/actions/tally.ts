@@ -5,6 +5,7 @@ import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { checkAdminAuth, requireRole } from "@/app/actions/auth";
 import { getTallyColumns } from "@/app/actions/settings";
 import type { TallyColumn } from "@/lib/tally-columns";
+import { nameKey } from "@/lib/patient-count";
 import { revalidatePath } from "next/cache";
 
 function getAdminSupabase() {
@@ -49,14 +50,6 @@ export type TallySheetData = {
 };
 
 const TALLY_PREFIX = "tally:";
-
-/**
- * 同一人物の判定キー。
- * 「布川紗帆」と「布川　紗帆」のような空白ゆれを同じ人として扱う。
- */
-function nameKey(name: string): string {
-  return (name ?? "").replace(/[\s　]/g, "");
-}
 
 /** 受付ステータスの進み具合（小さいほど手前）。複数施術がある人は一番手前の状態を採用する */
 const CHECKIN_ORDER: (string | null)[] = [null, "arrived", "in_treatment", "done"];
@@ -270,7 +263,11 @@ export async function saveTallySheet(
   const columns = await getTallyColumns();
   const colKeys = new Set(columns.map((c) => c.key));
 
-  const supabase = await createClient();
+  // 読み込み(getTallySheet)は service role で全行見えるのに、保存だけログインユーザー権限だと、
+  // 「読めるのに消せない行」が1件でもあった瞬間に delete が空振りして insert だけ乗り、
+  // また金額が倍になる。読み書きで見えるものをそろえておく。
+  // clinic_id は下のクエリで必ず明示している。
+  const supabase = getAdminSupabase() ?? (await createClient());
 
   // 同じ人の行が2つ届いた場合の取り扱い。
   // 中身が同じなら「画面の重複表示」なので1つに畳む（そのまま入れると金額が倍になる）。

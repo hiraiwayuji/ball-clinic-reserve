@@ -1,6 +1,7 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
+import { countVisits } from "@/lib/patient-count";
 import { checkAdminAuth } from "@/app/actions/auth";
 import { COURSE_CATEGORIES, type CourseCategory } from "@/lib/course-categories";
 
@@ -412,7 +413,7 @@ export async function getMonthAnalytics(year: number, month: number): Promise<Mo
   // 自費売上
   const { data: cashRows } = await supabase
     .from("cash_sales")
-    .select("treatment_fee")
+    .select("treatment_fee, customer_name, sale_date")
     .eq("clinic_id", clinicId)
     .gte("sale_date", startDate)
     .lte("sale_date", endDate);
@@ -444,30 +445,35 @@ export async function getMonthAnalytics(year: number, month: number): Promise<Mo
     byCategory[r.category] = (byCategory[r.category] ?? 0) + r.amount;
   });
 
-  // 来院数（予約ベース・同一患者の複数メニューは1人扱い）
+  // 来院数（予約ベース）。同じ日の複数メニューは1来院にまとめるが、
+  // 別の日に来たぶんは別々に数える。
+  // （以前は customer_id だけでユニーク化していたため、月に8回来た方が1回になり
+  //   「1日平均来院数」が実態の3分の1ほどに小さく出ていた）
   const { data: apptRows } = await supabase
     .from("appointments")
-    .select("is_first_visit, customer_id")
+    .select("is_first_visit, customer_id, start_time")
     .eq("clinic_id", clinicId)
     .gte("start_time", startTs)
     .lte("start_time", endTs)
     .neq("status", "cancelled");
   const visits = apptRows ?? [];
-  // customer_id でユニーク化。nullは予約単位で1人ずつカウント
-  const seenIds = new Set<string>();
+  const seenVisits = new Set<string>();
   let totalVisits = 0;
   let newPatients = 0;
   for (const v of visits) {
+    const day = String(v.start_time ?? "").slice(0, 10);
     if (v.customer_id) {
-      if (seenIds.has(v.customer_id)) continue;
-      seenIds.add(v.customer_id);
+      const key = `${day}__${v.customer_id}`;
+      if (seenVisits.has(key)) continue;
+      seenVisits.add(key);
     }
     totalVisits++;
     if (v.is_first_visit) newPatients++;
   }
 
   const totalRevenue = cash + insurance + otherIncome;
-  const cashVisits = (cashRows ?? []).length;
+  // 客単価の分母。日計表は1人が列ごとに複数行になるので、行数で割ると単価が下がる
+  const cashVisits = countVisits(cashRows ?? []);
 
   // 平均来院数の分母は「営業日数」: closed_weekdays に含まれず、
   // clinic_holidays にも登録されていない日のみカウント。

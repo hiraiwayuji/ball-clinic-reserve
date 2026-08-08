@@ -5,6 +5,7 @@ import { requireRole } from "@/app/actions/auth";
 import { revalidatePath } from "next/cache";
 import { getMonthlyTotalRevenue } from "./sales";
 import { getSalesInputMode } from "./tally";
+import { nameKey } from "@/lib/patient-count";
 
 async function getSupabase() {
   return await createClient();
@@ -58,7 +59,8 @@ function buildVisitBreakdown(
   // ── ステップ1: 患者名×日付でまとめる（同日複数メニュー/日計表の複数行を1来院に）
   const dayGroups = new Map<string, { name: string; buckets: Set<string>; isNew: boolean }>();
   for (const r of rows) {
-    const name = String(r.customer_name ?? "").trim();
+    // 「布川紗帆」と「布川　紗帆」は同じ人。trim だけだと別人になり来院も患者数も1増える
+    const name = nameKey(r.customer_name);
     if (!name) continue;
     const day = String(r.sale_date ?? "");
     const gk = `${day}__${name}`;

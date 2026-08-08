@@ -381,12 +381,30 @@ export async function copyShifts(input: {
     };
   });
 
+  // すでに同じ枠（担当・日・開始時刻）が入っているものは作らない。
+  // これが無いと「先週をコピー」を2回押しただけで勤務表が二重になる。
+  const destDates = Array.from(new Set(inserts.map((r) => r.date)));
+  const { data: existing } = await sb
+    .from("staff_shifts")
+    .select("staff_id, date, start_time")
+    .eq("clinic_id", auth.clinicId)
+    .in("date", destDates);
+  const existingKeys = new Set(
+    (existing ?? []).map((r: any) => `${r.staff_id}__${r.date}__${r.start_time}`),
+  );
+  const fresh = inserts.filter(
+    (r) => !existingKeys.has(`${r.staff_id}__${r.date}__${r.start_time}`),
+  );
+  if (fresh.length === 0) {
+    return { success: true, copiedCount: 0 };
+  }
+
   // tenant-isolation-ignore: inserts の各行に clinic_id を埋め込み済み（L367）
-  const { error: insErr } = await sb.from("staff_shifts").insert(inserts);
+  const { error: insErr } = await sb.from("staff_shifts").insert(fresh);
   if (insErr) return { success: false, error: insErr.message };
 
   revalidatePath("/admin/settings/staff-schedule");
-  return { success: true, copiedCount: inserts.length };
+  return { success: true, copiedCount: fresh.length };
 }
 
 // ─────────────────────────────────────────────────────────────────

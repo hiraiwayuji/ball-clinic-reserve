@@ -1,6 +1,7 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
+import { countNewAndReturnVisits } from "@/lib/patient-count";
 import { checkAdminAuth, requireRole } from "@/app/actions/auth";
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { revalidatePath } from "next/cache";
@@ -106,6 +107,10 @@ export type PendingSalePatient = {
   additionalCoursesIncluded: boolean;
   /** 金額の元情報の出所。bulk画面で表示バッジを切り替えるのに使う。 */
   amountSource: "course" | "ai" | "empty";
+  /** 同じ患者さんの2件目以降の予約か（同日に担当違いで続けて受けた場合）。
+   *  AI履歴の金額は「その日1回ぶんの会計」なので、2件目にも同じ額を入れると売上が二重になる。
+   *  画面ではチェックを外し、1件目にまとめて入れてもらう。 */
+  sameDaySecondVisit: boolean;
   /** bulk画面で初期表示する金額（コース > AI > 空欄 の優先順位） */
   initialAmount: string;
   /** bulk画面で初期表示するメモ（コース名 > AI予測メモ > "" の優先順位） */
@@ -248,7 +253,9 @@ export async function getTodayPendingSales(dateStr?: string): Promise<{ success:
       }
     }
 
-    // 売上未入力の患者だけ抽出して、コース価格 → AI履歴 → 空欄 の順で元情報を決める
+    // 売上未入力の患者だけ抽出して、コース価格 → AI履歴 → 空欄 の順で元情報を決める。
+    // AI履歴からの金額は1人1回だけ入れる（同日2件目に同じ額が入ると売上が二重になる）
+    const aiPrefillDone = new Set<string>();
     const pending: PendingSalePatient[] = [];
     for (const apt of appointments as Array<{
       id: string;
@@ -387,6 +394,25 @@ export async function getTodayPendingSales(dateStr?: string): Promise<{ success:
         amountSource = "empty";
       }
 
+      // 同じ患者さんが同じ日に複数予約（担当違いで続けて受診）を持つとき、
+      // AI履歴の金額は「その日の会計1回ぶん」の履歴なので、2件目にも同じ額を入れて
+      // 自動チェックまでしてしまうと、売上が二重になっても気づけない。
+      // （ダブル施術のように本当に2件ぶん頂くこともあるので、消すのではなく
+      //   空欄＋チェックを外して「2件目」と明示し、人が決められるようにする）
+      // コース価格が付いている予約はメニューごとの正しい金額なのでそのまま残す。
+      const nameKeyForVisit = customerName.replace(/[\s　]/g, "");
+      const sameDaySecondVisit = aiPrefillDone.has(nameKeyForVisit);
+      if (amountSource === "ai") {
+        if (sameDaySecondVisit) {
+          amountSource = "empty";
+          initialAmount = "";
+          initialMemo = "";
+          predictedPaymentTypes = [];
+        } else {
+          aiPrefillDone.add(nameKeyForVisit);
+        }
+      }
+
       // ── 水素など「実費とセットなら無料」コースの自動判定 ──
       // 同日に実費施術あり＆保険施術なし → 今回は無料（¥0・水素（無料）区分）を提案。
       // 保険施術ありや、水素だけの来院（hasOtherTreatment=false）は通常料金のまま。
@@ -423,6 +449,7 @@ export async function getTodayPendingSales(dateStr?: string): Promise<{ success:
         additionalCoursesPrice,
         additionalCoursesIncluded,
         amountSource,
+        sameDaySecondVisit,
         initialAmount,
         initialMemo,
         initialPaymentTypes: predictedPaymentTypes,
@@ -1880,10 +1907,10 @@ export async function getAnnualTaxData(
             .eq("clinic_id", clinicId)
             .gte("expense_date", startDate)
             .lte("expense_date", endDate),
-          // 来院数（自費）
+          // 来院数（自費）。人数を数えるので名前と日付も要る
           supabase
             .from("cash_sales")
-            .select("is_first_visit")
+            .select("is_first_visit, customer_name, sale_date")
             .eq("clinic_id", clinicId)
             .gte("sale_date", startDate)
             .lte("sale_date", endDate),
@@ -1893,8 +1920,10 @@ export async function getAnnualTaxData(
         const insuranceIncome = (insRes.data ?? []).reduce((s: number, r: any) => s + r.amount, 0);
         const totalIncome    = cashIncome + insuranceIncome;
         const expenseTotal   = (expRes.data ?? []).reduce((s: number, r: any) => s + r.amount, 0);
-        const newPatients    = (salesRes.data ?? []).filter((r: any) => r.is_first_visit).length;
-        const returnPatients = (salesRes.data ?? []).filter((r: any) => !r.is_first_visit).length;
+        // 確定申告に出す人数。日計表は1人が列ごとに複数行なので行数では数えない
+        const visitCounts    = countNewAndReturnVisits(salesRes.data ?? []);
+        const newPatients    = visitCounts.newVisits;
+        const returnPatients = visitCounts.returnVisits;
 
         return {
           month,

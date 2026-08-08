@@ -105,13 +105,38 @@ export default function DashboardClient({ aiSecretaryEnabled = true, canSeeExpen
     );
   }
 
-  // 今日の来院統計
-  const todayTotal = data?.appointments?.length ?? 0;
-  const todayArrived = data?.appointments?.filter((a: any) => a.checkin_status === "arrived").length ?? 0;
-  const todayInTreatment = data?.appointments?.filter((a: any) => a.checkin_status === "in_treatment").length ?? 0;
-  const todayDone = data?.appointments?.filter((a: any) => a.checkin_status === "done").length ?? 0;
-  const todayWaiting = data?.appointments?.filter((a: any) => !a.checkin_status).length ?? 0;
-  const todayFirstVisit = data?.appointments?.filter((a: any) => a.type === "初診").length ?? 0;
+  // 今日の来院統計。
+  // 同じ方が保険＋鍼灸で2予約持っていることがよくあるので、患者ごとにまとめて数える。
+  // 状態は「一番手前のもの」を採用（鍼が済んでも整体が残っていればその方はまだ完了ではない）。
+  // 受付カウンターと同じ数え方にしないと、同じ時刻に画面ごとで人数が食い違う。
+  const todayStats = (() => {
+    const ORDER: (string | null)[] = [null, "arrived", "in_treatment", "done"];
+    const groups = new Map<string, { status: string | null; isFirst: boolean }>();
+    for (const a of (data?.appointments ?? []) as any[]) {
+      const key = a.customer_id ?? `name:${a.name ?? ""}`;
+      const prev = groups.get(key);
+      const status = a.checkin_status ?? null;
+      const isFirst = a.type === "初診";
+      if (!prev) { groups.set(key, { status, isFirst }); continue; }
+      if (ORDER.indexOf(status) < ORDER.indexOf(prev.status)) prev.status = status;
+      prev.isFirst = prev.isFirst || isFirst;
+    }
+    let arrived = 0, inTreatment = 0, done = 0, waiting = 0, firstVisit = 0;
+    for (const g of groups.values()) {
+      if (g.status === "arrived") arrived++;
+      else if (g.status === "in_treatment") inTreatment++;
+      else if (g.status === "done") done++;
+      else waiting++;
+      if (g.isFirst) firstVisit++;
+    }
+    return { total: groups.size, arrived, inTreatment, done, waiting, firstVisit };
+  })();
+  const todayTotal = todayStats.total;
+  const todayArrived = todayStats.arrived;
+  const todayInTreatment = todayStats.inTreatment;
+  const todayDone = todayStats.done;
+  const todayWaiting = todayStats.waiting;
+  const todayFirstVisit = todayStats.firstVisit;
 
   const monthlyProgress = data && data.monthlyRevenue && data.targetIncome
     ? Math.min(100, Math.round((data.monthlyRevenue.total / data.targetIncome) * 100))

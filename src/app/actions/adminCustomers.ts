@@ -1,6 +1,7 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
+import { countNewAndReturnVisits, countVisitDays } from "@/lib/patient-count";
 import { createClient as createAdminClient } from "@supabase/supabase-js";
 import { checkAdminAuth } from "./auth";
 import { revalidatePath } from "next/cache";
@@ -188,7 +189,10 @@ export async function getCustomers(): Promise<CustomerWithStats[]> {
         name: c.name,
         phone: c.phone,
         created_at: c.created_at,
-        appointmentCount: active.length,
+        // 来院回数は「予約の件数」ではなく「来院した日数」。
+        // 同じ日に保険＋鍼灸で2予約取る方が多く、件数だと1回の来院が2回になり
+        // リピート率（2回以上）が実態より高く出る。
+        appointmentCount: countVisitDays(active.map((a) => a.start_time)),
         cancelCount: cancelled.length,
         noShowCount: noShow.length,
         lastVisit,
@@ -955,21 +959,21 @@ export async function getMonthlyVisitStats(months = 6): Promise<MonthlyVisitStat
 
     const { data } = await supabase
       .from("cash_sales")
-      .select("is_first_visit")
+      .select("is_first_visit, customer_name, sale_date")
       .eq("clinic_id", clinicId)
       .gte("sale_date", startDate)
       .lte("sale_date", endDate);
 
-    const rows = data ?? [];
-    const newP = rows.filter((r: { is_first_visit: boolean | null }) => r.is_first_visit).length;
-    const returnP = rows.filter((r: { is_first_visit: boolean | null }) => !r.is_first_visit).length;
+    // 日計表は1人が列ごとに複数行になるので、行数で数えると再来院が水増しになる。
+    // 「その日その人が来た」を1として数える。
+    const { newVisits, returnVisits, total } = countNewAndReturnVisits(data ?? []);
 
     result.push({
       month: monthStr,
       label: `${month}月`,
-      newPatients: newP,
-      returnPatients: returnP,
-      total: rows.length,
+      newPatients: newVisits,
+      returnPatients: returnVisits,
+      total,
     });
   }
 

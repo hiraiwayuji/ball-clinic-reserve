@@ -751,15 +751,20 @@ export async function generateStaffBriefing(): Promise<{ success: boolean; brief
     if (customerIds.length > 0) {
       const { data: allAppts } = await sb
         .from("appointments")
-        .select("customer_id, status")
+        .select("customer_id, status, start_time")
         .eq("clinic_id", auth.clinicId)
         .in("customer_id", customerIds)
         .neq("status", "cancelled");
-      const visitsPerCustomer = new Map<string, number>();
+      // リピート＝2日以上来ていること。同じ日の複数メニューを2回と数えない
+      const visitDaysPerCustomer = new Map<string, Set<string>>();
       (allAppts ?? []).forEach((a: any) => {
-        visitsPerCustomer.set(a.customer_id, (visitsPerCustomer.get(a.customer_id) ?? 0) + 1);
+        const d = String(a.start_time ?? "").slice(0, 10);
+        if (!a.customer_id || !d) return;
+        const set = visitDaysPerCustomer.get(a.customer_id) ?? new Set<string>();
+        set.add(d);
+        visitDaysPerCustomer.set(a.customer_id, set);
       });
-      const repeats = Array.from(visitsPerCustomer.values()).filter((n) => n >= 2).length;
+      const repeats = Array.from(visitDaysPerCustomer.values()).filter((s) => s.size >= 2).length;
       repeatRate = customerIds.length > 0 ? Math.round((repeats / customerIds.length) * 100) : 0;
     }
   }

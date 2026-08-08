@@ -18,6 +18,7 @@ import { downloadMonthlyReport } from "@/lib/monthly-report";
 import { downloadAnnualTaxReport } from "@/lib/annual-tax-report";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import Link from "next/link";
+import { visitsByDate, countNewAndReturnVisits } from "@/lib/patient-count";
 
 // --- Radar Chart Component (SVG based) ---
 const RadarChart = ({ data }: { data: { label: string, value: number, max: number }[] }) => {
@@ -304,15 +305,11 @@ function DetailPanel({ year, month, onClose }: { year: number; month: number; on
               {data.cashSales.length === 0 ? (
                 <div className="p-6 text-center text-slate-400 text-sm">この月の来院データはありません</div>
               ) : visitView === "daily" ? (() => {
-                // 日別集計
-                const byDate: Record<string, { total: number; first: number }> = {};
-                for (const row of data.cashSales) {
-                  if (!byDate[row.sale_date]) byDate[row.sale_date] = { total: 0, first: 0 };
-                  byDate[row.sale_date].total++;
-                  if (row.is_first_visit) byDate[row.sale_date].first++;
-                }
+                // 日別集計。1人が保険列・鍼灸列で複数行になるので、患者×日でまとめて数える
+                const byDate = visitsByDate(data.cashSales);
                 const days = Object.keys(byDate).sort();
-                const avg = days.length > 0 ? (data.cashSales.length / days.length).toFixed(1) : "0";
+                const totalVisits = days.reduce((s, d) => s + byDate[d].total, 0);
+                const avg = days.length > 0 ? (totalVisits / days.length).toFixed(1) : "0";
                 const maxCount = Math.max(...days.map(d => byDate[d].total), 1);
                 return (
                   <div>
@@ -320,7 +317,7 @@ function DetailPanel({ year, month, onClose }: { year: number; month: number; on
                     <div className="mx-4 mt-3 mb-2 p-3 bg-emerald-50 rounded-lg flex items-center justify-between">
                       <span className="text-xs text-emerald-700 font-medium">1日平均来院数</span>
                       <span className="text-2xl font-bold text-emerald-600">{avg}<span className="text-sm font-normal ml-1">人/日</span></span>
-                      <span className="text-xs text-slate-400">（{days.length}営業日 / 合計{data.cashSales.length}人）</span>
+                      <span className="text-xs text-slate-400">（{days.length}営業日 / 合計{totalVisits}人）</span>
                     </div>
                     <table className="w-full text-sm">
                       <thead>
@@ -348,8 +345,8 @@ function DetailPanel({ year, month, onClose }: { year: number; month: number; on
                       <tfoot>
                         <tr className="bg-slate-50 text-xs text-slate-500 font-bold">
                           <td className="px-4 py-3">合計 {days.length}日</td>
-                          <td className="px-4 py-3 text-right">{data.cashSales.length}人</td>
-                          <td className="px-4 py-3 text-right text-amber-600">{data.cashSales.filter((s: any) => s.is_first_visit).length}名</td>
+                          <td className="px-4 py-3 text-right">{totalVisits}人</td>
+                          <td className="px-4 py-3 text-right text-amber-600">{days.reduce((s, d) => s + byDate[d].first, 0)}名</td>
                           <td />
                         </tr>
                       </tfoot>
@@ -397,7 +394,7 @@ function DetailPanel({ year, month, onClose }: { year: number; month: number; on
                   </tbody>
                   <tfoot>
                     <tr className="bg-slate-50 font-bold text-xs text-slate-500">
-                      <td className="px-4 py-3" colSpan={2}>合計 {data.cashSales.length}件（初診 {data.cashSales.filter((s: any) => s.is_first_visit).length}名）</td>
+                      <td className="px-4 py-3" colSpan={2}>合計 {data.cashSales.length}件（初診 {countNewAndReturnVisits(data.cashSales).newVisits}名）</td>
                       <td colSpan={2} />
                     </tr>
                   </tfoot>
