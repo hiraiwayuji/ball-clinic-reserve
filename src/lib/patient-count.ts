@@ -12,10 +12,15 @@
 /**
  * 同一人物の判定キー。
  * 「布川紗帆」と「布川　紗帆」のような空白ゆれ（半角・全角）を同じ人として扱う。
+ * 「松浦拓登(タクト)」のような、かっこ書きのふりがなも外して比べる。
  * cash_sales は customer_id を持たず名前の文字列で患者を表すので、ここが要になる。
  */
 export function nameKey(name: string | null | undefined): string {
-  return (name ?? "").replace(/[\s　]/g, "");
+  const base = (name ?? "").normalize("NFKC");
+  // かっこ書きしか名前が無い人（「(アモウミ)」等）は、落とすと空になるので元のまま使う
+  const withoutReading = base.replace(/[（(][^）)]*[）)]/g, "");
+  const picked = withoutReading.replace(/[\s　]/g, "") ? withoutReading : base;
+  return picked.replace(/[\s　]/g, "");
 }
 
 /** yyyy-MM-dd を取り出す（ISO文字列でも sale_date でも可） */

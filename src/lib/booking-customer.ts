@@ -10,12 +10,16 @@ import type { SupabaseClient } from "@supabase/supabase-js";
  * 完全一致だけだと「山内 颯人」と「山内颯人」、全角/半角スペースの違いで
  * 既存患者を見つけられず「初めての方は…」になる事故が起きる（2026-05 山内family 実例）。
  * - NFKC で全角英数/記号を半角化 / 全半角スペース除去 / 小文字化
+ * - 「松浦拓登(タクト)」のような、かっこ書きのふりがなは外して比べる
+ *   （古い取り込みデータに多く、あとから作った本物のカルテと別人になっていた）
  */
 export function normalizeNameForMatch(value: string): string {
-  return (value ?? "")
-    .normalize("NFKC")
-    .replace(/[\s　]/g, "")
-    .toLowerCase();
+  const base = (value ?? "").normalize("NFKC");
+  // かっこの中身（ふりがな）を落とす。ただし「(アモウミ)」のように
+  // かっこ書きしか名前が無い人は、落とすと空になってしまうので元のまま使う。
+  const withoutReading = base.replace(/[（(][^）)]*[）)]/g, "");
+  const picked = withoutReading.replace(/[\s　]/g, "") ? withoutReading : base;
+  return picked.replace(/[\s　]/g, "").toLowerCase();
 }
 
 /**
