@@ -2,6 +2,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { countNewAndReturnVisits } from "@/lib/patient-count";
+import { findCustomersByName } from "@/lib/customer-match";
 import { checkAdminAuth, requireRole } from "@/app/actions/auth";
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { revalidatePath } from "next/cache";
@@ -602,11 +603,14 @@ export async function updateCustomerCityByName(
   const city = (cityName ?? "").trim();
   const sb = getAdminSupabase() ?? (await getSupabase());
   if (!sb) return { success: false, error: "接続エラーが発生しました" };
+  // 表記ゆれ（「東村　心愛」/「東村 心愛」）でも同じ人として更新する
+  const sameName = await findCustomersByName(sb as any, clinicId, name);
+  if (sameName.length === 0) return { success: true, updated: 0 };
   const { data, error } = await sb
     .from("customers")
     .update({ city_name: city || null })
     .eq("clinic_id", clinicId)
-    .eq("name", name)
+    .in("id", sameName.map((c) => c.id))
     .select("id");
   if (error) return { success: false, error: "保存に失敗しました: " + error.message };
   return { success: true, updated: data?.length ?? 0 };
@@ -631,12 +635,23 @@ export async function updateCustomerProfileByName(
   if (Object.keys(patch).length === 0) return { success: true, updated: 0 };
   const sb = getAdminSupabase() ?? (await getSupabase());
   if (!sb) return { success: false, error: "接続エラーが発生しました" };
-  const { data, error } = await sb
-    .from("customers")
-    .update(patch)
-    .eq("clinic_id", clinicId)
-    .eq("name", name)
-    .select("id");
+
+  // 名前の完全一致だけで探すと、「東村　心愛」と「東村 心愛」のように
+  // 空白が1文字違うだけで 0件 → 下の新規作成に落ちて、空のカルテが増えていた。
+  // 表記ゆれを吸収して探し、見つかった人を id 指定で更新する。
+  const sameName = await findCustomersByName(sb as any, clinicId, name);
+  let data: { id: string }[] | null = null;
+  let error: { message: string } | null = null;
+  if (sameName.length > 0) {
+    const res = await sb
+      .from("customers")
+      .update(patch)
+      .eq("clinic_id", clinicId)
+      .in("id", sameName.map((c) => c.id))
+      .select("id");
+    data = (res.data as any) ?? null;
+    error = (res.error as any) ?? null;
+  }
   if (error) return { success: false, error: "保存に失敗しました: " + error.message };
 
   // 該当する customers 行が無い患者（受付の一括入力だけで cash_sales に居る飛び込み・新患など）は

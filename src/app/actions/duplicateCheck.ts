@@ -2,6 +2,7 @@
 
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { checkAdminAuth } from "./auth";
+import { normalizeNameForMatch } from "@/lib/booking-customer";
 
 function getAdminSupabase() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -42,11 +43,16 @@ export async function findSameDayAppointmentsByName(
     const supabase = getAdminSupabase();
     if (!supabase) return { appointments: [], customerCount: 0 };
 
-    const { data: sameNameCustomers } = await supabase
+    // 完全一致だと「東村　心愛」と「東村 心愛」が別人になり、
+    // 同じ方の二重予約を見逃す。空白ゆれを吸収して同名を集める。
+    const { data: allCustomers } = await supabase
       .from("customers")
-      .select("id, phone, medical_record_number")
-      .eq("clinic_id", clinicId)
-      .eq("name", trimmed);
+      .select("id, name, phone, medical_record_number")
+      .eq("clinic_id", clinicId);
+    const key = normalizeNameForMatch(trimmed);
+    const sameNameCustomers = (allCustomers ?? []).filter(
+      (c: any) => normalizeNameForMatch(c.name ?? "") === key,
+    );
 
     if (!sameNameCustomers || sameNameCustomers.length === 0) {
       return { appointments: [], customerCount: 0 };

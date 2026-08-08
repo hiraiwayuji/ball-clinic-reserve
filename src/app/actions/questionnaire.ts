@@ -2,6 +2,8 @@
 
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { revalidatePath } from "next/cache";
+import { findExistingCustomer } from "@/lib/customer-match";
+import { normalizePhone } from "@/lib/phone";
 import { PUBLIC_CLINIC_ID } from "@/lib/default-clinic-id";
 
 // 公開アクション（認証不要）
@@ -42,13 +44,21 @@ export async function submitQuestionnaire(data: QuestionnaireData): Promise<{ su
   const db = getAdminSupabase();
   const DEFAULT_CLINIC_ID = PUBLIC_CLINIC_ID;
 
-  // 電話番号で既存顧客を照合（同一院内のみ）
-  const { data: existing } = await db
-    .from("customers")
-    .select("id, name, line_user_id")
-    .eq("clinic_id", DEFAULT_CLINIC_ID)
-    .eq("phone", phone.trim())
-    .maybeSingle();
+  // 既存顧客を照合（同一院内のみ）。
+  // 以前は電話の完全一致＋ maybeSingle だったため、
+  // 家族で同じ番号・仮番号を共有していると「複数ヒット＝エラー＝見つからない」となり、
+  // アンケートを出すたびに新しいカルテが作られていた。
+  const matched = await findExistingCustomer(db, DEFAULT_CLINIC_ID, { name, phone });
+  let existing: { id: string; line_user_id: string | null } | null = null;
+  if (matched) {
+    const { data: full } = await db
+      .from("customers")
+      .select("id, line_user_id")
+      .eq("clinic_id", DEFAULT_CLINIC_ID)
+      .eq("id", matched.id)
+      .maybeSingle();
+    existing = (full as any) ?? { id: matched.id, line_user_id: null };
+  }
 
   if (existing) {
     // 既存顧客: プロフィールを更新
@@ -68,7 +78,7 @@ export async function submitQuestionnaire(data: QuestionnaireData): Promise<{ su
   // 新規顧客として登録
   const insertData: Record<string, any> = {
     name: name.trim(),
-    phone: phone.trim(),
+    phone: normalizePhone(phone) || phone.trim(),
     clinic_id: DEFAULT_CLINIC_ID,
   };
   if (effectiveBirthMonth) insertData.birth_month = effectiveBirthMonth;

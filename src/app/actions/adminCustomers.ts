@@ -440,6 +440,30 @@ export async function mergeCustomers(
     movedCounts[table] = moved?.length ?? 0;
   }
 
+  // 6-b. 売上（cash_sales）は customer_id を持たず customer_name の文字列だけで
+  //      患者と結びついている。名義を target の名前に付け替えないと、
+  //      カルテを統合しても売上・来院数は別人のまま残り続ける。
+  {
+    const srcName = String((sourceRow as any)?.name ?? "").trim();
+    const dstName = String((targetRow as any)?.name ?? "").trim();
+    if (srcName && dstName && srcName !== dstName) {
+      const { data: renamed, error: renameError } = await supabase
+        .from("cash_sales")
+        .update({ customer_name: dstName })
+        .eq("clinic_id", clinicId)
+        .eq("customer_name", srcName)
+        .select("id");
+      if (renameError) {
+        console.error("Failed to move cash_sales:", renameError);
+        return {
+          success: false,
+          error: "売上の名義移行に失敗したため統合を中止しました。データは消えていません。",
+        };
+      }
+      movedCounts["cash_sales"] = renamed?.length ?? 0;
+    }
+  }
+
   // 7. 引っ越し漏れの確認。1件でも source 側に残っていたら削除しない。
   //    source を消すと ON DELETE CASCADE で子データが道連れで消えるため、ここで必ず止める。
   const leftovers: string[] = [];
