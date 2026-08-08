@@ -287,9 +287,13 @@ export async function updateCustomerInfo(
 /**
  * customers を参照している子テーブル（customer_id 列を持つテーブル）の一覧。
  *
- * ⚠️ ここに書き忘れたテーブルは、統合の最後に走る source 顧客の DELETE で
- *    ON DELETE CASCADE により黙って消える。
- *    （2026-07-18 にトレーニング評価が消失したのはこれが原因。予約だけ移していた）
+ * ⚠️ ここに書き忘れたテーブルは、統合の最後に走る source 顧客の DELETE のときに
+ *    外部キーの設定しだいで挙動が分かれる。
+ *      - ON DELETE CASCADE のテーブル（customer_line_links / training_assessments）
+ *        → 黙って道連れで消える。いちばん危ない
+ *        （2026-07-18 にトレーニング評価が消失したのはこれ。予約だけ移していた）
+ *      - NO ACTION のテーブル（appointments）
+ *        → DELETE が外部キー違反で失敗する（消えはしないが操作が止まる）
  *    customers を参照する子テーブルを増やしたら、必ずここにも足すこと。
  *    足し忘れた場合も、統合の直前に残存チェックで止まるようにしてある。
  */
