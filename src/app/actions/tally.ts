@@ -50,6 +50,20 @@ export type TallySheetData = {
 
 const TALLY_PREFIX = "tally:";
 
+/**
+ * 同一人物の判定キー。
+ * 「布川紗帆」と「布川　紗帆」のような空白ゆれを同じ人として扱う。
+ */
+function nameKey(name: string): string {
+  return (name ?? "").replace(/[\s　]/g, "");
+}
+
+/** 受付ステータスの進み具合（小さいほど手前）。複数施術がある人は一番手前の状態を採用する */
+const CHECKIN_ORDER: (string | null)[] = [null, "arrived", "in_treatment", "done"];
+function earlierCheckin(a: string | null, b: string | null): string | null {
+  return CHECKIN_ORDER.indexOf(a) <= CHECKIN_ORDER.indexOf(b) ? a : b;
+}
+
 /** memo(JSON) から日計表メタ情報を取り出す */
 function parseTallyMemo(memo: string | null): { mrn: string; minutes: string; variant: string } {
   if (!memo) return { mrn: "", minutes: "", variant: "" };
@@ -118,7 +132,7 @@ export async function getTallySheet(dateStr: string): Promise<TallySheetData> {
     (cancelledAppts ?? [])
       .map((a: any) => {
         const cust = Array.isArray(a.customers) ? a.customers[0] : a.customers;
-        return (cust?.name ?? "").trim();
+        return nameKey((cust?.name ?? "").trim());
       })
       .filter(Boolean),
   );
@@ -131,51 +145,82 @@ export async function getTallySheet(dateStr: string): Promise<TallySheetData> {
     .eq("sale_date", dateStr)
     .like("payment_type", `${TALLY_PREFIX}%`);
 
-  // name -> 集約
-  type Agg = { amounts: Record<string, number>; variants: Record<string, string>; staff_id: string | null; mrn: string; minutes: string; is_first_visit: boolean };
+  // 同一人物（空白ゆれを含む）ごとに集約
+  type Agg = { name: string; amounts: Record<string, number>; variants: Record<string, string>; staff_id: string | null; mrn: string; minutes: string; is_first_visit: boolean };
   const saved = new Map<string, Agg>();
   (savedRows ?? []).forEach((r: any) => {
-    const name = r.customer_name as string;
+    const name = String(r.customer_name ?? "").trim();
+    const key = nameKey(name);
+    if (!key) return;
     const colKey = String(r.payment_type ?? "").slice(TALLY_PREFIX.length);
     const meta = parseTallyMemo(r.memo);
-    const prev = saved.get(name) ?? { amounts: {}, variants: {}, staff_id: null, mrn: "", minutes: "", is_first_visit: false };
+    const prev = saved.get(key) ?? { name, amounts: {}, variants: {}, staff_id: null, mrn: "", minutes: "", is_first_visit: false };
     prev.amounts[colKey] = (prev.amounts[colKey] ?? 0) + (Number(r.treatment_fee) || 0);
     if (meta.variant) prev.variants[colKey] = meta.variant;
     prev.staff_id = prev.staff_id ?? r.staff_id ?? null;
     prev.mrn = prev.mrn || meta.mrn;
     prev.minutes = prev.minutes || meta.minutes;
     prev.is_first_visit = prev.is_first_visit || !!r.is_first_visit;
-    saved.set(name, prev);
+    saved.set(key, prev);
+  });
+
+  // 同じ人が同じ日に複数予約（保険→鍼灸で担当が違う等）でも記帳は1行。
+  // 予約ごとに行を作ると、保存済み金額が各行にプリフィルされて保存のたび金額が倍になる。
+  type ApptGroup = { name: string; mrn: string; minutes: number; staff_id: string | null; is_first_visit: boolean; appointment_id: string | null; customer_id: string | null; phone: string; checkin_status: string | null };
+  const apptGroups = new Map<string, ApptGroup>();
+  (appts ?? []).forEach((a: any) => {
+    const cust = Array.isArray(a.customers) ? a.customers[0] : a.customers;
+    const name = (cust?.name ?? "").trim();
+    const key = nameKey(name);
+    if (!key) return;
+    let mins = 0;
+    try {
+      const m = Math.round((new Date(a.end_time).getTime() - new Date(a.start_time).getTime()) / 60000);
+      if (m > 0 && m < 600) mins = m;
+    } catch {}
+    const prev = apptGroups.get(key);
+    if (!prev) {
+      apptGroups.set(key, {
+        name,
+        mrn: cust?.medical_record_number ?? "",
+        minutes: mins,
+        staff_id: a.staff_id ?? null,
+        is_first_visit: !!a.is_first_visit,
+        appointment_id: a.id ?? null,
+        customer_id: cust?.id ?? null,
+        phone: cust?.phone ?? "",
+        checkin_status: a.checkin_status ?? null,
+      });
+      return;
+    }
+    // 施術時間は合算（40分＋20分＝60分）、受付状態は一番手前のものを残す
+    prev.minutes += mins;
+    prev.is_first_visit = prev.is_first_visit || !!a.is_first_visit;
+    prev.staff_id = prev.staff_id ?? a.staff_id ?? null;
+    prev.mrn = prev.mrn || (cust?.medical_record_number ?? "");
+    prev.checkin_status = earlierCheckin(prev.checkin_status, a.checkin_status ?? null);
   });
 
   const usedNames = new Set<string>();
   const rows: TallyRow[] = [];
 
   // 予約ベースの行
-  (appts ?? []).forEach((a: any) => {
-    const cust = Array.isArray(a.customers) ? a.customers[0] : a.customers;
-    const name = (cust?.name ?? "").trim();
-    if (!name) return;
-    const s = saved.get(name);
-    let minutes = "";
-    try {
-      const mins = Math.round((new Date(a.end_time).getTime() - new Date(a.start_time).getTime()) / 60000);
-      if (mins > 0 && mins < 600) minutes = String(mins);
-    } catch {}
+  apptGroups.forEach((g, key) => {
+    const s = saved.get(key);
     rows.push({
-      customer_name: name,
-      medical_record_number: s?.mrn || (cust?.medical_record_number ?? "") || "",
-      minutes: s?.minutes || minutes,
-      staff_id: s?.staff_id ?? a.staff_id ?? null,
-      is_first_visit: s?.is_first_visit ?? !!a.is_first_visit,
+      customer_name: g.name,
+      medical_record_number: s?.mrn || g.mrn || "",
+      minutes: s?.minutes || (g.minutes > 0 ? String(g.minutes) : ""),
+      staff_id: s?.staff_id ?? g.staff_id,
+      is_first_visit: s?.is_first_visit ?? g.is_first_visit,
       amounts: s?.amounts ?? {},
       variants: s?.variants ?? {},
-      appointment_id: a.id ?? null,
-      customer_id: cust?.id ?? null,
-      customer_phone: cust?.phone ?? "",
-      checkin_status: a.checkin_status ?? null,
+      appointment_id: g.appointment_id,
+      customer_id: g.customer_id,
+      customer_phone: g.phone,
+      checkin_status: g.checkin_status,
     });
-    usedNames.add(name);
+    usedNames.add(key);
   });
 
   // 予約に無い保存済み患者（飛び込み）も行として追加
@@ -189,7 +234,7 @@ export async function getTallySheet(dateStr: string): Promise<TallySheetData> {
       if (total === 0) return;
     }
     rows.push({
-      customer_name: name,
+      customer_name: agg.name,
       medical_record_number: agg.mrn,
       minutes: agg.minutes,
       staff_id: agg.staff_id,
@@ -227,35 +272,67 @@ export async function saveTallySheet(
 
   const supabase = await createClient();
 
-  // 今回の保存で「触れてよい患者」の名前セット。
-  // 保存対象をこの患者だけに限定することで、別端末・別タブで入力された
-  // "この画面には載っていない別患者" の記帳を絶対に上書き削除しない。
-  const submittedNames = Array.from(
-    new Set(
-      rows
-        .map((r) => (r.customer_name ?? "").trim())
-        .filter((n) => n.length > 0),
-    ),
-  );
+  // 同じ人の行が2つ届いた場合の取り扱い。
+  // 中身が同じなら「画面の重複表示」なので1つに畳む（そのまま入れると金額が倍になる）。
+  // 中身が違うなら別会計なので列ごとに合算する。
+  const mergedRows: TallyRow[] = [];
+  const rowByName = new Map<string, TallyRow>();
+  for (const r of rows) {
+    const name = (r.customer_name ?? "").trim();
+    if (!name) continue;
+    const key = nameKey(name);
+    const prev = rowByName.get(key);
+    if (!prev) {
+      const copy: TallyRow = { ...r, customer_name: name, amounts: { ...r.amounts }, variants: { ...(r.variants ?? {}) } };
+      rowByName.set(key, copy);
+      mergedRows.push(copy);
+      continue;
+    }
+    if (JSON.stringify(prev.amounts) === JSON.stringify(r.amounts)) continue;
+    for (const [col, val] of Object.entries(r.amounts ?? {})) {
+      prev.amounts[col] = (prev.amounts[col] ?? 0) + (Number(val) || 0);
+    }
+    for (const [col, v] of Object.entries(r.variants ?? {})) {
+      if (!prev.variants![col]) prev.variants![col] = v;
+    }
+    prev.is_first_visit = prev.is_first_visit || r.is_first_visit;
+    prev.medical_record_number = prev.medical_record_number || r.medical_record_number;
+    prev.staff_id = prev.staff_id ?? r.staff_id;
+  }
 
   // 空データが送られてきた場合（画面ロード失敗・通信の巻き戻し等）に
   // その日の記帳を全消去してしまう事故を防ぐ。何も送られなければ何もしない。
-  if (submittedNames.length === 0) {
+  if (mergedRows.length === 0) {
     return { success: true, saved: 0 };
   }
 
   // 既存の tally 行を「今回送信された患者の分だけ」削除して入れ替える。
   // 個別入力の cash_sales（payment_type が tally: 以外）は触らない。
-  const { error: delErr } = await supabase
+  // 「布川紗帆」と「布川　紗帆」のような空白ゆれも同じ人として消す（残すと重複行が復活する）。
+  const submittedKeys = new Set(mergedRows.map((r) => nameKey(r.customer_name)));
+  const { data: existingTallyRows, error: fetchErr } = await supabase
     .from("cash_sales")
-    .delete()
+    .select("id, customer_name")
     .eq("clinic_id", clinicId)
     .eq("sale_date", dateStr)
-    .like("payment_type", `${TALLY_PREFIX}%`)
-    .in("customer_name", submittedNames);
-  if (delErr) {
-    console.error("saveTallySheet delete error:", delErr);
-    return { success: false, error: "保存準備に失敗しました: " + delErr.message };
+    .like("payment_type", `${TALLY_PREFIX}%`);
+  if (fetchErr) {
+    console.error("saveTallySheet fetch error:", fetchErr);
+    return { success: false, error: "保存準備に失敗しました: " + fetchErr.message };
+  }
+  const deleteIds = (existingTallyRows ?? [])
+    .filter((r: any) => submittedKeys.has(nameKey(String(r.customer_name ?? ""))))
+    .map((r: any) => r.id as string);
+  if (deleteIds.length > 0) {
+    const { error: delErr } = await supabase
+      .from("cash_sales")
+      .delete()
+      .eq("clinic_id", clinicId)
+      .in("id", deleteIds);
+    if (delErr) {
+      console.error("saveTallySheet delete error:", delErr);
+      return { success: false, error: "保存準備に失敗しました: " + delErr.message };
+    }
   }
 
   // 列ごとの種別候補（種別の正当性チェック用）
@@ -265,7 +342,7 @@ export async function saveTallySheet(
 
   // 各行 → 金額のある列ごとに 1 行へ展開
   const insertRows: any[] = [];
-  for (const row of rows) {
+  for (const row of mergedRows) {
     const name = (row.customer_name ?? "").trim();
     if (!name) continue;
     const mrn = (row.medical_record_number ?? "").trim();

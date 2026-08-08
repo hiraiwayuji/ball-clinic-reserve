@@ -129,7 +129,7 @@ function nextStatus(current: CheckinStatus): CheckinStatus {
 // ── カードコンポーネント ────────────────────────────────────────────
 
 function AppointmentCard({
-  apt,
+  apts,
   onStatusChange,
   onRemove,
   staffName,
@@ -137,9 +137,10 @@ function AppointmentCard({
   onRefresh,
   onCompleteUpTo,
 }: {
-  apt: Appointment;
-  onStatusChange: (id: string, status: CheckinStatus) => void;
-  onRemove: (id: string) => void;
+  /** 同じ患者さんの当日の施術すべて（開始時刻の昇順）。1人1枚のカードにする */
+  apts: Appointment[];
+  onStatusChange: (ids: string[], status: CheckinStatus) => void;
+  onRemove: (ids: string[]) => void;
   staffName: string;
   onIntakeUpdate: (id: string, checklist: IntakeChecklist) => void;
   onRefresh: () => void;
@@ -154,8 +155,17 @@ function AppointmentCard({
   const [prediction, setPrediction] = useState<SalesPrediction | null>(null);
   // 「次回予約」ボタンで AddAppointmentDialog を開くための state
   const [nextReserveOpen, setNextReserveOpen] = useState(false);
-  const step = getStep(apt.checkin_status);
-  const next = nextStatus(apt.checkin_status);
+  const apt = apts[0];
+  const lastApt = apts[apts.length - 1];
+  const aptIds = apts.map((a) => a.id);
+  // 複数施術がある方は「一番手前の状態」をカードの状態にする。
+  // （鍼が終わっていても整体がまだなら、その方はまだ完了ではない）
+  const groupStatus = apts.reduce<CheckinStatus>(
+    (worst, a) => (CHECKIN_STEPS.findIndex((s) => s.value === a.checkin_status) < CHECKIN_STEPS.findIndex((s) => s.value === worst) ? a.checkin_status : worst),
+    "done",
+  );
+  const step = getStep(groupStatus);
+  const next = nextStatus(groupStatus);
   const nextStep = next !== null ? getStep(next) : null;
 
   const buildSalesUrl = useCallback(() => {
@@ -186,12 +196,14 @@ function AppointmentCard({
   // 「未来院」状態から一発で会計画面（売上記帳ページ）まで進めるショートカット
   const handleQuickToCheckout = () => {
     startTransition(async () => {
-      const res = await updateCheckinStatus(apt.id, "done");
-      if (!res.success) {
-        toast.error(res.error ?? "更新に失敗しました");
-        return;
+      for (const id of aptIds) {
+        const res = await updateCheckinStatus(id, "done");
+        if (!res.success) {
+          toast.error(res.error ?? "更新に失敗しました");
+          return;
+        }
       }
-      onStatusChange(apt.id, "done");
+      onStatusChange(aptIds, "done");
       recordAction(COUNTER_DONE_KEY, SALES_PAGE_KEY);
       toast.success(`${apt.customers?.name ?? "患者"}様を会計へ進めました`);
       router.push(buildSalesUrl());
@@ -199,8 +211,8 @@ function AppointmentCard({
   };
 
   const time = format(parseISO(apt.start_time), "HH:mm");
-  const endTime = format(parseISO(apt.end_time), "HH:mm");
-  const isDone = apt.checkin_status === "done";
+  const endTime = format(parseISO(lastApt.end_time), "HH:mm");
+  const isDone = groupStatus === "done";
 
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout>;
@@ -221,48 +233,55 @@ function AppointmentCard({
   const handleAdvance = () => {
     if (!nextStep) return;
     startTransition(async () => {
-      const res = await updateCheckinStatus(apt.id, next);
-      if (res.success) {
-        onStatusChange(apt.id, next);
-        toast.success(`${apt.customers?.name ?? "患者"}様を「${nextStep.label}」に更新しました`);
-        if (next === "done") {
-          recordAction(COUNTER_DONE_KEY, SALES_PAGE_KEY);
-          setJustDone(true);
+      for (const id of aptIds) {
+        const res = await updateCheckinStatus(id, next);
+        if (!res.success) {
+          toast.error(res.error ?? "更新に失敗しました");
+          return;
         }
-      } else {
-        toast.error(res.error ?? "更新に失敗しました");
+      }
+      onStatusChange(aptIds, next);
+      toast.success(`${apt.customers?.name ?? "患者"}様を「${nextStep.label}」に更新しました`);
+      if (next === "done") {
+        recordAction(COUNTER_DONE_KEY, SALES_PAGE_KEY);
+        setJustDone(true);
       }
     });
   };
 
   const handleStatusChange = (targetStatus: CheckinStatus) => {
     startTransition(async () => {
-      const res = await updateCheckinStatus(apt.id, targetStatus);
-      if (res.success) {
-        onStatusChange(apt.id, targetStatus);
-        toast.success(`ステータスを「${getStep(targetStatus).label}」に変更しました`);
-        if (targetStatus === "done" && apt.checkin_status !== "done") {
-          recordAction(COUNTER_DONE_KEY, SALES_PAGE_KEY);
-          setJustDone(true);
+      for (const id of aptIds) {
+        const res = await updateCheckinStatus(id, targetStatus);
+        if (!res.success) {
+          toast.error(res.error ?? "更新に失敗しました");
+          return;
         }
-      } else {
-        toast.error(res.error ?? "更新に失敗しました");
+      }
+      onStatusChange(aptIds, targetStatus);
+      toast.success(`ステータスを「${getStep(targetStatus).label}」に変更しました`);
+      if (targetStatus === "done" && groupStatus !== "done") {
+        recordAction(COUNTER_DONE_KEY, SALES_PAGE_KEY);
+        setJustDone(true);
       }
     });
   };
 
   const handleNoShow = () => {
     const patientName = apt.customers?.name ?? "この患者";
-    if (!confirm(`${patientName}様を「来院なし」として受付一覧から外しますか？`)) return;
+    const suffix = apts.length > 1 ? `（本日の${apts.length}件すべて）` : "";
+    if (!confirm(`${patientName}様を「来院なし」として受付一覧から外しますか？${suffix}`)) return;
 
     startTransition(async () => {
-      const res = await markAppointmentNoShow(apt.id);
-      if (res.success) {
-        onRemove(apt.id);
-        toast.success(`${patientName}様を来院なしとして受付から外しました`);
-      } else {
-        toast.error(res.error ?? "更新に失敗しました");
+      for (const id of aptIds) {
+        const res = await markAppointmentNoShow(id);
+        if (!res.success) {
+          toast.error(res.error ?? "更新に失敗しました");
+          return;
+        }
       }
+      onRemove(aptIds);
+      toast.success(`${patientName}様を来院なしとして受付から外しました`);
     });
   };
 
@@ -300,20 +319,53 @@ function AppointmentCard({
             {isBirthdayToday(apt) && (
               <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-pink-500 text-white">🎂 誕生日</span>
             )}
-            {apt.course_name && (
+            {apts.length > 1 && (
+              <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-violet-600 text-white">
+                本日{apts.length}件
+              </span>
+            )}
+            {apts.length === 1 && apt.course_name && (
               <span className="text-xs font-medium text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-900/30 px-2 py-0.5 rounded-full border border-emerald-200 dark:border-emerald-700/50">
                 {apt.course_name}
               </span>
             )}
-            {apt.staff_name && (
+            {apts.length === 1 && apt.staff_name && (
               <span className="text-xs text-slate-500 dark:text-slate-400">担当: {apt.staff_name}</span>
             )}
-            {apt.room_name && (
+            {apts.length === 1 && apt.room_name && (
               <span className="text-xs text-indigo-600 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-900/30 px-2 py-0.5 rounded-full border border-indigo-200 dark:border-indigo-700/50">
                 {apt.room_name}
               </span>
             )}
           </div>
+
+          {/* 続けて複数メニューを受ける方は、施術を縦に並べて1人として扱う */}
+          {apts.length > 1 && (
+            <div className="mt-1.5 space-y-1">
+              {apts.map((a) => {
+                const s = getStep(a.checkin_status);
+                return (
+                  <div key={a.id} className="flex items-center gap-2 flex-wrap text-xs">
+                    <span className="font-mono font-bold text-slate-600 dark:text-slate-300 tabular-nums">
+                      {format(parseISO(a.start_time), "HH:mm")}〜{format(parseISO(a.end_time), "HH:mm")}
+                    </span>
+                    {a.course_name && (
+                      <span className="font-medium text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-900/30 px-2 py-0.5 rounded-full border border-emerald-200 dark:border-emerald-700/50">
+                        {a.course_name}
+                      </span>
+                    )}
+                    {a.staff_name && (
+                      <span className="text-slate-500 dark:text-slate-400">担当: {a.staff_name}</span>
+                    )}
+                    {a.room_name && (
+                      <span className="text-indigo-600 dark:text-indigo-300">{a.room_name}</span>
+                    )}
+                    <span className={`ml-auto font-bold ${s.color}`}>{s.shortLabel}</span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
           {apt.customers?.phone && (
             <div className="flex items-center gap-1 text-xs text-slate-500 dark:text-slate-400 mt-0.5">
               <Phone className="w-3 h-3" />{apt.customers.phone}
@@ -397,9 +449,9 @@ function AppointmentCard({
             {CHECKIN_STEPS.map((s) => (
               <DropdownMenuItem
                 key={s.value === null ? "null" : s.value}
-                disabled={isPending || s.value === apt.checkin_status}
+                disabled={isPending || s.value === groupStatus}
                 onClick={() => handleStatusChange(s.value)}
-                className={`gap-2 cursor-pointer ${s.value === apt.checkin_status ? "bg-slate-100 dark:bg-slate-800" : ""}`}
+                className={`gap-2 cursor-pointer ${s.value === groupStatus ? "bg-slate-100 dark:bg-slate-800" : ""}`}
               >
                 <div className={`flex items-center gap-2 ${s.color}`}>
                   {s.icon}
@@ -445,7 +497,7 @@ function AppointmentCard({
         )}
 
         {/* 未来院から会計まで一発ジャンプ（checkin_status を done に更新しつつ /admin/sales へ） */}
-        {apt.checkin_status === null && (
+        {groupStatus === null && (
           <button
             type="button"
             onClick={handleQuickToCheckout}
@@ -465,7 +517,7 @@ function AppointmentCard({
         )}
 
         {/* 会計登録へリンク（名前・初診フラグ・予測データをクエリパラメータで渡す） */}
-        {(apt.checkin_status === "in_treatment" || apt.checkin_status === "arrived" || apt.checkin_status === "done") && (
+        {(groupStatus === "in_treatment" || groupStatus === "arrived" || groupStatus === "done") && (
           <div className="relative">
             <Link
               href={buildSalesUrl()}
@@ -678,19 +730,36 @@ export default function CounterPage() {
   }, [clinicId, fetchAppointments]);
 
   // ローカルステータス更新（楽観的UI）
-  const handleStatusChange = useCallback((id: string, status: CheckinStatus) => {
+  const handleStatusChange = useCallback((ids: string[], status: CheckinStatus) => {
     setAppointments(prev =>
-      prev.map(a => a.id === id ? { ...a, checkin_status: status } : a)
+      prev.map(a => ids.includes(a.id) ? { ...a, checkin_status: status } : a)
     );
   }, []);
 
-  const handleRemoveAppointment = useCallback((id: string) => {
-    setAppointments(prev => prev.filter(a => a.id !== id));
+  const handleRemoveAppointment = useCallback((ids: string[]) => {
+    setAppointments(prev => prev.filter(a => !ids.includes(a.id)));
   }, []);
 
+  // 同じ患者さんの複数施術は1グループ＝カード1枚。並び順は最初の予約時刻のまま。
+  const orderedGroups: Appointment[][] = [];
+  {
+    const seen = new Map<string, Appointment[]>();
+    for (const apt of appointments) {
+      const key = apt.customers?.id ?? `name:${apt.customers?.name ?? apt.id}`;
+      const existing = seen.get(key);
+      if (existing) { existing.push(apt); continue; }
+      const group = [apt];
+      seen.set(key, group);
+      orderedGroups.push(group);
+    }
+  }
+  const isGroupDone = (g: Appointment[]) => g.every(a => a.checkin_status === "done");
+
   // セクション分け：未完了 / 完了
-  const activeApts = appointments.filter(a => a.checkin_status !== "done");
-  const doneApts = appointments.filter(a => a.checkin_status === "done");
+  const activeGroups = orderedGroups.filter(g => !isGroupDone(g));
+  const doneGroups = orderedGroups.filter(isGroupDone);
+  const activeApts = activeGroups.flat();
+  const doneApts = doneGroups.flat();
   const hasActiveAppointments = activeApts.length > 0;
   const canSuggestClosing = hasActiveAppointments && doneApts.length > 0;
 
@@ -725,13 +794,15 @@ export default function CounterPage() {
   // 「ここまで終了」: 一覧の上から、押した予約までをまとめて会計完了にする。
   // 一覧は開始時刻の昇順なので、index までを切り出せば「その時間まで」になる。
   const handleCompleteUpTo = (index: number) => {
-    const targets = activeApts.slice(0, index + 1);
-    const last = targets[targets.length - 1];
+    const groups = activeGroups.slice(0, index + 1);
+    const targets = groups.flat();
+    const lastGroup = groups[groups.length - 1];
+    const last = lastGroup?.[0];
     if (!last) return;
     const label = `${format(parseISO(last.start_time), "HH:mm")} ${last.customers?.name ?? "この方"}様`;
     completeAndGoToBulk(
       targets,
-      `${label} まで、${targets.length}名を会計完了にして一括入力へ進みますか？\n\n`
+      `${label} まで、${groups.length}名を会計完了にして一括入力へ進みますか？\n\n`
         + `来院されなかった方が混ざっている場合は、先に「来院なし」で外してください。`,
     );
   };
@@ -874,12 +945,12 @@ export default function CounterPage() {
       ) : (
         <div className="space-y-6">
           {/* アクティブな予約 */}
-          {activeApts.length > 0 && (
+          {activeGroups.length > 0 && (
             <div className="space-y-3">
-              {activeApts.map((apt, i) => (
+              {activeGroups.map((group, i) => (
                 <AppointmentCard
-                  key={apt.id}
-                  apt={apt}
+                  key={group[0].id}
+                  apts={group}
                   onStatusChange={handleStatusChange}
                   onRemove={handleRemoveAppointment}
                   staffName={staffName}
@@ -887,7 +958,7 @@ export default function CounterPage() {
                   onRefresh={fetchAppointments}
                   // 一番下の予約は「本日の施術はすべて終了」と同じ結果になるので出さない
                   onCompleteUpTo={
-                    i < activeApts.length - 1 && !isClosingDay
+                    i < activeGroups.length - 1 && !isClosingDay
                       ? () => handleCompleteUpTo(i)
                       : undefined
                   }
@@ -897,19 +968,19 @@ export default function CounterPage() {
           )}
 
           {/* 完了済み */}
-          {doneApts.length > 0 && (
-            <details className="group" open={doneApts.length > 0 && activeApts.length === 0}>
+          {doneGroups.length > 0 && (
+            <details className="group" open={doneGroups.length > 0 && activeGroups.length === 0}>
               <summary className="cursor-pointer flex items-center gap-2 text-sm font-bold text-slate-500 select-none list-none py-2">
                 <CheckCircle2 className="w-4 h-4 text-slate-500" />
-                会計完了（{doneApts.length}名）
+                会計完了（{doneGroups.length}名）
                 <span className="text-xs font-normal text-slate-500 ml-1 group-open:hidden">▶ 展開</span>
                 <span className="text-xs font-normal text-slate-500 ml-1 hidden group-open:inline">▼ 折りたたむ</span>
               </summary>
               <div className="mt-2 space-y-2">
-                {doneApts.map(apt => (
+                {doneGroups.map(group => (
                   <AppointmentCard
-                    key={apt.id}
-                    apt={apt}
+                    key={group[0].id}
+                    apts={group}
                     onStatusChange={handleStatusChange}
                     onRemove={handleRemoveAppointment}
                     staffName={staffName}

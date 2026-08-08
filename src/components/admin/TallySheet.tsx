@@ -303,7 +303,8 @@ export default function TallySheet({ initialDate }: { initialDate?: string }) {
     const people = new Set<string>();
     const newPatients = new Set<string>();
     for (const r of rows) {
-      const name = r.customer_name.trim();
+      // 「布川紗帆」と「布川　紗帆」は同じ人。空白を無視して数える
+      const name = r.customer_name.replace(/[\s　]/g, "");
       if (!name || !rowEntered(r)) continue;
       people.add(name);
       if (r.is_first_visit) newPatients.add(name);
