@@ -9,6 +9,7 @@ import {
   markAppointmentNoShow,
   updateCheckinStatus,
   toggleInsuranceChanged,
+  getMonthCrossingFirstVisits,
   type CheckinStatus,
   type IntakeChecklist,
 } from "@/app/actions/adminReserve";
@@ -136,9 +137,12 @@ function AppointmentCard({
   onIntakeUpdate,
   onRefresh,
   onCompleteUpTo,
+  isMonthCrossing,
 }: {
   /** 同じ患者さんの当日の施術すべて（開始時刻の昇順）。1人1枚のカードにする */
   apts: Appointment[];
+  /** 先月から続けて来ている方の今月1回目＝保険証確認・署名が必要 */
+  isMonthCrossing?: boolean;
   onStatusChange: (ids: string[], status: CheckinStatus) => void;
   onRemove: (ids: string[]) => void;
   staffName: string;
@@ -315,6 +319,11 @@ function AppointmentCard({
             )}
             {apt.is_first_visit && (
               <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-rose-500 text-white uppercase tracking-wide">初診</span>
+            )}
+            {isMonthCrossing && (
+              <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-violet-600 text-white" title="先月から続けて来られている方の今月1回目です。保険証の確認と署名をお願いします">
+                月初
+              </span>
             )}
             {isBirthdayToday(apt) && (
               <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-pink-500 text-white">🎂 誕生日</span>
@@ -650,6 +659,7 @@ function AppointmentCard({
 export default function CounterPage() {
   const router = useRouter();
   const [appointments, setAppointments] = useState<Appointment[]>([]);
+  const [monthCrossIds, setMonthCrossIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [currentTime, setCurrentTime] = useState<Date | null>(null);
   const [targetDate, setTargetDate] = useState<Date>(new Date());
@@ -700,6 +710,14 @@ export default function CounterPage() {
     const dateStr = format(targetDate, "yyyy-MM-dd");
     const res = await getAppointmentsByDate(dateStr);
     if (res.success) setAppointments(res.data as unknown as Appointment[]);
+    // 月またぎ（今月1回目）の予約IDを取って「月初」バッジを出す。
+    // 受付でその場で保険証確認・署名をお願いするため、予約カレンダーと同じ印をここにも出す。
+    getMonthCrossingFirstVisits(
+      `${dateStr}T00:00:00+09:00`,
+      `${dateStr}T23:59:59+09:00`,
+    )
+      .then((ids) => setMonthCrossIds(new Set(ids)))
+      .catch(() => setMonthCrossIds(new Set()));
     setLoading(false);
   }, [targetDate]);
 
@@ -951,6 +969,7 @@ export default function CounterPage() {
                 <AppointmentCard
                   key={group[0].id}
                   apts={group}
+                  isMonthCrossing={group.some(a => monthCrossIds.has(a.id))}
                   onStatusChange={handleStatusChange}
                   onRemove={handleRemoveAppointment}
                   staffName={staffName}
@@ -981,6 +1000,7 @@ export default function CounterPage() {
                   <AppointmentCard
                     key={group[0].id}
                     apts={group}
+                    isMonthCrossing={group.some(a => monthCrossIds.has(a.id))}
                     onStatusChange={handleStatusChange}
                     onRemove={handleRemoveAppointment}
                     staffName={staffName}

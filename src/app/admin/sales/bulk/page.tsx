@@ -12,7 +12,7 @@ import {
   type PendingSalePatient,
   type CashSalePaymentType,
 } from "@/app/actions/sales";
-import { markAppointmentNoShow, markAppointmentClinicCancel } from "@/app/actions/adminReserve";
+import { markAppointmentNoShow, markAppointmentClinicCancel, getMonthCrossingFirstVisits } from "@/app/actions/adminReserve";
 import { usePaymentCategories } from "@/lib/use-payment-categories";
 import { getPaymentCategoryColor } from "@/lib/payment-category-color";
 import { evaluateMedicalAid, effectiveWindowBurden, DEFAULT_MEDICAL_AID_RULES, type MedicalAidRules } from "@/lib/medical-aid";
@@ -54,6 +54,7 @@ function BulkSalesPageInner() {
 
   const { categories: paymentCategories, reload: reloadCategories } = usePaymentCategories();
   const [rows, setRows] = useState<DraftRow[]>([]);
+  const [monthCrossIds, setMonthCrossIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [isPending, startTransition] = useTransition();
   const [medicalAidRules, setMedicalAidRules] = useState<MedicalAidRules | null>(null);
@@ -70,6 +71,13 @@ function BulkSalesPageInner() {
 
   const fetchPending = async () => {
     setLoading(true);
+    // 月またぎ（今月1回目）の予約IDを取って「月初」バッジを出す。保険証確認・署名の見落とし防止。
+    getMonthCrossingFirstVisits(
+      `${targetDateStr}T00:00:00+09:00`,
+      `${targetDateStr}T23:59:59+09:00`,
+    )
+      .then((ids) => setMonthCrossIds(new Set(ids)))
+      .catch(() => setMonthCrossIds(new Set()));
     const res = await getTodayPendingSales(targetDateStr);
     if (res.success) {
       setRows(
@@ -228,7 +236,7 @@ function BulkSalesPageInner() {
             一括売上入力
           </h1>
           <p className="text-sm text-slate-500 dark:text-slate-400 mt-0.5">
-            {format(targetDate, "M月d日（E）", { locale: ja })} — 会計完了・売上未入力の患者一覧
+            {format(targetDate, "yyyy年M月d日（E）", { locale: ja })} — 会計完了・売上未入力の患者一覧
             {dateParam && dateParam !== new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" }) && (
               <span className="text-xs text-amber-600 dark:text-amber-400 font-medium ml-2">（過去日）</span>
             )}
@@ -361,6 +369,7 @@ function BulkSalesPageInner() {
                 }
                 onNoShow={() => handleNoShow(row)}
                 onClinicCancel={() => handleClinicCancel(row)}
+                isMonthCrossing={monthCrossIds.has(row.appointmentId)}
               />
             ))}
           </div>
@@ -413,6 +422,7 @@ function DraftRowItem({
   onCategoryAdded,
   onNoShow,
   onClinicCancel,
+  isMonthCrossing,
 }: {
   row: DraftRow;
   onChange: (updated: DraftRow) => void;
@@ -422,6 +432,8 @@ function DraftRowItem({
   onCategoryAdded: () => Promise<void> | void;
   onNoShow: () => void;
   onClinicCancel: () => void;
+  /** 先月から続けて来ている方の今月1回目＝保険証確認・署名が必要 */
+  isMonthCrossing?: boolean;
 }) {
   // 氏名・カルテ番号のその場修正
   const [editingIdentity, setEditingIdentity] = useState(false);
@@ -641,6 +653,14 @@ function DraftRowItem({
             )}
             {row.isFirstVisit && (
               <span className="text-[10px] font-black px-1.5 py-0.5 rounded-full bg-rose-500 text-white">初診</span>
+            )}
+            {isMonthCrossing && (
+              <span
+                className="text-[10px] font-black px-1.5 py-0.5 rounded-full bg-violet-600 text-white shrink-0"
+                title="先月から続けて来られている方の今月1回目です。保険証の確認と署名をお願いします"
+              >
+                月初
+              </span>
             )}
             {/* 氏名・カルテ番号をその場で修正 */}
             <button

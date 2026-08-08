@@ -12,6 +12,7 @@ import {
   type TallyRow,
 } from "@/app/actions/tally";
 import { updateCheckinStatus, type CheckinStatus } from "@/app/actions/adminReserve";
+import { searchPatientsForBooking } from "@/app/actions/patientSearch";
 import { AddAppointmentDialog } from "@/components/admin/AddAppointmentDialog";
 import type { TallyColumn } from "@/lib/tally-columns";
 
@@ -256,6 +257,28 @@ export default function TallySheet({ initialDate }: { initialDate?: string }) {
   };
   const removeRow = (id: number) => setRows((prev) => prev.filter((r) => r._id !== id));
   const addRow = () => setRows((prev) => [...prev, blankRow()]);
+
+  // 手入力した名前から患者マスタを引いて、カルテ番号を自動で入れる。
+  // 同じ名前が複数いるときは特定できないので入れない（違う番号を入れる方が危ない）。
+  // 名前がマスタに無いときは知らせる（カタカナと漢字で二重登録される事故を防ぐ）。
+  const fillFromPatientMaster = async (id: number, rawName: string) => {
+    const name = rawName.trim();
+    const key = name.replace(/[\s　]/g, "");
+    if (!key) return;
+    const row = rows.find((r) => r._id === id);
+    if (row?.medical_record_number.trim()) return;
+    try {
+      const patients = await searchPatientsForBooking(name);
+      const exact = patients.filter((p) => p.name.replace(/[\s　]/g, "") === key);
+      if (exact.length === 1 && exact[0].medicalRecordNumber) {
+        updateRow(id, { medical_record_number: exact[0].medicalRecordNumber });
+      } else if (exact.length === 0 && patients.length > 0) {
+        toast.warning(
+          `「${name}」は患者登録にありません。${patients.map((p) => p.name).slice(0, 3).join("・")} のことでしたら、そちらの表記で入れてください`,
+        );
+      }
+    } catch {}
+  };
 
   // 「会計済」トグル。予約に紐づく行は受付カウンターの checkin_status と連動。
   const toggleDone = (row: UIRow, done: boolean) => {
@@ -521,6 +544,7 @@ export default function TallySheet({ initialDate }: { initialDate?: string }) {
                     <input
                       value={r.customer_name}
                       onChange={(e) => updateRow(r._id, { customer_name: e.target.value })}
+                      onBlur={(e) => fillFromPatientMaster(r._id, e.target.value)}
                       placeholder="お名前"
                       className="w-full px-2 py-1.5 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 outline-none focus:border-indigo-400"
                     />

@@ -28,6 +28,7 @@ import { Calendar as CalendarIcon, Plus, Trash2, Loader2, Coins, User, UserPlus,
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { addCashSale, getCashSales, deleteCashSale, updateCashSale, searchSalesPatients, getCustomerByMedicalRecord, getLastSaleForCustomer, updateCustomerCityByName, updateCustomerProfileByName, SalesPatientSuggestion, type CashSalePaymentType } from "@/app/actions/sales";
 import { updateCheckinStatus, getLastAppointmentByCustomerName } from "@/app/actions/adminReserve";
+import { searchPatientsForBooking } from "@/app/actions/patientSearch";
 import { getActiveCoursesByPopularity, type ReservationCourse } from "@/app/actions/courses";
 import { usePaymentCategories } from "@/lib/use-payment-categories";
 import { getPaymentCategoryColor } from "@/lib/payment-category-color";
@@ -453,6 +454,20 @@ function SalesPageInner() {
     }
   };
 
+  // 患者マスタからカルテ番号を引いて自動で入れる。
+  // 同姓が複数いるときは特定できないので入れない（間違ったカルテ番号を入れる方が事故）。
+  const fillMedicalRecordNumber = useCallback(async (name: string) => {
+    const key = name.replace(/[\s　]/g, "");
+    if (!key) return;
+    try {
+      const patients = await searchPatientsForBooking(name);
+      const exact = patients.filter((p) => p.name.replace(/[\s　]/g, "") === key);
+      if (exact.length === 1 && exact[0].medicalRecordNumber) {
+        setMedicalRecordNumberValue(exact[0].medicalRecordNumber);
+      }
+    } catch {}
+  }, []);
+
   // 名前入力でデバウンス検索
   const handleNameChange = useCallback((value: string) => {
     setNameValue(value);
@@ -465,17 +480,19 @@ function SalesPageInner() {
         const results = await searchSalesPatients(value);
         setSuggestions(results);
         setShowSuggestions(results.length > 0);
+        await fillMedicalRecordNumber(value);
       } finally {
         setIsSearching(false);
       }
     }, 300);
-  }, []);
+  }, [fillMedicalRecordNumber]);
 
   // 候補を選択したとき
   const handleSelectSuggestion = (p: SalesPatientSuggestion) => {
     setNameValue(p.customer_name);
     setJippiItems([{ name: formatPrevSimilarLabel(p.lastItems), amount: p.lastAmount }]);
     setShowSuggestions(false);
+    void fillMedicalRecordNumber(p.customer_name);
   };
 
   // サジェスト外クリックで閉じる

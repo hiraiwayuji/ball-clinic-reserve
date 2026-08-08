@@ -64,11 +64,13 @@ export async function searchPatientsForBooking(query: string): Promise<PatientSu
   // 名前 OR カルテ番号 で部分一致検索（親子の同電話番号問題への対策として、カルテ番号でも引けるように）
   // medical_record_number カラム未作成の旧環境でもクラッシュしないよう、エラー時は name のみで再クエリ
   let customers: { id: string; name: string; phone: string; medical_record_number: string | null }[] = [];
+  // カンマや括弧が入るとフィルタ式そのものが壊れ、カルテ番号が取れなくなるので落とす
+  const safeQ = q.replace(/[,()*]/g, " ").trim();
   const { data: byOr, error: orError } = await supabase
     .from("customers")
     .select("id, name, phone, medical_record_number")
     .eq("clinic_id", clinicId)
-    .or(`name.ilike.%${q}%,medical_record_number.ilike.%${q}%`)
+    .or(`name.ilike.%${safeQ}%,medical_record_number.ilike.%${safeQ}%`)
     .limit(8);
   if (orError) {
     const { data: byName } = await supabase
