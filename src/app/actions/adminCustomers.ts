@@ -2,6 +2,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { countNewAndReturnVisits, countVisitDays } from "@/lib/patient-count";
+import { compareNames, nameNeedsCleanup, normalizeForCompare } from "@/lib/name-similarity";
 import { createClient as createAdminClient } from "@supabase/supabase-js";
 import { checkAdminAuth } from "./auth";
 import { revalidatePath } from "next/cache";
@@ -512,6 +513,163 @@ export async function mergeCustomers(
     after: { movedCounts, mergedFields: Object.keys(mergePatch), sourceDeleted: !deleteError },
   });
 
+  revalidatePath("/admin/customers");
+  return { success: true };
+}
+
+// ───────────────── 名前の整理（似た名前の検索・要整理リスト） ─────────────────
+
+export type NameCandidate = {
+  id: string;
+  name: string;
+  medicalRecordNumber: string | null;
+  phone: string | null;
+  visitDays: number;
+  lastVisit: string | null;
+  /** 直近の来院日（最大3件）。「この人は誰だったか」を思い出す手がかりに使う */
+  recentVisits: string[];
+  salesRows: number;
+  /** 予約も売上も無い＝消しても何も失わない */
+  isEmpty: boolean;
+};
+
+export type SimilarCandidate = NameCandidate & { score: number; reason: string };
+
+export type NameCleanupRow = NameCandidate & { cleanupReason: string };
+
+/** 院内の患者を、名前の整理に必要な情報つきでまとめて取る */
+async function loadNameCandidates(clinicId: string): Promise<NameCandidate[]> {
+  const supabase = await createClient();
+  const [{ data: customers }, { data: appts }, { data: sales }] = await Promise.all([
+    supabase
+      .from("customers")
+      .select("id, name, medical_record_number, phone")
+      .eq("clinic_id", clinicId),
+    supabase
+      .from("appointments")
+      .select("customer_id, start_time, status")
+      .eq("clinic_id", clinicId)
+      .neq("status", "cancelled"),
+    supabase
+      .from("cash_sales")
+      .select("customer_name")
+      .eq("clinic_id", clinicId),
+  ]);
+
+  const daysByCustomer = new Map<string, Set<string>>();
+  const lastByCustomer = new Map<string, string>();
+  for (const a of (appts ?? []) as any[]) {
+    if (!a.customer_id) continue;
+    const d = String(a.start_time ?? "").slice(0, 10);
+    if (!d) continue;
+    const set = daysByCustomer.get(a.customer_id) ?? new Set<string>();
+    set.add(d);
+    daysByCustomer.set(a.customer_id, set);
+    const prev = lastByCustomer.get(a.customer_id);
+    if (!prev || d > prev) lastByCustomer.set(a.customer_id, d);
+  }
+
+  // 売上は名前の文字列で結びついているので、正規化した名前で数える
+  const salesByName = new Map<string, number>();
+  for (const s of (sales ?? []) as any[]) {
+    const k = normalizeForCompare(s.customer_name);
+    if (!k) continue;
+    salesByName.set(k, (salesByName.get(k) ?? 0) + 1);
+  }
+
+  return ((customers ?? []) as any[]).map((c) => {
+    const days = daysByCustomer.get(c.id);
+    const visitDays = days?.size ?? 0;
+    const salesRows = salesByName.get(normalizeForCompare(c.name)) ?? 0;
+    return {
+      id: c.id as string,
+      name: (c.name ?? "") as string,
+      medicalRecordNumber: c.medical_record_number ?? null,
+      phone: c.phone ?? null,
+      visitDays,
+      lastVisit: lastByCustomer.get(c.id) ?? null,
+      recentVisits: Array.from(days ?? []).sort().reverse().slice(0, 3),
+      salesRows,
+      isEmpty: visitDays === 0 && salesRows === 0,
+    };
+  });
+}
+
+/**
+ * 名前を入れると、似ている患者を探して返す。
+ * 空白・ふりがな・カタカナ/ひらがな・打ち間違い・姓だけ、を拾う。
+ */
+export async function searchSimilarCustomers(query: string): Promise<SimilarCandidate[]> {
+  const { clinicId } = await checkAdminAuth();
+  const q = (query ?? "").trim();
+  if (!q) return [];
+  const all = await loadNameCandidates(clinicId);
+  const hits: SimilarCandidate[] = [];
+  for (const c of all) {
+    const hit = compareNames(q, c.name);
+    if (!hit) continue;
+    hits.push({ ...c, score: hit.score, reason: hit.reason });
+  }
+  return hits
+    .sort((a, b) => b.score - a.score || b.visitDays - a.visitDays)
+    .slice(0, 40);
+}
+
+/**
+ * 名前が不完全な患者（ふりがなだけ・カタカナだけ・姓だけ）を、
+ * 直しやすいように新しい順で返す。似た名前の候補も添える。
+ */
+export async function getNameCleanupList(): Promise<{
+  rows: (NameCleanupRow & { similar: SimilarCandidate[] })[];
+  totalCustomers: number;
+}> {
+  const { clinicId } = await checkAdminAuth();
+  const all = await loadNameCandidates(clinicId);
+
+  const rows = all
+    .map((c) => ({ c, check: nameNeedsCleanup(c.name) }))
+    .filter((x) => x.check.needs)
+    .map(({ c, check }) => {
+      // その人に似た名前の患者を、本人以外から探す
+      const similar = all
+        .filter((o) => o.id !== c.id)
+        .map((o) => {
+          const hit = compareNames(c.name, o.name);
+          return hit ? { ...o, score: hit.score, reason: hit.reason } : null;
+        })
+        .filter((v): v is SimilarCandidate => v !== null)
+        .sort((a, b) => b.score - a.score || b.visitDays - a.visitDays)
+        .slice(0, 5);
+      return { ...c, cleanupReason: check.reason, similar };
+    })
+    .sort((a, b) => (b.lastVisit ?? "").localeCompare(a.lastVisit ?? "") || b.visitDays - a.visitDays);
+
+  return { rows, totalCustomers: all.length };
+}
+
+/**
+ * 予約も売上も無い患者カルテだけを消す。
+ * 1件でもぶら下がっていたら消さない（消すと予約が道連れで消えるため）。
+ */
+export async function deleteEmptyCustomer(customerId: string): Promise<{ success: boolean; error?: string }> {
+  const { clinicId } = await checkAdminAuth();
+  const all = await loadNameCandidates(clinicId);
+  const target = all.find((c) => c.id === customerId);
+  if (!target) return { success: false, error: "この院の患者ではありません" };
+  if (!target.isEmpty) {
+    return {
+      success: false,
+      error: `${target.name}様には来院${target.visitDays}日・売上${target.salesRows}件が残っています。`
+        + `消すとそれも消えるので、統合するか、お名前を直してください。`,
+    };
+  }
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("customers")
+    .delete()
+    .eq("clinic_id", clinicId)
+    .eq("id", customerId);
+  if (error) return { success: false, error: "削除に失敗しました: " + error.message };
   revalidatePath("/admin/customers");
   return { success: true };
 }
