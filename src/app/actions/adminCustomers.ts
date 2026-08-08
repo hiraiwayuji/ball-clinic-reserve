@@ -659,7 +659,14 @@ export async function deleteCustomerRecord(
 ): Promise<{ success: boolean; error?: string; removedAppointments?: number }> {
   const auth = await checkAdminAuth();
   const { clinicId } = auth;
-  const supabase = await createClient();
+
+  // 退避先テーブルは RLS を有効にしてポリシーを置いていない（患者情報なので外から読ませない）。
+  // ログインユーザーのクライアントでは書き込めないので、ここは service role で扱う。
+  // clinic_id は下のクエリすべてで明示している。
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) return { success: false, error: "サーバー設定エラーです" };
+  const supabase = createAdminClient(url, key);
 
   const { data: customer } = await supabase
     .from("customers")
