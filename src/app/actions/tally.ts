@@ -245,6 +245,55 @@ export async function getTallySheet(dateStr: string): Promise<TallySheetData> {
 }
 
 /**
+ * 窓口日計表から、ある患者さんのその日の記帳を消す。
+ *
+ * これまで画面の「削除」ボタンはその場の表示から消すだけで、保存済みの記帳
+ * （cash_sales）は残ったままだった。次に開くと「保存済みだが予約に無い患者」
+ * として復活し、消したはずの行がまた出てくる不具合になっていた。
+ * ここで実際に保存済みデータを消すことで、消したら本当に消える状態にする。
+ * （その日の予約自体がある方は、この関数の対象にしない＝予約は残るので
+ *   一覧からは消えず、金額欄が空に戻るだけの扱いにする＝呼び出し側の判断）
+ */
+export async function deleteTallyEntriesForName(
+  dateStr: string,
+  customerName: string,
+): Promise<{ success: boolean; error?: string; deleted?: number }> {
+  const auth = await checkAdminAuth();
+  const { clinicId } = auth;
+  if (dateStr !== todayJst() && auth.role !== "owner") {
+    return { success: false, error: "過去・未来日の記帳の削除はオーナーのみ可能です" };
+  }
+  const key = nameKey(customerName);
+  if (!key) return { success: false, error: "お名前が空です" };
+
+  const sb = getAdminSupabase();
+  if (!sb) return { success: false, error: "サーバー設定エラーです" };
+
+  const { data: existingRows, error: fetchErr } = await sb
+    .from("cash_sales")
+    .select("id, customer_name")
+    .eq("clinic_id", clinicId)
+    .eq("sale_date", dateStr)
+    .like("payment_type", `${TALLY_PREFIX}%`);
+  if (fetchErr) return { success: false, error: "削除準備に失敗しました: " + fetchErr.message };
+
+  const ids = (existingRows ?? [])
+    .filter((r: any) => nameKey(String(r.customer_name ?? "")) === key)
+    .map((r: any) => r.id as string);
+  if (ids.length === 0) return { success: true, deleted: 0 };
+
+  const { error: delErr } = await sb
+    .from("cash_sales")
+    .delete()
+    .eq("clinic_id", clinicId)
+    .in("id", ids);
+  if (delErr) return { success: false, error: "削除に失敗しました: " + delErr.message };
+
+  revalidatePath("/admin/sales");
+  return { success: true, deleted: ids.length };
+}
+
+/**
  * 窓口日計表を保存（その日の tally: 行を入れ替え）。
  * 当日入力は受付スタッフ可、過去日の編集はオーナー専用。
  */

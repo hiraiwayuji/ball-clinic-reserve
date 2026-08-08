@@ -8,11 +8,13 @@ import { Loader2, Plus, Trash2, Save, RefreshCw, BarChart3, Coins, UserPlus, Cal
 import {
   getTallySheet,
   saveTallySheet,
+  deleteTallyEntriesForName,
   type TallyStaff,
   type TallyRow,
 } from "@/app/actions/tally";
 import { updateCheckinStatus, getMonthCrossingFirstVisits, type CheckinStatus } from "@/app/actions/adminReserve";
 import { searchPatientsForBooking } from "@/app/actions/patientSearch";
+import { updateSalePatientIdentity } from "@/app/actions/sales";
 import { AddAppointmentDialog } from "@/components/admin/AddAppointmentDialog";
 import type { TallyColumn } from "@/lib/tally-columns";
 
@@ -30,6 +32,9 @@ type UIRow = {
   customer_id: string | null;
   customer_phone: string;
   checkin_status: CheckinStatus;
+  // 読み込み時のお名前（画面内だけの記録・送信対象外）。
+  // スタッフがその場で名前を書き換えたときに「登録名も直しますか？」と聞くための元値。
+  _originalName: string;
 };
 
 let ROW_SEQ = 1;
@@ -53,6 +58,7 @@ function toUIRow(r: TallyRow): UIRow {
     customer_id: r.customer_id ?? null,
     customer_phone: r.customer_phone ?? "",
     checkin_status: (r.checkin_status ?? null) as CheckinStatus,
+    _originalName: r.customer_name,
   };
 }
 
@@ -70,6 +76,7 @@ function blankRow(): UIRow {
     customer_id: null,
     customer_phone: "",
     checkin_status: null,
+    _originalName: "",
   };
 }
 
@@ -263,6 +270,34 @@ export default function TallySheet({ initialDate }: { initialDate?: string }) {
   const removeRow = (id: number) => setRows((prev) => prev.filter((r) => r._id !== id));
   const addRow = () => setRows((prev) => [...prev, blankRow()]);
 
+  // 行の削除ボタン。
+  // ・予約に紐づく行（appointment_id あり）は、消してもその日の予約自体は残っているので
+  //   次に開くとまた出てくる。誤解を防ぐため、ここでは金額欄だけ空に戻す。
+  // ・予約に紐づかない行（飛び込み・手入力）は、保存済みのデータが残っていると
+  //   前まで「表示から消えるだけで、保存データは残ったまま」だったため、
+  //   次に開くとまた復活する不具合になっていた。ここで実際に保存データを消す。
+  const handleDeleteRow = (row: UIRow) => {
+    if (row.appointment_id) {
+      if (!Object.values(row.amounts).some((v) => v.trim() !== "")) return; // 空なら何もしない
+      if (!confirm(`${row.customer_name || "この行"}様の金額をクリアしますか？\n（本日の予約は残るので、行自体は消えません）`)) return;
+      updateRow(row._id, { amounts: {}, variants: {} });
+      return;
+    }
+    const name = row.customer_name.trim();
+    const hasData = name !== "" || Object.values(row.amounts).some((v) => v.trim() !== "");
+    if (!hasData) { removeRow(row._id); return; } // 空の行はそのまま消すだけ
+    if (!confirm(`${name}様の本日の記帳を削除しますか？\n元に戻せません。`)) return;
+    startSaving(async () => {
+      const res = await deleteTallyEntriesForName(date, name);
+      if (res.success) {
+        removeRow(row._id);
+        toast.success(`${name}様の記帳を削除しました`);
+      } else {
+        toast.error(res.error ?? "削除に失敗しました");
+      }
+    });
+  };
+
   // 手入力した名前から患者マスタを引いて、カルテ番号を自動で入れる。
   // 同じ名前が複数いるときは特定できないので入れない（違う番号を入れる方が危ない）。
   // 名前がマスタに無いときは知らせる（カタカナと漢字で二重登録される事故を防ぐ）。
@@ -271,6 +306,38 @@ export default function TallySheet({ initialDate }: { initialDate?: string }) {
     const key = name.replace(/[\s　]/g, "");
     if (!key) return;
     const row = rows.find((r) => r._id === id);
+
+    // その日の予約に紐づく行の名前を、元と違う表記に直したとき
+    // （例: 予約時はカタカナ「ヒガシムラ　ミユ」で登録されていた方を、
+    //   受付が漢字「東村 心愛」に打ち直した）。
+    // そのまま保存すると、登録名（customers.name）はカタカナのままなので、
+    // 次回はまた別人として日計表に2人分かれて出てきてしまう。
+    // ここで「登録名も直しますか？」と確認し、直せば同じ人のまま統合される。
+    if (row?.customer_id && row._originalName && row._originalName.trim() !== name) {
+      const origKey = row._originalName.replace(/[\s　]/g, "");
+      if (origKey !== key) {
+        toast(`「${row._originalName}」様のお名前を「${name}」に直しますか？`, {
+          description: "次回からもこの名前で表示されます（別人として2人に分かれなくなります）",
+          duration: 15000,
+          action: {
+            label: "直す",
+            onClick: () => {
+              startSaving(async () => {
+                const res = await updateSalePatientIdentity(row.customer_id!, name, row.medical_record_number || null);
+                if (res.success) {
+                  toast.success(`お名前を「${name}」に直しました`);
+                  updateRow(id, { _originalName: name });
+                } else {
+                  toast.error(res.error ?? "変更に失敗しました");
+                }
+              });
+            },
+          },
+          cancel: { label: "このままでいい", onClick: () => {} },
+        });
+      }
+    }
+
     if (row?.medical_record_number.trim()) return;
     try {
       const patients = await searchPatientsForBooking(name);
@@ -656,9 +723,14 @@ export default function TallySheet({ initialDate }: { initialDate?: string }) {
                   <td className="px-1 py-1 text-center">
                     <button
                       type="button"
-                      onClick={() => removeRow(r._id)}
-                      className="p-1 rounded-lg text-slate-300 hover:text-rose-500 hover:bg-rose-50"
-                      title="行を削除"
+                      onClick={() => handleDeleteRow(r)}
+                      disabled={saving}
+                      className="p-1 rounded-lg text-slate-300 hover:text-rose-500 hover:bg-rose-50 disabled:opacity-40"
+                      title={
+                        r.appointment_id
+                          ? "金額をクリアします（本日の予約は残るので行は消えません）"
+                          : "この行の記帳を完全に削除します"
+                      }
                     >
                       <Trash2 className="w-4 h-4" />
                     </button>
