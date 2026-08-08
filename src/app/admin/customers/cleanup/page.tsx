@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input";
 import {
   getNameCleanupList,
   searchSimilarCustomers,
-  deleteEmptyCustomer,
+  deleteCustomerRecord,
   updateCustomerInfo,
   mergeCustomers,
   type SimilarCandidate,
@@ -84,11 +84,34 @@ export default function CustomerNameCleanupPage() {
   };
 
   const handleDelete = (row: CleanupRow) => {
-    if (!confirm(`「${row.name}」のカルテを削除しますか？\n元に戻せません。`)) return;
+    // 何が一緒に消えるかを必ず見せてから消す。
+    // 予約はカルテと一緒に消えるが、売上はお名前で残るので消えない。
+    const lines = [`「${row.name}」のカルテを削除します。`, ""];
+    if (row.visitDays > 0) {
+      lines.push(`⚠ この方の予約（来院${row.visitDays}日ぶん）も一緒に消えます。`);
+      if (row.recentVisits.length > 0) lines.push(`　来院日: ${row.recentVisits.join("・")}`);
+    }
+    if (row.salesRows > 0) {
+      lines.push(`※ 売上${row.salesRows}件は「${row.name}」名義のまま残ります（消えません）。`);
+    }
+    if (row.visitDays === 0 && row.salesRows === 0) {
+      lines.push("来院も売上もないカルテです。");
+    }
+    lines.push("", "消したぶんは復元できるよう保存しますが、画面上は元に戻せません。", "よろしいですか？");
+    if (!confirm(lines.join("\n"))) return;
+
     startBusy(async () => {
-      const res = await deleteEmptyCustomer(row.id);
-      if (res.success) { toast.success("削除しました"); load(); }
-      else toast.error(res.error ?? "削除に失敗しました");
+      const res = await deleteCustomerRecord(row.id);
+      if (res.success) {
+        toast.success(
+          res.removedAppointments
+            ? `削除しました（予約${res.removedAppointments}件も削除）`
+            : "削除しました",
+        );
+        load();
+      } else {
+        toast.error(res.error ?? "削除に失敗しました");
+      }
     });
   };
 
@@ -215,12 +238,17 @@ export default function CustomerNameCleanupPage() {
                     <Button
                       variant="outline"
                       size="sm"
-                      disabled={busy || !row.isEmpty}
-                      title={row.isEmpty ? "このカルテを削除します" : "来院や売上が残っているので削除できません"}
-                      className="gap-1.5 text-rose-600 border-rose-200 hover:bg-rose-50 disabled:opacity-40"
+                      disabled={busy}
+                      title={
+                        row.visitDays > 0
+                          ? `このカルテと、予約（来院${row.visitDays}日ぶん）を削除します`
+                          : "このカルテを削除します"
+                      }
+                      className="gap-1.5 text-rose-600 border-rose-200 hover:bg-rose-50"
                       onClick={() => handleDelete(row)}
                     >
-                      <Trash2 className="w-3.5 h-3.5" />削除
+                      <Trash2 className="w-3.5 h-3.5" />
+                      {row.visitDays > 0 ? `削除（予約${row.visitDays}日ぶんも）` : "削除"}
                     </Button>
                   </div>
                 </div>

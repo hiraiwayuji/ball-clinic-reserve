@@ -648,30 +648,74 @@ export async function getNameCleanupList(): Promise<{
 }
 
 /**
- * 予約も売上も無い患者カルテだけを消す。
- * 1件でもぶら下がっていたら消さない（消すと予約が道連れで消えるため）。
+ * 患者カルテを消す。
+ *
+ * 予約がぶら下がっていると ON DELETE CASCADE で一緒に消えるので、
+ * 消す直前の姿を deleted_customers_archive に丸ごと退避してから消す。
+ * （売上 cash_sales は customer_id を持たず名前で結びついているので消えない）
  */
-export async function deleteEmptyCustomer(customerId: string): Promise<{ success: boolean; error?: string }> {
-  const { clinicId } = await checkAdminAuth();
-  const all = await loadNameCandidates(clinicId);
-  const target = all.find((c) => c.id === customerId);
-  if (!target) return { success: false, error: "この院の患者ではありません" };
-  if (!target.isEmpty) {
-    return {
-      success: false,
-      error: `${target.name}様には来院${target.visitDays}日・売上${target.salesRows}件が残っています。`
-        + `消すとそれも消えるので、統合するか、お名前を直してください。`,
-    };
-  }
+export async function deleteCustomerRecord(
+  customerId: string,
+): Promise<{ success: boolean; error?: string; removedAppointments?: number }> {
+  const auth = await checkAdminAuth();
+  const { clinicId } = auth;
   const supabase = await createClient();
+
+  const { data: customer } = await supabase
+    .from("customers")
+    .select("*")
+    .eq("clinic_id", clinicId)
+    .eq("id", customerId)
+    .maybeSingle();
+  if (!customer) return { success: false, error: "この院の患者ではありません" };
+
+  const [{ data: appts }, { data: links }, { data: trainings }] = await Promise.all([
+    supabase.from("appointments").select("*").eq("clinic_id", clinicId).eq("customer_id", customerId),
+    supabase.from("customer_line_links").select("*").eq("clinic_id", clinicId).eq("customer_id", customerId),
+    supabase.from("training_assessments").select("*").eq("clinic_id", clinicId).eq("customer_id", customerId),
+  ]);
+
+  // 先に退避。ここが失敗したら消さない。
+  const { error: archiveError } = await supabase.from("deleted_customers_archive").insert({
+    clinic_id: clinicId,
+    customer_id: customerId,
+    customer_name: (customer as any).name ?? null,
+    snapshot: {
+      customer,
+      appointments: appts ?? [],
+      customer_line_links: links ?? [],
+      training_assessments: trainings ?? [],
+    },
+    deleted_by: auth.email ?? auth.userId ?? null,
+  });
+  if (archiveError) {
+    return { success: false, error: "退避に失敗したため削除を中止しました: " + archiveError.message };
+  }
+
   const { error } = await supabase
     .from("customers")
     .delete()
     .eq("clinic_id", clinicId)
     .eq("id", customerId);
   if (error) return { success: false, error: "削除に失敗しました: " + error.message };
+
+  await writeAudit({
+    clinicId,
+    actorUserId: auth.userId,
+    actorEmail: auth.email,
+    actorRole: auth.role as AuditActorRole,
+    actionType: "customer.delete",
+    targetTable: "customers",
+    targetId: customerId,
+    before: {
+      name: (customer as any).name ?? null,
+      appointments: appts?.length ?? 0,
+      note: "deleted_customers_archive に退避済み",
+    },
+  }).catch(() => {});
+
   revalidatePath("/admin/customers");
-  return { success: true };
+  return { success: true, removedAppointments: appts?.length ?? 0 };
 }
 
 export type FuzzyDuplicateGroup = {
