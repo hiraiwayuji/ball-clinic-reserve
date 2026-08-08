@@ -811,7 +811,10 @@ function ReserveContent() {
                   <h2 className="text-xl font-bold text-white tracking-tight">
                     {reserveFlow === "menu_first" ? "③ ご希望の日時" : "ご希望の日時"}
                   </h2>
-                  {requiredStaff && (
+                  {/* 担当を院側が自動で割り振る運用の院では、スタッフ名や
+                      「出勤日限定」であること自体を患者に見せない（からだ鍼灸整骨院のルール）。
+                      予約できない日は単に選べないだけで、患者は理由を知る必要がない。 */}
+                  {canPickStaff && requiredStaff && (
                     <div className="bg-orange-500/15 border-2 border-orange-400/60 rounded-2xl p-4 flex items-start gap-3">
                       <span className="text-2xl shrink-0">📅</span>
                       <div>
@@ -1145,8 +1148,10 @@ function ReserveContent() {
                   );
                 })()}
 
-                {/* 指名選択（担当を選べない院では非表示。ただし担当固定メニューの案内は残す） */}
-                {staffList.length > 0 && (canPickStaff || requiredStaff) && (
+                {/* 指名選択。担当を選べない院（からだ等）では、担当固定メニューでも
+                    「担当は◯◯さんです」とスタッフ名を見せない＝セクションごと出さない。
+                    患者は「予約できるかどうか」だけ分かればよく、誰が担当かは院側が決める。 */}
+                {staffList.length > 0 && canPickStaff && (
                   <section className={`space-y-4 ${reserveFlow === "menu_first" ? "order-2" : "order-3"}`}>
                     <h2 className="text-xl font-bold text-white tracking-tight">
                       {reserveFlow === "menu_first" ? "② スタッフ指名" : "スタッフ指名"}

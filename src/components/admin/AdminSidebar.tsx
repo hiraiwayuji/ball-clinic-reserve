@@ -1,13 +1,15 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
-import { LogOut } from "lucide-react";
+import { LogOut, ExternalLink, Globe } from "lucide-react";
 import { getAdminNavItems, isActiveNav, type Role } from "@/lib/admin-nav";
 import { CLINIC_CONFIG } from "@/lib/clinic-config";
 import { isFamilyGift, APP_TITLE } from "@/lib/app-mode";
 import { logoutAction } from "@/app/actions/auth";
+import { getCurrentHpUrl } from "@/app/actions/clinic-slot";
 
 const hasCustomLogo = !!CLINIC_CONFIG.logoSmallUrl && CLINIC_CONFIG.logoSmallUrl !== "/images/logo-white.png";
 const isDefaultClinic = CLINIC_CONFIG.isDefaultClinic;
@@ -24,6 +26,13 @@ export default function AdminSidebar({ role = "owner", variant = "desktop", onNa
   const pathname = usePathname();
   const items = getAdminNavItems(role);
   const homeHref = isFamilyGift ? "/calendar" : "/admin/dashboard";
+
+  // 「予約サイトを確認したい時がある」への対応。公式HPは院ごとに設定があれば出す。
+  const [hpUrl, setHpUrl] = useState<string | null>(null);
+  useEffect(() => {
+    if (isFamilyGift) return;
+    getCurrentHpUrl().then(setHpUrl).catch(() => {});
+  }, []);
 
   return (
     <aside
@@ -99,6 +108,36 @@ export default function AdminSidebar({ role = "owner", variant = "desktop", onNa
           })}
         </ul>
       </nav>
+
+      {/* 下部: 予約サイト・公式HPへの外部リンク＋ログアウト */}
+      {!isFamilyGift && (
+        <div className="border-t border-[var(--sidebar-border)] px-3 py-3 space-y-1">
+          <a
+            href="/reserve"
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={onNavigate}
+            className="flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium text-slate-600 hover:bg-slate-50 hover:text-slate-900 transition-colors"
+            title="患者さんに見えている予約サイトを新しいタブで開きます"
+          >
+            <ExternalLink className="w-4 h-4 shrink-0 text-slate-500" />
+            <span className="truncate">予約サイトを見る</span>
+          </a>
+          {hpUrl && (
+            <a
+              href={hpUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={onNavigate}
+              className="flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium text-slate-600 hover:bg-slate-50 hover:text-slate-900 transition-colors"
+              title="院の公式ホームページを新しいタブで開きます"
+            >
+              <Globe className="w-4 h-4 shrink-0 text-slate-500" />
+              <span className="truncate">公式HPを見る</span>
+            </a>
+          )}
+        </div>
+      )}
 
       {/* 下部: ログアウト */}
       <div className="border-t border-[var(--sidebar-border)] px-3 py-3">

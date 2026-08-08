@@ -231,6 +231,39 @@ export async function getCurrentPatientCanPickStaff(): Promise<boolean> {
  *
  * Fail-safe: 取得失敗時は false を返す（従来挙動＝連携なしでも予約可）。
  */
+/**
+ * 院の公式HPアドレス（clinic_settings.hp_url）。
+ * 管理画面のサイドバーから「公式HPを見る」リンクを出すために使う
+ * （ぼーるくんの依頼：予約サイトを確認したい時にすぐ開けるように）。
+ * Fail-safe: 取得失敗時は null（リンクを出さないだけで、他の機能に影響しない）。
+ */
+export async function getCurrentHpUrl(): Promise<string | null> {
+  try {
+    if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
+      return null;
+    }
+    const sb = createSupabaseClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL,
+      process.env.SUPABASE_SERVICE_ROLE_KEY,
+      { auth: { persistSession: false } },
+    );
+    const { data, error } = await sb
+      .from("clinic_settings")
+      .select("hp_url")
+      .eq("id", PUBLIC_CLINIC_ID)
+      .maybeSingle();
+    if (error) {
+      console.error("[getCurrentHpUrl] supabase error:", error.message);
+      return null;
+    }
+    const url = (data?.hp_url as string | null)?.trim();
+    return url || null;
+  } catch (e: any) {
+    console.error("[getCurrentHpUrl] unexpected error:", e?.message ?? e);
+    return null;
+  }
+}
+
 export async function getRequireLineLink(): Promise<boolean> {
   try {
     if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {

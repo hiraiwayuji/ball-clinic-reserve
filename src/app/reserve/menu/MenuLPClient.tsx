@@ -23,6 +23,7 @@ import type { PublicClinicSettings, ThemeColor } from "@/app/actions/publicSetti
 import { CLINIC_CONFIG } from "@/lib/clinic-config";
 import { getThemeClasses } from "@/lib/lp-theme";
 import LPHero from "@/components/reserve/LPHero";
+import { useClinicPatientCanPickStaff } from "@/lib/use-clinic-patient-staff";
 
 type Tab = "coupon" | "menu" | "all";
 type AudienceFilter = "all" | "first" | "repeat";
@@ -239,6 +240,9 @@ function CouponCard({
   availabilityDate?: string | null;
   onSelect: () => void;
 }) {
+  // 担当を院側が自動で割り振る運用の院では、どのスタッフの出勤日かという
+  // 内部事情を患者に見せない（からだ鍼灸整骨院のルール）。
+  const canPickStaff = useClinicPatientCanPickStaff();
   const aud = audienceOf(course);
   const theme = getThemeClasses(themeColor);
   const hasDiscount =
@@ -362,8 +366,10 @@ function CouponCard({
         </div>
       </div>
 
-      {/* 出勤日限定バナー（さみ先生・ヘッドスパ等） */}
-      {course.required_staff_id && (
+      {/* 出勤日限定バナー（さみ先生・ヘッドスパ等）。
+          担当を院側が自動で割り振る運用の院では、患者にスタッフ名や
+          「出勤日限定」であること自体を見せない（空き状況だけ見えれば十分）。 */}
+      {canPickStaff && course.required_staff_id && (
         <div className="mx-3 mb-2 -mt-1 flex items-center gap-2 bg-orange-500/15 border border-orange-500/40 rounded-xl px-3 py-2">
           <CalendarDays className="w-4 h-4 text-orange-300 shrink-0" />
           <div className="min-w-0">

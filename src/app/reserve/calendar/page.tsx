@@ -192,7 +192,9 @@ function ReserveCalendarContent() {
   const [staffScheduleName, setStaffScheduleName] = useState<string>("");
   // 「出勤日のみ受付」の注記は、出勤日制のスタッフ（さみ等）のときだけ出す。
   // 受付時間・休憩だけ設定した常勤スタッフに出すと「出勤日が限られている」と誤解される。
-  const showStaffDayNote = staffScheduleName !== "" && staffSchedule?.restrictDays !== false;
+  // 担当を院側が自動で割り振る運用の院（からだ等）では、スタッフ名も
+  // 「出勤日限定」であること自体も患者に見せない。
+  const showStaffDayNote = canPickStaff && staffScheduleName !== "" && staffSchedule?.restrictDays !== false;
   // 選択コースの最短の空き日（"yyyy-MM-dd" / null=空き無し / undefined=未取得）
   const [courseNextDate, setCourseNextDate] = useState<string | null | undefined>(undefined);
   // 日付を押したら時間帯パネルへ自動スクロールするための ref
