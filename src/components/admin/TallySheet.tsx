@@ -11,7 +11,7 @@ import {
   type TallyStaff,
   type TallyRow,
 } from "@/app/actions/tally";
-import { updateCheckinStatus, type CheckinStatus } from "@/app/actions/adminReserve";
+import { updateCheckinStatus, getMonthCrossingFirstVisits, type CheckinStatus } from "@/app/actions/adminReserve";
 import { searchPatientsForBooking } from "@/app/actions/patientSearch";
 import { AddAppointmentDialog } from "@/components/admin/AddAppointmentDialog";
 import type { TallyColumn } from "@/lib/tally-columns";
@@ -100,6 +100,7 @@ export default function TallySheet({ initialDate }: { initialDate?: string }) {
     initialDate || format(new Date(), "yyyy-MM-dd"),
   );
   const [columns, setColumns] = useState<TallyColumn[]>([]);
+  const [monthCrossIds, setMonthCrossIds] = useState<Set<string>>(new Set());
   const [staff, setStaff] = useState<TallyStaff[]>([]);
   const [rows, setRows] = useState<UIRow[]>([]);
   const [isOwner, setIsOwner] = useState(false);
@@ -217,6 +218,10 @@ export default function TallySheet({ initialDate }: { initialDate?: string }) {
 
   const load = useCallback((d: string) => {
     setLoading(true);
+    // 月またぎ（今月1回目）の予約IDを取って「月初」の印を出す。保険証確認・署名の見落とし防止。
+    getMonthCrossingFirstVisits(`${d}T00:00:00+09:00`, `${d}T23:59:59+09:00`)
+      .then((ids) => setMonthCrossIds(new Set(ids)))
+      .catch(() => setMonthCrossIds(new Set()));
     getTallySheet(d)
       .then((data) => {
         setColumns(data.columns);
@@ -541,6 +546,14 @@ export default function TallySheet({ initialDate }: { initialDate?: string }) {
                   isDone ? "bg-emerald-50/40 dark:bg-emerald-900/10" : "",
                 ].join(" ")}>
                   <td className="px-1 py-1 sticky left-0 bg-white dark:bg-slate-800">
+                    {r.appointment_id && monthCrossIds.has(r.appointment_id) && (
+                      <span
+                        className="block text-[9px] font-black text-violet-700 dark:text-violet-300 leading-none mb-0.5"
+                        title="先月から続けて来られている方の今月1回目です。保険証の確認と署名をお願いします"
+                      >
+                        ● 月初
+                      </span>
+                    )}
                     <input
                       value={r.customer_name}
                       onChange={(e) => updateRow(r._id, { customer_name: e.target.value })}
