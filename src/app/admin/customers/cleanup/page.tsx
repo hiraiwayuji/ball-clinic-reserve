@@ -12,6 +12,7 @@ import {
   deleteCustomerRecord,
   updateCustomerInfo,
   mergeCustomers,
+  searchCustomersByNamePart,
   type SimilarCandidate,
   type NameCleanupRow,
 } from "@/app/actions/adminCustomers";
@@ -49,6 +50,9 @@ export default function CustomerNameCleanupPage() {
   const [busy, startBusy] = useTransition();
   const [editingId, setEditingId] = useState<string | null>(null);
   const [nameDraft, setNameDraft] = useState("");
+  // 行ごとの「この苗字の人を全部さがす」結果
+  const [surnameHits, setSurnameHits] = useState<Record<string, SimilarCandidate[]>>({});
+  const [surnameLoading, setSurnameLoading] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -128,6 +132,26 @@ export default function CustomerNameCleanupPage() {
         toast.error(res.error ?? "削除に失敗しました");
       }
     });
+  };
+
+  /** その方の苗字（ふりがなだけの人はふりがな）で、院内の全員から探す */
+  const searchKeyOf = (name: string) => {
+    const base = name.normalize("NFKC").replace(/[（(][^）)]*[）)]/g, "").replace(/[\s　]/g, "");
+    if (base) return base;
+    return name.normalize("NFKC").match(/[（(]([^）)]*)[）)]/)?.[1]?.replace(/[\s　]/g, "") ?? name;
+  };
+
+  const handleSurnameSearch = async (row: CleanupRow) => {
+    const key = searchKeyOf(row.name);
+    setSurnameLoading(row.id);
+    try {
+      const res = await searchCustomersByNamePart(key);
+      setSurnameHits((prev) => ({ ...prev, [row.id]: res.filter((r) => r.id !== row.id) }));
+    } catch {
+      toast.error("検索に失敗しました");
+    } finally {
+      setSurnameLoading(null);
+    }
   };
 
   const handleMerge = (row: CleanupRow, into: SimilarCandidate) => {
@@ -301,44 +325,66 @@ export default function CustomerNameCleanupPage() {
                   </div>
                 )}
 
-                {row.similar.length > 0 && (
-                  <div className="mt-3 border-t border-slate-100 dark:border-slate-800 pt-2">
-                    <p className="text-xs font-bold text-slate-500 dark:text-slate-400 mb-1">似たお名前の方</p>
-                    <div className="space-y-1.5">
-                      {row.similar.map((s) => (
-                        <div key={s.id} className="flex items-center justify-between gap-2 flex-wrap">
-                          <div className="min-w-0">
-                            <span className="text-sm font-bold text-slate-800 dark:text-slate-100">{s.name}</span>
-                            {s.medicalRecordNumber && (
-                              <span className="ml-2 text-[10px] font-bold text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-slate-700/60 px-1.5 py-0.5 rounded-full tabular-nums">
-                                No.{s.medicalRecordNumber}
-                              </span>
-                            )}
-                            <span className="ml-2 text-xs text-indigo-600 dark:text-indigo-300">{s.reason}</span>
-                            <div><VisitSummary c={s} /></div>
-                            {s.recentVisits.length > 0 && (
-                              <p className="text-xs text-slate-500 dark:text-slate-400">
-                                {s.recentVisits.slice(0, 2).map((v) => (
-                                  `${formatVisitDate(v.date)} ${v.time}`
-                                  + (v.courseName ? ` ${v.courseName}` : "")
-                                )).join(" / ")}
-                              </p>
-                            )}
-                          </div>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            disabled={busy}
-                            className="gap-1.5 shrink-0"
-                            onClick={() => handleMerge(row, s)}
-                          >
-                            <Merge className="w-3.5 h-3.5" />この方にまとめる
-                          </Button>
-                        </div>
-                      ))}
-                    </div>
+                <div className="mt-3 border-t border-slate-100 dark:border-slate-800 pt-2">
+                  <div className="flex items-center justify-between gap-2 flex-wrap mb-1">
+                    <p className="text-xs font-bold text-slate-500 dark:text-slate-400">
+                      {row.similar.length > 0 ? "似たお名前の方" : "似たお名前の方は見つかりませんでした"}
+                    </p>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      disabled={surnameLoading === row.id}
+                      className="gap-1.5 text-indigo-600 dark:text-indigo-300 h-7"
+                      onClick={() => handleSurnameSearch(row)}
+                    >
+                      {surnameLoading === row.id
+                        ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        : <Search className="w-3.5 h-3.5" />}
+                      「{searchKeyOf(row.name)}」の人を全員さがす
+                    </Button>
                   </div>
-                )}
+
+                  <div className="space-y-1.5">
+                    {(surnameHits[row.id] ?? row.similar).map((s) => (
+                      <div key={s.id} className="flex items-center justify-between gap-2 flex-wrap">
+                        <div className="min-w-0">
+                          <span className="text-sm font-bold text-slate-800 dark:text-slate-100">{s.name}</span>
+                          {s.medicalRecordNumber && (
+                            <span className="ml-2 text-[10px] font-bold text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-slate-700/60 px-1.5 py-0.5 rounded-full tabular-nums">
+                              No.{s.medicalRecordNumber}
+                            </span>
+                          )}
+                          <span className="ml-2 text-xs text-indigo-600 dark:text-indigo-300">{s.reason}</span>
+                          <div><VisitSummary c={s} /></div>
+                          {s.recentVisits.length > 0 && (
+                            <p className="text-xs text-slate-500 dark:text-slate-400">
+                              {s.recentVisits.slice(0, 2).map((v) => (
+                                `${formatVisitDate(v.date)} ${v.time}`
+                                + (v.courseName ? ` ${v.courseName}` : "")
+                              )).join(" / ")}
+                            </p>
+                          )}
+                        </div>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={busy}
+                          className="gap-1.5 shrink-0"
+                          onClick={() => handleMerge(row, s)}
+                        >
+                          <Merge className="w-3.5 h-3.5" />この方にまとめる
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+
+                  {surnameHits[row.id] && (
+                    <p className="text-xs text-slate-500 dark:text-slate-400 mt-1.5">
+                      「{searchKeyOf(row.name)}」を含む方 {surnameHits[row.id].length}名
+                      {surnameHits[row.id].length === 0 && " — ほかにいらっしゃいません"}
+                    </p>
+                  )}
+                </div>
               </div>
             ))}
           </div>

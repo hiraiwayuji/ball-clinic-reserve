@@ -650,6 +650,36 @@ export async function searchSimilarCustomers(query: string): Promise<SimilarCand
 }
 
 /**
+ * 苗字（名前の一部）で、その文字を含む患者を全部返す。
+ *
+ * 「似たお名前の方」は上位5件しか出さないので、
+ * 「天羽」さんが他に何人いるのかを見たいときはこちらを使う。
+ * 似ている/似ていないの判定はせず、含むものを全部出す。
+ */
+export async function searchCustomersByNamePart(part: string): Promise<SimilarCandidate[]> {
+  const { clinicId } = await checkAdminAuth();
+  const key = normalizeForCompare(part);
+  if (!key) return [];
+  const all = await loadNameCandidates(clinicId);
+
+  const hits: SimilarCandidate[] = [];
+  for (const c of all) {
+    const name = normalizeForCompare(c.name);
+    if (!name) continue;
+    if (name.startsWith(key)) {
+      hits.push({ ...c, score: 90, reason: `「${part}」で始まるお名前です` });
+    } else if (name.includes(key)) {
+      hits.push({ ...c, score: 60, reason: `「${part}」を含むお名前です` });
+    } else if (key.includes(name) && name.length >= 2) {
+      hits.push({ ...c, score: 50, reason: `「${c.name}」が「${part}」に含まれます` });
+    }
+  }
+  return hits
+    .sort((a, b) => b.score - a.score || b.visitDays - a.visitDays || a.name.localeCompare(b.name, "ja"))
+    .slice(0, 100);
+}
+
+/**
  * 名前が不完全な患者（ふりがなだけ・カタカナだけ・姓だけ）を、
  * 直しやすいように新しい順で返す。似た名前の候補も添える。
  */
