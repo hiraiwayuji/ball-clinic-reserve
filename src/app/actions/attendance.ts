@@ -246,6 +246,156 @@ export async function getTodayAttendance(staffId: string): Promise<TodayAttendan
   };
 }
 
+// ── スタッフ本人の記録確認・打刻もれ ──────────────────────
+
+export type MyAttendanceDay = {
+  workDate: string;         // "YYYY-MM-DD"
+  weekday: string;          // "月"〜"日"
+  clockIn: string | null;   // "HH:mm"
+  clockOut: string | null;
+  breakMinutes: number;
+  /** 出勤か退勤のどちらかが抜けている＝打刻もれ */
+  missing: boolean;
+  /** 実働 "H:MM"（両方そろっている日だけ） */
+  worked: string | null;
+};
+
+/**
+ * スタッフ本人が自分の出退勤を確認する用（ログイン不要・打刻画面から）。
+ * 直近 days 日ぶんを新しい順で返す。
+ * 金額・時給・他人の記録は一切返さない（見えるのは自分の出退勤だけ）。
+ */
+export async function getMyAttendance(
+  staffId: string,
+  days = 45,
+): Promise<{ records: MyAttendanceDay[]; missingCount: number }> {
+  if (!staffId) return { records: [], missingCount: 0 };
+  const db = admin();
+  if (!(await verifyStaff(db, staffId))) return { records: [], missingCount: 0 };
+
+  const { date: today } = jstNow();
+  const from = new Date(`${today}T00:00:00+09:00`);
+  from.setUTCDate(from.getUTCDate() - days);
+  const fromStr = from.toISOString().slice(0, 10);
+
+  const { data } = await db
+    .from("staff_attendance")
+    .select("work_date, clock_in_at, clock_out_at, break_minutes")
+    .eq("clinic_id", PUBLIC_CLINIC_ID)
+    .eq("staff_id", staffId)
+    .gte("work_date", fromStr)
+    .lte("work_date", today)
+    .order("work_date", { ascending: false });
+
+  const hm = (iso: string | null) =>
+    iso
+      ? new Intl.DateTimeFormat("ja-JP", {
+          timeZone: "Asia/Tokyo", hour: "2-digit", minute: "2-digit", hour12: false,
+        }).format(new Date(iso))
+      : null;
+  const WD = ["日", "月", "火", "水", "木", "金", "土"];
+
+  const records: MyAttendanceDay[] = ((data ?? []) as any[]).map((r) => {
+    const clockIn = hm(r.clock_in_at);
+    const clockOut = hm(r.clock_out_at);
+    const [y, m, d] = String(r.work_date).split("-").map(Number);
+    let worked: string | null = null;
+    if (r.clock_in_at && r.clock_out_at) {
+      const mins =
+        Math.round((new Date(r.clock_out_at).getTime() - new Date(r.clock_in_at).getTime()) / 60000)
+        - (Number(r.break_minutes ?? 0) || 0);
+      const safe = Math.max(0, mins);
+      worked = `${Math.floor(safe / 60)}:${String(safe % 60).padStart(2, "0")}`;
+    }
+    return {
+      workDate: r.work_date as string,
+      weekday: WD[new Date(Date.UTC(y, m - 1, d)).getUTCDay()],
+      clockIn,
+      clockOut,
+      breakMinutes: Number(r.break_minutes ?? 0) || 0,
+      // 今日はまだ勤務中かもしれないので、打刻もれとは見なさない
+      missing: r.work_date !== today && (!clockIn || !clockOut),
+      worked,
+    };
+  });
+
+  return { records, missingCount: records.filter((r) => r.missing).length };
+}
+
+/**
+ * スタッフ本人が、自分の過去の打刻もれをその場で直す（ログイン不要）。
+ *
+ * 押し忘れは必ず起きる。院長を待たないと直せないと現場が止まるので、
+ * 本人が直せるようにする。ただし直せるのは
+ *   ・自分の記録だけ（staffId 検証あり）
+ *   ・出勤か退勤が抜けている日だけ（両方入っている記録は本人には触らせない）
+ *   ・当日は対象外（勤務中の可能性があるため）
+ * とし、誰がいつ何を入れたかは監査ログに残す。
+ */
+export async function fixMyMissingPunch(
+  staffId: string,
+  workDate: string,
+  clockInHm: string | null,
+  clockOutHm: string | null,
+): Promise<{ success: boolean; error?: string }> {
+  const db = admin();
+  const staffName = await verifyStaff(db, staffId);
+  if (!staffName) return { success: false, error: "お名前を選び直してください" };
+
+  const isHm = (v: string | null) => v === null || /^([01]\d|2[0-3]):[0-5]\d$/.test(v);
+  if (!isHm(clockInHm) || !isHm(clockOutHm)) {
+    return { success: false, error: "時刻は 09:30 のような形で入力してください" };
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(workDate)) return { success: false, error: "日付が不正です" };
+
+  const { date: today } = jstNow();
+  if (workDate >= today) return { success: false, error: "本日ぶんは打刻ボタンから記録してください" };
+
+  const { data: rec } = await db
+    .from("staff_attendance")
+    .select("id, clock_in_at, clock_out_at")
+    .eq("clinic_id", PUBLIC_CLINIC_ID)
+    .eq("staff_id", staffId)
+    .eq("work_date", workDate)
+    .maybeSingle();
+  if (!rec) return { success: false, error: "その日の記録が見つかりません" };
+  if (rec.clock_in_at && rec.clock_out_at) {
+    return { success: false, error: "この日はすでに両方記録されています。直すときは院長に相談してください" };
+  }
+
+  const toIso = (hmv: string | null) =>
+    hmv === null ? null : new Date(`${workDate}T${hmv}:00+09:00`).toISOString();
+  // 抜けている側だけ埋める（入っている側は本人には上書きさせない）
+  const clockInAt = rec.clock_in_at ?? toIso(clockInHm);
+  let clockOutAt = rec.clock_out_at ?? toIso(clockOutHm);
+  if (!clockInAt || !clockOutAt) return { success: false, error: "出勤と退勤の両方を入力してください" };
+  // 日をまたいだ勤務（22:00→翌0:30）はマイナスにならないよう翌日扱いにする
+  if (new Date(clockOutAt) <= new Date(clockInAt)) {
+    const d = new Date(clockOutAt);
+    d.setUTCDate(d.getUTCDate() + 1);
+    clockOutAt = d.toISOString();
+  }
+
+  const { error } = await db
+    .from("staff_attendance")
+    .update({ clock_in_at: clockInAt, clock_out_at: clockOutAt, updated_at: new Date().toISOString() })
+    .eq("id", rec.id)
+    .eq("clinic_id", PUBLIC_CLINIC_ID);
+  if (error) return { success: false, error: "保存に失敗しました。もう一度お試しください" };
+
+  await writeAudit({
+    clinicId: PUBLIC_CLINIC_ID,
+    actorRole: "staff",
+    actionType: "attendance.self_fix",
+    targetTable: "staff_attendance",
+    targetId: rec.id as string,
+    before: { staff_name: staffName, work_date: workDate, clock_in_at: rec.clock_in_at, clock_out_at: rec.clock_out_at },
+    after: { staff_name: staffName, work_date: workDate, clock_in_at: clockInAt, clock_out_at: clockOutAt },
+  }).catch(() => {});
+
+  return { success: true };
+}
+
 /** 自院の実在アクティブスタッフか検証（共通リンクの最低限の防御）。staff_name を返す。 */
 async function verifyStaff(db: ReturnType<typeof admin>, staffId: string): Promise<string | null> {
   const { data } = await db
@@ -1036,6 +1186,8 @@ export type AttendanceExcelDay = {
   weekday: string;          // "月"〜"日"
   clockIn: string | null;   // "HH:mm"
   clockOut: string | null;  // "HH:mm"
+  /** 休憩（分）。人によって違う（森川=120／森藤=45／パートは0）ので日ごとに持つ */
+  breakMinutes: number;
   isClosed: boolean;
 };
 
@@ -1076,7 +1228,7 @@ export async function getMonthlyAttendanceForExcel(
     supabase.from("clinic_holidays").select("date").eq("clinic_id", clinicId)
       .gte("date", monthStart).lte("date", monthEnd),
     supabase.from("staff_attendance")
-      .select("staff_id, work_date, clock_in_at, clock_out_at")
+      .select("staff_id, work_date, clock_in_at, clock_out_at, break_minutes")
       .eq("clinic_id", clinicId)
       .gte("work_date", monthStart).lte("work_date", monthEnd),
   ]);
@@ -1095,15 +1247,16 @@ export async function getMonthlyAttendanceForExcel(
     }).format(new Date(iso));
   };
 
-  // (staff_id, work_date) -> {clockIn, clockOut}。同日複数打刻は最初の出勤・最後の退勤を使う
-  const byKey = new Map<string, { in: string | null; out: string | null }>();
+  // (staff_id, work_date) -> {clockIn, clockOut, break}。同日複数打刻は最初の出勤・最後の退勤を使う
+  const byKey = new Map<string, { in: string | null; out: string | null; brk: number }>();
   for (const r of (attendanceRes.data ?? []) as any[]) {
     const key = `${r.staff_id}|${r.work_date}`;
-    const cur = byKey.get(key) ?? { in: null, out: null };
+    const cur = byKey.get(key) ?? { in: null, out: null, brk: 0 };
     const inT = hm(r.clock_in_at);
     const outT = hm(r.clock_out_at);
     if (inT && (!cur.in || inT < cur.in)) cur.in = inT;
     if (outT && (!cur.out || outT > cur.out)) cur.out = outT;
+    cur.brk = Math.max(cur.brk, Number(r.break_minutes ?? 0) || 0);
     byKey.set(key, cur);
   }
 
@@ -1120,6 +1273,7 @@ export async function getMonthlyAttendanceForExcel(
         weekday: WD[weekdayIdx],
         clockIn: rec?.in ?? null,
         clockOut: rec?.out ?? null,
+        breakMinutes: rec?.brk ?? 0,
         isClosed: closedWeekdays.has(weekdayIdx) || holidaySet.has(dateStr),
       });
     }

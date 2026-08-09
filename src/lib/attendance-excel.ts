@@ -95,8 +95,10 @@ export function downloadMonthlyAttendanceExcel(
       // そのままだと退勤 < 出勤 になり総稼働がマイナスになるので翌日扱いにする。
       if (clockIn != null && clockOut != null && clockOut < clockIn) clockOut += 1;
 
-      // 打刻がある日だけ休憩の既定値を入れる（休みの日は空欄。元ファイルと同じ）
-      const brk = hasPunch ? defaultBreakMinutes / (24 * 60) : null;
+      // 休憩は記録されている実績を使う。未記録の日だけ既定値を入れる
+      // （森川先生=2時間、森藤先生=45分、パートは休憩なし、と人によって違うため）
+      const brkMin = d.breakMinutes > 0 ? d.breakMinutes : defaultBreakMinutes;
+      const brk = hasPunch ? brkMin / (24 * 60) : null;
       const note = d.isClosed && !hasPunch ? "院休診" : null;
 
       rows.push([

@@ -4,12 +4,14 @@ import { useEffect, useMemo, useState } from "react";
 import { format } from "date-fns";
 import { ja } from "date-fns/locale";
 import { toast } from "sonner";
-import { Loader2, Clock, LogIn, LogOut, CheckCircle2, AlertTriangle, ListChecks, Circle, XCircle, Lock } from "lucide-react";
+import { Loader2, Clock, LogIn, LogOut, CheckCircle2, AlertTriangle, ListChecks, Circle, XCircle, Lock, CalendarDays } from "lucide-react";
 import {
   listAttendanceStaff, getAttendanceConfig, getTodayAttendance,
   clockIn, clockOut, getTodayTasks, reportTask,
   getAttendanceGate, unlockAttendanceDevice,
+  getMyAttendance, fixMyMissingPunch,
   type AttendanceStaff, type AttendanceConfig, type TodayAttendance, type OvertimeReasonType, type TodayTask, type AttendanceGate,
+  type MyAttendanceDay,
 } from "@/app/actions/attendance";
 import { OVERTIME_REASONS } from "@/lib/attendance-constants";
 import { CLINIC_CONFIG } from "@/lib/clinic-config";
@@ -30,6 +32,22 @@ export default function AttendancePage() {
   const [reasonOpen, setReasonOpen] = useState(false);
   const [reasonType, setReasonType] = useState<OvertimeReasonType | "">("");
   const [reasonNote, setReasonNote] = useState("");
+
+  // 現在時刻（1分ごとに更新）。「今が何時か」が見えないと打刻して良いか迷うため
+  const [nowHm, setNowHm] = useState(() => format(new Date(), "HH:mm"));
+  useEffect(() => {
+    const t = setInterval(() => setNowHm(format(new Date(), "HH:mm")), 30_000);
+    return () => clearInterval(t);
+  }, []);
+
+  // 自分の出退勤の記録（本人だけが見る）と、打刻もれの入力
+  const [mine, setMine] = useState<{ records: MyAttendanceDay[]; missingCount: number }>({ records: [], missingCount: 0 });
+  const [mineLoading, setMineLoading] = useState(false);
+  const [showMine, setShowMine] = useState(false);
+  const [fixDay, setFixDay] = useState<MyAttendanceDay | null>(null);
+  const [fixIn, setFixIn] = useState("");
+  const [fixOut, setFixOut] = useState("");
+  const [fixBusy, setFixBusy] = useState(false);
 
   // 今日の業務チェックリスト
   const [tasks, setTasks] = useState<TodayTask[]>([]);
@@ -106,14 +124,37 @@ export default function AttendancePage() {
     }
   };
 
-  useEffect(() => { refreshToday(staffId); refreshTasks(staffId); }, [staffId]);
+  /** 自分の記録を取り直す。打刻もれの件数もここで分かる */
+  const refreshMine = async (id: string) => {
+    if (!id) { setMine({ records: [], missingCount: 0 }); return; }
+    setMineLoading(true);
+    try { setMine(await getMyAttendance(id)); }
+    catch { setMine({ records: [], missingCount: 0 }); }
+    finally { setMineLoading(false); }
+  };
+
+  useEffect(() => { refreshToday(staffId); refreshTasks(staffId); refreshMine(staffId); }, [staffId]);
+
+  const submitFix = async () => {
+    if (!fixDay) return;
+    setFixBusy(true);
+    const r = await fixMyMissingPunch(staffId, fixDay.workDate, fixIn || null, fixOut || null);
+    setFixBusy(false);
+    if (r.success) {
+      setFixDay(null);
+      toast.success("記録しました");
+      refreshMine(staffId);
+    } else {
+      toast.error(r.error ?? "保存に失敗しました");
+    }
+  };
 
   const handleClockIn = async () => {
     if (!staffId) { toast.error("お名前を選んでください"); return; }
     setBusy(true);
     const r = await clockIn(staffId);
     setBusy(false);
-    if (r.success) { toast.success("出勤を記録しました。今日の業務リストを確認してください"); refreshToday(staffId); refreshTasks(staffId); }
+    if (r.success) { toast.success("出勤を記録しました。今日の業務リストを確認してください"); refreshToday(staffId); refreshTasks(staffId); refreshMine(staffId); }
     else toast.error(r.error ?? "記録に失敗しました");
   };
 
@@ -125,6 +166,7 @@ export default function AttendancePage() {
     if (r.success) {
       toast.success(`お疲れさまでした。退勤を記録しました（今日の業務 ${donePct}% できました）`);
       refreshToday(staffId);
+      refreshMine(staffId);
       return;
     }
     if (r.requireTaskReport) {
@@ -152,6 +194,7 @@ export default function AttendancePage() {
       setReasonOpen(false);
       toast.success(`退勤を記録しました（今日の業務 ${donePct}% できました）`);
       refreshToday(staffId);
+      refreshMine(staffId);
     } else if (r.requireTaskReport) {
       setReasonOpen(false);
       setHighlightTasks(true);
@@ -226,76 +269,122 @@ export default function AttendancePage() {
 
   const clockedIn = !!today?.clockInAt;
   const clockedOut = !!today?.clockOutAt;
+  const tasksLeft = tasks.length - reportedCount;
+
+  // ── 名前を選ぶ前：名前のボタンだけを大きく出す ──
+  // 以前は小さなプルダウンで、何をすればいいか分かりにくかった。
+  // 「①名前を押す → ②出勤を押す」の2ステップだけに絞る。
+  if (!staffId) {
+    return (
+      <div className="min-h-screen bg-slate-50 text-slate-800">
+        <div className="max-w-md mx-auto px-4 py-8 space-y-6">
+          <div className="text-center">
+            <p className="text-slate-500 text-sm">{clinicName}</p>
+            <div className="mt-1 text-4xl font-black tabular-nums text-slate-800">{nowHm}</div>
+            <p className="text-slate-500 text-sm mt-0.5">
+              {format(new Date(), "M月d日(E)", { locale: ja })}
+            </p>
+          </div>
+
+          <div className="bg-white rounded-3xl border-2 border-blue-200 p-5 shadow-sm">
+            <p className="text-center text-lg font-black text-blue-700 mb-1">
+              ① お名前を押してください
+            </p>
+            <p className="text-center text-xs text-slate-500 mb-4">
+              押すと、出勤・退勤のボタンが出ます
+            </p>
+            {staffList.length === 0 ? (
+              <div className="h-20 grid place-items-center"><Loader2 className="w-6 h-6 animate-spin text-slate-300" /></div>
+            ) : (
+              <div className="grid grid-cols-2 gap-3">
+                {staffList.map((s) => (
+                  <button
+                    key={s.id}
+                    onClick={() => setStaffId(s.id)}
+                    className="h-16 rounded-2xl border-2 border-slate-200 bg-white hover:bg-blue-50 hover:border-blue-400 active:scale-[0.98] transition-all text-base font-black text-slate-700 px-2"
+                  >
+                    {s.name}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800">
-      <div className="max-w-md mx-auto px-4 py-6 space-y-5">
-        {/* ヘッダー */}
-        <div className="text-center">
-          <div className="inline-flex items-center gap-2 text-blue-600 font-black">
-            <Clock className="w-5 h-5" />
-            出退勤の打刻
-          </div>
-          <p className="text-slate-500 text-sm mt-1">{clinicName}</p>
-          {config && (
-            <p className="text-[11px] text-slate-400 mt-1">
-              シフト終わりから{config.overtimeGraceMinutes}分を過ぎての退社は、理由の入力が必要です
+      <div className="max-w-md mx-auto px-4 py-6 space-y-4">
+        {/* 選択中の名前＋現在時刻。押せば名前を選び直せる */}
+        <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-2xl font-black text-slate-800 truncate">{selectedStaff?.name} さん</p>
+            <p className="text-xs text-slate-500 mt-0.5">
+              {format(new Date(), "M月d日(E)", { locale: ja })}　現在 {nowHm}
             </p>
-          )}
+          </div>
+          <button
+            onClick={() => { setStaffId(""); setShowMine(false); }}
+            className="shrink-0 h-10 px-3 rounded-xl border border-slate-300 text-xs font-bold text-slate-600 hover:bg-slate-50"
+          >
+            名前を
+            <br />
+            変える
+          </button>
         </div>
 
-        {/* 名前選択 */}
-        <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm">
-          <label className="block">
-            <span className="text-xs font-bold text-slate-600">お名前を選んでください</span>
-            <select
-              value={staffId}
-              onChange={(e) => setStaffId(e.target.value)}
-              className="mt-1.5 w-full h-12 rounded-xl border border-slate-300 px-3 text-base bg-white"
-            >
-              <option value="">― 選択してください ―</option>
-              {staffList.map((s) => (
-                <option key={s.id} value={s.id}>{s.name}</option>
-              ))}
-            </select>
-          </label>
-        </div>
+        {/* 打刻もれのお知らせ（次の勤務日に気づけるように） */}
+        {mine.missingCount > 0 && (
+          <button
+            onClick={() => setShowMine(true)}
+            className="w-full text-left bg-amber-50 border-2 border-amber-400 rounded-2xl p-4 hover:bg-amber-100 transition-colors"
+          >
+            <div className="flex items-start gap-2">
+              <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+              <div>
+                <p className="font-black text-amber-800 text-sm">
+                  打刻が抜けている日が {mine.missingCount}日 あります
+                </p>
+                <p className="text-xs text-amber-700 mt-0.5">
+                  押して確認・入力できます（出勤か退勤のどちらかを押し忘れた日です）
+                </p>
+              </div>
+            </div>
+          </button>
+        )}
 
         {/* 本日の状態 */}
-        {staffId && (
-          <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm">
-            <p className="text-xs font-bold text-slate-600 mb-2">
-              本日（{format(new Date(), "M月d日(E)", { locale: ja })}）の {selectedStaff?.name} さん
-            </p>
-            {loadingToday ? (
-              <div className="h-12 grid place-items-center"><Loader2 className="w-5 h-5 animate-spin text-slate-300" /></div>
-            ) : (
-              <div className="grid grid-cols-2 gap-3 text-center">
-                <div className={`rounded-xl p-3 border ${clockedIn ? "bg-emerald-50 border-emerald-200" : "bg-slate-50 border-slate-200"}`}>
-                  <div className="text-[11px] font-bold text-slate-500">出勤</div>
-                  <div className="text-lg font-black mt-0.5">
-                    {today?.clockInAt ? format(new Date(today.clockInAt), "HH:mm") : "—"}
-                  </div>
-                </div>
-                <div className={`rounded-xl p-3 border ${clockedOut ? "bg-blue-50 border-blue-200" : "bg-slate-50 border-slate-200"}`}>
-                  <div className="text-[11px] font-bold text-slate-500">退勤</div>
-                  <div className="text-lg font-black mt-0.5">
-                    {today?.clockOutAt ? format(new Date(today.clockOutAt), "HH:mm") : "—"}
-                  </div>
+        <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm">
+          {loadingToday ? (
+            <div className="h-14 grid place-items-center"><Loader2 className="w-5 h-5 animate-spin text-slate-300" /></div>
+          ) : (
+            <div className="grid grid-cols-2 gap-3 text-center">
+              <div className={`rounded-xl p-3 border-2 ${clockedIn ? "bg-emerald-50 border-emerald-300" : "bg-slate-50 border-slate-200"}`}>
+                <div className="text-xs font-bold text-slate-500">出勤</div>
+                <div className={`text-2xl font-black mt-0.5 tabular-nums ${clockedIn ? "text-emerald-700" : "text-slate-300"}`}>
+                  {today?.clockInAt ? format(new Date(today.clockInAt), "HH:mm") : "まだ"}
                 </div>
               </div>
-            )}
-            {today?.isOvertime && today.reasonType && (
-              <div className="mt-3 text-xs bg-amber-50 border border-amber-200 rounded-lg p-2 text-amber-800 flex items-start gap-1.5">
-                <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
-                <span>
-                  残業として記録：{OVERTIME_REASONS.find((r) => r.value === today.reasonType)?.label}
-                  {today.reasonNote ? `（${today.reasonNote}）` : ""}
-                </span>
+              <div className={`rounded-xl p-3 border-2 ${clockedOut ? "bg-blue-50 border-blue-300" : "bg-slate-50 border-slate-200"}`}>
+                <div className="text-xs font-bold text-slate-500">退勤</div>
+                <div className={`text-2xl font-black mt-0.5 tabular-nums ${clockedOut ? "text-blue-700" : "text-slate-300"}`}>
+                  {today?.clockOutAt ? format(new Date(today.clockOutAt), "HH:mm") : "まだ"}
+                </div>
               </div>
-            )}
-          </div>
-        )}
+            </div>
+          )}
+          {today?.isOvertime && today.reasonType && (
+            <div className="mt-3 text-xs bg-amber-50 border border-amber-200 rounded-lg p-2 text-amber-800 flex items-start gap-1.5">
+              <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+              <span>
+                残業として記録：{OVERTIME_REASONS.find((r) => r.value === today.reasonType)?.label}
+                {today.reasonNote ? `（${today.reasonNote}）` : ""}
+              </span>
+            </div>
+          )}
+        </div>
 
         {/* 今日の業務チェックリスト */}
         {staffId && tasks.length > 0 && (
@@ -341,33 +430,163 @@ export default function AttendancePage() {
           </div>
         )}
 
-        {/* 打刻ボタン */}
-        {staffId && (
-          <div className="space-y-3">
+        {/* 打刻ボタン。今やることを1つだけ大きく出す（両方並べると迷うため） */}
+        <div className="space-y-3">
+          {!clockedIn && (
             <button
               onClick={handleClockIn}
-              disabled={busy || clockedIn}
-              className="w-full h-14 rounded-2xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white text-base font-black shadow-lg flex items-center justify-center gap-2"
+              disabled={busy}
+              className="w-full h-20 rounded-2xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white text-2xl font-black shadow-lg flex items-center justify-center gap-3"
             >
-              <LogIn className="w-5 h-5" />
-              {clockedIn ? "出勤ずみ" : "出勤"}
+              {busy ? <Loader2 className="w-7 h-7 animate-spin" /> : <LogIn className="w-7 h-7" />}
+              ② 出勤
             </button>
-            <button
-              onClick={handleClockOut}
-              disabled={busy || clockedOut}
-              className="w-full h-14 rounded-2xl bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white text-base font-black shadow-lg flex items-center justify-center gap-2"
-            >
-              <LogOut className="w-5 h-5" />
-              {clockedOut ? "退勤ずみ" : "退勤"}
-            </button>
-            {clockedOut && (
-              <div className="text-center text-emerald-600 text-sm font-bold flex items-center justify-center gap-1">
-                <CheckCircle2 className="w-4 h-4" /> 本日の打刻は完了しています
-              </div>
-            )}
-          </div>
-        )}
+          )}
+
+          {clockedIn && !clockedOut && (
+            <>
+              <button
+                onClick={handleClockOut}
+                disabled={busy}
+                className="w-full h-20 rounded-2xl bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white text-2xl font-black shadow-lg flex items-center justify-center gap-3"
+              >
+                {busy ? <Loader2 className="w-7 h-7 animate-spin" /> : <LogOut className="w-7 h-7" />}
+                退勤
+              </button>
+              {tasksLeft > 0 && (
+                <p className="text-center text-xs font-bold text-amber-700 bg-amber-50 border border-amber-200 rounded-xl py-2 px-3">
+                  退勤する前に、上の「今日の業務」を{tasksLeft}件チェックしてください
+                </p>
+              )}
+            </>
+          )}
+
+          {clockedOut && (
+            <div className="rounded-2xl bg-emerald-50 border-2 border-emerald-300 p-5 text-center">
+              <CheckCircle2 className="w-9 h-9 text-emerald-600 mx-auto" />
+              <p className="mt-1.5 text-lg font-black text-emerald-800">お疲れさまでした</p>
+              <p className="text-sm text-emerald-700 mt-0.5">本日の打刻は終わっています</p>
+            </div>
+          )}
+        </div>
+
+        {/* 自分の記録を確認する（本人だけ・金額は出ない） */}
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+          <button
+            onClick={() => setShowMine((v) => !v)}
+            className="w-full flex items-center justify-between gap-2 px-4 py-3.5 hover:bg-slate-50"
+          >
+            <span className="flex items-center gap-2 text-sm font-black text-slate-700">
+              <CalendarDays className="w-4 h-4 text-blue-500" />
+              自分の出退勤を確認する
+            </span>
+            <span className="text-xs font-bold text-slate-400">{showMine ? "閉じる" : "ひらく"}</span>
+          </button>
+
+          {showMine && (
+            <div className="border-t border-slate-100 px-4 py-3">
+              {mineLoading ? (
+                <div className="h-16 grid place-items-center"><Loader2 className="w-5 h-5 animate-spin text-slate-300" /></div>
+              ) : mine.records.length === 0 ? (
+                <p className="text-sm text-slate-400 py-4 text-center">まだ記録がありません</p>
+              ) : (
+                <ul className="divide-y divide-slate-100">
+                  {mine.records.map((r) => (
+                    <li key={r.workDate} className="py-2.5 flex items-center justify-between gap-2">
+                      <div className="min-w-0">
+                        <span className="text-sm font-bold text-slate-700 tabular-nums">
+                          {r.workDate.slice(5).replace("-", "/")}（{r.weekday}）
+                        </span>
+                        {r.missing && (
+                          <span className="ml-2 text-[10px] font-black text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded-full">
+                            打刻もれ
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <span className="text-sm tabular-nums text-slate-600">
+                          {r.clockIn ?? "—"} 〜 {r.clockOut ?? "—"}
+                        </span>
+                        {r.worked && <span className="text-xs font-bold text-slate-400 tabular-nums w-12 text-right">{r.worked}</span>}
+                        {r.missing && (
+                          <button
+                            onClick={() => { setFixDay(r); setFixIn(r.clockIn ?? ""); setFixOut(r.clockOut ?? ""); }}
+                            className="h-8 px-2.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-white text-xs font-black"
+                          >
+                            入力
+                          </button>
+                        )}
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <p className="mt-2 text-[11px] text-slate-400 leading-relaxed">
+                ここに出るのは自分の記録だけです。<br />
+                すでに出勤・退勤の両方が入っている日を直したいときは院長にお伝えください。
+              </p>
+            </div>
+          )}
+        </div>
       </div>
+
+      {/* 打刻もれの入力モーダル */}
+      {fixDay && (
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-end sm:items-center justify-center p-4" onClick={() => !fixBusy && setFixDay(null)}>
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md p-5 space-y-4" onClick={(e) => e.stopPropagation()}>
+            <div className="text-center">
+              <div className="inline-flex items-center gap-2 text-amber-600 font-black">
+                <AlertTriangle className="w-5 h-5" />
+                {fixDay.workDate.slice(5).replace("-", "月")}日（{fixDay.weekday}）の打刻
+              </div>
+              <p className="text-slate-500 text-sm mt-1">
+                押し忘れた時刻を入れてください
+              </p>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <label className="block">
+                <span className="text-xs font-bold text-slate-600">出勤</span>
+                <input
+                  type="time"
+                  value={fixIn}
+                  onChange={(e) => setFixIn(e.target.value)}
+                  disabled={!!fixDay.clockIn}
+                  className="mt-1 w-full h-12 rounded-xl border border-slate-300 px-3 text-base bg-white disabled:bg-slate-100 disabled:text-slate-400"
+                />
+              </label>
+              <label className="block">
+                <span className="text-xs font-bold text-slate-600">退勤</span>
+                <input
+                  type="time"
+                  value={fixOut}
+                  onChange={(e) => setFixOut(e.target.value)}
+                  disabled={!!fixDay.clockOut}
+                  className="mt-1 w-full h-12 rounded-xl border border-slate-300 px-3 text-base bg-white disabled:bg-slate-100 disabled:text-slate-400"
+                />
+              </label>
+            </div>
+            <p className="text-[11px] text-slate-400 text-center">
+              すでに記録されている方は変えられません（灰色の欄）
+            </p>
+            <div className="flex gap-2 pt-1">
+              <button
+                onClick={() => setFixDay(null)}
+                disabled={fixBusy}
+                className="flex-1 h-12 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold text-sm"
+              >
+                もどる
+              </button>
+              <button
+                onClick={submitFix}
+                disabled={fixBusy || !fixIn || !fixOut}
+                className="flex-1 h-12 rounded-xl bg-amber-600 hover:bg-amber-700 disabled:opacity-40 text-white font-black text-sm"
+              >
+                {fixBusy ? "保存中..." : "この時刻で記録"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 「できなかった理由」入力モーダル */}
       {reasonTask && (
