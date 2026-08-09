@@ -17,10 +17,11 @@ import {
   Smartphone,
   Network,
   ScrollText,
+  Clock,
 } from "lucide-react";
 
-const MANUAL_VERSION = "v1.3";
-const MANUAL_UPDATED_AT = "2026-07-13";
+const MANUAL_VERSION = "v1.4";
+const MANUAL_UPDATED_AT = "2026-08-09";
 
 type Item = {
   icon: React.ReactNode;
@@ -446,6 +447,60 @@ export default function ManualSection() {
         </Section>
 
         <Section
+          icon={<Clock className="w-4 h-4 text-cyan-600" />}
+          title="勤怠（出退勤の打刻）"
+          color="border-cyan-200 dark:border-cyan-900 bg-cyan-50/50 dark:bg-cyan-950/30"
+        >
+          <p>
+            スタッフは <b>/attendance</b> の打刻画面、院長は <b>「勤怠」</b> タブで一覧を見ます。
+            金額（時給・残業代）と全員の一覧は<b>院長だけ</b>が見られます。
+          </p>
+
+          <div className="font-semibold text-slate-900 dark:text-slate-100 pt-1">スタッフの使い方（2ステップ）</div>
+          <Step n={1} title="お名前を押す">
+            打刻画面には大きな名前ボタンが並んでいます。自分の名前を押してください。
+          </Step>
+          <Step n={2} title="「出勤」または「退勤」を押す">
+            今やることが1つだけ大きく出ます。出勤前なら「出勤」、出勤後なら「退勤」だけが出ます。
+            退勤するには、その日の業務すべてに「できた／できなかった」を付ける必要があります（100%でなくて大丈夫です）。
+          </Step>
+
+          <div className="font-semibold text-slate-900 dark:text-slate-100 pt-1">自分の記録の確認・打刻の押し忘れ</div>
+          <p>
+            打刻画面の <b>「自分の出退勤を確認する」</b> で、自分の直近45日ぶんを見られます（自分のぶんだけ）。
+            出勤か退勤のどちらかを押し忘れた日があると、次に画面を開いたとき
+            <b>「打刻が抜けている日が◯日あります」</b> と上に出ます。押すとその場で時刻を入れて直せます。
+          </p>
+          <Tip>
+            スタッフが自分で直せるのは「片方が抜けている日」だけです。
+            出勤・退勤の両方が入っている日を直したいときは、院長が「勤怠」タブの一覧から修正します。
+          </Tip>
+
+          <div className="font-semibold text-slate-900 dark:text-slate-100 pt-1">院のパソコンでだけ打刻できるようにする</div>
+          <p>
+            「勤怠」タブの <b>「打刻できるパソコンを限定する」</b> でパスワードを決めてオンにすると、
+            院のパソコンでそのパスワードを1回入れた端末だけが打刻できるようになります。
+            スタッフ個人のスマホからは打刻できません。パスワードはスタッフに教えないでください。
+          </p>
+          <Tip>
+            <b>パスワードが分からなくなったときは、新しいパスワードを入れて保存し直すだけで大丈夫です。</b>
+            元のパスワードは表示できませんが、すでに登録ずみのパソコンは、パスワードを変えても
+            そのまま打刻を続けられます（打刻できなくなる心配はありません）。
+          </Tip>
+
+          <div className="font-semibold text-slate-900 dark:text-slate-100 pt-1">月末の勤怠管理表（Excel）</div>
+          <p>
+            「勤怠」タブの <b>「勤怠管理表を作る」</b> を押すと、その月の勤怠管理表がExcelでダウンロードされます。
+            スタッフ1人につき1シートで、出勤・休憩・退勤・総稼働・残業まで入った状態で出ます。
+            合計は数式で入っているので、あとから時刻を直せば自動で計算し直されます。
+          </p>
+          <Tip>
+            打刻の押し忘れや時刻の間違いは、先に「勤怠」タブの一覧で直してから作ってください。
+            ツールの記録がそのままExcelになります。
+          </Tip>
+        </Section>
+
+        <Section
           icon={<HelpCircle className="w-4 h-4 text-slate-600" />}
           title="困ったときは（よくある質問）"
           color="border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-900/40"
@@ -455,6 +510,22 @@ export default function ManualSection() {
             <p>
               A. その患者さんがLINE紐づけ済か「顧客管理」で確認してください。
               「未紐づけ」になっていればリマインダーは送れません。
+            </p>
+          </div>
+          <div>
+            <div className="font-semibold mb-1">Q. 打刻用のパスワードが分からなくなりました</div>
+            <p>
+              A.「勤怠」タブの「打刻できるパソコンを限定する」で、新しいパスワードを入れて保存し直してください。
+              元のパスワードは表示できませんが、すでに登録ずみのパソコンは、パスワードを変えても
+              そのまま打刻できます。打刻できなくなることはありません。
+            </p>
+          </div>
+          <div>
+            <div className="font-semibold mb-1">Q. 出勤（または退勤）を押し忘れました</div>
+            <p>
+              A. 次に打刻画面を開くと上に「打刻が抜けている日が◯日あります」と出ます。
+              押すとその日の時刻をその場で入力できます。
+              出勤・退勤の両方が入っている日を直したいときは院長にお伝えください（「勤怠」タブから直せます）。
             </p>
           </div>
           <div>

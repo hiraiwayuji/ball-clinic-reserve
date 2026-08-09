@@ -1217,12 +1217,11 @@ export async function getMonthlyAttendanceForExcel(
   const monthEnd = `${month}-${String(daysInMonth).padStart(2, "0")}`;
 
   const [{ data: staffRows }, { data: settings }, { data: holidays }, attendanceRes] = await Promise.all([
-    // 打刻対象外（藤川先生・オーナー等）は月次勤怠表にも出さない
+    // 退職者も含めて全員取る。誰を表に載せるかは下で決める
+    // （退職した人でもその月に働いていれば、給与のために勤怠管理表が要る）
     supabase.from("reservation_staff")
-      .select("id, name, sort_order")
+      .select("id, name, sort_order, is_active, attendance_excluded")
       .eq("clinic_id", clinicId)
-      .eq("is_active", true)
-      .or("attendance_excluded.is.null,attendance_excluded.eq.false")
       .order("sort_order", { ascending: true }),
     supabase.from("clinic_settings").select("closed_weekdays").eq("id", clinicId).maybeSingle(),
     supabase.from("clinic_holidays").select("date").eq("clinic_id", clinicId)
@@ -1260,7 +1259,17 @@ export async function getMonthlyAttendanceForExcel(
     byKey.set(key, cur);
   }
 
-  const staff: AttendanceExcelStaff[] = ((staffRows ?? []) as any[]).map((s) => {
+  // 表に載せる人＝「今いる打刻対象のスタッフ」＋「その月に打刻がある人（退職者を含む）」。
+  // 退職で is_active=false にした人を外してしまうと、最終月の勤怠管理表が出せなくなる。
+  const punchedThisMonth = new Set(
+    ((attendanceRes.data ?? []) as any[]).map((r) => r.staff_id as string),
+  );
+  const targetStaff = ((staffRows ?? []) as any[]).filter((s) => {
+    const active = s.is_active !== false && s.attendance_excluded !== true;
+    return active || punchedThisMonth.has(s.id as string);
+  });
+
+  const staff: AttendanceExcelStaff[] = targetStaff.map((s) => {
     const days: AttendanceExcelDay[] = [];
     for (let d = 1; d <= daysInMonth; d++) {
       const dateStr = `${month}-${String(d).padStart(2, "0")}`;
