@@ -6,15 +6,17 @@ import { ja } from "date-fns/locale";
 import { toast } from "sonner";
 import {
   Loader2, Clock, ChevronLeft, ChevronRight, AlertTriangle, Copy, Link2,
-  Save, Coins, Settings2, CheckCircle2, TrendingDown, Lock, Eye, EyeOff, Pencil,
+  Save, Coins, Settings2, CheckCircle2, TrendingDown, Lock, Eye, EyeOff, Pencil, FileSpreadsheet,
 } from "lucide-react";
 import {
   getAttendanceSettings, setAttendanceSettings, listStaffWages, setStaffWage, getAttendanceReport,
   getAttendanceDeviceSettings, setAttendancePasscode, setAttendanceDeviceLock,
   getWageGate, setWagePasscode, unlockWageView, lockWageView, setAttendanceTimes,
+  getMonthlyAttendanceForExcel, getAttendanceClinicName,
   type AttendanceConfig, type OwnerStaffWage, type AttendanceReportRecord, type AttendanceSummary, type AttendanceJudgment,
 } from "@/app/actions/attendance";
 import { JUDGMENT_LABEL } from "@/lib/attendance-constants";
+import { downloadMonthlyAttendanceExcel } from "@/lib/attendance-excel";
 
 const COLOR: Record<string, string> = {
   blue: "#3b82f6", sky: "#0ea5e9", indigo: "#6366f1", violet: "#8b5cf6", purple: "#a855f7",
@@ -45,6 +47,7 @@ export default function AttendanceAdminPage() {
   const [summary, setSummary] = useState<AttendanceSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [savingCfg, setSavingCfg] = useState(false);
+  const [excelBusy, setExcelBusy] = useState(false);
   const [attendUrl, setAttendUrl] = useState("");
   // 端末ロック（院のPCのみ打刻）
   const [deviceLock, setDeviceLock] = useState(false);
@@ -172,6 +175,31 @@ export default function AttendanceAdminPage() {
       .then((r) => { setRecords(r.success ? r.records ?? [] : []); setSummary(r.success ? r.summary ?? null : null); })
       .finally(() => setLoading(false));
   }, [monthStr]);
+
+  /** 打刻データから、藤川先生がこれまで手作業で作っていた勤怠管理表を作る */
+  const downloadExcel = async () => {
+    setExcelBusy(true);
+    try {
+      const [res, clinicName] = await Promise.all([
+        getMonthlyAttendanceForExcel(monthStr),
+        getAttendanceClinicName(),
+      ]);
+      if (!res.success || !res.staff) {
+        toast.error(res.error ?? "勤怠管理表の作成に失敗しました");
+        return;
+      }
+      if (res.staff.length === 0) {
+        toast.error("対象のスタッフがいません");
+        return;
+      }
+      downloadMonthlyAttendanceExcel(monthStr, clinicName, res.staff);
+      toast.success(`${res.staff.length}名分の勤怠管理表をダウンロードしました`);
+    } catch {
+      toast.error("勤怠管理表の作成に失敗しました");
+    } finally {
+      setExcelBusy(false);
+    }
+  };
 
   const saveConfig = async () => {
     if (!config) return;
@@ -476,12 +504,23 @@ export default function AttendanceAdminPage() {
       </div>
 
       {/* 月切替 */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-2 flex-wrap">
         <h2 className="text-sm font-black text-slate-700">勤怠の記録</h2>
-        <div className="flex items-center gap-1 bg-slate-100 rounded-xl p-1">
-          <button onClick={() => setMonth((d) => addMonths(d, -1))} className="h-8 w-8 grid place-items-center rounded-lg hover:bg-white"><ChevronLeft className="w-4 h-4" /></button>
-          <span className="px-2 text-sm font-bold min-w-[96px] text-center">{format(month, "yyyy年M月", { locale: ja })}</span>
-          <button onClick={() => setMonth((d) => addMonths(d, 1))} className="h-8 w-8 grid place-items-center rounded-lg hover:bg-white"><ChevronRight className="w-4 h-4" /></button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={downloadExcel}
+            disabled={excelBusy}
+            className="flex items-center gap-1.5 h-9 px-3 rounded-xl bg-emerald-600 text-white text-sm font-bold hover:bg-emerald-700 disabled:opacity-50"
+            title="この月の勤怠管理表をExcelで作ります（スタッフごとにシートが分かれます）"
+          >
+            {excelBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileSpreadsheet className="w-4 h-4" />}
+            勤怠管理表を作る
+          </button>
+          <div className="flex items-center gap-1 bg-slate-100 rounded-xl p-1">
+            <button onClick={() => setMonth((d) => addMonths(d, -1))} className="h-8 w-8 grid place-items-center rounded-lg hover:bg-white"><ChevronLeft className="w-4 h-4" /></button>
+            <span className="px-2 text-sm font-bold min-w-[96px] text-center">{format(month, "yyyy年M月", { locale: ja })}</span>
+            <button onClick={() => setMonth((d) => addMonths(d, 1))} className="h-8 w-8 grid place-items-center rounded-lg hover:bg-white"><ChevronRight className="w-4 h-4" /></button>
+          </div>
         </div>
       </div>
 

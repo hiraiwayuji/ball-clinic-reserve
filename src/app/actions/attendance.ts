@@ -1027,3 +1027,104 @@ export async function getAttendanceReport(
 
   return { success: true, records, summary };
 }
+
+// ── 月次勤怠表（Excel）の元データ ──────────────────────────
+
+/** 1日ぶんの打刻。休診日はDBを見ずに isClosed=true で返す（備考に「院休診」を出すため） */
+export type AttendanceExcelDay = {
+  day: number;              // 1〜31
+  weekday: string;          // "月"〜"日"
+  clockIn: string | null;   // "HH:mm"
+  clockOut: string | null;  // "HH:mm"
+  isClosed: boolean;
+};
+
+export type AttendanceExcelStaff = {
+  staffId: string;
+  staffName: string;
+  days: AttendanceExcelDay[];
+};
+
+/**
+ * 月次勤怠表（藤川先生が今まで手作業で作っていたExcelと同じ形式）を
+ * 自動生成するための元データ。owner専用。日は1日〜月末まで全部返す
+ * （打刻が無い日も行として出すため）。
+ * 各セルの合計・残業時間はブラウザ側（lib/attendance-excel.ts）で計算する。
+ */
+export async function getMonthlyAttendanceForExcel(
+  month: string,
+): Promise<{ success: boolean; staff?: AttendanceExcelStaff[]; error?: string }> {
+  const { clinicId } = await requireRole(["owner"]);
+  if (!/^\d{4}-\d{2}$/.test(month)) return { success: false, error: "月の指定が不正です" };
+  const { createClient } = await import("@/lib/supabase/server");
+  const supabase = await createClient();
+
+  const [yy, mm] = month.split("-").map(Number);
+  const daysInMonth = new Date(yy, mm, 0).getDate();
+  const monthStart = `${month}-01`;
+  const monthEnd = `${month}-${String(daysInMonth).padStart(2, "0")}`;
+
+  const [{ data: staffRows }, { data: settings }, { data: holidays }, attendanceRes] = await Promise.all([
+    // 打刻対象外（藤川先生・オーナー等）は月次勤怠表にも出さない
+    supabase.from("reservation_staff")
+      .select("id, name, sort_order")
+      .eq("clinic_id", clinicId)
+      .eq("is_active", true)
+      .or("attendance_excluded.is.null,attendance_excluded.eq.false")
+      .order("sort_order", { ascending: true }),
+    supabase.from("clinic_settings").select("closed_weekdays").eq("id", clinicId).maybeSingle(),
+    supabase.from("clinic_holidays").select("date").eq("clinic_id", clinicId)
+      .gte("date", monthStart).lte("date", monthEnd),
+    supabase.from("staff_attendance")
+      .select("staff_id, work_date, clock_in_at, clock_out_at")
+      .eq("clinic_id", clinicId)
+      .gte("work_date", monthStart).lte("work_date", monthEnd),
+  ]);
+  if (attendanceRes.error) return { success: false, error: attendanceRes.error.message };
+
+  const closedWeekdays = new Set(
+    ((settings?.closed_weekdays as string | null) ?? "0,3").split(",").map((s) => parseInt(s.trim(), 10)),
+  );
+  const holidaySet = new Set((holidays ?? []).map((h: any) => h.date as string));
+  const WD = ["日", "月", "火", "水", "木", "金", "土"];
+
+  const hm = (iso: string | null) => {
+    if (!iso) return null;
+    return new Intl.DateTimeFormat("ja-JP", {
+      timeZone: "Asia/Tokyo", hour: "2-digit", minute: "2-digit", hour12: false,
+    }).format(new Date(iso));
+  };
+
+  // (staff_id, work_date) -> {clockIn, clockOut}。同日複数打刻は最初の出勤・最後の退勤を使う
+  const byKey = new Map<string, { in: string | null; out: string | null }>();
+  for (const r of (attendanceRes.data ?? []) as any[]) {
+    const key = `${r.staff_id}|${r.work_date}`;
+    const cur = byKey.get(key) ?? { in: null, out: null };
+    const inT = hm(r.clock_in_at);
+    const outT = hm(r.clock_out_at);
+    if (inT && (!cur.in || inT < cur.in)) cur.in = inT;
+    if (outT && (!cur.out || outT > cur.out)) cur.out = outT;
+    byKey.set(key, cur);
+  }
+
+  const staff: AttendanceExcelStaff[] = ((staffRows ?? []) as any[]).map((s) => {
+    const days: AttendanceExcelDay[] = [];
+    for (let d = 1; d <= daysInMonth; d++) {
+      const dateStr = `${month}-${String(d).padStart(2, "0")}`;
+      // 曜日は暦日そのものから出す。"YYYY-MM-DDT00:00:00+09:00" を new Date して
+      // getUTCDay すると UTC では前日になり、曜日が1日ずれる。
+      const weekdayIdx = new Date(Date.UTC(yy, mm - 1, d)).getUTCDay();
+      const rec = byKey.get(`${s.id}|${dateStr}`);
+      days.push({
+        day: d,
+        weekday: WD[weekdayIdx],
+        clockIn: rec?.in ?? null,
+        clockOut: rec?.out ?? null,
+        isClosed: closedWeekdays.has(weekdayIdx) || holidaySet.has(dateStr),
+      });
+    }
+    return { staffId: s.id as string, staffName: s.name as string, days };
+  });
+
+  return { success: true, staff };
+}
