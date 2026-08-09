@@ -334,6 +334,15 @@ export default function AttendanceAdminPage() {
           院のパソコンで一度だけパスワードを入力すれば、以後そのパソコンはパスワード不要です。
           スタッフ個人のスマホでは打刻できなくなります（パスワードは院長だけが知っておいてください）。
         </p>
+        {/* パスワードはハッシュで保存していて元に戻せない。
+            「分からなくなった＝詰み」と思われないよう、対処法をその場に書いておく。 */}
+        {hasPasscode && (
+          <p className="text-[11px] text-slate-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 leading-relaxed">
+            <span className="font-bold">パスワードが分からなくなったときは</span><br />
+            下の欄に新しいパスワードを入れて保存するだけで大丈夫です（元のパスワードは表示できません）。
+            すでに登録ずみのパソコンは、パスワードを変えてもそのまま打刻できます。
+          </p>
+        )}
 
         {/* パスワード設定 */}
         <label className="block">
