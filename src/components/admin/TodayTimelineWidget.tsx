@@ -564,15 +564,26 @@ export default function TodayTimelineWidget({
   // （例: 17:00-17:40 を A先生・B先生で 17:00-17:20 / 17:20-17:40 に分割）
   // _displayStart / _displayEnd はタイムテーブル表示専用で、モーダルは元の start_time を使う
   const buildAptsByStaff = (day: TimelineDay, slotMinutes: number) => {
-    type DisplayApt = TimelineAppointment & { _displayStart?: string; _displayEnd?: string };
+    type DisplayApt = TimelineAppointment & {
+      _displayStart?: string;
+      _displayEnd?: string;
+      _displayCourseName?: string;
+    };
     const map = new Map<string, DisplayApt[]>();
 
     for (const a of day.appointments) {
       const allStaffIds: string[] = [];
       allStaffIds.push(a.staff_id ?? defaultStaffId ?? UNASSIGNED_KEY);
+      // その先生が担当するメニュー名。1人目＝主メニュー、2人目以降＝追加メニューの順番で対応させる。
+      // これを出さないと「経絡治療は森藤先生しかできないのに森川先生の行に経絡治療と出る」
+      // （実際に森川先生が担当しているのは追加メニューの保険施術）という誤解になる。
+      const courseNames: (string | null)[] = [a.course_name ?? null];
+      const addCourses = a.additional_courses ?? [];
       for (const add of a.additional_staff ?? []) {
         if (add?.staff_id && !allStaffIds.includes(add.staff_id)) {
+          const idx = allStaffIds.length - 1; // 追加スタッフの何人目か（0始まり）
           allStaffIds.push(add.staff_id);
+          courseNames.push(addCourses[idx]?.course_name ?? null);
         }
       }
 
@@ -599,7 +610,12 @@ export default function TodayTimelineWidget({
         if (!map.has(staffId)) map.set(staffId, []);
         const displayStart = shiftIso(a.start_time, idx * perStaff);
         const displayEnd = shiftIso(a.start_time, (idx + 1) * perStaff);
-        map.get(staffId)!.push({ ...a, _displayStart: displayStart, _displayEnd: displayEnd });
+        map.get(staffId)!.push({
+          ...a,
+          _displayStart: displayStart,
+          _displayEnd: displayEnd,
+          _displayCourseName: courseNames[idx] ?? a.course_name ?? undefined,
+        });
       });
     }
     return map as Map<string, TimelineAppointment[]>;
@@ -1122,8 +1138,12 @@ export default function TodayTimelineWidget({
                     })}
                     {/* 予約バー（absolute 配置） */}
                     {apts.map((a) => {
-                      // 複数スタッフ予約は _displayStart/_displayEnd でずらした時刻を使う
-                      const dispA = a as typeof a & { _displayStart?: string; _displayEnd?: string };
+                      // 複数スタッフ予約は _displayStart/_displayEnd でずらした時刻・担当メニューを使う
+                      const dispA = a as typeof a & {
+                        _displayStart?: string;
+                        _displayEnd?: string;
+                        _displayCourseName?: string;
+                      };
                       const startMin = minuteOfDayJst(dispA._displayStart ?? a.start_time);
                       const endMinRaw = (dispA._displayEnd ?? a.end_time)
                         ? minuteOfDayJst(dispA._displayEnd ?? a.end_time!)
@@ -1151,6 +1171,8 @@ export default function TodayTimelineWidget({
                       const isCancelled = a.status === "cancelled";
                       const displayStartLabel = fmtTime(dispA._displayStart ?? a.start_time);
                       const hasMultiStaff = (dispA._displayStart !== undefined);
+                      // その先生のレーンに出すメニュー名（複数スタッフ予約は担当ぶんだけ）
+                      const laneCourseName = dispA._displayCourseName ?? a.course_name;
                       const draggable = canDrag(a);
                       return (
                         <button
@@ -1180,7 +1202,7 @@ export default function TodayTimelineWidget({
                           }}
                           title={isCancelled
                             ? `${displayStartLabel} ${a.customer_name ?? ""} ${cancelKindLabel(a.cancel_kind, a.no_show)}（タップで復活できます）`
-                            : `${displayStartLabel} ${a.customer_name ?? ""}${a.medical_record_number ? ` (No.${a.medical_record_number})` : ""} ${a.course_name ?? ""}${hasMultiStaff ? "（時間分割表示・ドラッグ移動はできません）" : "・ドラッグで時間や先生を変えられます"}`}
+                            : `${displayStartLabel} ${a.customer_name ?? ""}${a.medical_record_number ? ` (No.${a.medical_record_number})` : ""} ${laneCourseName ?? ""}${hasMultiStaff ? `（${s.name}先生の担当ぶん・時間分割表示・ドラッグ移動はできません）` : "・ドラッグで時間や先生を変えられます"}`}
                         >
                           <div className={`truncate font-semibold ${isCancelled ? "line-through" : ""}`}>
                             {!a.staff_id && !isCancelled && (
@@ -1210,10 +1232,12 @@ export default function TodayTimelineWidget({
                             <div className="truncate text-[9px] font-bold text-slate-400 dark:text-slate-500">
                               {cancelKindLabel(a.cancel_kind, a.no_show)}
                             </div>
-                          ) : a.course_name && (
+                          ) : laneCourseName && (
                             <div className="truncate opacity-80">
-                              {a.department === "カフェ" ? "☕ " : ""}{a.course_name}
-                              {((a.additional_courses?.length ?? 0) > 0) && ` ＋${a.additional_courses?.length}`}
+                              {a.department === "カフェ" ? "☕ " : ""}{laneCourseName}
+                              {/* 複数スタッフの予約は、その先生が担当するメニューだけを出す
+                                  （他の先生のメニューまで出すと「この先生はこれをやらない」誤解になる） */}
+                              {!hasMultiStaff && ((a.additional_courses?.length ?? 0) > 0) && ` ＋${a.additional_courses?.length}`}
                             </div>
                           )}
                         </button>
@@ -1478,7 +1502,14 @@ export default function TodayTimelineWidget({
               {/* 時間だけを動かす。予約変更ダイアログを開かずに済むように */}
               <div className="flex items-center gap-2">
                 <span className="text-xs font-bold text-slate-500 dark:text-slate-400 shrink-0">時間をずらす</span>
-                {[-30, -20, -10, 10, 20, 30].map((d) => (
+                {/* ずらす幅は院の予約枠（clinic_settings.slot_duration_minutes）の1・2・3倍。
+                    30分決め打ちにすると、20分単位で運用している からだ鍼灸整骨院で
+                    枠とズレた時刻に動いてしまう（2026-08-10 藤川先生／絶対ルール）。
+                    からだ=20分 → ±20/40/60、30分の院 → ±30/60/90。 */}
+                {(() => {
+                  const step = data?.slotMinutes ?? 30;
+                  return [-3, -2, -1, 1, 2, 3].map((n) => n * step);
+                })().map((d) => (
                   <button
                     key={d}
                     type="button"
