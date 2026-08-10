@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { CalendarDays, MapPin, Phone, Globe, Instagram, MessageCircle, Star } from "lucide-react";
+import { CalendarDays, MapPin, Phone, Globe, Instagram, Star } from "lucide-react";
 import type { PublicClinicSettings } from "@/app/actions/publicSettings";
 import { getThemeClasses } from "@/lib/lp-theme";
 
@@ -12,8 +12,6 @@ interface Props {
    *  すぐ下のクーポン/メニューに目が行くようにする。 */
   minimal?: boolean;
 }
-
-const LINE_DEFAULT_URL = process.env.NEXT_PUBLIC_LINE_OFFICIAL_ACCOUNT_URL;
 
 export default function LPHero({ settings, fallbackName, minimal = false }: Props) {
   const theme = getThemeClasses(settings?.theme_color ?? "blue");
@@ -72,8 +70,12 @@ export default function LPHero({ settings, fallbackName, minimal = false }: Prop
           </Link>
         )}
 
-        {/* お問い合わせ群 */}
-        <div className="mt-5 grid grid-cols-2 gap-2">
+        {/* お問い合わせ群。
+            「LINEで問合せ」ボタンは置かない（2026-08-10 藤川先生の依頼）。
+            空き枠を見た患者さんが、予約フォームを通さず公式LINEに直接メッセージを送ってしまい、
+            仮予約が院に届かないまま自動応答だけ返る事故が起きたため。
+            ※ LINE連携（友だち追加ゲート）や通知は別の導線なので影響しない。 */}
+        <div className="mt-5">
           {settings?.phone_number && (
             <a
               href={`tel:${settings.phone_number.replace(/[^\d+]/g, "")}`}
@@ -81,17 +83,6 @@ export default function LPHero({ settings, fallbackName, minimal = false }: Prop
             >
               <Phone className={`w-3.5 h-3.5 ${theme.accentText}`} />
               電話する
-            </a>
-          )}
-          {(settings?.line_official_account_url || LINE_DEFAULT_URL) && (
-            <a
-              href={settings?.line_official_account_url || LINE_DEFAULT_URL}
-              target="_blank"
-              rel="noreferrer"
-              className="flex items-center justify-center gap-1.5 h-11 rounded-xl bg-[#06C755]/15 hover:bg-[#06C755]/25 border border-[#06C755]/40 text-white text-xs font-bold transition"
-            >
-              <MessageCircle className="w-3.5 h-3.5 text-[#06C755]" />
-              LINE で問合せ
             </a>
           )}
         </div>
