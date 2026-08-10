@@ -396,10 +396,13 @@ export function AddAppointmentDialog({
     if (!slots || slots.length === 0) {
       return <option value="" disabled>{slotsLoading ? "空きを確認中..." : "時間を選択"}</option>;
     }
+    // カレンダーでタップした時刻が営業時間外などで一覧に無いときも、その時刻を必ず出す。
+    // （選択肢に無いと別の時刻が選ばれているように見え、押した枠と違う時間で登録される事故になる）
+    const extra = time && !slots.some((s) => s.time === time) ? [{ time, blocked: false, note: "時間外" } as AdminDaySlot] : [];
     return (
       <>
         <option value="" disabled>時間を選択</option>
-        {slots.map((s) => (
+        {[...extra, ...slots].map((s) => (
           <option key={s.time} value={s.time} disabled={s.blocked}>
             {s.blocked
               ? `× ${s.time}（${s.note ?? "予約あり"}）`

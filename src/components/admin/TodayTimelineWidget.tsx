@@ -22,6 +22,7 @@ import type { ClinicRole } from "@/app/actions/auth";
 import { AddAppointmentDialog } from "@/components/admin/AddAppointmentDialog";
 import { EditAppointmentDialog } from "@/components/admin/EditAppointmentDialog";
 import { PendingReservationsButton } from "@/components/admin/PendingReservationsButton";
+import { getBlockedSlots, deleteBlockedSlot, type BlockedSlot } from "@/app/actions/blocked-slots";
 
 // スタッフ未指定の予約をまとめる仮想列
 const UNASSIGNED_KEY = "__unassigned__";
@@ -101,9 +102,33 @@ function statusColor(status: string, checkin: string | null, isFirstVisit: boole
   return "bg-sky-50 border-sky-300 text-sky-900 dark:bg-sky-900/30 dark:text-sky-100";
 }
 
+/**
+ * 時間帯の帯（勤務時間・休憩・受付カバー）の位置。
+ * グリッドの1列目はスタッフ名の 140px なので、％は「140px を除いた残り幅」に対して掛ける。
+ * （140px を含む全幅に掛けていたため、帯が右にズレて実際の時刻と合っていなかった）
+ */
+function bandStyle(startMin: number, endMin: number, scheduleStart: number, scheduleEnd: number) {
+  const total = scheduleEnd - scheduleStart;
+  if (total <= 0) return null;
+  const l = Math.max(0, (Math.max(startMin, scheduleStart) - scheduleStart) / total);
+  const r = Math.min(1, (Math.min(endMin, scheduleEnd) - scheduleStart) / total);
+  if (r <= l) return null;
+  return {
+    left: `calc(140px + (100% - 140px) * ${l})`,
+    width: `calc((100% - 140px) * ${r - l})`,
+  };
+}
+
 export default function TodayTimelineWidget({
   showPendingButton = true,
-}: { showPendingButton?: boolean } = {}) {
+  breakMode = false,
+  onBreakCell,
+}: {
+  showPendingButton?: boolean;
+  /** 予約画面の「休憩モード」。ON のあいだは空きセルのタップで休憩を追加する。 */
+  breakMode?: boolean;
+  onBreakCell?: (date: Date, time: string) => void;
+} = {}) {
   const router = useRouter();
   // 基準日。week のときはこの日を含む「月曜〜日曜」を表示する。
   const [date, setDate] = useState<Date | null>(null);
@@ -116,6 +141,9 @@ export default function TodayTimelineWidget({
   const [addonInfo, setAddonInfo] = useState<{ courseId: string; name: string; allowConcurrent: boolean } | null>(null);
   // Googleクチコミ依頼が使えるか（設定URLがある院のみボタン表示）
   const [reviewEnabled, setReviewEnabled] = useState(false);
+
+  // 臨時の休憩枠（予約ブロック）。休憩モードで足したぶんをこの画面にも帯で出す。
+  const [blockedSlots, setBlockedSlots] = useState<BlockedSlot[]>([]);
 
   // 新規予約ダイアログ（空きセルクリックで開く）
   const [reserveDialog, setReserveDialog] = useState<{
@@ -242,23 +270,50 @@ export default function TodayTimelineWidget({
     fetchRange(rangeFromKey, rangeToKey);
   }, [rangeFromKey, rangeToKey, fetchRange]);
 
+  // 休憩枠（予約ブロック）を期間ぶん取得
+  const fetchBlocked = useCallback(async (fromKey: string, toKey: string) => {
+    try {
+      setBlockedSlots(await getBlockedSlots(fromKey, toKey));
+    } catch {
+      // 取れなくてもタイムテーブル自体は出す
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!rangeFromKey || !rangeToKey) return;
+    fetchBlocked(rangeFromKey, rangeToKey);
+  }, [rangeFromKey, rangeToKey, fetchBlocked]);
+
   // 予約の追加・変更のあとに今の期間を取り直す
   const rangeRef = useRef<{ from: string; to: string } | null>(null);
   rangeRef.current = rangeFromKey && rangeToKey ? { from: rangeFromKey, to: rangeToKey } : null;
   const refresh = useCallback(() => {
     const r = rangeRef.current;
-    if (r) fetchRange(r.from, r.to);
-  }, [fetchRange]);
+    if (r) { fetchRange(r.from, r.to); fetchBlocked(r.from, r.to); }
+  }, [fetchRange, fetchBlocked]);
 
-  // Realtime: appointments 変更で再取得。
+  // Realtime: appointments / 休憩枠の変更で再取得。
   // 購読は張りっぱなしにし、日付が変わっても貼り直さない（毎回の再購読がもたつきの元だった）。
   useEffect(() => {
     const sb = createClient();
     const ch = sb.channel("timeline-realtime")
       .on("postgres_changes", { event: "*", schema: "public", table: "appointments" }, realtimeGuard(() => refresh()))
+      .on("postgres_changes", { event: "*", schema: "public", table: "clinic_blocked_slots" }, realtimeGuard(() => refresh()))
       .subscribe();
     return () => { sb.removeChannel(ch); };
   }, [refresh]);
+
+  // 休憩枠の削除（帯の × ボタン）
+  const handleDeleteBlocked = async (b: BlockedSlot) => {
+    if (!window.confirm(`${b.start_time}〜${b.end_time} の「${b.reason}」を削除しますか？`)) return;
+    const res = await deleteBlockedSlot(b.id);
+    if (res.success) {
+      toast.success("休憩を削除しました。");
+      refresh();
+    } else {
+      toast.error(res.error ?? "削除に失敗しました。");
+    }
+  };
 
   // 1日表示なら前後1日、週表示なら前後1週間ぶん動かす
   const goPrev = () => date && setDate(rangeMode === "week" ? addWeeks(date, -1) : addDays(date, -1));
@@ -266,10 +321,15 @@ export default function TodayTimelineWidget({
   const goToday = () => setDate(new Date());
 
   // 空きセルクリック → 新規予約ダイアログを開く
+  // （休憩モードONのときは予約ではなく「休憩（予約ブロック）」を追加する）
   const handleEmptyCellClick = (dateKey: string, staffId: string, minuteOfDay: number) => {
     const hh = Math.floor(minuteOfDay / 60);
     const mm = minuteOfDay % 60;
     const timeStr = `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
+    if (breakMode && onBreakCell) {
+      onBreakCell(dateFromKey(dateKey), timeStr);
+      return;
+    }
     setReserveDialog({
       open: true,
       staffId: staffId === UNASSIGNED_KEY ? undefined : staffId,
@@ -713,24 +773,68 @@ export default function TodayTimelineWidget({
                     </div>
                     {receptionSchedules.map((sc) => {
                       if (sc.isOff || !sc.startTime || !sc.endTime) return null;
-                      const sMin = hmToMinutes(sc.startTime);
-                      const eMin = hmToMinutes(sc.endTime);
-                      const left = Math.max(0, ((sMin - scheduleStart) / totalGridMinutes) * 100);
-                      const width = Math.min(100 - left, ((Math.min(eMin, scheduleEnd) - Math.max(sMin, scheduleStart)) / totalGridMinutes) * 100);
-                      if (width <= 0) return null;
+                      const band = bandStyle(
+                        hmToMinutes(sc.startTime),
+                        hmToMinutes(sc.endTime),
+                        scheduleStart,
+                        scheduleEnd,
+                      );
+                      if (!band) return null;
                       return (
                         <div
                           key={sc.staffId}
                           className="absolute top-1 bottom-1 rounded"
                           style={{
-                            left: `calc(140px + ${left}%)`,
-                            width: `${width}%`,
+                            ...band,
                             backgroundColor: sc.displayColor ?? "#94a3b8",
                             opacity: 0.5,
                             zIndex: 1,
                           }}
                           title={`${sc.staffName} ${sc.startTime}–${sc.endTime}`}
                         />
+                      );
+                    })}
+                  </div>
+                );
+              })()}
+
+              {/* 臨時の休憩（予約ブロック）ストリップ。
+                  院ぜんたいを塞ぐので、スタッフ行とは別に1本の帯で出す。× で削除できる。 */}
+              {(() => {
+                const dayBlocks = blockedSlots.filter((b) => b.date === day.date);
+                if (dayBlocks.length === 0) return null;
+                const scheduleStart = day.scheduleStartHour * 60;
+                const scheduleEnd = day.scheduleEndHour * 60;
+                return (
+                  <div
+                    className="grid relative border-b border-amber-200 dark:border-amber-800/60 bg-amber-50/60 dark:bg-amber-900/10"
+                    style={{ gridTemplateColumns: `140px repeat(${timeMarks.length}, minmax(28px, 1fr))`, minHeight: "22px" }}
+                  >
+                    <div className="px-2 py-0.5 text-[10px] font-bold text-amber-700 dark:text-amber-300 sticky left-0 bg-amber-50 dark:bg-amber-900/20 z-10 border-r border-amber-200 dark:border-amber-800/60 flex items-center gap-1" style={{ gridRow: "1" }}>
+                      🍵 休憩（予約不可）
+                    </div>
+                    {dayBlocks.map((b) => {
+                      const band = bandStyle(hmToMinutes(b.start_time), hmToMinutes(b.end_time), scheduleStart, scheduleEnd);
+                      if (!band) return null;
+                      return (
+                        <div
+                          key={b.id}
+                          className="absolute top-0.5 bottom-0.5 rounded border border-amber-300 bg-amber-200/80 dark:bg-amber-800/50 dark:border-amber-700 flex items-center justify-center gap-1 overflow-hidden"
+                          style={{ ...band, zIndex: 2 }}
+                          title={`${b.start_time}〜${b.end_time} ${b.reason}`}
+                        >
+                          <span className="text-[10px] font-bold text-amber-800 dark:text-amber-200 truncate px-1">
+                            {b.start_time}〜{b.end_time} {b.reason}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteBlocked(b)}
+                            className="shrink-0 rounded px-1 text-amber-800 dark:text-amber-200 hover:bg-amber-300/70 font-bold"
+                            title="この休憩を削除"
+                          >
+                            ×
+                          </button>
+                        </div>
                       );
                     })}
                   </div>
@@ -786,13 +890,9 @@ export default function TodayTimelineWidget({
                 const schedEnd = sched?.endTime ? hmToMinutes(sched.endTime) : null;
                 const scheduleStart = day.scheduleStartHour * 60;
                 const scheduleEnd = day.scheduleEndHour * 60;
-                const totalGridMinutes = scheduleEnd - scheduleStart;
-                // 勤務時間バーの CSS left/width (%)
-                const barLeft = (schedStart !== null && totalGridMinutes > 0)
-                  ? Math.max(0, ((schedStart - scheduleStart) / totalGridMinutes) * 100)
-                  : null;
-                const barWidth = (schedStart !== null && schedEnd !== null && totalGridMinutes > 0)
-                  ? Math.min(100, ((Math.min(schedEnd, scheduleEnd) - Math.max(schedStart, scheduleStart)) / totalGridMinutes) * 100)
+                // 勤務時間バーの位置（スタッフ名の 140px を除いた幅に対して計算する）
+                const schedBand = (schedStart !== null && schedEnd !== null)
+                  ? bandStyle(schedStart, schedEnd, scheduleStart, scheduleEnd)
                   : null;
 
                 const editKey = `${day.date}|${s.id}`;
@@ -824,12 +924,11 @@ export default function TodayTimelineWidget({
                       />
                     )}
                     {/* 勤務時間バー（予約バーの後ろ、z-index 低め） */}
-                    {barLeft !== null && barWidth !== null && !sched?.isOff && !day.isHoliday && (
+                    {schedBand && !sched?.isOff && !day.isHoliday && (
                       <div
                         className="absolute top-0 bottom-0 pointer-events-none"
                         style={{
-                          left: `calc(140px + ${barLeft}%)`,
-                          width: `${barWidth}%`,
+                          ...schedBand,
                           backgroundColor: "rgba(220, 252, 231, 0.5)",
                           zIndex: 0,
                         }}
@@ -838,21 +937,18 @@ export default function TodayTimelineWidget({
                     {/* 休憩バンド（グレー帯） */}
                     {(() => {
                       if (!sched || sched.isOff || !sched.breakStart || !sched.breakEnd) return null;
-                      const brkStart = hmToMinutes(sched.breakStart);
-                      const brkEnd = hmToMinutes(sched.breakEnd);
-                      if (brkEnd <= brkStart) return null;
-                      const brkLeft = Math.max(0, ((brkStart - scheduleStart) / totalGridMinutes) * 100);
-                      const brkWidth = Math.min(
-                        100 - brkLeft,
-                        ((Math.min(brkEnd, scheduleEnd) - Math.max(brkStart, scheduleStart)) / totalGridMinutes) * 100,
+                      const brkBand = bandStyle(
+                        hmToMinutes(sched.breakStart),
+                        hmToMinutes(sched.breakEnd),
+                        scheduleStart,
+                        scheduleEnd,
                       );
-                      if (brkWidth <= 0) return null;
+                      if (!brkBand) return null;
                       return (
                         <div
                           className="absolute top-0 bottom-0 pointer-events-none flex items-center justify-center"
                           style={{
-                            left: `calc(140px + ${brkLeft}%)`,
-                            width: `${brkWidth}%`,
+                            ...brkBand,
                             backgroundColor: "rgba(100, 116, 139, 0.18)",
                             zIndex: 1,
                           }}
@@ -1005,13 +1101,17 @@ export default function TodayTimelineWidget({
                             e.preventDefault();
                             handleDropOnCell(day.date, s.id, m.minute);
                           }}
-                          aria-label={`${format(dayDate, "M月d日", { locale: ja })} ${s.name} ${m.label} に新規予約を追加`}
-                          title={`${format(dayDate, "M/d", { locale: ja })} ${s.name} ${m.label} ・クリックで新規予約`}
+                          aria-label={`${format(dayDate, "M月d日", { locale: ja })} ${s.name} ${m.label} に${breakMode ? "休憩を追加" : "新規予約を追加"}`}
+                          title={breakMode
+                            ? `${format(dayDate, "M/d", { locale: ja })} ${m.label} ・クリックで休憩（予約ブロック）`
+                            : `${format(dayDate, "M/d", { locale: ja })} ${s.name} ${m.label} ・クリックで新規予約`}
                           style={{ gridRow: "1 / -1" }}
                           className={`h-full transition-colors cursor-pointer ${
                             isDropHere
                               ? "bg-blue-200 dark:bg-blue-800/60 ring-1 ring-inset ring-blue-500"
-                              : "hover:bg-blue-50 dark:hover:bg-blue-900/20"
+                              : breakMode
+                                ? "hover:bg-amber-100 dark:hover:bg-amber-900/30"
+                                : "hover:bg-blue-50 dark:hover:bg-blue-900/20"
                           } ${
                             m.label.includes(":00")
                               ? "border-l border-slate-300 dark:border-slate-600"

@@ -988,8 +988,14 @@ export default function AdminWeeklyGridPage() {
             内部で日付ナビゲーション・データ取得・Realtime 更新を完結。 */}
         {viewModeReady && viewMode === "timetable" && (
           <div className="flex-1 overflow-auto">
-            {/* 予約画面のヘッダーに既に「仮予約」ボタンがあるので、ここでは重複表示しない */}
-            <TodayTimelineWidget showPendingButton={false} />
+            {/* 予約画面のヘッダーに既に「仮予約」ボタンがあるので、ここでは重複表示しない。
+                休憩モードON のときは、この画面の空きセルをタップしても休憩を追加できるようにする
+                （からだ鍼灸整骨院の既定表示がこのタイムテーブルのため、週表示だけ対応だと使えなかった）。 */}
+            <TodayTimelineWidget
+              showPendingButton={false}
+              breakMode={breakMode}
+              onBreakCell={openBreakDialogForCell}
+            />
           </div>
         )}
 
