@@ -183,6 +183,104 @@ async function getDayCapacity(
 }
 
 /**
+ * 患者が担当を選ばない院で、予約に担当（レーン）を院側のルールで自動で割り当てる。
+ *
+ * からだ鍼灸整骨院の運用ルール（藤川先生／2026-08-10）:
+ *   - 患者に担当を見せない・選ばせない（指名制は無し）
+ *   - 院としての優先順位があり、優先の先生の枠から埋めたい
+ * そのため「そのメニューはこの先生しかできない（required_staff_id）」とは別に、
+ * 「優先的にこの先生に入れたい（preferred_staff_id）」を用意している。
+ * 優先の先生がその日休み・その時間に別の予約がある場合は、他の受付可能な先生に回す。
+ *
+ * 戻り値: 割り当てたスタッフ（誰も空いていなければ null＝担当未設定のまま）
+ */
+async function pickStaffForBooking(
+  db: any,
+  clinicId: string,
+  dateStr: string,
+  time: string,
+  startIso: string,
+  endIso: string,
+  durationMinutes: number,
+  preferredStaffId: string | null,
+): Promise<{ id: string; name: string | null } | null> {
+  try {
+    const { data: staffRows } = await db
+      .from("reservation_staff")
+      .select("id, name, sort_order, schedule_based_booking, booking_weekdays, booking_start_time, booking_end_time, booking_break_start, booking_break_end, booking_until")
+      .eq("clinic_id", clinicId)
+      .eq("is_active", true)
+      .or("available_for_online_booking.is.null,available_for_online_booking.eq.true");
+    if (!staffRows || staffRows.length === 0) return null;
+
+    // その日の個別設定（受付しない日・時間の上書き）と、終日休みの登録
+    const [{ data: dateRows }, { data: offRows }, { data: weeklyRows }, { data: settings }] = await Promise.all([
+      db.from("staff_booking_dates").select("staff_id, available, start_time, end_time")
+        .eq("clinic_id", clinicId).eq("date", dateStr),
+      db.from("staff_working_overrides").select("staff_id, kind, start_time, blocks_booking")
+        .eq("clinic_id", clinicId).eq("date", dateStr),
+      db.from("staff_working_hours").select("staff_id, day_of_week, start_time, end_time, break_start, break_end")
+        .eq("clinic_id", clinicId),
+      db.from("clinic_settings").select("booking_follow_work_schedule, booking_prep_minutes")
+        .eq("id", clinicId).maybeSingle(),
+    ]);
+
+    const followSchedule = !!settings?.booking_follow_work_schedule;
+    const prep = followSchedule ? Number(settings?.booking_prep_minutes ?? 0) || 0 : 0;
+    const offSet = new Set(
+      (offRows ?? [])
+        .filter((o: any) => (o.kind === "off" || o.kind === "leave") && !o.start_time && o.blocks_booking !== false)
+        .map((o: any) => o.staff_id),
+    );
+
+    // 優先の先生を先頭に、あとは表示順
+    const ordered = [...staffRows].sort((a: any, b: any) => {
+      if (preferredStaffId) {
+        if (a.id === preferredStaffId) return -1;
+        if (b.id === preferredStaffId) return 1;
+      }
+      return (a.sort_order ?? 999) - (b.sort_order ?? 999);
+    });
+
+    for (const st of ordered as any[]) {
+      if (st.booking_until && dateStr > String(st.booking_until).slice(0, 10)) continue;
+      if (offSet.has(st.id)) continue;
+
+      const ovr = (dateRows ?? []).find((d: any) => d.staff_id === st.id);
+      const sched = buildStaffSchedule(
+        st,
+        ovr ? [{ date: dateStr, available: !!ovr.available, start: normStaffTime(ovr.start_time), end: normStaffTime(ovr.end_time) }] : [],
+        followSchedule ? (weeklyRows ?? []).filter((w: any) => w.staff_id === st.id) : [],
+        prep,
+      );
+      if (sched) {
+        if (!isStaffAvailableOnYmd(dateStr, sched)) continue;
+        if (!isTimeWithinStaffHoursYmd(dateStr, time, sched)) continue;
+        if (!isStaffSpanBookableYmd(dateStr, time, durationMinutes, sched)) continue;
+      }
+
+      // その時間に別の予約が入っていないか
+      const { data: conflict } = await db
+        .from("appointments")
+        .select("id")
+        .eq("clinic_id", clinicId)
+        .eq("staff_id", st.id)
+        .neq("status", "cancelled")
+        .lt("start_time", endIso)
+        .gt("end_time", startIso)
+        .limit(1);
+      if (conflict && conflict.length > 0) continue;
+
+      return { id: st.id as string, name: (st.name as string) ?? null };
+    }
+    return null;
+  } catch (e) {
+    console.error("[pickStaffForBooking] failed:", e);
+    return null;
+  }
+}
+
+/**
  * 氏名照合用の正規化。
  * 完全一致だけだと「山内 颯人」と「山内颯人」、全角/半角スペースの違いで
  * 既存患者を見つけられず「初めての方は…」になる事故が起きる（2026-05 山内family 実例）。
@@ -602,6 +700,8 @@ export async function createReservation(formData: FormData) {
     let courseDurationStr = formData.get("courseDurationMinutes") as string | null;
     let staffId = (formData.get("staffId") as string) || null;
     let staffName = (formData.get("staffName") as string) || null;
+    // メニューに設定された「優先担当」。患者には見せず、院側の割り当てにだけ使う。
+    let preferredStaffId: string | null = null;
     const roomId = (formData.get("roomId") as string) || null;
     const roomName = (formData.get("roomName") as string) || null;
     const requestedCustomerId = (formData.get("customerId") as string) || null;
@@ -683,7 +783,7 @@ export async function createReservation(formData: FormData) {
       if (courseId) {
         const { data: courseRow } = await adminDb
           .from("reservation_courses")
-          .select("required_staff_id, name, duration_minutes, is_active, is_bookable_addon")
+          .select("required_staff_id, preferred_staff_id, name, duration_minutes, is_active, is_bookable_addon")
           .eq("id", courseId)
           .eq("clinic_id", PUBLIC_CLINIC_ID)
           .maybeSingle();
@@ -709,6 +809,7 @@ export async function createReservation(formData: FormData) {
         if (courseRow.duration_minutes != null) {
           courseDurationStr = String(courseRow.duration_minutes);
         }
+        preferredStaffId = (courseRow?.preferred_staff_id as string | null) ?? null;
         const reqStaffId = (courseRow?.required_staff_id as string | null) ?? null;
         if (reqStaffId) {
           const { data: reqStaff } = await adminDb
@@ -1076,6 +1177,27 @@ export async function createReservation(formData: FormData) {
           .limit(1);
         if (roomConflict && roomConflict.length > 0) {
           return { success: false, error: "選択された個室はその時間帯すでに使用中です。別のお部屋または時間帯をお選びください。" };
+        }
+      }
+
+      // ── 担当（レーン）の自動割り当て ──
+      // からだ鍼灸整骨院のように患者が担当を選べない院では、ここまでで担当が決まっていない。
+      // 担当未設定のまま入れると受付が毎回割り振ることになり、院の優先順位も反映されないため、
+      // メニューの優先担当 → 他の受付可能なスタッフ、の順に「空いている人」を入れる。
+      if (!staffId && !isCapacityFull) {
+        const picked = await pickStaffForBooking(
+          adminDb,
+          DEFAULT_CLINIC_ID,
+          rawDate,
+          time,
+          startDateTimeStr,
+          endDateTimeStr,
+          Number(courseDurationStr) || (await getCurrentSlotDuration()),
+          preferredStaffId,
+        );
+        if (picked) {
+          staffId = picked.id;
+          staffName = picked.name;
         }
       }
 
