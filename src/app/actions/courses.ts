@@ -693,7 +693,9 @@ export async function getCoursesAvailability(): Promise<CourseAvailability[]> {
       .from("clinic_holidays").select("date").eq("clinic_id", DEFAULT_CLINIC_ID);
     const holidaySet = new Set((holidays ?? []).map((h: { date: string }) => String(h.date).slice(0, 10)));
 
-    // 予約（30日分）→ 日付ごとの予約済み30分スロット集合
+    // 予約（30日分）→ 日付ごとの「埋まっている時刻」集合。
+    // 30分刻みで展開すると、20分刻みの院（からだ鍼灸整骨院）で 10:20 のような
+    // 実在する枠を数え落とす。休憩枠と同じ 5分刻みで展開してどの院でも合わせる。
     const startUTC = new Date(`${ymd(today)}T00:00:00+09:00`).toISOString();
     const endUTC = new Date(`${ymd(end)}T23:59:59+09:00`).toISOString();
     const { data: apts } = await admin
@@ -703,8 +705,8 @@ export async function getCoursesAvailability(): Promise<CourseAvailability[]> {
     const bookedByDate = new Map<string, Set<string>>();
     for (const a of apts ?? []) {
       const s = new Date((a as { start_time: string }).start_time).getTime();
-      const e = (a as { end_time?: string | null }).end_time ? new Date((a as { end_time: string }).end_time).getTime() : s + 30 * 60000;
-      for (let cur = s; cur < e; cur += 30 * 60000) {
+      const e = (a as { end_time?: string | null }).end_time ? new Date((a as { end_time: string }).end_time).getTime() : s + 5 * 60000;
+      for (let cur = s; cur < e; cur += 5 * 60000) {
         const j = new Date(cur + 9 * 3600000);
         const dk = `${j.getUTCFullYear()}-${String(j.getUTCMonth() + 1).padStart(2, "0")}-${String(j.getUTCDate()).padStart(2, "0")}`;
         const tk = `${String(j.getUTCHours()).padStart(2, "0")}:${String(j.getUTCMinutes()).padStart(2, "0")}`;

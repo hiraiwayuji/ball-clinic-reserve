@@ -10,6 +10,7 @@ import { getLineAccessToken, pushLineToCustomer } from "@/lib/admin-notify";
 import { getPushTargetsForCustomer, getPushTargetsForCustomers } from "@/lib/line-links";
 import { isTimeWithinStaffHoursYmd, type StaffSchedule } from "@/lib/staff-availability";
 import { formatDateTimeLine, formatVisitLabel } from "@/lib/appointment-summary";
+import { getCurrentSlotDuration } from "@/app/actions/clinic-slot";
 
 /** DB の "HH:MM:SS" / "HH:MM" を "HH:MM" に正規化（未設定は null）。reserve.ts と同じ挙動。 */
 function normStaffTime(v: string | null | undefined): string | null {
@@ -431,7 +432,8 @@ export async function checkAddAppointmentOverlap(params: {
   try {
     const { date, time } = params;
     if (!date || !time) return { kind: "none" };
-    const durationMinutes = Number(params.durationMinutes) || 30;
+    // 所要時間の既定は院の予約枠サイズ（30分決め打ちにしない。からだ鍼灸整骨院は20分）
+    const durationMinutes = Number(params.durationMinutes) || (await getCurrentSlotDuration());
 
     // 1. 実効の担当レーンを決める（担当指定 > コースの required_staff_id）。
     //    どちらも無い（指定なし）ときはレーン重複の概念がないので none。
@@ -564,7 +566,8 @@ export async function createManualReservation(formData: FormData) {
     const recurringWeeksStr = formData.get("recurringWeeks") as string;
     const recurringWeeks = recurringWeeksStr ? parseInt(recurringWeeksStr, 10) : 1;
     const durationStr = formData.get("duration") as string;
-    const durationMinutes = durationStr ? parseInt(durationStr, 10) : 30;
+    // 未指定なら院の予約枠サイズ（からだ鍼灸整骨院は20分。30分決め打ちにしない）
+    const durationMinutes = durationStr ? parseInt(durationStr, 10) : await getCurrentSlotDuration();
 
     // コース・スタッフ・個室の選択（任意）
     // 患者側 reserve と同じく ID と snapshot 名を併存させる。
@@ -2481,6 +2484,8 @@ export async function bulkCreateManualReservations(reservations: any[]) {
 
     const results = [];
     let successCount = 0;
+    // 施術時間の既定に使う院の予約枠サイズ（ループの外で1回だけ取る）
+    const bulkSlotMinutes = await getCurrentSlotDuration();
 
     // ── マスタ一括取得 (N+1解消・clinic_id フィルタ付き) ──
     const courseIds = [...new Set(reservations.map((r: any) => r.courseId).filter(Boolean) as string[])];
@@ -2599,7 +2604,8 @@ export async function bulkCreateManualReservations(reservations: any[]) {
       }
 
       const startDateTimeStr = `${r.date}T${r.time}:00+09:00`;
-      const endDate = new Date(new Date(startDateTimeStr).getTime() + 30 * 60 * 1000);
+      // 施術時間は院の予約枠サイズぶん（からだ鍼灸整骨院は20分。30分決め打ちにしない）
+      const endDate = new Date(new Date(startDateTimeStr).getTime() + bulkSlotMinutes * 60 * 1000);
 
       const memo = `[AI一括登録] ${r.symptoms || ""}`.trim();
 

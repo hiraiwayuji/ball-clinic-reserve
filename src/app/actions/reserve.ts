@@ -393,13 +393,16 @@ export async function getMonthlyAvailability(year: number, month: number): Promi
       return {};
     }
 
-    // 日付ごとの予約数をカウント (30分=1枠として換算、営業時間内のみ)
+    // 日付ごとの予約数をカウント（1枠＝院の予約枠サイズ。営業時間内のみ）。
+    // 30分決め打ちだと、20分刻みの院（からだ鍼灸整骨院）で 11:30 のような
+    // 存在しない時刻を数え、実在する 11:20 を数え落として混み具合がズレる。
+    const slotMinutes = await getCurrentSlotDuration();
     const counts: Record<string, number> = {};
     data.forEach((app: { start_time: string, end_time?: string }) => {
       // データベースから返される時刻はUTCとして解釈されるべき (例: "2026-03-16T04:00:00+00:00")
       const dStart = new Date(app.start_time);
-      const dEnd = app.end_time ? new Date(app.end_time) : new Date(dStart.getTime() + 30 * 60000);
-      
+      const dEnd = app.end_time ? new Date(app.end_time) : new Date(dStart.getTime() + slotMinutes * 60000);
+
       let current = dStart.getTime();
       while (current < dEnd.getTime()) {
         // JavascriptのDateはシステムのローカルタイムゾーンで解釈されるため、明示的にJSTへフォーマットする
@@ -420,12 +423,12 @@ export async function getMonthlyAvailability(year: number, month: number): Promi
         const slotTime = `${p.hour}:${p.minute}`; // HH:mm
         
         const slotDateObj = new Date(`${dateKey}T00:00:00+09:00`);
-        const businessSlots = getTimeSlots(slotDateObj);
-        
+        const businessSlots = getTimeSlots(slotDateObj, { slotMinutes });
+
         if (businessSlots.includes(slotTime)) {
           counts[dateKey] = (counts[dateKey] || 0) + 1;
         }
-        current += 30 * 60000;
+        current += slotMinutes * 60000;
       }
     });
 
@@ -503,7 +506,12 @@ export async function getDailyAvailability(
       return [];
     }
 
-    // 取得した予約日時の開始・終了から、各30分枠ごとの予約数をカウント
+    // 取得した予約日時の開始・終了から、時刻ごとの予約数をカウント。
+    // 🚨 以前は 30分刻みで展開していたため、20分刻みの院（からだ鍼灸整骨院）で
+    //    10:00〜10:40 の予約が「10:00」「10:30」になり、実在する枠 10:20 が
+    //    空きのまま残っていた（患者さんには空きに見えるのに予約すると弾かれる）。
+    //    休憩枠と同じ 5分刻みで展開すれば 10/15/20/30分 どの院でも正しく塞がる。
+    const EXPAND_STEP_MS = 5 * 60000;
     const slotCounts: Record<string, number> = {};
     (data ?? []).forEach((app: { start_time: string, end_time?: string, staff_id?: string | null, status?: string }) => {
       // コース担当が指定されている場合は、そのレーンの予約を数える。
@@ -515,7 +523,7 @@ export async function getDailyAvailability(
         if (!isUnassignedRealBooking) return;
       }
       const start = new Date(app.start_time);
-      const end = app.end_time ? new Date(app.end_time) : new Date(start.getTime() + 30 * 60000);
+      const end = app.end_time ? new Date(app.end_time) : new Date(start.getTime() + EXPAND_STEP_MS);
 
       let current = start.getTime();
       while (current < end.getTime()) {
@@ -529,7 +537,7 @@ export async function getDailyAvailability(
         const timeKey = jstFormatter.format(new Date(current)); // "HH:mm" in JST
 
         slotCounts[timeKey] = (slotCounts[timeKey] || 0) + 1;
-        current += 30 * 60000;
+        current += EXPAND_STEP_MS;
       }
     });
 

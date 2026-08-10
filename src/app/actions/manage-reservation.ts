@@ -5,7 +5,7 @@ import { PUBLIC_CLINIC_ID } from "@/lib/default-clinic-id";
 import { getLineUidFromCookie } from "@/app/actions/family-line";
 import { pushLineToOwners } from "@/lib/admin-notify";
 import { isDateWithinAllowedRange, isTimeSlotWithinTwoHours, isTodayJST } from "@/lib/time-slots";
-import { getBookingHorizonDays } from "@/app/actions/clinic-slot";
+import { getBookingHorizonDays, getCurrentSlotDuration } from "@/app/actions/clinic-slot";
 import { getSpecialDayForDate } from "@/app/actions/special-days";
 
 const CLINIC_ID = PUBLIC_CLINIC_ID;
@@ -140,10 +140,13 @@ export async function rescheduleMyReservation(
     if (special.closeTime && t >= toMin(special.closeTime)) return { ok: false, error: `その日は ${special.closeTime} までのご予約です。` };
   }
 
-  // 所要時間は元予約を維持
+  // 所要時間は元予約を維持。
+  // 下限を30分で固定していたため、20分刻みの院（からだ鍼灸整骨院）で
+  // 患者さんが日時を変更すると20分の施術が30分に伸びていた。院の枠サイズを下限にする。
+  const slotMinutes = await getCurrentSlotDuration();
   const oldStart = new Date(apt.start_time);
-  const oldEnd = apt.end_time ? new Date(apt.end_time) : new Date(oldStart.getTime() + 30 * 60000);
-  const durationMs = Math.max(30 * 60000, oldEnd.getTime() - oldStart.getTime());
+  const oldEnd = apt.end_time ? new Date(apt.end_time) : new Date(oldStart.getTime() + slotMinutes * 60000);
+  const durationMs = Math.max(slotMinutes * 60000, oldEnd.getTime() - oldStart.getTime());
   const newStartIso = `${newDate}T${newTime}:00+09:00`;
   const newStart = new Date(newStartIso);
   const newEndIso = new Date(newStart.getTime() + durationMs).toISOString();

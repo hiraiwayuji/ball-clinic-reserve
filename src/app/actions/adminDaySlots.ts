@@ -162,7 +162,8 @@ export async function getAdminDaySlots(params: {
     });
     const booked = laneRows.map((a) => {
       const start = new Date(a.start_time).getTime();
-      const end = a.end_time ? new Date(a.end_time).getTime() : start + 30 * 60 * 1000;
+      // 終了時刻が入っていない予約は院の枠サイズぶんとみなす（30分決め打ちにしない）
+      const end = a.end_time ? new Date(a.end_time).getTime() : start + slotMinutes * 60 * 1000;
       return { start, end, label: `${jstHm.format(start)}〜${jstHm.format(end)}` };
     });
 
