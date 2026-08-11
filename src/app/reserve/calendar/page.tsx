@@ -32,7 +32,7 @@ const LINE_URL = process.env.NEXT_PUBLIC_LINE_OFFICIAL_ACCOUNT_URL ?? "https://l
 
 // 静的なTIME_SLOTS, MAX_SLOTSを削除
 
-type AvailabilityLevel = "available" | "few" | "full" | "closed" | "past";
+type AvailabilityLevel = "available" | "few" | "full" | "closed" | "outOfRange" | "past";
 
 // 予約可能期間の人にやさしい表示。90 → "3ヶ月"、30 → "1ヶ月"、それ以外は "〇日"。
 function horizonLabel(days: number): string {
@@ -66,8 +66,9 @@ function getAvailabilityLevel(dateStr: string, bookedCount: number, date: Date, 
   // 担当固定コース（さみ整体など）：そのスタッフの出勤日以外は休診扱いにして選べなくする
   if (staffSchedule && !isStaffAvailableOn(date, staffSchedule)) return "closed";
 
-  // 予約可能期間（院ごと clinic_settings.booking_horizon_days）外は休診扱い
-  if (!isDateWithinAllowedRange(date, false, schedule.bookingHorizonDays)) return "closed";
+  // 予約可能期間（院ごと clinic_settings.booking_horizon_days）外は「休診」ではなく「予約不可」扱い
+  // （休診日と混同されると、患者さんが「その曜日はずっと休み」と誤解するため区別する）
+  if (!isDateWithinAllowedRange(date, false, schedule.bookingHorizonDays)) return "outOfRange";
 
   // 実際に予約可能なスロット（2時間前制限にかかっていないもの）をカウントする
   // 担当固定（さみ・ヘッドスパ等）の出勤時間が設定されていれば、その時間帯だけを母数にする
@@ -124,6 +125,15 @@ const levelConfig = {
     border: "border-white/10",
     dot: "bg-slate-600",
     label: "休診",
+    labelClass: "text-slate-500",
+    text: "text-slate-500",
+  },
+  // 休診日ではなく「予約可能期間の外」。院は営業しているが、まだWeb予約の受付を開けていない日。
+  outOfRange: {
+    bg: "bg-white/5",
+    border: "border-white/10",
+    dot: "bg-slate-600",
+    label: "予約不可",
     labelClass: "text-slate-500",
     text: "text-slate-500",
   },
@@ -507,7 +517,7 @@ function ReserveCalendarContent() {
   }, [selectedDate, loadingDay]);
 
   const handleDayClick = async (date: Date, level: AvailabilityLevel) => {
-    if (level === "closed" || level === "past") return;
+    if (level === "closed" || level === "outOfRange" || level === "past") return;
     setSelectedDate(date);
     setSelectedLevel(level);
     setWaitlistState("idle");
@@ -828,7 +838,7 @@ function ReserveCalendarContent() {
 
         {/* ─── 凡例 ─── */}
         <div className="flex items-center justify-between bg-zinc-900 rounded-2xl px-4 py-3 mb-4 border border-zinc-800">
-          {(["available", "few", "full", "closed"] as const).map(lv => (
+          {(["available", "few", "full", "closed", "outOfRange"] as const).map(lv => (
             <div key={lv} className="flex flex-col items-center gap-1">
               <span className={`w-2.5 h-2.5 rounded-full ${levelConfig[lv].dot}`} />
               <span className="text-[10px] text-zinc-400 font-bold">{levelConfig[lv].label || "休診"}</span>
@@ -863,7 +873,7 @@ function ReserveCalendarContent() {
                 const level = getAvailabilityLevel(dateStr, bookedCount, day, clinicHolidays, slotMinutes, schedule, staffSchedule, findSpecialDay(specialDays, dateStr));
                 const isSelected = selectedDate && isSameDay(day, selectedDate);
                 const isCurrentMonth = isSameMonth(day, currentMonth);
-                const isClickable = level !== "closed" && level !== "past" && isCurrentMonth;
+                const isClickable = level !== "closed" && level !== "outOfRange" && level !== "past" && isCurrentMonth;
                 const todayDay = isToday(day);
                 const dow = idx % 7;
 
@@ -919,6 +929,9 @@ function ReserveCalendarContent() {
                     )}
                     {isCurrentMonth && level === "closed" && (
                       <span className="text-[10px] font-bold text-zinc-300">休</span>
+                    )}
+                    {isCurrentMonth && level === "outOfRange" && (
+                      <span className="text-[10px] font-bold text-zinc-400">不可</span>
                     )}
                   </div>
                 );
