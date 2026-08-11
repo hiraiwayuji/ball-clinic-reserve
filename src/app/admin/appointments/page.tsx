@@ -509,6 +509,47 @@ export default function AdminWeeklyGridPage() {
           MOBILE VIEW (< md)
       ==================================================== */}
       <div className="md:hidden space-y-3">
+        {/* ビュー切替（スマホ）。
+            院の初期表示が「スタッフ別（timetable）」でも、これまではスマホだと
+            日別リストしか出せず、設定が無視されていた。 */}
+        <div className="flex bg-slate-100 dark:bg-slate-800 rounded-xl p-0.5 gap-0.5">
+          {([
+            ["day", "日別リスト", LayoutList],
+            ["timetable", "スタッフ別", User],
+          ] as const).map(([mode, label, Icon]) => {
+            const on = mode === "timetable" ? viewMode === "timetable" : viewMode !== "timetable";
+            return (
+              <button
+                key={mode}
+                onClick={() => handleViewModeChange(mode)}
+                aria-pressed={on}
+                className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold transition-all ${
+                  on
+                    ? "bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 shadow-sm"
+                    : "text-slate-500 dark:text-slate-400"
+                }`}
+              >
+                <Icon className="w-3.5 h-3.5" /> {label}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* 院の初期表示設定を読み終わるまでは描かない（先に日別が出てから切り替わるとちらつくため） */}
+        {!viewModeReady ? (
+          <div className="flex items-center justify-center py-20">
+            <Loader2 className="h-8 w-8 animate-spin text-blue-500" />
+          </div>
+        ) : viewMode === "timetable" ? (
+          /* スマホ向けのスタッフ別表示。先生を1人選んで時間を縦に見る形（compact）。 */
+          <TodayTimelineWidget
+            showPendingButton={false}
+            compact
+            breakMode={breakMode}
+            onBreakCell={openBreakDialogForCell}
+          />
+        ) : (
+        <>
         {/* Week navigation strip */}
         <div className="flex items-center justify-between">
           <Button
@@ -803,6 +844,8 @@ export default function AdminWeeklyGridPage() {
             </Button>
           </div>
         </Card>
+        </>
+        )}
       </div>
 
       {/* ====================================================

@@ -8,7 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
   ChevronLeft, ChevronRight, Loader2, RotateCcw,
-  UserCheck, CreditCard, XCircle, Plus, CalendarPlus, Pencil,
+  UserCheck, CreditCard, XCircle, Plus, CalendarPlus, Pencil, Search, X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
@@ -74,6 +74,8 @@ type MovePlan = {
   fromTimeLabel: string;
   toTimeLabel: string;
   durationMinutes: number;
+  /** 複数担当の予約なら担当人数（2以上）。確認ダイアログに注意書きを出す */
+  staffCount: number;
 };
 
 /** 表示レンジ。"day"=1日だけ / "week"=月曜〜日曜を縦に7つ */
@@ -90,6 +92,44 @@ function eachDateKey(fromKey: string, toKey: string): string[] {
   const last = dateFromKey(toKey);
   for (let d = dateFromKey(fromKey); d <= last; d = addDays(d, 1)) out.push(dateKeyOf(d));
   return out;
+}
+
+/**
+ * タイムテーブル描画用に「表示上の時刻」を足した予約。
+ * 複数担当の予約は担当ごとに時間を等分して別バーで描くので、
+ * _displayStart/_displayEnd（そのバーの表示時刻）と
+ * _splitIndex/_splitCount（何分割の何本目か）を持たせる。
+ * モーダルや保存処理は必ず元の start_time / end_time を使う。
+ */
+type DisplayApt = TimelineAppointment & {
+  _displayStart?: string;
+  _displayEnd?: string;
+  /** そのバーの先生が担当するメニュー名（主メニュー／追加メニューを担当順に対応させたもの） */
+  _displayCourseName?: string;
+  _splitIndex?: number;
+  _splitCount?: number;
+};
+
+/** 分割バー同士を「同じ予約だ」と分かるようにつなぐ枠線色。予約IDから決めるので毎回同じ色になる。 */
+const SPLIT_LINK_COLORS = ["#7c3aed", "#0891b2", "#db2777", "#ea580c", "#15803d", "#4f46e5"];
+function splitLinkColor(id: string): string {
+  let h = 0;
+  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
+  return SPLIT_LINK_COLORS[h % SPLIT_LINK_COLORS.length];
+}
+
+/** 絞り込み比較用の正規化（大文字小文字と空白の違いを無視する） */
+function normalizeQuery(s: string): string {
+  return s.toLowerCase().replace(/[\s　]/g, "");
+}
+
+/** 絞り込み文字列に当てはまる予約か（空なら全部 true） */
+function aptMatchesQuery(a: TimelineAppointment, normQuery: string): boolean {
+  if (!normQuery) return true;
+  const hay = normalizeQuery(
+    [a.customer_name ?? "", a.medical_record_number ?? "", a.course_name ?? "", a.staff_name ?? ""].join(" "),
+  );
+  return hay.includes(normQuery);
 }
 
 function statusColor(status: string, checkin: string | null, isFirstVisit: boolean): string {
@@ -123,11 +163,14 @@ export default function TodayTimelineWidget({
   showPendingButton = true,
   breakMode = false,
   onBreakCell,
+  compact = false,
 }: {
   showPendingButton?: boolean;
   /** 予約画面の「休憩モード」。ON のあいだは空きセルのタップで休憩を追加する。 */
   breakMode?: boolean;
   onBreakCell?: (date: Date, time: string) => void;
+  /** スマホ用。横並びグリッドではなく「先生を1人選んで縦に見る」表示にする */
+  compact?: boolean;
 } = {}) {
   const router = useRouter();
   // 基準日。week のときはこの日を含む「月曜〜日曜」を表示する。
@@ -196,6 +239,14 @@ export default function TodayTimelineWidget({
   const [receptionAiMsg, setReceptionAiMsg] = useState<string | null>(null);
   // 月またぎ（先月から継続の患者様の今月最初の来院）バッジ対象の予約ID
   const [monthCrossIds, setMonthCrossIds] = useState<Set<string>>(new Set());
+
+  // 患者名などでの絞り込み（当てはまらない予約は薄く落とすだけで、消しはしない）
+  const [filterText, setFilterText] = useState("");
+  const normQuery = normalizeQuery(filterText);
+  // マウスを乗せている予約の患者。同じ患者の他の予約に紫の枠を出す
+  const [hoverCustomerId, setHoverCustomerId] = useState<string | null>(null);
+  // スマホ表示で「いま見ている先生」
+  const [compactStaffId, setCompactStaffId] = useState<string | null>(null);
 
   useEffect(() => {
     setDate(new Date());
@@ -427,13 +478,44 @@ export default function TodayTimelineWidget({
     [data],
   );
 
+  // 期間内に「同じ患者様の予約」が何件あるか。2件以上のときだけ結びつけ表示をする。
+  const customerAptCounts = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const a of allAppointments) {
+      if (!a.customer_id || a.status === "cancelled") continue;
+      m.set(a.customer_id, (m.get(a.customer_id) ?? 0) + 1);
+    }
+    return m;
+  }, [allAppointments]);
+
+  // 絞り込みに当てはまる予約の件数（キャンセル済みは数えない）
+  const filteredCount = useMemo(
+    () => (normQuery ? allAppointments.filter((a) => a.status !== "cancelled" && aptMatchesQuery(a, normQuery)).length : 0),
+    [allAppointments, normQuery],
+  );
+
+  // いま結びつけて見せる患者。選択中の予約 → マウスを乗せている予約 の順で決める。
+  const linkedCustomerId = (() => {
+    const id = selectedApt?.customer_id ?? hoverCustomerId;
+    if (!id) return null;
+    return (customerAptCounts.get(id) ?? 0) >= 2 ? id : null;
+  })();
+
+  // 選択中の予約と同じ患者様の「他の予約」（詳細モーダルに一覧で出す）
+  const selectedCustomerOtherApts = useMemo(() => {
+    if (!selectedApt?.customer_id) return [];
+    return allAppointments
+      .filter((a) => a.customer_id === selectedApt.customer_id && a.id !== selectedApt.id && a.status !== "cancelled")
+      .sort((a, b) => a.start_time.localeCompare(b.start_time));
+  }, [allAppointments, selectedApt]);
+
   // 担当未設定の予約を表示するデフォルト行（先頭スタッフ＝sort_order 最小のメイン担当）
   const defaultStaffId = data?.staff[0]?.id ?? null;
 
-  // 複数担当の予約は行ごとに時間を分割して描いているので、1本だけ動かすと辻褄が合わない。
-  // キャンセル済みも動かす意味がないので、どちらもドラッグ不可にする。
-  const canDrag = (a: TimelineAppointment): boolean =>
-    a.status !== "cancelled" && (a.additional_staff?.length ?? 0) === 0;
+  // キャンセル済みは動かす意味がないのでドラッグ不可。
+  // 複数担当の予約は行ごとに時間を分割して描いているが、掴めるのは先頭担当のバーだけにして
+  // （下の draggable 判定）、動かすときは元の start_time を基準に予約まるごと移動させる。
+  const canDrag = (a: TimelineAppointment): boolean => a.status !== "cancelled";
 
   // セルに落とした → 確認ダイアログ用の移動プランを作る
   // 週表示では別の日のブロックにも落とせるので、移動先の日付も受け取る。
@@ -445,6 +527,13 @@ export default function TodayTimelineWidget({
 
     const apt = allAppointments.find((a) => a.id === aptId);
     if (!apt || !canDrag(apt)) return;
+
+    // 複数担当の予約を「その予約にすでに入っている別の先生」の行へ落とすと
+    // メイン担当と追加担当が同じ人になってしまうので止める。
+    if ((apt.additional_staff ?? []).some((add) => add?.staff_id === toStaffId)) {
+      toast.error("その先生はもうこの予約の担当に入っています（担当の入れ替えは予約変更からどうぞ）");
+      return;
+    }
 
     const fromMinute = minuteOfDayJst(apt.start_time);
     const fromDateKey = jstDateKey(apt.start_time);
@@ -472,6 +561,7 @@ export default function TodayTimelineWidget({
       fromTimeLabel: fmtTime(apt.start_time),
       toTimeLabel: minutesToHm(toMinute),
       durationMinutes,
+      staffCount: (apt.additional_staff?.length ?? 0) + 1,
     });
   };
 
@@ -564,11 +654,6 @@ export default function TodayTimelineWidget({
   // （例: 17:00-17:40 を A先生・B先生で 17:00-17:20 / 17:20-17:40 に分割）
   // _displayStart / _displayEnd はタイムテーブル表示専用で、モーダルは元の start_time を使う
   const buildAptsByStaff = (day: TimelineDay, slotMinutes: number) => {
-    type DisplayApt = TimelineAppointment & {
-      _displayStart?: string;
-      _displayEnd?: string;
-      _displayCourseName?: string;
-    };
     const map = new Map<string, DisplayApt[]>();
 
     for (const a of day.appointments) {
@@ -615,10 +700,12 @@ export default function TodayTimelineWidget({
           _displayStart: displayStart,
           _displayEnd: displayEnd,
           _displayCourseName: courseNames[idx] ?? a.course_name ?? undefined,
+          _splitIndex: idx,
+          _splitCount: allStaffIds.length,
         });
       });
     }
-    return map as Map<string, TimelineAppointment[]>;
+    return map;
   };
 
   if (!date) return null;
@@ -671,6 +758,36 @@ export default function TodayTimelineWidget({
             </Button>
           </div>
         </div>
+        {/* 患者名でその日の予約を探す。当てはまらない予約は薄くなるだけで、位置は変わらない。 */}
+        <div className="w-full flex items-center gap-2">
+          <div className="relative flex-1 max-w-xs">
+            <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+            <input
+              type="search"
+              value={filterText}
+              onChange={(e) => setFilterText(e.target.value)}
+              placeholder="患者名・カルテ番号で絞り込み"
+              aria-label="患者名・カルテ番号で絞り込み"
+              className="w-full text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 pl-8 pr-8 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-400"
+            />
+            {filterText && (
+              <button
+                type="button"
+                onClick={() => setFilterText("")}
+                aria-label="絞り込みを消す"
+                className="absolute right-1.5 top-1/2 -translate-y-1/2 p-1 rounded text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+          {normQuery && (
+            <span className="text-xs font-bold text-slate-500 tabular-nums">
+              {filteredCount}件
+              {filteredCount === 0 && <span className="ml-1 font-normal">（見つかりません）</span>}
+            </span>
+          )}
+        </div>
       </CardHeader>
       <CardContent>
         {loading ? (
@@ -682,6 +799,227 @@ export default function TodayTimelineWidget({
         ) : data && data.staff.length === 0 ? (
           <div className="text-slate-500 text-sm py-6 text-center">
             スタッフが登録されていません。設定 → スタッフから追加してください。
+          </div>
+        ) : data && compact ? (
+          /* ── スマホ表示：横に広いグリッドは指1本では追えないので、
+                「先生を1人選んで、時間を縦に見る」形にする ── */
+          <div className="space-y-5">
+            {data.days.map((day) => {
+              const dayDate = dateFromKey(day.date);
+              const timeMarks = buildTimeMarks(day, data.slotMinutes);
+              const aptsByStaff = buildAptsByStaff(day, data.slotMinutes);
+              const staffSchedules = schedulesByDate[day.date] ?? [];
+              const dayBlocks = blockedSlots.filter((b) => b.date === day.date);
+              const isToday = isSameDay(dayDate, new Date());
+              // 受付最終日を過ぎた先生は出さない（PC表示と同じルール）
+              const lanes = staffRows.filter(
+                (s) => !s.booking_until || day.date <= String(s.booking_until).slice(0, 10),
+              );
+              const activeStaff = lanes.find((s) => s.id === compactStaffId) ?? lanes[0] ?? null;
+              const apts = activeStaff ? (aptsByStaff.get(activeStaff.id) ?? []) : [];
+              const sched = activeStaff ? staffSchedules.find((sc) => sc.staffId === activeStaff.id) : undefined;
+              const scheduleStart = day.scheduleStartHour * 60;
+              // 最後の目盛りは「営業終了時刻」のラベルなので行にはしない
+              const rowMarks = timeMarks.slice(0, -1);
+              // 縦表示では分割せず「本当の開始時刻」の行に置く（時刻の読み違いが起きないように）
+              const byRow = new Map<number, DisplayApt[]>();
+              for (const a of apts) {
+                const sMin = minuteOfDayJst(a.start_time);
+                const idx = Math.min(
+                  Math.max(Math.floor((sMin - scheduleStart) / data.slotMinutes), 0),
+                  Math.max(rowMarks.length - 1, 0),
+                );
+                if (!byRow.has(idx)) byRow.set(idx, []);
+                byRow.get(idx)!.push(a);
+              }
+              return (
+                <div key={day.date}>
+                  <div
+                    className={`px-2 py-1.5 mb-2 rounded-lg border text-sm font-bold flex items-center gap-2 ${
+                      day.isHoliday
+                        ? "bg-slate-100 border-slate-300 text-slate-500 dark:bg-slate-800 dark:border-slate-600 dark:text-slate-400"
+                        : isToday
+                          ? "bg-blue-50 border-blue-300 text-blue-800 dark:bg-blue-900/40 dark:border-blue-700 dark:text-blue-200"
+                          : "bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700"
+                    }`}
+                  >
+                    <span>{format(dayDate, "M月d日(E)", { locale: ja })}</span>
+                    {day.isHoliday && (
+                      <span className="text-[10px] font-black bg-slate-500 text-white px-1.5 py-0.5 rounded">休診日</span>
+                    )}
+                    {isToday && <span className="text-[10px] font-black bg-blue-600 text-white px-1.5 py-0.5 rounded">今日</span>}
+                    <span className="ml-auto text-[11px] font-normal text-slate-400 tabular-nums">
+                      {day.appointments.filter((a) => a.status !== "cancelled").length}件
+                    </span>
+                  </div>
+
+                  {/* 先生の切り替え（横スクロール） */}
+                  <div className="flex gap-1.5 overflow-x-auto pb-1.5" style={{ scrollbarWidth: "none" }}>
+                    {lanes.map((s) => {
+                      const count = (aptsByStaff.get(s.id) ?? []).filter((a) => a.status !== "cancelled").length;
+                      const on = activeStaff?.id === s.id;
+                      return (
+                        <button
+                          key={s.id}
+                          type="button"
+                          onClick={() => setCompactStaffId(s.id)}
+                          aria-pressed={on}
+                          className={`shrink-0 flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-bold border transition-colors ${
+                            on
+                              ? "bg-blue-600 border-blue-600 text-white"
+                              : "bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300"
+                          }`}
+                        >
+                          {s.name}
+                          <span
+                            className={`text-[10px] font-black tabular-nums rounded-full px-1.5 ${
+                              on ? "bg-white/25 text-white" : "bg-slate-100 dark:bg-slate-800 text-slate-500"
+                            }`}
+                          >
+                            {count}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {sched?.isOff && (
+                    <p className="my-1.5 text-xs font-bold text-rose-600 bg-rose-50 border border-rose-200 rounded-lg px-2 py-1.5 dark:bg-rose-900/30 dark:text-rose-300 dark:border-rose-800">
+                      {activeStaff?.name} はこの日お休みです
+                    </p>
+                  )}
+
+                  <div className="rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden">
+                    {rowMarks.map((m, i) => {
+                      const rowApts = byRow.get(i) ?? [];
+                      const isHour = m.minute % 60 === 0;
+                      // その時間にかかっている休憩（予約不可）。これを出さないと空きに見えて二重に入れてしまう。
+                      const coveringBlock = (minute: number) =>
+                        dayBlocks.find(
+                          (b) => hmToMinutes(b.start_time) < minute + data.slotMinutes && hmToMinutes(b.end_time) > minute,
+                        );
+                      const rowBlock = coveringBlock(m.minute);
+                      const prevBlock = i > 0 ? coveringBlock(rowMarks[i - 1].minute) : undefined;
+                      const isBlockStart = !!rowBlock && prevBlock?.id !== rowBlock.id;
+                      return (
+                        <div
+                          key={m.minute}
+                          className="flex items-stretch border-b last:border-b-0 border-slate-100 dark:border-slate-800"
+                        >
+                          <div
+                            className={`w-14 shrink-0 px-2 py-2 text-[11px] tabular-nums border-r border-slate-100 dark:border-slate-800 ${
+                              isHour
+                                ? "font-black text-slate-700 dark:text-slate-200 bg-slate-50 dark:bg-slate-800/50"
+                                : "font-semibold text-slate-400 dark:text-slate-500"
+                            }`}
+                          >
+                            {minutesToHm(m.minute)}
+                          </div>
+                          <div className="flex-1 min-w-0 p-1 space-y-1">
+                            {/* 休憩（予約不可）の帯。先頭の行にだけ内容と削除ボタンを出す。 */}
+                            {isBlockStart && rowBlock && (
+                              <div className="flex items-center gap-1 rounded-lg border border-amber-300 bg-amber-100 px-2 py-1 dark:bg-amber-900/30 dark:border-amber-700">
+                                <span className="text-[11px] font-bold text-amber-800 dark:text-amber-200 truncate">
+                                  🍵 {rowBlock.start_time}〜{rowBlock.end_time} {rowBlock.reason}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteBlocked(rowBlock)}
+                                  className="ml-auto shrink-0 rounded px-1.5 font-bold text-amber-800 dark:text-amber-200"
+                                  aria-label="この休憩を削除"
+                                >
+                                  ×
+                                </button>
+                              </div>
+                            )}
+                            {rowApts.length === 0 ? (
+                              rowBlock ? (
+                                isBlockStart ? null : (
+                                  <div className="px-2 py-1.5 text-[11px] font-bold text-amber-700/70 dark:text-amber-300/70">
+                                    休憩中（予約不可）
+                                  </div>
+                                )
+                              ) : (
+                                <button
+                                  type="button"
+                                  disabled={!activeStaff}
+                                  onClick={() => activeStaff && handleEmptyCellClick(day.date, activeStaff.id, m.minute)}
+                                  aria-label={`${format(dayDate, "M月d日", { locale: ja })} ${minutesToHm(m.minute)} に${breakMode ? "休憩を追加" : "新規予約を追加"}`}
+                                  className="w-full text-left text-[11px] font-bold text-slate-300 dark:text-slate-600 py-1.5 px-2 rounded-lg active:bg-blue-50 dark:active:bg-blue-900/20"
+                                >
+                                  ＋
+                                </button>
+                              )
+                            ) : (
+                              rowApts.map((a) => {
+                                const cls = statusColor(a.status, a.checkin_status, a.is_first_visit);
+                                const isCancelled = a.status === "cancelled";
+                                const splitCount = a._splitCount ?? 1;
+                                const hasMultiStaff = splitCount > 1;
+                                const linkColor = hasMultiStaff ? splitLinkColor(a.id) : null;
+                                const isLinkedCustomer = !!linkedCustomerId && a.customer_id === linkedCustomerId;
+                                const dimmed = !aptMatchesQuery(a, normQuery);
+                                return (
+                                  <button
+                                    key={`${a.id}-${activeStaff?.id ?? ""}`}
+                                    type="button"
+                                    onClick={() => setSelectedApt(a)}
+                                    className={`w-full text-left rounded-lg border px-2 py-1.5 ${cls} ${
+                                      isLinkedCustomer ? "ring-2 ring-violet-400" : ""
+                                    } ${dimmed ? "opacity-25" : ""}`}
+                                    style={linkColor ? { borderColor: linkColor, borderWidth: "2px" } : undefined}
+                                  >
+                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                      <span className="text-[11px] font-black tabular-nums">
+                                        {fmtTime(a.start_time)}
+                                        {a.end_time && `–${fmtTime(a.end_time)}`}
+                                      </span>
+                                      <span className={`text-sm font-bold ${isCancelled ? "line-through" : ""}`}>
+                                        {a.customer_name ?? "(顧客名なし)"}
+                                      </span>
+                                      {a.medical_record_number && (
+                                        <span className="text-[10px] font-bold opacity-70 tabular-nums">
+                                          No.{a.medical_record_number}
+                                        </span>
+                                      )}
+                                      {a.is_first_visit && (
+                                        <span className="text-[9px] font-black bg-amber-500 text-white px-1.5 py-0.5 rounded-full">初診</span>
+                                      )}
+                                      {!isCancelled && monthCrossIds.has(a.id) && (
+                                        <span className="text-[9px] font-black bg-violet-600 text-white px-1.5 py-0.5 rounded-full">月初</span>
+                                      )}
+                                      {hasMultiStaff && (
+                                        <span
+                                          className="text-[9px] font-black text-white px-1.5 py-0.5 rounded-full"
+                                          style={{ backgroundColor: linkColor ?? "#7c3aed" }}
+                                        >
+                                          担当{splitCount}人 {(a._splitIndex ?? 0) + 1}/{splitCount}
+                                        </span>
+                                      )}
+                                    </div>
+                                    {isCancelled ? (
+                                      <div className="text-[10px] font-bold text-slate-400 dark:text-slate-500">
+                                        {cancelKindLabel(a.cancel_kind, a.no_show)}
+                                      </div>
+                                    ) : (a._displayCourseName ?? a.course_name) ? (
+                                      <div className="text-[11px] truncate opacity-80">
+                                        {a.department === "カフェ" ? "☕ " : ""}{a._displayCourseName ?? a.course_name}
+                                        {/* 複数担当のときは、その先生が担当するメニューだけを出す */}
+                                        {!hasMultiStaff && ((a.additional_courses?.length ?? 0) > 0) && ` ＋${a.additional_courses?.length}`}
+                                      </div>
+                                    ) : null}
+                                  </button>
+                                );
+                              })
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
           </div>
         ) : data && (
           <div className="overflow-x-auto">
@@ -878,23 +1216,19 @@ export default function TodayTimelineWidget({
                   : "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300";
                 // ── 時間がかぶる予約を縦に段積み（サブレーン）して全部見えるようにする ──
                 // 複数スタッフ予約は _displayStart/_displayEnd を使って実際の表示時刻でレーン計算する。
-                type DispApt = TimelineAppointment & { _displayStart?: string; _displayEnd?: string };
-                const sortedApts = [...apts].sort((a, b) => {
-                  const da = a as DispApt;
-                  const db = b as DispApt;
-                  return minuteOfDayJst(da._displayStart ?? a.start_time) - minuteOfDayJst(db._displayStart ?? b.start_time);
-                });
+                const sortedApts = [...apts].sort(
+                  (a, b) => minuteOfDayJst(a._displayStart ?? a.start_time) - minuteOfDayJst(b._displayStart ?? b.start_time),
+                );
                 const laneEnds: number[] = [];
                 const laneOf = new Map<string, number>();
                 for (const a of sortedApts) {
-                  const da = a as DispApt;
-                  const sMin = minuteOfDayJst(da._displayStart ?? a.start_time);
+                  const sMin = minuteOfDayJst(a._displayStart ?? a.start_time);
                   const eMin = Math.max(
-                    (da._displayEnd ?? a.end_time) ? minuteOfDayJst(da._displayEnd ?? a.end_time!) : sMin + data.slotMinutes,
+                    (a._displayEnd ?? a.end_time) ? minuteOfDayJst(a._displayEnd ?? a.end_time!) : sMin + data.slotMinutes,
                     sMin + data.slotMinutes,
                   );
                   // 複数スタッフ予約は staff ごとに別キーを使う
-                  const laneKey = da._displayStart ? `${a.id}-${s.id}` : a.id;
+                  const laneKey = a._displayStart ? `${a.id}-${s.id}` : a.id;
                   let lane = laneEnds.findIndex((end) => end <= sMin);
                   if (lane === -1) { lane = laneEnds.length; laneEnds.push(eMin); }
                   else laneEnds[lane] = eMin;
@@ -1139,14 +1473,9 @@ export default function TodayTimelineWidget({
                     {/* 予約バー（absolute 配置） */}
                     {apts.map((a) => {
                       // 複数スタッフ予約は _displayStart/_displayEnd でずらした時刻・担当メニューを使う
-                      const dispA = a as typeof a & {
-                        _displayStart?: string;
-                        _displayEnd?: string;
-                        _displayCourseName?: string;
-                      };
-                      const startMin = minuteOfDayJst(dispA._displayStart ?? a.start_time);
-                      const endMinRaw = (dispA._displayEnd ?? a.end_time)
-                        ? minuteOfDayJst(dispA._displayEnd ?? a.end_time!)
+                      const startMin = minuteOfDayJst(a._displayStart ?? a.start_time);
+                      const endMinRaw = (a._displayEnd ?? a.end_time)
+                        ? minuteOfDayJst(a._displayEnd ?? a.end_time!)
                         : startMin + data.slotMinutes;
                       const endMin = Math.max(endMinRaw, startMin + data.slotMinutes);
                       const scheduleStart = day.scheduleStartHour * 60;
@@ -1169,16 +1498,34 @@ export default function TodayTimelineWidget({
                       const gridColStart = gridStartIdx + 2;
                       const cls = statusColor(a.status, a.checkin_status, a.is_first_visit);
                       const isCancelled = a.status === "cancelled";
-                      const displayStartLabel = fmtTime(dispA._displayStart ?? a.start_time);
-                      const hasMultiStaff = (dispA._displayStart !== undefined);
+                      const displayStartLabel = fmtTime(a._displayStart ?? a.start_time);
                       // その先生のレーンに出すメニュー名（複数スタッフ予約は担当ぶんだけ）
-                      const laneCourseName = dispA._displayCourseName ?? a.course_name;
-                      const draggable = canDrag(a);
+                      const laneCourseName = a._displayCourseName ?? a.course_name;
+                      // 複数担当の予約は担当ごとに時間を等分してずらして描いている。
+                      // バーの左端だけ見ると「実際には無い時刻」に見えるので、
+                      // 予約そのものの通し時刻と「1/2・2/2」を必ずバーに出す。
+                      const splitCount = a._splitCount ?? 1;
+                      const hasMultiStaff = splitCount > 1;
+                      const splitLabel = hasMultiStaff ? `${(a._splitIndex ?? 0) + 1}/${splitCount}` : "";
+                      const wholeTimeLabel = `${fmtTime(a.start_time)}${a.end_time ? `–${fmtTime(a.end_time)}` : ""}`;
+                      // 分割バー同士を同じ枠線色でつないで「1件の予約」だと分かるようにする
+                      const linkColor = hasMultiStaff ? splitLinkColor(a.id) : null;
+                      // 掴めるのは先頭担当のバーだけ。動かすと予約まるごと（全担当ぶん）動く。
+                      const draggable = canDrag(a) && (!hasMultiStaff || (a._splitIndex ?? 0) === 0);
+                      // 同じ患者様の他の予約に紫の枠を出す（選択中／マウスを乗せている患者）
+                      const isLinkedCustomer = !!linkedCustomerId && a.customer_id === linkedCustomerId;
+                      // 絞り込みに当てはまらない予約は薄く落とす（消しはしない）
+                      const dimmed = !aptMatchesQuery(a, normQuery);
+                      const opacityCls = dimmed ? "opacity-25" : draggingAptId === a.id ? "opacity-40" : "";
                       return (
                         <button
                           key={`${a.id}-${s.id}`}
                           type="button"
                           onClick={() => setSelectedApt(a)}
+                          onMouseEnter={() => setHoverCustomerId(a.customer_id)}
+                          onMouseLeave={() => setHoverCustomerId(null)}
+                          onFocus={() => setHoverCustomerId(a.customer_id)}
+                          onBlur={() => setHoverCustomerId(null)}
                           draggable={draggable}
                           onDragStart={(e) => {
                             e.dataTransfer.effectAllowed = "move";
@@ -1187,22 +1534,27 @@ export default function TodayTimelineWidget({
                             setDraggingAptId(a.id);
                           }}
                           onDragEnd={() => { setDraggingAptId(null); setDropTarget(null); }}
-                          className={`text-[11px] leading-tight rounded border px-1 py-0.5 my-0.5 text-left truncate hover:ring-2 hover:ring-blue-400 transition-all ${cls} ${
+                          className={`text-[11px] leading-tight rounded border px-1 py-0.5 my-0.5 text-left truncate transition-all ${cls} ${
+                            isLinkedCustomer ? "ring-2 ring-violet-400" : "hover:ring-2 hover:ring-blue-400"
+                          } ${
                             draggable ? "cursor-grab active:cursor-grabbing" : ""
                           } ${
                             // ドラッグ中はバーを「透過」させ、下に隠れているセルにも落とせるようにする
                             draggingAptId ? "pointer-events-none" : ""
-                          } ${draggingAptId === a.id ? "opacity-40" : ""}`}
+                          } ${opacityCls}`}
                           style={{
                             gridColumn: `${gridColStart} / span ${colSpan}`,
                             gridRow: (laneOf.get(`${a.id}-${s.id}`) ?? laneOf.get(a.id) ?? 0) + 1,
                             alignSelf: "stretch",
                             marginLeft: `${(offsetFrac / colSpan) * 100}%`,
                             width: `${Math.min((widthCols / colSpan) * 100, 100)}%`,
+                            ...(linkColor ? { borderColor: linkColor, borderWidth: "2px" } : {}),
                           }}
                           title={isCancelled
                             ? `${displayStartLabel} ${a.customer_name ?? ""} ${cancelKindLabel(a.cancel_kind, a.no_show)}（タップで復活できます）`
-                            : `${displayStartLabel} ${a.customer_name ?? ""}${a.medical_record_number ? ` (No.${a.medical_record_number})` : ""} ${laneCourseName ?? ""}${hasMultiStaff ? `（${s.name}先生の担当ぶん・時間分割表示・ドラッグ移動はできません）` : "・ドラッグで時間や先生を変えられます"}`}
+                            : hasMultiStaff
+                              ? `${a.customer_name ?? ""}${a.medical_record_number ? ` (No.${a.medical_record_number})` : ""} ${laneCourseName ?? ""}（${s.name}先生の担当ぶん）\n通しの予約時間 ${wholeTimeLabel}（担当${splitCount}人・このバーは${splitLabel}）\n${draggable ? "このバーをドラッグすると予約まるごと動きます" : "移動は先頭の先生のバーからどうぞ"}`
+                              : `${displayStartLabel} ${a.customer_name ?? ""}${a.medical_record_number ? ` (No.${a.medical_record_number})` : ""} ${laneCourseName ?? ""}・ドラッグで時間や先生を変えられます`}
                         >
                           <div className={`truncate font-semibold ${isCancelled ? "line-through" : ""}`}>
                             {!a.staff_id && !isCancelled && (
@@ -1224,21 +1576,41 @@ export default function TodayTimelineWidget({
                             {a.party_size != null && (
                               <span className="ml-1 text-[9px] font-bold text-orange-600">{a.party_size}名</span>
                             )}
-                            {((a.additional_staff?.length ?? 0) > 0) && (
-                              <span className="ml-1 text-[9px] font-normal opacity-70">×{(a.additional_staff?.length ?? 0) + 1}人</span>
+                            {hasMultiStaff && (
+                              <span
+                                className="ml-1 text-[9px] font-black px-1 rounded text-white"
+                                style={{ backgroundColor: linkColor ?? "#7c3aed" }}
+                                title={`担当${splitCount}人で分けて表示しています（${splitLabel}本目）`}
+                              >
+                                {splitLabel}
+                              </span>
                             )}
                           </div>
                           {isCancelled ? (
                             <div className="truncate text-[9px] font-bold text-slate-400 dark:text-slate-500">
                               {cancelKindLabel(a.cancel_kind, a.no_show)}
                             </div>
-                          ) : laneCourseName && (
-                            <div className="truncate opacity-80">
-                              {a.department === "カフェ" ? "☕ " : ""}{laneCourseName}
-                              {/* 複数スタッフの予約は、その先生が担当するメニューだけを出す
-                                  （他の先生のメニューまで出すと「この先生はこれをやらない」誤解になる） */}
-                              {!hasMultiStaff && ((a.additional_courses?.length ?? 0) > 0) && ` ＋${a.additional_courses?.length}`}
-                            </div>
+                          ) : (
+                            <>
+                              {/* 複数担当のときは「本当の予約時間」をバーに出す。
+                                  バーの位置は担当ごとにずらしてあるので、これが無いと時刻を読み違える。 */}
+                              {hasMultiStaff && (
+                                <div
+                                  className="truncate text-[9px] font-bold tabular-nums"
+                                  style={{ color: linkColor ?? undefined }}
+                                >
+                                  通し {wholeTimeLabel}
+                                </div>
+                              )}
+                              {laneCourseName && (
+                                <div className="truncate opacity-80">
+                                  {a.department === "カフェ" ? "☕ " : ""}{laneCourseName}
+                                  {/* 複数スタッフの予約は、その先生が担当するメニューだけを出す
+                                      （他の先生のメニューまで出すと「この先生はこれをやらない」誤解になる） */}
+                                  {!hasMultiStaff && ((a.additional_courses?.length ?? 0) > 0) && ` ＋${a.additional_courses?.length}`}
+                                </div>
+                              )}
+                            </>
                           )}
                         </button>
                       );
@@ -1309,6 +1681,12 @@ export default function TodayTimelineWidget({
                   )}
                 </div>
               </div>
+              {movePlan.staffCount > 1 && (
+                <p className="text-[11px] font-semibold text-violet-700 dark:text-violet-300">
+                  この予約は担当{movePlan.staffCount}人です。分けて表示している{movePlan.staffCount}本のバーは
+                  まとめて動きます（通しの予約時間ごと移動します）。
+                </p>
+              )}
               {movePlan.apt.status === "waiting" && (
                 <p className="text-[11px] text-amber-700 dark:text-amber-300">
                   この予約はキャンセル待ちです。
@@ -1415,10 +1793,46 @@ export default function TodayTimelineWidget({
                 )}
               </div>
               {selectedApt.memo && <div><span className="text-slate-500">メモ:</span> <span className="whitespace-pre-wrap">{selectedApt.memo}</span></div>}
+              {(selectedApt.additional_staff?.length ?? 0) > 0 && (
+                <div className="rounded-lg bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 px-3 py-2 text-xs text-slate-600 dark:text-slate-300">
+                  担当{(selectedApt.additional_staff?.length ?? 0) + 1}人の予約です。タイムテーブルでは先生ごとに
+                  時間を分けて{(selectedApt.additional_staff?.length ?? 0) + 1}本のバーで表示していますが、
+                  実際の予約時間は上の
+                  <span className="font-bold tabular-nums">
+                    {" "}{fmtTime(selectedApt.start_time)}
+                    {selectedApt.end_time && `–${fmtTime(selectedApt.end_time)}`}{" "}
+                  </span>
+                  です。
+                </div>
+              )}
               {selectedApt.status !== "cancelled" && monthCrossIds.has(selectedApt.id) && (
                 <div className="rounded-lg bg-violet-50 dark:bg-violet-900/20 border border-violet-200 dark:border-violet-800 px-3 py-2 text-xs font-semibold text-violet-800 dark:text-violet-200">
                   🔖 月またぎ：先月から継続の患者様の今月最初の来院です。
                   保険証の確認など、月初の対応をお願いします。
+                </div>
+              )}
+              {/* 同じ患者様の他の予約。表の上では紫の枠でつながっているものを、ここでは一覧で出す。 */}
+              {selectedCustomerOtherApts.length > 0 && (
+                <div className="rounded-lg bg-violet-50 dark:bg-violet-900/20 border border-violet-200 dark:border-violet-800 px-3 py-2">
+                  <p className="text-xs font-bold text-violet-800 dark:text-violet-200 mb-1">
+                    同じ患者様の予約が この表示期間に あと{selectedCustomerOtherApts.length}件あります
+                  </p>
+                  <ul className="space-y-0.5">
+                    {selectedCustomerOtherApts.map((o) => (
+                      <li key={o.id}>
+                        <button
+                          type="button"
+                          onClick={() => setSelectedApt(o)}
+                          className="w-full text-left text-xs text-violet-800 dark:text-violet-200 hover:underline tabular-nums"
+                        >
+                          {format(dateFromKey(jstDateKey(o.start_time)), "M/d(E)", { locale: ja })}{" "}
+                          {fmtTime(o.start_time)}
+                          {o.course_name && <span className="ml-1 font-normal opacity-80">{o.course_name}</span>}
+                          {o.staff_name && <span className="ml-1 font-normal opacity-60">/ {o.staff_name}</span>}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
                 </div>
               )}
             </div>
