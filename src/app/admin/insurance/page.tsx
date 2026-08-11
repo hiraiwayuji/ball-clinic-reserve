@@ -300,6 +300,12 @@ export default function InsurancePage() {
           <Button variant="outline" size="sm" onClick={handleExport} disabled={payments.length === 0} className="flex items-center gap-1.5 border-slate-200 text-slate-600 hover:bg-slate-50">
             <Download className="w-4 h-4" /> Excel出力
           </Button>
+          <Link href="/admin/passbook">
+            <Button variant="outline" size="sm" className="border-indigo-200 text-indigo-600 hover:bg-indigo-50 dark:border-indigo-800 dark:text-indigo-400 dark:hover:bg-indigo-950/50 font-bold">
+              <BookOpen className="w-4 h-4 mr-1.5" />
+              通帳読み取り
+            </Button>
+          </Link>
           <Link href="/admin/expenses">
             <Button variant="outline" size="sm" className="border-emerald-200 text-emerald-600 hover:bg-emerald-50 dark:border-emerald-800 dark:text-emerald-400 dark:hover:bg-emerald-950/50 font-bold">
               <Receipt className="w-4 h-4 mr-1.5" />

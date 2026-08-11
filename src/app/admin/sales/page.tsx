@@ -24,7 +24,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { BirthDateInput } from "@/app/admin/customers/BirthDateInput";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Calendar as CalendarIcon, Plus, Trash2, Loader2, Coins, User, UserPlus, Landmark, Receipt, Upload, Download, Clock, Bot, X, AlertTriangle, Zap, Pencil, ShieldCheck, CalendarPlus, MapPin } from "lucide-react";
+import { Calendar as CalendarIcon, Plus, Trash2, Loader2, Coins, User, UserPlus, Landmark, Receipt, Upload, Download, Clock, Bot, X, AlertTriangle, Zap, Pencil, ShieldCheck, CalendarPlus, MapPin, BookOpen } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { addCashSale, getCashSales, deleteCashSale, updateCashSale, searchSalesPatients, getCustomerByMedicalRecord, getLastSaleForCustomer, updateCustomerCityByName, updateCustomerProfileByName, SalesPatientSuggestion, type CashSalePaymentType } from "@/app/actions/sales";
 import { updateCheckinStatus, getLastAppointmentByCustomerName } from "@/app/actions/adminReserve";
@@ -570,6 +570,12 @@ function SalesPageInner() {
             <Button variant="outline" size="sm" className="border-blue-200 text-blue-600 hover:bg-blue-50 dark:border-blue-800 dark:text-blue-400 dark:hover:bg-blue-950/50 font-bold">
               <Landmark className="w-4 h-4 mr-1.5" />
               保険入金へ
+            </Button>
+          </Link>
+          <Link href="/admin/passbook">
+            <Button variant="outline" size="sm" className="border-indigo-200 text-indigo-600 hover:bg-indigo-50 dark:border-indigo-800 dark:text-indigo-400 dark:hover:bg-indigo-950/50 font-bold">
+              <BookOpen className="w-4 h-4 mr-1.5" />
+              通帳読み取り
             </Button>
           </Link>
           <div className="flex items-center gap-2 bg-white dark:bg-slate-900 p-2 border dark:border-slate-800 rounded-lg shadow-sm">

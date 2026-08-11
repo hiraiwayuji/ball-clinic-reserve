@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Calendar as CalendarIcon, Plus, Trash2, Loader2, Receipt, AlertCircle, Save, Camera, Sparkles, Pencil, Check, X, Banknote, Download, FileSpreadsheet, Settings2 } from "lucide-react";
+import { Calendar as CalendarIcon, Plus, Trash2, Loader2, Receipt, AlertCircle, Save, Camera, Sparkles, Pencil, Check, X, Banknote, Download, FileSpreadsheet, Settings2, BookOpen } from "lucide-react";
 import { addExpense, getExpenses, deleteExpense, addPendingExpense, updateExpense, getMonthDetailedExpenses } from "@/app/actions/sales";
 import { getCustomExpenseCategories, addCustomExpenseCategory, deleteCustomExpenseCategory, getClinicSettings } from "@/app/actions/settings";
 import { BASE_EXPENSE_CATEGORIES } from "@/lib/expense-categories";
@@ -427,6 +427,12 @@ export default function ExpensesPage() {
               <Button size="lg" className="bg-blue-600 hover:bg-blue-700 text-white shadow-lg shadow-blue-200/50 flex items-center gap-2 group">
                 <Banknote className="w-5 h-5 group-hover:scale-110 transition-transform" />
                 <span className="text-base font-black">保険入金</span>
+              </Button>
+            </Link>
+            <Link href="/admin/passbook">
+              <Button size="lg" className="bg-indigo-600 hover:bg-indigo-700 text-white shadow-lg shadow-indigo-200/50 flex items-center gap-2 group">
+                <BookOpen className="w-5 h-5 group-hover:scale-110 transition-transform" />
+                <span className="text-base font-black">通帳読み取り</span>
               </Button>
             </Link>
           </div>
