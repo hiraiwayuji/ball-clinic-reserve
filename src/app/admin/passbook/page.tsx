@@ -378,10 +378,14 @@ export default function PassbookPage() {
                         className={`border-b border-slate-100 dark:border-slate-800 align-top ${imported ? "opacity-45" : ""} ${r.checked ? "bg-indigo-50/40 dark:bg-indigo-950/20" : ""}`}
                       >
                         <td className="p-2">
+                          {/* 取込済みの行は二重登録になるのでチェックできない。
+                              もう一度取り込みたいときは下の取込履歴から記録を消してもらう */}
                           <input
                             type="checkbox"
-                            className="w-4 h-4 accent-indigo-600 cursor-pointer"
+                            className="w-4 h-4 accent-indigo-600 cursor-pointer disabled:cursor-not-allowed"
                             checked={r.checked}
+                            disabled={imported}
+                            title={imported ? "取り込み済みです。もう一度取り込むには下の取込履歴から記録を削除してください" : undefined}
                             onChange={(e) => patchRow(i, { checked: e.target.checked })}
                           />
                         </td>
