@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>通帳の写真から記帳できるようになりました｜予約システム</title>
+<style>
+  :root{
+    --bg:#fdf8f3; --card:#fff; --ink:#3b2f2a; --sub:#7a6a60;
+    --line:#ecdfd4; --accent:#4f46e5; --accent-soft:#eef2ff;
+    --rose:#e11d48; --rose-soft:#ffe4e6; --ok:#15803d; --ok-soft:#dcfce7;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font-family:"Hiragino Kaku Gothic ProN","Yu Gothic",system-ui,sans-serif;
+    line-height:1.85;font-size:16px}
+  .wrap{max-width:720px;margin:0 auto;padding:24px 18px 64px}
+  header{text-align:center;padding:14px 0 20px}
+  .eyebrow{font-size:13px;color:var(--sub);letter-spacing:.08em}
+  h1{font-size:23px;margin:6px 0 10px;line-height:1.5}
+  .lead{font-size:15px;color:var(--sub);margin:0}
+
+  .toc{background:var(--card);border:1px solid var(--line);border-radius:18px;
+    padding:16px 18px;margin:18px 0 26px;box-shadow:0 2px 10px rgba(180,140,100,.08)}
+  .toc h2{font-size:15px;margin:0 0 10px;color:var(--accent)}
+  .toc ol{margin:0;padding-left:1.2em;font-size:15px}
+  .toc li{padding:3px 0}
+  .toc a{color:var(--ink);text-decoration:none;border-bottom:1px dotted var(--line)}
+
+  section{background:var(--card);border:1px solid var(--line);border-radius:18px;
+    padding:20px 18px;margin:0 0 22px;box-shadow:0 2px 10px rgba(180,140,100,.08);
+    scroll-margin-top:16px}
+  .badge{display:inline-block;font-size:12px;font-weight:700;color:#fff;background:var(--accent);
+    padding:4px 12px;border-radius:999px;margin-bottom:10px}
+  h2{font-size:19px;margin:0 0 6px;line-height:1.5}
+  .when{font-size:14px;color:var(--sub);margin:0 0 16px}
+
+  ol.steps{margin:0;padding:0;list-style:none;counter-reset:s}
+  ol.steps>li{counter-increment:s;position:relative;padding:0 0 18px 46px;margin:0}
+  ol.steps>li::before{content:counter(s);position:absolute;left:0;top:1px;
+    width:30px;height:30px;border-radius:50%;background:var(--accent);color:#fff;
+    font-weight:700;font-size:15px;display:flex;align-items:center;justify-content:center}
+  ol.steps>li::after{content:"";position:absolute;left:14px;top:34px;bottom:4px;width:2px;background:var(--line)}
+  ol.steps>li:last-child::after{display:none}
+  ol.steps>li>b{display:block;font-size:16px}
+  ol.steps p{margin:2px 0 0;font-size:14px;color:var(--sub)}
+
+  figure{margin:14px 0 4px}
+  figure svg{width:100%;height:auto;display:block}
+  figcaption{font-size:12.5px;color:var(--sub);text-align:center;margin-top:6px}
+
+  .note{border-radius:14px;padding:12px 14px;font-size:14px;margin:14px 0 0;
+    background:var(--accent-soft);border:1px solid #a5b4fc}
+  .warn{background:var(--rose-soft);border:1px solid #fda4af}
+  .good{background:var(--ok-soft);border:1px solid #86efac}
+  .note>b:first-child{display:block;margin-bottom:2px}
+
+  table{width:100%;border-collapse:collapse;font-size:14px;margin:12px 0 0}
+  th,td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}
+  th{background:#f5f3ff;font-size:13px;white-space:nowrap}
+  td:first-child{white-space:nowrap}
+  .tw{overflow-x:auto}
+
+  .kbd{display:inline-block;background:#eef2ff;border:1px solid #a5b4fc;color:#3730a3;
+    border-radius:8px;padding:1px 8px;font-weight:700;font-size:14px}
+  footer{text-align:center;font-size:13px;color:var(--sub);padding-top:10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <div class="eyebrow">予約システム｜新しい機能</div>
+  <h1>通帳の写真から<br>記帳できるようになりました</h1>
+  <p class="lead">通帳を1枚撮るだけで、経費と保険の入金を<br>まとめて登録できます。</p>
+</header>
+
+<div class="toc">
+  <h2>この資料の中身</h2>
+  <ol>
+    <li><a href="#a1">どこにあるか</a></li>
+    <li><a href="#a2">使い方（3ステップ）</a></li>
+    <li><a href="#a3">保険の入金が自動で照合されます</a></li>
+    <li><a href="#a4">二重に登録しないための注意</a></li>
+  </ol>
+</div>
+
+<!-- 1 -->
+<section id="a1">
+  <span class="badge">1</span>
+  <h2>どこにあるか</h2>
+  <p class="when">「売上記帳」「経費記帳」「保険入金」のどの画面からでも入れます。</p>
+
+  <figure>
+    <svg viewBox="0 0 780 210" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="売上記帳の画面の右上に「通帳読み取り」ボタンが増えた">
+      <style>
+        .ttl{font:700 14px sans-serif;fill:#3b2f2a}
+        .btn{font:700 12px sans-serif;fill:#4b5563}
+        .btnA{font:700 12px sans-serif;fill:#4f46e5}
+        .sm{font:600 12px sans-serif;fill:#e11d48}
+      </style>
+      <rect x="10" y="10" width="760" height="190" rx="14" fill="#fbfaf8" stroke="#e5e0d8"/>
+      <text x="30" y="46" class="ttl">売上記帳</text>
+
+      <rect x="300" y="28" width="104" height="30" rx="8" fill="#fff" stroke="#d6d3d1"/>
+      <text x="316" y="48" class="btn">Excel出力</text>
+      <rect x="414" y="28" width="104" height="30" rx="8" fill="#fff" stroke="#a7d7c0"/>
+      <text x="432" y="48" class="btn">経費記帳へ</text>
+      <rect x="528" y="28" width="104" height="30" rx="8" fill="#fff" stroke="#a9c4e8"/>
+      <text x="546" y="48" class="btn">保険入金へ</text>
+
+      <rect x="642" y="28" width="112" height="30" rx="8" fill="#eef2ff" stroke="#4f46e5" stroke-width="2"/>
+      <text x="654" y="48" class="btnA">通帳読み取り</text>
+      <circle cx="698" cy="43" r="30" fill="none" stroke="#e11d48" stroke-width="3"/>
+      <path d="M660 128 L692 80" stroke="#e11d48" stroke-width="3" fill="none"/>
+      <path d="M692 80 l-13 3 l6 10 z" fill="#e11d48"/>
+      <text x="452" y="146" class="sm">ここが増えました</text>
+
+      <rect x="30" y="86" width="380" height="90" rx="10" fill="#fff" stroke="#e5e0d8"/>
+      <text x="46" y="112" class="btn">（いつもの受付入力の画面はそのままです）</text>
+    </svg>
+    <figcaption>売上記帳の画面。右上に「通帳読み取り」が増えています</figcaption>
+  </figure>
+</section>
+
+<!-- 2 -->
+<section id="a2">
+  <span class="badge">2</span>
+  <h2>使い方は3ステップ</h2>
+  <p class="when">画面にも 1・2・3 と番号が出ています。上から順に進めてください。</p>
+
+  <ol class="steps">
+    <li>
+      <b>通帳の写真を撮る</b>
+      <p>「カメラで撮影」か「写真から読み取り」を押します。見開きのままで大丈夫です。</p>
+    </li>
+    <li>
+      <b>取り込む行を選ぶ</b>
+      <p>通帳の明細が1行ずつ表になって出ます。すでにチェックが入っている行が、そのまま登録される行です。</p>
+    </li>
+    <li>
+      <b>「選んだ○件を取り込む」を押す</b>
+      <p>経費は経費記帳へ、保険の入金は保険入金の画面へ、自動で入ります。</p>
+    </li>
+  </ol>
+
+  <figure>
+    <svg viewBox="0 0 780 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="読み取った通帳の明細が1行ずつ表になり、行ごとに種別とカテゴリが自動で選ばれる">
+      <style>
+        .h{font:700 11px sans-serif;fill:#7a6a60}
+        .c{font:600 12px sans-serif;fill:#3b2f2a}
+        .n{font:700 12px sans-serif;fill:#2563eb}
+        .n2{font:700 12px sans-serif;fill:#44403c}
+        .sel{font:600 11px sans-serif;fill:#3b2f2a}
+        .ok{font:600 10.5px sans-serif;fill:#1d4ed8}
+        .ng{font:600 10.5px sans-serif;fill:#be123c}
+      </style>
+      <rect x="10" y="10" width="760" height="280" rx="14" fill="#fff" stroke="#e5e0d8"/>
+      <line x1="10" y1="46" x2="770" y2="46" stroke="#e5e0d8"/>
+      <text x="60" y="36" class="h">日付</text>
+      <text x="120" y="36" class="h">摘要</text>
+      <text x="300" y="36" class="h">入金</text>
+      <text x="378" y="36" class="h">出金</text>
+      <text x="440" y="36" class="h">これは何？</text>
+      <text x="548" y="36" class="h">内訳</text>
+      <text x="648" y="36" class="h">状態</text>
+
+      <!-- row1 -->
+      <rect x="28" y="60" width="14" height="14" rx="3" fill="#4f46e5"/>
+      <path d="M31 67 l3 3 l6 -6" stroke="#fff" stroke-width="2" fill="none"/>
+      <text x="60" y="72" class="c">07-30</text>
+      <text x="120" y="72" class="c">フリコミ キヨウカイケンポ</text>
+      <text x="340" y="72" class="n" text-anchor="end">¥93,276</text>
+      <rect x="440" y="58" width="92" height="22" rx="5" fill="#fff" stroke="#d6d3d1"/>
+      <text x="450" y="74" class="sel">保険入金</text>
+      <text x="548" y="72" class="sel">協会けんぽ</text>
+      <text x="648" y="68" class="ok">登録済みと一致</text>
+      <text x="648" y="82" class="ok">通帳確認済みになります</text>
+
+      <!-- row2 -->
+      <rect x="28" y="110" width="14" height="14" rx="3" fill="#4f46e5"/>
+      <path d="M31 117 l3 3 l6 -6" stroke="#fff" stroke-width="2" fill="none"/>
+      <text x="60" y="122" class="c">08-05</text>
+      <text x="120" y="122" class="c">デンキ シコクデンリヨク</text>
+      <text x="418" y="122" class="n2" text-anchor="end">¥18,420</text>
+      <rect x="440" y="108" width="92" height="22" rx="5" fill="#fff" stroke="#d6d3d1"/>
+      <text x="450" y="124" class="sel">経費</text>
+      <rect x="544" y="108" width="92" height="22" rx="5" fill="#fff" stroke="#d6d3d1"/>
+      <text x="554" y="124" class="sel">光熱費</text>
+
+      <!-- row3 -->
+      <rect x="28" y="160" width="14" height="14" rx="3" fill="#4f46e5"/>
+      <path d="M31 167 l3 3 l6 -6" stroke="#fff" stroke-width="2" fill="none"/>
+      <text x="60" y="172" class="c">08-06</text>
+      <text x="120" y="172" class="c">ヤチン オオニシフドウサン</text>
+      <text x="418" y="172" class="n2" text-anchor="end">¥85,000</text>
+      <rect x="440" y="158" width="92" height="22" rx="5" fill="#fff" stroke="#d6d3d1"/>
+      <text x="450" y="174" class="sel">経費</text>
+      <rect x="544" y="158" width="92" height="22" rx="5" fill="#fff" stroke="#d6d3d1"/>
+      <text x="554" y="174" class="sel">家賃</text>
+
+      <!-- row4 unchecked -->
+      <rect x="28" y="210" width="14" height="14" rx="3" fill="#fff" stroke="#a8a29e"/>
+      <text x="60" y="222" class="c">08-10</text>
+      <text x="120" y="222" class="c">ゲンキンニユウキン</text>
+      <text x="340" y="222" class="n" text-anchor="end">¥60,000</text>
+      <rect x="440" y="208" width="92" height="22" rx="5" fill="#fff" stroke="#d6d3d1"/>
+      <text x="450" y="224" class="sel">その他収入</text>
+      <text x="648" y="218" class="ng">受付の売上と二重に</text>
+      <text x="648" y="232" class="ng">なるので外してあります</text>
+      <circle cx="35" cy="217" r="17" fill="none" stroke="#e11d48" stroke-width="3"/>
+      <path d="M120 262 L58 240" stroke="#e11d48" stroke-width="3" fill="none"/>
+      <path d="M58 240 l11 -8 l3 12 z" fill="#e11d48"/>
+      <text x="128" y="268" class="ng">危ない行は、はじめからチェックが外れています</text>
+    </svg>
+    <figcaption>読み取ったあとの画面。種別もカテゴリも自動で入ります</figcaption>
+  </figure>
+
+  <div class="note">
+    <b>金額と種別だけは目で確かめてください</b>
+    写真の写り方によっては、AIが数字を読み違えることがあります。
+    取り込む前に、通帳と見くらべて確かめてください。
+  </div>
+</section>
+
+<!-- 3 -->
+<section id="a3">
+  <span class="badge">3</span>
+  <h2>保険の入金が自動で照合されます</h2>
+  <p class="when">これまで手でチェックしていた「通帳確認」が、写真1枚で済みます。</p>
+
+  <div class="tw">
+    <table>
+      <tr><th>通帳の行</th><th>どうなるか</th></tr>
+      <tr>
+        <td>すでに登録した<br>保険入金と金額が同じ</td>
+        <td>その入金が<b>「通帳確認済み」</b>になります。<br>振込日も通帳の日付で埋まります。</td>
+      </tr>
+      <tr>
+        <td>同じ金額の登録がない</td>
+        <td>保険入金として<b>新しく登録</b>します。<br>保険の名前と「何月分か」を選べます。</td>
+      </tr>
+    </table>
+  </div>
+
+  <div class="note">
+    <b>「何月分か」は選んでください</b>
+    保険は2ヶ月ほど遅れて振り込まれます。
+    はじめは振り込まれた月が入っているので、6月分の入金なら「2026年06月分」に変えてください。
+  </div>
+</section>
+
+<!-- 4 -->
+<section id="a4">
+  <span class="badge">4</span>
+  <h2>二重に登録しないようになっています</h2>
+  <p class="when">操作は特に要りません。裏側で自動で気をつけています。</p>
+
+  <ol class="steps">
+    <li>
+      <b>同じページを2回撮っても大丈夫</b>
+      <p>一度取り込んだ行は「取込済み」と出て、チェックが付けられなくなります。</p>
+    </li>
+    <li>
+      <b>レシートで入れた経費とかぶったら赤で知らせます</b>
+      <p>同じ金額の経費がすでにあると赤い注意が出て、チェックが外れた状態になります。</p>
+    </li>
+    <li>
+      <b>受付で記帳した売上の入金は、はじめから取り込みません</b>
+      <p>その他収入の行はチェックが外してあります。必要なときだけご自分で付けてください。</p>
+    </li>
+  </ol>
+
+  <div class="note warn">
+    <b>取り込みをやり直したいとき</b>
+    画面のいちばん下の「取込履歴」を開いて、その行のごみ箱を押すともう一度読み込めるようになります。
+    このとき、すでに登録された経費や保険入金は消えません。
+    いらない場合は経費記帳・保険入金の画面から消してください。
+  </div>
+</section>
+
+<footer>
+  ご不明な点があれば、いつでもご連絡ください。
+</footer>
+
+</div>
+</body>
+</html>
