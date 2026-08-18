@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useRef, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 import {
   format, addDays, startOfWeek, subWeeks, addWeeks, parseISO, isSameDay,
@@ -11,7 +11,8 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
-  ChevronLeft, ChevronRight, Calendar, Settings, Loader2, Plus, User, CalendarDays, Search, LayoutList, Coffee, X,
+  ChevronLeft, ChevronRight, Calendar, Settings, Loader2, Plus, Minus, User, CalendarDays, Search, LayoutList, Coffee, X,
+  ChevronDown, ChevronUp, Maximize2, Maximize, Minimize2, GripHorizontal,
 } from "lucide-react";
 import Link from "next/link";
 import { EditAppointmentDialog } from "@/components/admin/EditAppointmentDialog";
@@ -31,6 +32,20 @@ import { getClinicSettings } from "@/app/actions/settings";
 import { realtimeGuard } from "@/lib/realtime-guard";
 import TodayTimelineWidget from "@/components/admin/TodayTimelineWidget";
 import { PendingReservationsButton } from "@/components/admin/PendingReservationsButton";
+
+// 週間ビューの「時間軸1コマ」の高さ（px）。
+// 1コマは小さめを既定にして、一目で見える行数を増やす（縦に長く見たい、という運用のため）。
+const ROW_H_DEFAULT = 36;
+const ROW_H_MIN = 24;
+const ROW_H_MAX = 120;
+const ROW_H_STEP = 6;
+// キーを v2 にしているのは、旧既定(50px)を覚えている端末も新しい既定に戻すため
+const ROW_H_KEY = "admin-week-row-height-v2";
+// カレンダーの大枠（表示エリア全体）の高さ。既定は「画面ぴったり」で、ここからの差分を覚える。
+const FRAME_EXTRA_KEY = "admin-week-frame-extra";
+const FRAME_MIN_H = 320;
+const FRAME_EXTRA_MAX = 2000;
+const ICAL_OPEN_KEY = "admin-ical-card-open";
 
 export default function AdminWeeklyGridPage() {
   const slotMinutes = useClinicSlotDuration();
@@ -76,6 +91,123 @@ export default function AdminWeeklyGridPage() {
   // 部門（サロン/カフェ）フィルタ。clinic_settings.departments が空の院はタブを出さない。
   const [departments, setDepartments] = useState<string[]>([]);
   const [departmentFilter, setDepartmentFilter] = useState<string>(""); // "" = 全部門
+  // 週間ビューの1コマの縦幅（px）。ヘッダーの「縦幅 − ＋ / 画面に合わせる」で変えられる。
+  const [rowHeight, setRowHeight] = useState(ROW_H_DEFAULT);
+  // PC のカレンダー大枠の高さ。12rem 決め打ちをやめ、実際のウィンドウの高さから毎回計算する。
+  const [desktopHeight, setDesktopHeight] = useState<number | null>(null);
+  // 大枠を画面ぴったりからさらに伸ばす／縮める量（px）。下のバーをドラッグして決める。
+  const [frameExtra, setFrameExtra] = useState(0);
+  // 全画面表示（サイドバーやヘッダーを隠して、カレンダーだけを画面いっぱいに出す）
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  // カレンダー同期URLの案内カード（開いたままだとカレンダーが縦に狭くなるので既定は閉じる）
+  const [icalOpen, setIcalOpen] = useState(false);
+  const desktopAreaRef = useRef<HTMLDivElement | null>(null);
+  const weekScrollRef = useRef<HTMLDivElement | null>(null);
+  const weekHeaderRef = useRef<HTMLDivElement | null>(null);
+
+  // 前回いじった縦幅・同期カードの開閉を覚えておく
+  useEffect(() => {
+    try {
+      const saved = Number(localStorage.getItem(ROW_H_KEY));
+      if (Number.isFinite(saved) && saved >= ROW_H_MIN && saved <= ROW_H_MAX) setRowHeight(saved);
+      const savedExtra = Number(localStorage.getItem(FRAME_EXTRA_KEY));
+      if (Number.isFinite(savedExtra) && Math.abs(savedExtra) <= FRAME_EXTRA_MAX) setFrameExtra(savedExtra);
+      setIcalOpen(localStorage.getItem(ICAL_OPEN_KEY) === "1");
+    } catch { /* localStorage が使えない環境では既定値のまま */ }
+  }, []);
+
+  const changeRowHeight = useCallback((next: number) => {
+    const clamped = Math.min(ROW_H_MAX, Math.max(ROW_H_MIN, Math.round(next)));
+    setRowHeight(clamped);
+    try { localStorage.setItem(ROW_H_KEY, String(clamped)); } catch { /* 無視 */ }
+  }, []);
+
+  // 大枠の高さを覚える（ドラッグを離したときだけ書き込む）
+  const saveFrameExtra = useCallback((value: number) => {
+    try { localStorage.setItem(FRAME_EXTRA_KEY, String(Math.round(value))); } catch { /* 無視 */ }
+  }, []);
+
+  const frameDrag = useRef<{ startY: number; startExtra: number } | null>(null);
+  const onFrameDragStart = (e: React.PointerEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    frameDrag.current = { startY: e.clientY, startExtra: frameExtra };
+  };
+  const onFrameDragMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    const st = frameDrag.current;
+    if (!st) return;
+    const base = desktopHeight ?? 600;
+    const raw = st.startExtra + (e.clientY - st.startY);
+    // 大枠が小さくなりすぎないように下限を付ける
+    setFrameExtra(Math.min(FRAME_EXTRA_MAX, Math.max(FRAME_MIN_H - base, raw)));
+  };
+  const onFrameDragEnd = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!frameDrag.current) return;
+    frameDrag.current = null;
+    try { e.currentTarget.releasePointerCapture(e.pointerId); } catch { /* 無視 */ }
+    saveFrameExtra(frameExtra);
+  };
+  const resetFrameHeight = useCallback(() => {
+    setFrameExtra(0);
+    saveFrameExtra(0);
+  }, [saveFrameExtra]);
+
+  const toggleIcalCard = useCallback(() => {
+    setIcalOpen((prev) => {
+      const next = !prev;
+      try { localStorage.setItem(ICAL_OPEN_KEY, next ? "1" : "0"); } catch { /* 無視 */ }
+      return next;
+    });
+  }, []);
+
+  // 「画面に合わせる」= 受付時間ぶんの行が、できるだけ画面に収まる高さにする。
+  // 10分刻み・受付11時間の院だと 60行以上あって物理的に入りきらないので、
+  // そのときは最小の高さで止めて「全部は入らない」と正直に伝える。
+  const fitRowHeightToScreen = useCallback(() => {
+    const scroller = weekScrollRef.current;
+    if (!scroller || TIME_SLOTS.length === 0) return;
+    const headerH = weekHeaderRef.current?.offsetHeight ?? 40;
+    const usable = scroller.clientHeight - headerH - 2;
+    const ideal = Math.floor(usable / TIME_SLOTS.length);
+    changeRowHeight(ideal);
+    if (ideal < ROW_H_MIN) {
+      toast.info(`枠が多いため縦幅は最小の${ROW_H_MIN}pxにしました（この画面には全部は入りきりません）`);
+    }
+  }, [TIME_SLOTS.length, changeRowHeight]);
+
+  // PC のカレンダー枠を、いま開いているウィンドウの高さいっぱいまで伸ばす。
+  // （画面の小さい PC でカレンダーだけ狭く見える、を根本から直す）
+  useEffect(() => {
+    const update = () => {
+      const el = desktopAreaRef.current;
+      if (!el || el.offsetParent === null) return; // スマホ幅では非表示なので測らない
+      const top = el.getBoundingClientRect().top + window.scrollY;
+      // 管理画面の main には下パディングがある。これを引かないと、その分だけ
+      // ページ全体がスクロールして「下に白い余白が残る」見え方になる。
+      const main = el.closest("main");
+      const padBottom = main ? parseFloat(getComputedStyle(main).paddingBottom) || 0 : 0;
+      setDesktopHeight(Math.max(FRAME_MIN_H, Math.round(window.innerHeight - top - padBottom - 4)));
+    };
+    update();
+    window.addEventListener("resize", update);
+    const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(update) : null;
+    ro?.observe(document.body);
+    return () => {
+      window.removeEventListener("resize", update);
+      ro?.disconnect();
+    };
+  }, [viewModeReady, icalOpen, isFullscreen]);
+
+  // 全画面は Esc で戻れるようにしておく（閉じ方が分からなくなるのを防ぐ）
+  useEffect(() => {
+    if (!isFullscreen) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setIsFullscreen(false); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [isFullscreen]);
+
+  // 実際に使う大枠の高さ（画面ぴったり ± ドラッグぶん）
+  const frameHeight = Math.max(FRAME_MIN_H, (desktopHeight ?? 600) + frameExtra);
 
   // 月ビュー用: 月の全日付（前月末・翌月頭の空白セルも含めて週単位で並べる）
   const monthGrid = useMemo(() => {
@@ -852,8 +984,12 @@ export default function AdminWeeklyGridPage() {
           DESKTOP VIEW (≥ md)
       ==================================================== */}
       <div
-        className="hidden md:flex flex-col gap-4"
-        style={{ height: "calc(100vh - 12rem)", overflow: "hidden" }}
+        ref={desktopAreaRef}
+        className={`hidden md:flex flex-col gap-2 ${isFullscreen ? "fixed inset-0 z-50 bg-slate-50 dark:bg-slate-950 p-3" : ""}`}
+        style={{
+          height: isFullscreen ? "100dvh" : desktopHeight ? `${frameHeight}px` : "calc(100vh - 12rem)",
+          overflow: "hidden",
+        }}
       >
         {/* Navigation bar */}
         <Card className="shrink-0 rounded-b-none border-b-0">
@@ -903,7 +1039,7 @@ export default function AdminWeeklyGridPage() {
               )}
             </div>
 
-            <div className="flex items-center gap-3">
+            <div className="flex items-center justify-end flex-wrap gap-2">
               {/* ビュー切り替えタブ */}
               <div className="flex bg-slate-100 dark:bg-slate-800 rounded-lg p-0.5 gap-0.5">
                 <button
@@ -1004,7 +1140,51 @@ export default function AdminWeeklyGridPage() {
                   ))}
                 </div>
               )}
-              <div className="flex items-center gap-2 text-sm">
+              {/* 時間軸1コマの縦幅。PC の画面サイズに合わせて伸ばせる */}
+              {viewMode === "week" && (
+                <div className="flex items-center gap-1 rounded-lg border border-slate-200 dark:border-slate-700 px-1.5 py-1">
+                  <span className="px-1 text-[11px] font-semibold text-slate-500">1コマ</span>
+                  <button
+                    onClick={() => changeRowHeight(rowHeight - ROW_H_STEP)}
+                    disabled={rowHeight <= ROW_H_MIN}
+                    title="1コマを狭くする"
+                    className="rounded-md p-1 text-slate-600 hover:bg-slate-100 disabled:opacity-30 dark:text-slate-300 dark:hover:bg-slate-800"
+                  >
+                    <Minus className="w-3.5 h-3.5" />
+                  </button>
+                  <span className="w-9 text-center text-[11px] font-semibold tabular-nums text-slate-600 dark:text-slate-300">{rowHeight}px</span>
+                  <button
+                    onClick={() => changeRowHeight(rowHeight + ROW_H_STEP)}
+                    disabled={rowHeight >= ROW_H_MAX}
+                    title="1コマを広くする"
+                    className="rounded-md p-1 text-slate-600 hover:bg-slate-100 disabled:opacity-30 dark:text-slate-300 dark:hover:bg-slate-800"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    onClick={fitRowHeightToScreen}
+                    title="受付時間ぶんの行が、できるだけ画面に収まる高さにします"
+                    className="ml-0.5 flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-semibold text-blue-700 hover:bg-blue-50 dark:text-blue-300 dark:hover:bg-blue-950"
+                  >
+                    <Maximize2 className="w-3 h-3" />
+                    画面に合わせる
+                  </button>
+                </div>
+              )}
+              {/* 全画面：サイドバーもページ見出しも隠して、カレンダーだけを画面いっぱいに出す */}
+              <button
+                onClick={() => setIsFullscreen((v) => !v)}
+                title={isFullscreen ? "全画面をやめます（Escでも戻れます）" : "カレンダーだけを画面いっぱいに広げます"}
+                className={`flex items-center gap-1 rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition-colors ${
+                  isFullscreen
+                    ? "border-blue-600 bg-blue-600 text-white hover:bg-blue-700"
+                    : "border-slate-200 text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+                }`}
+              >
+                {isFullscreen ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize className="w-3.5 h-3.5" />}
+                {isFullscreen ? "全画面をやめる" : "全画面"}
+              </button>
+              <div className="hidden xl:flex items-center gap-2 text-sm">
                 <div className="flex items-center">
                   <div className="w-3 h-3 bg-blue-100 border border-blue-200 rounded-sm mr-1" />
                   確定
@@ -1154,7 +1334,7 @@ export default function AdminWeeklyGridPage() {
         )}
 
         {/* Weekly grid（週間モード） */}
-        {viewModeReady && viewMode === "week" && <Card className="flex-1 overflow-auto rounded-t-none border-t bg-slate-50">
+        {viewModeReady && viewMode === "week" && <Card ref={weekScrollRef} className="flex-1 min-h-0 overflow-auto rounded-t-none border-t bg-slate-50 py-0">
           {loading ? (
             <div className="h-full flex items-center justify-center">
               <Loader2 className="h-8 w-8 animate-spin text-blue-500" />
@@ -1162,7 +1342,7 @@ export default function AdminWeeklyGridPage() {
           ) : (
             <div className="min-w-[800px] h-full relative">
               {/* Day headers */}
-              <div className="flex sticky top-0 z-20 bg-white border-b shadow-sm">
+              <div ref={weekHeaderRef} className="flex sticky top-0 z-20 bg-white border-b shadow-sm">
                 <div className="w-20 shrink-0 border-r bg-slate-50" />
                 {weekDays.map((date, i) => {
                   const isToday = isSameDay(date, new Date());
@@ -1192,7 +1372,10 @@ export default function AdminWeeklyGridPage() {
               <div className="bg-white">
                 {TIME_SLOTS.map((slot, rowIndex) => (
                   <div key={slot} className="flex border-b">
-                    <div className="w-20 shrink-0 border-r bg-slate-50 flex items-center justify-center text-xs font-medium text-slate-500 py-4">
+                    <div
+                      className="w-20 shrink-0 border-r bg-slate-50 flex items-center justify-center text-xs font-medium text-slate-500"
+                      style={{ height: `${rowHeight}px` }}
+                    >
                       {slot}
                     </div>
                     {weekDays.map((date, colIndex) => {
@@ -1237,13 +1420,13 @@ export default function AdminWeeklyGridPage() {
                               setIsAddDialogOpen(true);
                             }
                           }}
-                          style={{ height: "50px" }}
+                          style={{ height: `${rowHeight}px` }}
                         >
                           {/* 休憩ブロック（開始セルに、時間ぶんの高さで表示） */}
                           {breakStart && (
                             <div
                               className="absolute inset-x-0.5 top-0.5 z-[5] rounded border border-amber-300 bg-amber-100/90 px-1.5 py-1 text-[11px] leading-tight text-amber-800 overflow-hidden"
-                              style={{ height: `${Math.max(1, (hmToMin(breakStart.end_time) - hmToMin(breakStart.start_time)) / (slotMinutes || 30)) * 50 - 4}px` }}
+                              style={{ height: `${Math.max(1, (hmToMin(breakStart.end_time) - hmToMin(breakStart.start_time)) / (slotMinutes || 30)) * rowHeight - 4}px` }}
                             >
                               <div className="flex items-start justify-between gap-1">
                                 <span className="font-bold flex items-center gap-0.5">
@@ -1284,7 +1467,7 @@ export default function AdminWeeklyGridPage() {
                             // 1行の高さは院の予約枠（20分刻みの院で30分決め打ちにすると
                             // 60分の予約が40分ぶんの高さで描かれ、空いていると勘違いする）
                             const slotCount = Math.max(1, Math.ceil(durationMinutes / (slotMinutes || 30)));
-                            const heightPx = slotCount * 50 - 4;
+                            const heightPx = slotCount * rowHeight - 4;
                             const widthPercent = 100 / (slotAppts.length || 1);
                             const leftOffset = index * widthPercent;
 
@@ -1520,29 +1703,60 @@ export default function AdminWeeklyGridPage() {
           </Card>
         )}
 
-        {/* iCal sync card (desktop) */}
-        <Card className="shrink-0 bg-blue-50 border-blue-200">
-          <div className="p-4 flex items-center justify-between">
-            <div>
-              <h3 className="font-bold text-blue-900 text-sm">カレンダー同期URL（Googleカレンダー用）</h3>
-              <p className="text-xs text-blue-700 mt-1">
+        {/* 大枠の高さを変えるバー。ここを上下にドラッグするとカレンダーの表示エリアが伸び縮みする。
+            ダブルクリックで「画面ぴったり」に戻す。 */}
+        {viewModeReady && !isFullscreen && (
+          <div
+            onPointerDown={onFrameDragStart}
+            onPointerMove={onFrameDragMove}
+            onPointerUp={onFrameDragEnd}
+            onPointerCancel={onFrameDragEnd}
+            onDoubleClick={resetFrameHeight}
+            title="上下にドラッグすると表示エリアの高さを変えられます（ダブルクリックで画面ぴったりに戻します）"
+            className="shrink-0 flex items-center justify-center gap-2 h-5 cursor-row-resize select-none rounded-md bg-slate-100 text-slate-400 hover:bg-blue-100 hover:text-blue-600 dark:bg-slate-800 dark:hover:bg-blue-950"
+          >
+            <GripHorizontal className="w-4 h-4" />
+            <span className="text-[10px] font-semibold">
+              ドラッグで高さ変更{frameExtra !== 0 ? `（画面ぴったり ${frameExtra > 0 ? "+" : ""}${Math.round(frameExtra)}px・ダブルクリックで戻す）` : ""}
+            </span>
+          </div>
+        )}
+
+        {/* iCal sync card (desktop)
+            開いたままだとカレンダーの縦が 100px 以上狭くなるので、既定は閉じておく。
+            見出しを押すと今まで通りの中身（URL＋.icsダウンロード）が出る。 */}
+        <Card className={`shrink-0 bg-blue-50 border-blue-200 py-0 ${isFullscreen ? "hidden" : ""}`}>
+          <button
+            onClick={toggleIcalCard}
+            className="w-full flex items-center justify-between px-4 py-2 text-left"
+            title="Googleカレンダー・iPhoneに予約を同期するURLを表示します"
+          >
+            <span className="font-bold text-blue-900 text-sm">カレンダー同期URL（Googleカレンダー用）</span>
+            <span className="flex items-center gap-1 text-xs font-semibold text-blue-700">
+              {icalOpen ? "閉じる" : "開く"}
+              {icalOpen ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />}
+            </span>
+          </button>
+          {icalOpen && (
+            <div className="px-4 pb-3 flex items-center justify-between gap-4 border-t border-blue-200 pt-3">
+              <p className="text-xs text-blue-700">
                 このURLをGoogleカレンダーやiPhoneの「照会カレンダー」に追加すると、予約と「家族カレンダー」の予定がすべて自動同期されます。
               </p>
+              <div className="flex items-center gap-2 shrink-0">
+                <code className="text-xs bg-white border border-blue-200 px-3 py-1.5 rounded select-all">
+                  https://ball-clinic.vercel.app/api/calendar/sync
+                </code>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="bg-white border-blue-200 hover:bg-blue-100 text-blue-700"
+                  onClick={() => window.open("/api/calendar/sync", "_blank")}
+                >
+                  .icsをダウンロード
+                </Button>
+              </div>
             </div>
-            <div className="flex items-center gap-2">
-              <code className="text-xs bg-white border border-blue-200 px-3 py-1.5 rounded select-all">
-                https://ball-clinic.vercel.app/api/calendar/sync
-              </code>
-              <Button
-                variant="outline"
-                size="sm"
-                className="bg-white border-blue-200 hover:bg-blue-100 text-blue-700"
-                onClick={() => window.open("/api/calendar/sync", "_blank")}
-              >
-                .icsをダウンロード
-              </Button>
-            </div>
-          </div>
+          )}
         </Card>
       </div>
 
