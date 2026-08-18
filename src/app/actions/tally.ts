@@ -36,6 +36,9 @@ export type TallyRow = {
   variants?: Record<string, string>;
   // 受付カウンターとの連動・次回予約のための予約紐付け（保存対象外、表示用）
   appointment_id?: string | null;
+  // その行にまとまっている予約すべて（保険＋鍼灸など、同じ人の同じ日の複数予約）。
+  // 会計済は人単位なので、この全部をまとめて更新する。
+  appointment_ids?: string[];
   customer_id?: string | null;
   customer_phone?: string;
   checkin_status?: string | null; // null|"arrived"|"in_treatment"|"done"
@@ -159,7 +162,7 @@ export async function getTallySheet(dateStr: string): Promise<TallySheetData> {
 
   // 同じ人が同じ日に複数予約（保険→鍼灸で担当が違う等）でも記帳は1行。
   // 予約ごとに行を作ると、保存済み金額が各行にプリフィルされて保存のたび金額が倍になる。
-  type ApptGroup = { name: string; mrn: string; minutes: number; staff_id: string | null; is_first_visit: boolean; appointment_id: string | null; customer_id: string | null; phone: string; checkin_status: string | null };
+  type ApptGroup = { name: string; mrn: string; minutes: number; staff_id: string | null; is_first_visit: boolean; appointment_id: string | null; appointment_ids: string[]; customer_id: string | null; phone: string; checkin_status: string | null };
   const apptGroups = new Map<string, ApptGroup>();
   (appts ?? []).forEach((a: any) => {
     const cust = Array.isArray(a.customers) ? a.customers[0] : a.customers;
@@ -180,6 +183,7 @@ export async function getTallySheet(dateStr: string): Promise<TallySheetData> {
         staff_id: a.staff_id ?? null,
         is_first_visit: !!a.is_first_visit,
         appointment_id: a.id ?? null,
+        appointment_ids: a.id ? [a.id as string] : [],
         customer_id: cust?.id ?? null,
         phone: cust?.phone ?? "",
         checkin_status: a.checkin_status ?? null,
@@ -192,6 +196,7 @@ export async function getTallySheet(dateStr: string): Promise<TallySheetData> {
     prev.staff_id = prev.staff_id ?? a.staff_id ?? null;
     prev.mrn = prev.mrn || (cust?.medical_record_number ?? "");
     prev.checkin_status = earlierCheckin(prev.checkin_status, a.checkin_status ?? null);
+    if (a.id) prev.appointment_ids.push(a.id as string);
   });
 
   const usedNames = new Set<string>();
@@ -209,6 +214,7 @@ export async function getTallySheet(dateStr: string): Promise<TallySheetData> {
       amounts: s?.amounts ?? {},
       variants: s?.variants ?? {},
       appointment_id: g.appointment_id,
+      appointment_ids: g.appointment_ids,
       customer_id: g.customer_id,
       customer_phone: g.phone,
       checkin_status: g.checkin_status,
@@ -235,6 +241,7 @@ export async function getTallySheet(dateStr: string): Promise<TallySheetData> {
       amounts: agg.amounts,
       variants: agg.variants,
       appointment_id: null,
+      appointment_ids: [],
       customer_id: null,
       customer_phone: "",
       checkin_status: null,

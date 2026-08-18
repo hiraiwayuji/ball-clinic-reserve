@@ -1521,6 +1521,42 @@ export async function updateCheckinStatus(
   }
 }
 
+/**
+ * 同じ人の同じ日の予約をまとめて会計済（などのステータス）にする。
+ *
+ * 日計表は「同じ人・同じ日」を1行にまとめて表示するため、保険＋鍼灸のように
+ * その日に2件予約がある方は、1件目だけ done にしても行の表示は未会計のままだった
+ * （表示はその人の一番手前のステータスを採用しているため）。
+ * 会計は人単位なので、その行にぶら下がる予約を全部まとめて更新する。
+ */
+export async function updateCheckinStatusMany(
+  appointmentIds: string[],
+  status: CheckinStatus,
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const ids = Array.from(new Set((appointmentIds ?? []).filter(Boolean)));
+    if (ids.length === 0) return { success: true };
+
+    const { clinicId } = await checkAdminAuth();
+    const supabase = getAdminSupabase();
+    if (!supabase) return { success: false, error: "サーバー設定エラー" };
+
+    const { error } = await supabase
+      .from("appointments")
+      .update({ checkin_status: status })
+      .in("id", ids)
+      .eq("clinic_id", clinicId);
+
+    if (error) return { success: false, error: error.message };
+
+    revalidatePath("/admin/counter");
+    return { success: true };
+  } catch (err) {
+    console.error("updateCheckinStatusMany error:", err);
+    return { success: false, error: "予期せぬエラーが発生しました" };
+  }
+}
+
 // ── 初診受付チェックリスト ──────────────────────────────────────────────
 
 export type IntakeCheckKey =

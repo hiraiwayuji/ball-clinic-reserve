@@ -12,7 +12,7 @@ import {
   type TallyStaff,
   type TallyRow,
 } from "@/app/actions/tally";
-import { updateCheckinStatus, getMonthCrossingFirstVisits, type CheckinStatus } from "@/app/actions/adminReserve";
+import { updateCheckinStatusMany, getMonthCrossingFirstVisits, type CheckinStatus } from "@/app/actions/adminReserve";
 import { searchPatientsForBooking } from "@/app/actions/patientSearch";
 import { updateSalePatientIdentity } from "@/app/actions/sales";
 import { AddAppointmentDialog } from "@/components/admin/AddAppointmentDialog";
@@ -29,6 +29,8 @@ type UIRow = {
   variants: Record<string, string>; // colKey -> 選択された種別
   // 予約紐付け・受付ステータス（会計済の連動／次回予約に使用）
   appointment_id: string | null;
+  // その行にまとまっている予約すべて（保険＋鍼灸など同じ人の同じ日の複数予約）
+  appointment_ids: string[];
   customer_id: string | null;
   customer_phone: string;
   checkin_status: CheckinStatus;
@@ -55,6 +57,7 @@ function toUIRow(r: TallyRow): UIRow {
     amounts,
     variants: { ...(r.variants ?? {}) },
     appointment_id: r.appointment_id ?? null,
+    appointment_ids: r.appointment_ids ?? (r.appointment_id ? [r.appointment_id] : []),
     customer_id: r.customer_id ?? null,
     customer_phone: r.customer_phone ?? "",
     checkin_status: (r.checkin_status ?? null) as CheckinStatus,
@@ -73,6 +76,7 @@ function blankRow(): UIRow {
     amounts: {},
     variants: {},
     appointment_id: null,
+    appointment_ids: [],
     customer_id: null,
     customer_phone: "",
     checkin_status: null,
@@ -353,15 +357,23 @@ export default function TallySheet({ initialDate }: { initialDate?: string }) {
   };
 
   // 「会計済」トグル。予約に紐づく行は受付カウンターの checkin_status と連動。
+  //
+  // 同じ人が同じ日に保険＋鍼灸のように2件予約している日は、この行に予約が
+  // 2件ぶらさがっている。1件だけ done にしても表示は「一番手前のステータス」を
+  // 使うため未会計のままに戻ってしまうので、行の予約を全部まとめて更新する。
+  // （2026-08-18 からだ鍼灸整骨院 藤川先生より「会計済にできない」の報告）
   const toggleDone = (row: UIRow, done: boolean) => {
     const nextStatus: CheckinStatus = done ? "done" : "arrived";
     // 楽観的更新
     updateRow(row._id, { checkin_status: nextStatus });
-    if (!row.appointment_id) {
+    const ids = row.appointment_ids.length > 0
+      ? row.appointment_ids
+      : row.appointment_id ? [row.appointment_id] : [];
+    if (ids.length === 0) {
       // 予約に紐づかない飛び込み行はこの画面内だけの印（カウンター連動なし）
       return;
     }
-    updateCheckinStatus(row.appointment_id, nextStatus)
+    updateCheckinStatusMany(ids, nextStatus)
       .then((res) => {
         if (!res.success) {
           updateRow(row._id, { checkin_status: row.checkin_status }); // 失敗時ロールバック
