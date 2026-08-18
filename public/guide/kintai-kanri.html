@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>出勤・退勤をアプリで管理する機能のご案内｜予約システム</title>
+<style>
+  :root{
+    --bg:#fdf8f3; --card:#fff; --ink:#3b2f2a; --sub:#7a6a60;
+    --line:#ecdfd4; --accent:#4f46e5; --accent-soft:#eef2ff;
+    --rose:#e11d48; --rose-soft:#ffe4e6; --ok:#15803d; --ok-soft:#dcfce7;
+    --amber:#b45309; --amber-soft:#fef3c7;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font-family:"Hiragino Kaku Gothic ProN","Yu Gothic",system-ui,sans-serif;
+    line-height:1.85;font-size:16px}
+  .wrap{max-width:720px;margin:0 auto;padding:24px 18px 64px}
+  header{text-align:center;padding:14px 0 20px}
+  .eyebrow{font-size:13px;color:var(--sub);letter-spacing:.08em}
+  h1{font-size:23px;margin:6px 0 10px;line-height:1.5}
+  .lead{font-size:15px;color:var(--sub);margin:0}
+
+  .toc{background:var(--card);border:1px solid var(--line);border-radius:18px;
+    padding:16px 18px;margin:18px 0 26px;box-shadow:0 2px 10px rgba(180,140,100,.08)}
+  .toc h2{font-size:15px;margin:0 0 10px;color:var(--accent)}
+  .toc ol{margin:0;padding-left:1.2em;font-size:15px}
+  .toc li{padding:3px 0}
+  .toc a{color:var(--ink);text-decoration:none;border-bottom:1px dotted var(--line)}
+
+  section{background:var(--card);border:1px solid var(--line);border-radius:18px;
+    padding:20px 18px;margin:0 0 22px;box-shadow:0 2px 10px rgba(180,140,100,.08);
+    scroll-margin-top:16px}
+  .badge{display:inline-block;font-size:12px;font-weight:700;color:#fff;background:var(--accent);
+    padding:4px 12px;border-radius:999px;margin-bottom:10px}
+  h2{font-size:19px;margin:0 0 6px;line-height:1.5}
+  .when{font-size:14px;color:var(--sub);margin:0 0 16px}
+
+  ol.steps{margin:0;padding:0;list-style:none;counter-reset:s}
+  ol.steps>li{counter-increment:s;position:relative;padding:0 0 18px 46px;margin:0}
+  ol.steps>li::before{content:counter(s);position:absolute;left:0;top:1px;
+    width:30px;height:30px;border-radius:50%;background:var(--accent);color:#fff;
+    font-weight:700;font-size:15px;display:flex;align-items:center;justify-content:center}
+  ol.steps>li::after{content:"";position:absolute;left:14px;top:34px;bottom:4px;width:2px;background:var(--line)}
+  ol.steps>li:last-child::after{display:none}
+  ol.steps>li>b{display:block;font-size:16px}
+  ol.steps p{margin:2px 0 0;font-size:14px;color:var(--sub)}
+
+  figure{margin:14px 0 4px}
+  figure svg{width:100%;height:auto;display:block}
+  figcaption{font-size:12.5px;color:var(--sub);text-align:center;margin-top:6px}
+
+  .note{border-radius:14px;padding:12px 14px;font-size:14px;margin:14px 0 0;
+    background:var(--accent-soft);border:1px solid #a5b4fc}
+  .warn{background:var(--rose-soft);border:1px solid #fda4af}
+  .good{background:var(--ok-soft);border:1px solid #86efac}
+  .amber{background:var(--amber-soft);border:1px solid #fcd34d}
+  .note>b:first-child{display:block;margin-bottom:2px}
+
+  table{width:100%;border-collapse:collapse;font-size:14px;margin:12px 0 0}
+  th,td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}
+  th{background:#f5f3ff;font-size:13px;white-space:nowrap}
+  td:first-child{white-space:nowrap}
+  .tw{overflow-x:auto}
+
+  .kbd{display:inline-block;background:#eef2ff;border:1px solid #a5b4fc;color:#3730a3;
+    border-radius:8px;padding:1px 8px;font-weight:700;font-size:14px}
+
+  .ask{background:#fff;border:2px solid var(--accent);border-radius:18px;
+    padding:20px 18px;margin:0 0 26px}
+  .ask h2{color:var(--accent)}
+  .ask ul{margin:10px 0 0;padding-left:1.3em;font-size:15px}
+  .ask li{padding:4px 0}
+  .ask li b{color:var(--accent)}
+
+  footer{text-align:center;font-size:13px;color:var(--sub);padding-top:10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <div class="eyebrow">予約システム｜からだ鍼灸整骨院様へ</div>
+  <h1>出勤・退勤をアプリで管理する<br>機能のご案内</h1>
+  <p class="lead">エクセルでの勤怠管理と同じことが、<br>アプリの中でできるようになります。</p>
+</header>
+
+<div class="toc">
+  <h2>この資料の中身</h2>
+  <ol>
+    <li><a href="#a1">スタッフの打刻（出勤・退勤）</a></li>
+    <li><a href="#a2">院長の画面でひと目で確認・手直し</a></li>
+    <li><a href="#a3">毎月、エクセルで出力できます</a></li>
+    <li><a href="#a4">残業のムダも自動で見える化</a></li>
+    <li><a href="#a5">ご確認いただきたいこと</a></li>
+  </ol>
+</div>
+
+<!-- 1 -->
+<section id="a1">
+  <span class="badge">1</span>
+  <h2>スタッフの打刻（出勤・退勤）</h2>
+  <p class="when">ログイン不要。受付のパソコン、または各自のスマホから使えます。</p>
+
+  <ol class="steps">
+    <li>
+      <b>打刻用のページを開く</b>
+      <p>院長からお送りするリンクをブックマークするか、各自のスマホに送ります。</p>
+    </li>
+    <li>
+      <b>自分の名前を押す</b>
+      <p>ログインやパスワードの入力は不要です。名前を選ぶだけです。</p>
+    </li>
+    <li>
+      <b>「出勤」「退勤」を押す</b>
+      <p>それだけで、その日の出勤・退勤の時刻が記録されます。</p>
+    </li>
+  </ol>
+
+  <figure>
+    <svg viewBox="0 0 780 220" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="打刻ページ。名前を選ぶと出勤・退勤のボタンが出る">
+      <style>
+        .ttl{font:700 14px sans-serif;fill:#3b2f2a}
+        .sub{font:600 12px sans-serif;fill:#7a6a60}
+        .name{font:700 13px sans-serif;fill:#3b2f2a}
+        .btnIn{font:700 15px sans-serif;fill:#fff}
+        .lbl{font:700 11px sans-serif;fill:#065f46}
+      </style>
+      <rect x="10" y="10" width="760" height="200" rx="14" fill="#fbfaf8" stroke="#e5e0d8"/>
+      <text x="30" y="42" class="ttl">出退勤の打刻</text>
+      <text x="30" y="62" class="sub">お名前を選んでください</text>
+
+      <rect x="30" y="78" width="150" height="40" rx="10" fill="#fff" stroke="#d6d3d1"/>
+      <text x="60" y="103" class="name">森川 和紀</text>
+      <rect x="196" y="78" width="150" height="40" rx="10" fill="#eef2ff" stroke="#4f46e5" stroke-width="2"/>
+      <text x="222" y="103" class="name" fill="#4f46e5">森藤 瑞穂香</text>
+      <text x="196" y="70" class="lbl">選択中</text>
+
+      <rect x="196" y="140" width="150" height="52" rx="12" fill="#10b981"/>
+      <text x="238" y="172" class="btnIn">② 出勤</text>
+      <rect x="362" y="140" width="150" height="52" rx="12" fill="#e5e0d8"/>
+      <text x="402" y="172" class="btnIn" fill="#7a6a60">退勤</text>
+    </svg>
+    <figcaption>スマホでも受付PCでも、同じ画面で打刻できます</figcaption>
+  </figure>
+
+  <div class="note">
+    <b>今の「出勤カウンターの受付チェック」とは別物です</b>
+    こちらはスタッフさん自身の「働いた時間」の記録です。患者さんの受付・会計とは連動しません。
+  </div>
+</section>
+
+<!-- 2 -->
+<section id="a2">
+  <span class="badge">2</span>
+  <h2>院長の画面でひと目で確認・手直し</h2>
+  <p class="when">押し忘れがあっても、あとから院長が直せます。</p>
+
+  <figure>
+    <svg viewBox="0 0 780 260" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="院長の勤怠一覧画面。名前・出勤・退勤・労働時間が並び、時刻をタップして直せる">
+      <style>
+        .h{font:700 11px sans-serif;fill:#7a6a60}
+        .c{font:600 12px sans-serif;fill:#3b2f2a}
+        .cw{font:700 12px sans-serif;fill:#b45309}
+        .ok{font:600 10.5px sans-serif;fill:#1d4ed8}
+      </style>
+      <rect x="10" y="10" width="760" height="240" rx="14" fill="#fff" stroke="#e5e0d8"/>
+      <text x="30" y="38" class="h">2026年8月　勤怠一覧</text>
+      <line x1="10" y1="52" x2="770" y2="52" stroke="#e5e0d8"/>
+      <text x="40" y="72" class="h">日付</text>
+      <text x="140" y="72" class="h">お名前</text>
+      <text x="300" y="72" class="h">出勤</text>
+      <text x="400" y="72" class="h">退勤</text>
+      <text x="500" y="72" class="h">労働時間</text>
+      <text x="620" y="72" class="h">状態</text>
+
+      <line x1="10" y1="82" x2="770" y2="82" stroke="#f1ede7"/>
+      <text x="40" y="102" class="c">8/17(月)</text>
+      <text x="140" y="102" class="c">森川 和紀</text>
+      <rect x="292" y="88" width="56" height="22" rx="5" fill="#f5f3ff" stroke="#d6d3d1"/>
+      <text x="300" y="103" class="c">12:00</text>
+      <rect x="392" y="88" width="56" height="22" rx="5" fill="#f5f3ff" stroke="#d6d3d1"/>
+      <text x="400" y="103" class="c">21:10</text>
+      <text x="500" y="102" class="c">9時間10分</text>
+      <text x="620" y="102" class="cw">残業（理由あり）</text>
+
+      <line x1="10" y1="118" x2="770" y2="118" stroke="#f1ede7"/>
+      <text x="40" y="138" class="c">8/17(月)</text>
+      <text x="140" y="138" class="c">森藤 瑞穂香</text>
+      <rect x="292" y="124" width="56" height="22" rx="5" fill="#f5f3ff" stroke="#d6d3d1"/>
+      <text x="300" y="139" class="c">12:00</text>
+      <rect x="392" y="124" width="56" height="22" rx="5" fill="#fee2e2" stroke="#e11d48" stroke-width="1.5"/>
+      <text x="400" y="139" class="c" fill="#be123c">未入力</text>
+      <text x="500" y="138" class="c">―</text>
+      <text x="620" y="134" class="ok">タップして時刻を入力</text>
+      <text x="620" y="147" class="ok">できます</text>
+
+      <line x1="10" y1="154" x2="770" y2="154" stroke="#f1ede7"/>
+      <text x="40" y="174" class="c">8/18(火)</text>
+      <text x="140" y="174" class="c">岸田 典子</text>
+      <rect x="292" y="160" width="56" height="22" rx="5" fill="#f5f3ff" stroke="#d6d3d1"/>
+      <text x="300" y="175" class="c">11:50</text>
+      <rect x="392" y="160" width="56" height="22" rx="5" fill="#f5f3ff" stroke="#d6d3d1"/>
+      <text x="400" y="175" class="c">20:05</text>
+      <text x="500" y="174" class="c">8時間15分</text>
+      <text x="620" y="174" class="c" fill="#15803d">定時内</text>
+
+      <rect x="30" y="196" width="720" height="42" rx="10" fill="#eef2ff"/>
+      <text x="48" y="222" class="c" fill="#4338ca">出勤・退勤の時刻は、押し忘れの日も含めていつでも手で直せます</text>
+    </svg>
+    <figcaption>1ヶ月ぶんが一覧で並びます。時刻の欄をタップすると直せます</figcaption>
+  </figure>
+</section>
+
+<!-- 3 -->
+<section id="a3">
+  <span class="badge">3</span>
+  <h2>毎月、エクセルで出力できます</h2>
+  <p class="when">今エクセルでされている月次の管理を、そのまま置き換えられます。</p>
+
+  <div class="tw">
+    <table>
+      <tr><th>今まで（エクセル）</th><th>これから（アプリ）</th></tr>
+      <tr>
+        <td>毎日、出勤・退勤の時刻を<br>手で転記</td>
+        <td>スタッフが自分で打刻。<br>院長は直したい日だけ手直し</td>
+      </tr>
+      <tr>
+        <td>スタッフごとにシートを分けて集計</td>
+        <td>「エクセル出力」を押すだけで<br><b>スタッフごとにシートが分かれた</b><br>エクセルファイルができます</td>
+      </tr>
+      <tr>
+        <td>残業した日を目でチェック</td>
+        <td>残業の日は自動で色分け表示</td>
+      </tr>
+    </table>
+  </div>
+
+  <div class="note good">
+    <b>今のエクセルを急にやめる必要はありません</b>
+    しばらくは両方見比べながら、慣れてきたらアプリだけに移す、という進め方もできます。
+  </div>
+</section>
+
+<!-- 4 -->
+<section id="a4">
+  <span class="badge">4</span>
+  <h2>残業のムダも自動で見える化</h2>
+  <p class="when">以前ご相談いただいた「患者さんが少ないのに複数人残っている」を、金額つきで見える化します。</p>
+
+  <ol class="steps">
+    <li>
+      <b>シフトの終わりを何分過ぎたら「残業」か決める</b>
+      <p>スタッフごとのシフト終了時刻を基準にします（例：終了＋15分まではOK）。</p>
+    </li>
+    <li>
+      <b>残業した人には、理由の入力を求める</b>
+      <p>「院長の依頼」「締め作業」「正当な理由」などから選んでもらいます。</p>
+    </li>
+    <li>
+      <b>予約と突き合わせて「ムダな残業」を自動で判定</b>
+      <p>その時間に担当していた予約が無いのに残っていた場合、ムダな残業として金額を計算します（時給を入れた場合のみ）。</p>
+    </li>
+  </ol>
+
+  <div class="note amber">
+    <b>時給は院長だけが見られます</b>
+    合言葉（打刻用パスワードとは別）を決めていただくと、時給と金額の欄はその合言葉を知っている人にしか表示されません。スタッフの画面には一切出ません。
+  </div>
+</section>
+
+<!-- 5：確認事項 -->
+<div class="ask" id="a5">
+  <span class="badge" style="background:var(--accent)">5</span>
+  <h2>藤川先生にご確認いただきたいこと</h2>
+  <p class="when" style="margin-bottom:6px">この機能は今まだ<b>オフ</b>になっています。オンにする前に、次の3つだけ決めてください。</p>
+  <ul>
+    <li><b>①オンにしてよいか</b> — よければ、こちらでオンにします</li>
+    <li><b>②「定時」の目安</b> — シフト終わりの何分後までを定時とするか（今の仮設定は10分後）</li>
+    <li><b>③締め作業の担当</b> — 1人で締めてよい人はどなたか（今はまだ未設定です）</li>
+  </ul>
+  <p style="margin:14px 0 0;font-size:14px;color:var(--sub)">
+    時給の入力は院長ご自身の合言葉つきの画面で、あとからいつでも行えます。今すぐ決めていただく必要はありません。
+  </p>
+</div>
+
+<footer>
+  ご不明な点があれば、いつでもご連絡ください。
+</footer>
+
+</div>
+</body>
+</html>
