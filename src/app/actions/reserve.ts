@@ -81,6 +81,62 @@ import { getBookingHorizonDays, getCurrentSchedule, getCurrentSlotDuration, getR
 import { getCustomerLineState } from "@/lib/line-links";
 import { unstable_noStore as noStore } from "next/cache";
 
+/**
+ * 追加メニュー（水素・ヘッドスパ・汎用アドオン）を、その担当レーンに置いてよいかの共通ガード。
+ *
+ * 追加メニューは本予約の終了直後に自動で置かれる＝患者は開始時刻を選べない。
+ * ここで担当スタッフの「休み・受付時間・休憩」を見ずに入れてしまうと、
+ * 休憩中のスタッフに予約が刺さる（2026-08-22 からだ: 森川先生の休憩12:00〜14:00に
+ * 13:00の「整体 全身」が入り、現場が対応不能になった）。
+ * 本予約（required_staff / 指名）と同じ判定を必ず通して、置けないときは追加しない。
+ *
+ * - staffId が無い（レーン指定なしの追加メニュー）→ true（院の定員判定にまかせる）
+ * - スケジュール設定が何も無いスタッフ → true（従来どおり制限なし）
+ * - 判定に失敗（DBエラー等）→ true。ここで false にすると障害時に全院の追加メニューが
+ *   黙って消え、院側が気づけないため。衝突は仮予約なので確定前に人の目が入る。
+ */
+async function canStaffTakeAddonSpan(
+  db: any,
+  staffId: string | null,
+  ymd: string,
+  startHHMM: string,
+  durationMinutes: number,
+): Promise<boolean> {
+  if (!staffId) return true;
+  try {
+    const [{ data: st }, { data: ovr }, { data: offRows }] = await Promise.all([
+      db.from("reservation_staff")
+        .select("schedule_based_booking, booking_weekdays, booking_start_time, booking_end_time, booking_break_start, booking_break_end, booking_until")
+        .eq("id", staffId).eq("clinic_id", PUBLIC_CLINIC_ID).maybeSingle(),
+      db.from("staff_booking_dates").select("available, start_time, end_time")
+        .eq("clinic_id", PUBLIC_CLINIC_ID).eq("staff_id", staffId).eq("date", ymd).maybeSingle(),
+      db.from("staff_working_overrides").select("kind, start_time, blocks_booking")
+        .eq("clinic_id", PUBLIC_CLINIC_ID).eq("staff_id", staffId).eq("date", ymd),
+    ]);
+    if (!st) return true;
+    // 出勤調整の「終日休み」はレーンごと閉じる（pickStaffForBooking と同じ判定）
+    const dayOff = (offRows ?? []).some(
+      (o: any) => (o.kind === "off" || o.kind === "leave") && !o.start_time && o.blocks_booking !== false,
+    );
+    if (dayOff) return false;
+    const { weekly, prep } = await getStaffWeeklyHours(db, staffId);
+    const sched = buildStaffSchedule(
+      st,
+      ovr ? [{ date: ymd, available: !!ovr.available, start: normStaffTime(ovr.start_time), end: normStaffTime(ovr.end_time) }] : [],
+      weekly,
+      prep,
+    );
+    if (!sched) return true;
+    if (!isStaffAvailableOnYmd(ymd, sched)) return false;
+    // 開始〜終了まで丸ごと受付時間内で、休憩をまたがないか
+    if (!isStaffSpanBookableYmd(ymd, startHHMM, durationMinutes, sched)) return false;
+    return true;
+  } catch (e) {
+    console.error("[canStaffTakeAddonSpan] failed:", e);
+    return true;
+  }
+}
+
 async function getSupabase() {
   return await createServerClient();
 }
@@ -1312,7 +1368,9 @@ export async function createReservation(formData: FormData) {
                 .limit(1);
               laneFree = !(wConf && wConf.length > 0);
             }
-            if (inHours && laneFree) {
+            // 水素レーンの担当（水素＝1台）の休み・受付時間・休憩を見る
+            const wStaffOk = await canStaffTakeAddonSpan(adminDb, wStaffId, rawDate, wHHMM, wDur);
+            if (inHours && laneFree && wStaffOk) {
               const { error: wErr } = await adminDb.from("appointments").insert([{
                 customer_id: customerId,
                 start_time: wStartIso,
@@ -1406,7 +1464,9 @@ export async function createReservation(formData: FormData) {
                   .limit(1);
                 laneFree = !(hConf && hConf.length > 0);
               }
-              if (inHours && laneFree) {
+              // 開始時刻だけでなく、施術の終わりまで受付時間内か・休憩をまたがないかも見る
+              const hStaffOk = await canStaffTakeAddonSpan(adminDb, hStaffId, rawDate, hHHMM, hDur);
+              if (inHours && laneFree && hStaffOk) {
                 const { error: hErr } = await adminDb.from("appointments").insert([{
                   customer_id: customerId,
                   start_time: hStartIso,
@@ -1481,7 +1541,10 @@ export async function createReservation(formData: FormData) {
                 .lt("start_time", aEndIso).gt("end_time", aStartIso);
               free = (overlap?.length ?? 0) < dayCapacity;
             }
-            if (inHours && free) {
+            // 専任担当（required_staff_id）のいる追加メニューは、その先生の
+            // 休み・受付時間・休憩に入らないことを必ず確認してから置く
+            const aStaffOk = await canStaffTakeAddonSpan(adminDb, aStaffId, rawDate, aHHMM, aDur);
+            if (inHours && free && aStaffOk) {
               const { error: aErr } = await adminDb.from("appointments").insert([{
                 customer_id: customerId,
                 start_time: aStartIso,
@@ -1533,6 +1596,23 @@ export async function createReservation(formData: FormData) {
               `➕【${ar.name} 追加】${name}様 ${rawDate} ${ar.time ?? ""}〜（施術の直後）`,
             );
           }
+        }
+        // 追加メニューが取れなかったときも必ず院に知らせる。
+        // 患者側の画面には出るが院側は気づけず、「頼んだのに入っていない」という
+        // 行き違いになるため（2026-08-22 からだ）。
+        const addonFailed = [
+          ...(hydrogenError ? ["水素"] : []),
+          ...(headspaError ? ["ヘッドスパ"] : []),
+          ...addonResults.filter((ar) => !ar.added).map((ar) => ar.name),
+        ];
+        if (addonFailed.length > 0) {
+          await pushLineToOwners(
+            PUBLIC_CLINIC_ID,
+            `⚠️【追加メニューが取れませんでした】${name}様 ${rawDate} ${time}〜\n` +
+              `ご希望: ${addonFailed.join("・")}\n` +
+              `担当の受付時間・休憩・空き状況の都合で、施術の直後に入れられませんでした。\n` +
+              `本予約は取れています。追加分は院からご連絡をお願いします。`,
+          );
         }
         // 別日の既存予約がある状態で、ご本人が「院に確認済み」として追加予約した場合はオーナーに注意喚起
         if (hasOtherDayDuplicate && confirmedExisting) {

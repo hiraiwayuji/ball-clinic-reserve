@@ -81,6 +81,14 @@ export default function QuestionnairePage() {
   // 予約ページから引き継いだ仮予約の内容（あればアンケート後にそのまま確定する）
   const [pendingBooking, setPendingBooking] = useState<PendingBooking | null>(null);
   const [bookedIsWaiting, setBookedIsWaiting] = useState(false);
+  // 追加メニュー（施術の直後に続けて取るもの）の結果。
+  // 担当の受付時間・休憩の都合で取れないことがあり、それを患者さんに伝えないと
+  // 「頼んだのに入っていない」という行き違いになる（2026-08-22 からだ）。
+  const [bookedAddonResults, setBookedAddonResults] = useState<
+    { name: string; added: boolean; time: string | null; error: string | null }[] | null
+  >(null);
+  const [bookedHydrogenError, setBookedHydrogenError] = useState<string | null>(null);
+  const [bookedHeadspaError, setBookedHeadspaError] = useState<string | null>(null);
 
   // 院の公開設定（LINE URL・住所＝県判定）。マウント時に取得。
   const [lineUrl, setLineUrl] = useState<string>(LINE_URL_FALLBACK);
@@ -219,6 +227,9 @@ export default function QuestionnairePage() {
               localStorage.setItem("ballClinic_savedPhone", normalizedPhone);
             } catch {}
             setBookedIsWaiting(!!res.isWaiting);
+            setBookedAddonResults(res.addonResults ?? null);
+            setBookedHydrogenError(res.hydrogenError ?? null);
+            setBookedHeadspaError(res.headspaError ?? null);
             setStep("booked");
             return;
           }
@@ -264,6 +275,9 @@ export default function QuestionnairePage() {
               if (res?.success) {
                 setLineLinkedViaGate(true);
                 setBookedIsWaiting(!!res.isWaiting);
+                setBookedAddonResults(res.addonResults ?? null);
+                setBookedHydrogenError(res.hydrogenError ?? null);
+                setBookedHeadspaError(res.headspaError ?? null);
                 setStep("booked");
               } else {
                 toast.error(res?.error || "仮予約の確定に失敗しました。お手数ですが予約カレンダーからお進みください。");
@@ -303,6 +317,29 @@ export default function QuestionnairePage() {
               </p>
             </div>
           </div>
+
+          {/* 追加メニュー（施術の直後に続けて）の結果。取れなかったときは必ずお伝えする */}
+          {bookedAddonResults && bookedAddonResults.map((ar, i) => (
+            ar.added ? (
+              <div key={i} className="rounded-2xl bg-emerald-500/15 border border-emerald-400/30 px-4 py-3 text-emerald-100 text-sm font-bold">
+                ✅ {ar.name}も追加しました{ar.time ? `（${ar.time}〜・施術の直後）` : ""}
+              </div>
+            ) : (
+              <div key={i} className="rounded-2xl bg-amber-500/15 border border-amber-400/30 px-4 py-3 text-amber-100 text-sm font-bold">
+                ⚠️ {ar.name}は{ar.error ?? "追加できませんでした"}。<br />施術のご予約は受け付けています。院からご連絡いたします。
+              </div>
+            )
+          ))}
+          {bookedHydrogenError && (
+            <div className="rounded-2xl bg-amber-500/15 border border-amber-400/30 px-4 py-3 text-amber-100 text-sm font-bold">
+              ⚠️ {bookedHydrogenError}
+            </div>
+          )}
+          {bookedHeadspaError && (
+            <div className="rounded-2xl bg-amber-500/15 border border-amber-400/30 px-4 py-3 text-amber-100 text-sm font-bold">
+              ⚠️ {bookedHeadspaError}
+            </div>
+          )}
 
           {lineLinkedViaGate ? (
             /* LINE連携ゲートを通過済み → 追加のお願いは不要。確定連絡を待ってもらうだけ */
