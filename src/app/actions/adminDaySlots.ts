@@ -117,18 +117,15 @@ export async function getAdminDaySlots(params: {
       .eq("clinic_id", clinicId)
       .eq("date", dateStr);
 
-    // その担当が「同じ時間に1人まで」か。false の担当（からだ・マッスル等、同時に複数人を
-    // 診る運用）は DB の除外制約も掛からないので、埋まっていても選べるようにする。
-    let laneExclusive = false;
-    if (effStaffId) {
-      const { data: st } = await supabase
-        .from("reservation_staff")
-        .select("prevent_overlap")
-        .eq("id", effStaffId)
-        .eq("clinic_id", clinicId)
-        .maybeSingle();
-      laneExclusive = !!st?.prevent_overlap;
-    }
+    // 担当が埋まっている枠は、院を問わず選ばせない。
+    //
+    // 2026-08-22 まではここを `reservation_staff.prevent_overlap` で切り替えており、
+    // false の院（からだ・マッスル・AILUS）は埋まっていても枠を選べていた。
+    // その結果、同じ先生の同じ時間に2件入る「かぶり予約」が7〜8月だけで64組発生した。
+    // ぼーるくんの依頼（2026-08-22）で、登録・編集の全経路をサーバー側で止めるようにしたため、
+    // ここで選べたままだと「選べるのに登録すると弾かれる」という食い違いになる。
+    // 重ねて診たいときは担当を分ける運用にそろえる。
+    const laneExclusive = true;
 
     // レーンの既存予約。キャンセルは無視。
     // C待ち(waiting)は「その時間帯に空きが出たら」の希望登録で枠を持たないので除外する

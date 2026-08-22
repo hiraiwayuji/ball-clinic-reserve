@@ -31,6 +31,7 @@ import {
   type WaitlistCandidate,
 } from "@/app/actions/adminReserve";
 import { getCourses, getStaffList, getRooms, type ReservationCourse, type ReservationStaff, type ReservationRoom } from "@/app/actions/courses";
+import { getMyRole } from "@/app/actions/auth";
 import { AddAppointmentDialog } from "./AddAppointmentDialog";
 import { toast } from "sonner";
 import { getTimeSlots } from "@/lib/time-slots";
@@ -62,6 +63,17 @@ export function EditAppointmentDialog({
   const [lastVisitDate, setLastVisitDate] = useState<Date | null>(null);
   const [visitCount, setVisitCount] = useState<number | null>(null);
   const [deleteChoiceOpen, setDeleteChoiceOpen] = useState(false);
+  // 担当かぶりで保存できなかったときのお知らせ。
+  // トーストは数秒で消えて読み飛ばされるため、閉じるまで残るダイアログで出す
+  // （2026-08-22 ぼーるくん「注意メッセージを出しても読まない人がいる」）。
+  const [overlapError, setOverlapError] = useState<string | null>(null);
+  // ログイン中の権限。かぶりを承知で通せるのはオーナー（院長先生）だけ。
+  const [userRole, setUserRole] = useState<string | null>(null);
+  const isOwner = userRole === "owner";
+  // かぶりで止まった操作を、院長の判断でやり直すための覚え書き
+  const [pendingOverlapAction, setPendingOverlapAction] =
+    useState<null | "save" | "adjacent">(null);
+  useEffect(() => { getMyRole().then((r) => setUserRole(r)).catch(() => {}); }, []);
   const [seriesFutureCount, setSeriesFutureCount] = useState<number>(0);
   // キャンセル待ち：削除で空きが出たとき候補を出して LINE で空きを知らせる
   const [waitlistOpen, setWaitlistOpen] = useState(false);
@@ -243,6 +255,10 @@ export function EditAppointmentDialog({
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    await saveAppointment(false);
+  };
+
+  const saveAppointment = async (allowOverlap: boolean) => {
     if (!date || !time || !appointment) {
       toast.error("日付と時間を選択してください");
       return;
@@ -262,7 +278,9 @@ export function EditAppointmentDialog({
         roomId?: string | null;
         additionalCourseIds?: string[];
         additionalStaffIds?: string[];
+        allowOverlap?: boolean;
       } = {};
+      if (allowOverlap) options.allowOverlap = true;
       if (courseId !== initialCourseId) options.courseId = courseId === "" ? null : courseId;
       if (staffId !== initialStaffId) options.staffId = staffId === "" ? null : staffId;
       if (roomId !== initialRoomId) options.roomId = roomId === "" ? null : roomId;
@@ -287,6 +305,10 @@ export function EditAppointmentDialog({
         toast.success("予約を更新しました");
         onOpenChange(false);
         onSuccess?.();
+      } else if ("overlap" in result && result.overlap) {
+        // 担当かぶりは直してもらわないと保存させない。ダイアログで残す。
+        setPendingOverlapAction(("needsOwner" in result && result.needsOwner) ? "save" : null);
+        setOverlapError(result.error || "同じ担当の重複予約はできません。");
       } else {
         toast.error(result.error || "エラーが発生しました");
       }
@@ -312,6 +334,9 @@ export function EditAppointmentDialog({
         );
         onSuccess?.();
         onOpenChange(false);
+      } else if ("overlap" in res && res.overlap) {
+        setPendingOverlapAction(("needsOwner" in res && res.needsOwner) ? "adjacent" : null);
+        setOverlapError(res.error ?? "同じ担当の重複予約はできません。");
       } else {
         toast.error(res.error ?? "追加に失敗しました");
       }
@@ -514,7 +539,7 @@ export function EditAppointmentDialog({
   };
 
   // 直前・直後に任意コースを追加予約
-  const handleAddAdjacent = async () => {
+  const handleAddAdjacent = async (allowOverlap: boolean = false) => {
     if (!adjacentCourseId) { toast.error("コースを選んでください"); return; }
     if (!adjacentPanel) return;
     setIsSubmitting(true);
@@ -524,6 +549,7 @@ export function EditAppointmentDialog({
         adjacentCourseId,
         adjacentStaffId || null,
         adjacentPanel,
+        allowOverlap,
       );
       if (res.success) {
         const c = courses.find(c => c.id === adjacentCourseId);
@@ -959,7 +985,7 @@ export function EditAppointmentDialog({
                     </select>
                     <button
                       type="button"
-                      onClick={handleAddAdjacent}
+                      onClick={() => handleAddAdjacent(false)}
                       disabled={isSubmitting || !adjacentCourseId}
                       className="w-full h-9 rounded-lg bg-violet-600 hover:bg-violet-700 disabled:opacity-50 text-white text-sm font-bold transition"
                     >
@@ -1060,6 +1086,60 @@ export function EditAppointmentDialog({
         defaultVisitType="return"
         onSuccess={onSuccess}
       />
+
+      {/* 担当かぶりで保存できなかったときのお知らせ（直すまで保存させない） */}
+      <Dialog open={!!overlapError} onOpenChange={(o) => { if (!o) setOverlapError(null); }}>
+        <DialogContent className="max-w-sm border-2 border-rose-300">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-rose-700">
+              <span aria-hidden>⚠</span>
+              この予約は保存できません
+            </DialogTitle>
+            <DialogDescription className="whitespace-pre-line text-slate-700 leading-relaxed">
+              {overlapError}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="rounded-xl bg-rose-50 border border-rose-200 px-3 py-2 text-xs text-rose-800 leading-relaxed">
+            同じ先生の同じ時間に2件の予約は入れられません。<br />
+            <span className="font-bold">担当の先生を変える</span>か、
+            <span className="font-bold">時間をずらす</span>と保存できます。
+            {!isOwner && (
+              <>
+                <br />
+                どうしても重ねる必要があるときは、<span className="font-bold">院長先生の許可</span>が必要です。
+                先生にご確認ください。
+              </>
+            )}
+          </div>
+          <DialogFooter className="mt-2 flex-col gap-2 sm:flex-col">
+            <Button
+              type="button"
+              onClick={() => { setOverlapError(null); setPendingOverlapAction(null); }}
+              className="w-full h-11 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold"
+            >
+              戻って直す
+            </Button>
+            {/* 院長先生だけは、事情が分かっているので承知のうえで通せる */}
+            {isOwner && pendingOverlapAction && (
+              <Button
+                type="button"
+                variant="outline"
+                disabled={isSubmitting}
+                onClick={async () => {
+                  const action = pendingOverlapAction;
+                  setOverlapError(null);
+                  setPendingOverlapAction(null);
+                  if (action === "save") await saveAppointment(true);
+                  else if (action === "adjacent") await handleAddAdjacent(true);
+                }}
+                className="w-full h-10 rounded-xl border-amber-300 text-amber-800 hover:bg-amber-50 text-sm font-bold"
+              >
+                重なりを承知で進める（院長）
+              </Button>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* 予約確定後のLINE送信確認ポップ */}
       <Dialog open={lineConfirmOpen} onOpenChange={(o) => { if (!o) handleSkipLine(); }}>

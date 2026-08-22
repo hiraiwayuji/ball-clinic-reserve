@@ -989,6 +989,17 @@ export type StaffDaySchedule = {
   breakEnd: string | null;    // "HH:MM" 休憩終了
   source: "override" | "weekly" | "none";
   isOff: boolean;
+  /**
+   * 予約の受付に何らかの制限設定を持っているか
+   * （出勤日制 schedule_based_booking / 受付時間 / 受付休憩 / 受付最終日）。
+   *
+   * false ＝ 制限が1つも無い＝患者側は院の営業時間どおり予約できる
+   * （src/lib/staff-availability.ts の buildStaffSchedule が null を返す条件と同じ）。
+   * 勤務表が未登録のときに「営業時間ぜんぶ予約できる」と表示してよいのは
+   * この値が false の先生だけ。true の先生（ボールの さみ・ヘッドスパなど）は
+   * 出勤日を登録しないと1枠も取れないので、緑にすると逆の誤情報になる。
+   */
+  hasBookingLimit: boolean;
 };
 
 /**
@@ -1015,7 +1026,7 @@ export async function getStaffSchedulesForDates(
   const [staffRes, overrideRes, weeklyRes] = await Promise.all([
     // 全スタッフを取得（show_in_timeline は reservation_staff の列）
     sb.from("reservation_staff")
-      .select("id, name, role, display_color, show_in_timeline, booking_until")
+      .select("id, name, role, display_color, show_in_timeline, booking_until, schedule_based_booking, booking_start_time, booking_end_time, booking_break_start, booking_break_end")
       .eq("clinic_id", auth.clinicId)
       .eq("is_active", true)
       .order("sort_order", { ascending: true }),
@@ -1094,6 +1105,16 @@ function buildSchedulesForDay(
   }
 
   return staffList.map((s) => {
+    // 予約の受付に制限があるか（src/lib/staff-availability.ts の buildStaffSchedule が
+    // null を返す条件と同じ並び）。勤務表が未登録のときに
+    // 「営業時間ぜんぶ予約できる」と表示してよいのは、これが false の先生だけ。
+    const anyStaff = s as any;
+    const hasBookingLimit = !!(
+      anyStaff.schedule_based_booking ||
+      (anyStaff.booking_start_time && anyStaff.booking_end_time) ||
+      (anyStaff.booking_break_start && anyStaff.booking_break_end) ||
+      anyStaff.booking_until
+    );
     // 休憩: breakOverride > weeklyDefault
     const breakOverride = breakOverrideMap.get(s.id);
     const weeklyBreak = weeklyMap.get(s.id);
@@ -1119,6 +1140,7 @@ function buildSchedulesForDay(
         breakEnd,
         source: "override",
         isOff,
+        hasBookingLimit,
       };
     }
     const weekly = weeklyMap.get(s.id);
@@ -1135,6 +1157,7 @@ function buildSchedulesForDay(
         breakEnd,
         source: "weekly",
         isOff: false,
+        hasBookingLimit,
       };
     }
     return {
@@ -1149,6 +1172,7 @@ function buildSchedulesForDay(
       breakEnd,
       source: "none",
       isOff: false,
+      hasBookingLimit,
     };
   });
 }

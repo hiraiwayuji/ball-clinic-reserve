@@ -566,7 +566,7 @@ export default function TodayTimelineWidget({
   };
 
   // 確認ダイアログの「移動する」
-  const runMove = async () => {
+  const runMove = async (allowOverlap: boolean = false) => {
     if (!movePlan) return;
     const { apt, toStaffId, toStaffName, staffChanged, dateChanged, toDateKey, toDateLabel, toTimeLabel, durationMinutes } = movePlan;
     setMoving(true);
@@ -580,7 +580,11 @@ export default function TodayTimelineWidget({
         durationMinutes,
         // 同じ先生の行のなかで時間だけ動かした場合は担当に触らない
         // （担当未設定の予約を勝手に先頭スタッフの担当にしてしまわないため）
-        staffChanged ? { staffId: toStaffId } : undefined,
+        // 院長が「重なりを承知で進める」を押したときは allowOverlap を必ず添える
+        // （サーバー側で role が owner かをもう一度見る）
+        staffChanged
+          ? { staffId: toStaffId, ...(allowOverlap ? { allowOverlap: true } : {}) }
+          : (allowOverlap ? { allowOverlap: true } : undefined),
       );
       if (res.success) {
         const whenLabel = dateChanged ? `${toDateLabel} ${toTimeLabel}` : toTimeLabel;
@@ -591,8 +595,18 @@ export default function TodayTimelineWidget({
         );
         setMovePlan(null);
         refresh();
+      } else if ("overlap" in res && res.overlap) {
+        // 担当かぶりは直してもらわないと通さない。消えるトーストだと読み飛ばされる。
+        const plan = movePlan;
+        // 院長でも通せないかぶり（DBの除外制約で弾かれる担当）のときは再実行ボタンを出さない
+        if ("needsOwner" in res && res.needsOwner) {
+          setOverlapRetry(() => async () => { setMovePlan(plan); await runMove(true); });
+        } else {
+          setOverlapRetry(null);
+        }
+        setOverlapError(res.error ?? "同じ担当の重複予約はできません。");
+        setMovePlan(null);
       } else {
-        // 「その先生はその時間に別の予約が入っています」等はここに出る
         toast.error(res.error ?? "移動に失敗しました");
       }
     } catch {
@@ -605,7 +619,11 @@ export default function TodayTimelineWidget({
   // 予約の詳細から時間だけをその場でずらす。
   // これまでは「予約変更」を開いてプルダウンを選んで保存、と5タップ必要だった。
   const [shiftingTime, setShiftingTime] = useState(false);
-  const shiftAppointmentTime = async (apt: TimelineAppointment, deltaMinutes: number) => {
+  // 担当かぶりで動かせなかったときのお知らせ。閉じるまで残す（2026-08-22 ぼーるくん依頼）。
+  const [overlapError, setOverlapError] = useState<string | null>(null);
+  // かぶりで止まった操作を、院長の判断でやり直すための再実行関数
+  const [overlapRetry, setOverlapRetry] = useState<null | (() => Promise<void>)>(null);
+  const shiftAppointmentTime = async (apt: TimelineAppointment, deltaMinutes: number, allowOverlap: boolean = false) => {
     const start = new Date(apt.start_time);
     const end = apt.end_time ? new Date(apt.end_time) : new Date(start.getTime() + 30 * 60000);
     const durationMinutes = Math.max(1, Math.round((end.getTime() - start.getTime()) / 60000));
@@ -616,11 +634,20 @@ export default function TodayTimelineWidget({
     try {
       const res = await updateAppointmentDetails(
         apt.id, dateKey, timeLabel, apt.memo ?? "", apt.is_first_visit, durationMinutes,
+        // 院長が「重なりを承知で進める」を押したときだけ許可を添える
+        allowOverlap ? { allowOverlap: true } : undefined,
       );
       if (res.success) {
         toast.success(`${apt.customer_name ?? "患者"}様を ${timeLabel} に変更しました`);
         setSelectedApt(null);
         refresh();
+      } else if ("overlap" in res && res.overlap) {
+        if ("needsOwner" in res && res.needsOwner) {
+          setOverlapRetry(() => async () => { await shiftAppointmentTime(apt, deltaMinutes, true); });
+        } else {
+          setOverlapRetry(null);
+        }
+        setOverlapError(res.error ?? "同じ担当の重複予約はできません。");
       } else {
         toast.error(res.error ?? "時間の変更に失敗しました");
       }
@@ -1059,6 +1086,30 @@ export default function TodayTimelineWidget({
                   </span>
                 </div>
               )}
+              {/* 色の見かた（凡例）。どこが予約を取れる時間か分かるようにする。
+                  「その先生が入れない時間」に予約を取ってしまう事故が続いたため
+                  （2026-08-22 ぼーるくん依頼）。 */}
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-2 py-1.5 text-[10px] text-slate-500 dark:text-slate-400 border-b border-slate-200 dark:border-slate-700">
+                <span className="font-bold text-slate-600 dark:text-slate-300">色の見かた</span>
+                <span className="inline-flex items-center gap-1">
+                  <span
+                    className="inline-block w-4 h-3 rounded-sm border border-emerald-200"
+                    style={{ backgroundColor: "rgba(220, 252, 231, 0.9)" }}
+                  />
+                  予約を取れる時間
+                </span>
+                <span className="inline-flex items-center gap-1">
+                  <span
+                    className="inline-block w-4 h-3 rounded-sm border border-slate-300"
+                    style={{
+                      backgroundColor: "rgba(148, 163, 184, 0.14)",
+                      backgroundImage:
+                        "repeating-linear-gradient(-45deg, rgba(100,116,139,0.35) 0px, rgba(100,116,139,0.35) 2px, transparent 2px, transparent 6px)",
+                    }}
+                  />
+                  取れない時間（勤務時間外・休憩・休み）
+                </span>
+              </div>
               {/* 時間軸ヘッダ */}
               <div
                 className="grid items-center text-[10px] text-slate-500 dark:text-slate-400 border-b border-slate-200 dark:border-slate-700"
@@ -1241,9 +1292,20 @@ export default function TodayTimelineWidget({
                 const scheduleStart = day.scheduleStartHour * 60;
                 const scheduleEnd = day.scheduleEndHour * 60;
                 // 勤務時間バーの位置（スタッフ名の 140px を除いた幅に対して計算する）
+                //
+                // 勤務表が未登録の先生（source="none"／からだの島田先生など）は start/end が null。
+                // 従来はレーンがまっ白＝「取れるのか取れないのか分からない」状態だった。
+                //
+                // ここで営業時間ぜんぶを緑にしてよいのは、**予約の制限設定を1つも持たない先生だけ**。
+                // patient 側は staff-availability.ts の buildStaffSchedule が null を返す
+                //（＝制限なし＝院の営業時間どおり受け付ける）ので、それと同じ条件でそろえる。
+                // 出勤日制（schedule_based_booking）の先生は、出勤日を登録しないと1枠も取れないため、
+                // 緑にすると逆の誤情報になる（ボールの さみ・ヘッドスパが該当。2026-08-22 検品指摘）。
+                const noSchedule = schedStart === null || schedEnd === null;
+                const canFillWholeDay = noSchedule && sched?.hasBookingLimit === false;
                 const schedBand = (schedStart !== null && schedEnd !== null)
                   ? bandStyle(schedStart, schedEnd, scheduleStart, scheduleEnd)
-                  : null;
+                  : (canFillWholeDay ? bandStyle(scheduleStart, scheduleEnd, scheduleStart, scheduleEnd) : null);
 
                 const editKey = `${day.date}|${s.id}`;
                 const isEditing = editingKey === editKey;
@@ -1273,7 +1335,7 @@ export default function TodayTimelineWidget({
                         }}
                       />
                     )}
-                    {/* 勤務時間バー（予約バーの後ろ、z-index 低め） */}
+                    {/* 勤務時間バー（予約バーの後ろ、z-index 低め）＝ここが「予約を取れる時間」 */}
                     {schedBand && !sched?.isOff && !day.isHoliday && (
                       <div
                         className="absolute top-0 bottom-0 pointer-events-none"
@@ -1284,6 +1346,41 @@ export default function TodayTimelineWidget({
                         }}
                       />
                     )}
+                    {/* 勤務時間の外（出勤前・退勤後）＝予約を取れない時間。
+                        ここを白のままにしていたため「空いている」と見えて、
+                        その先生が入れない時間に予約を取ってしまう事故が起きていた
+                        （2026-08-22 ぼーるくん「取れる時間を把握していないので色を変えて」）。
+                        休み・休診日と同じ斜線グレーに統一する＝斜線＝予約不可。 */}
+                    {schedStart !== null && schedEnd !== null && !sched?.isOff && !day.isHoliday && (() => {
+                      const offStyle = {
+                        backgroundColor: "rgba(148, 163, 184, 0.14)",
+                        backgroundImage:
+                          "repeating-linear-gradient(-45deg, rgba(100,116,139,0.20) 0px, rgba(100,116,139,0.20) 2px, transparent 2px, transparent 9px)",
+                        zIndex: 0,
+                      } as const;
+                      const before = schedStart > scheduleStart
+                        ? bandStyle(scheduleStart, schedStart, scheduleStart, scheduleEnd) : null;
+                      const after = schedEnd < scheduleEnd
+                        ? bandStyle(schedEnd, scheduleEnd, scheduleStart, scheduleEnd) : null;
+                      return (
+                        <>
+                          {before && (
+                            <div
+                              className="absolute top-0 bottom-0 pointer-events-none"
+                              style={{ ...before, ...offStyle }}
+                              title={`${s.name}さんの勤務時間外（予約不可）`}
+                            />
+                          )}
+                          {after && (
+                            <div
+                              className="absolute top-0 bottom-0 pointer-events-none"
+                              style={{ ...after, ...offStyle }}
+                              title={`${s.name}さんの勤務時間外（予約不可）`}
+                            />
+                          )}
+                        </>
+                      );
+                    })()}
                     {/* 休憩バンド（グレー帯） */}
                     {(() => {
                       if (!sched || sched.isOff || !sched.breakStart || !sched.breakEnd) return null;
@@ -1296,14 +1393,21 @@ export default function TodayTimelineWidget({
                       if (!brkBand) return null;
                       return (
                         <div
-                          className="absolute top-0 bottom-0 pointer-events-none flex items-center justify-center"
+                          className="absolute top-0 bottom-0 pointer-events-none flex items-start justify-start"
                           style={{
                             ...brkBand,
-                            backgroundColor: "rgba(100, 116, 139, 0.18)",
+                            // 勤務時間外と同じ「斜線＝予約不可」の見た目に揃える。
+                            // 従来は薄いグレーだけで、空きと見分けがつきにくかった。
+                            backgroundColor: "rgba(148, 163, 184, 0.14)",
+                            backgroundImage:
+                              "repeating-linear-gradient(-45deg, rgba(100,116,139,0.20) 0px, rgba(100,116,139,0.20) 2px, transparent 2px, transparent 9px)",
                             zIndex: 1,
                           }}
+                          title={`${s.name}さんの休憩（予約不可）`}
                         >
-                          <span className="text-[8px] text-slate-500 dark:text-slate-400 font-semibold tracking-tight select-none">休憩</span>
+                          {/* ラベルは帯の左上に寄せる。中央に白背景で置くと、
+                              休憩時間に入っている予約バーの文字が読めなくなる（2026-08-22 検品指摘）。 */}
+                          <span className="text-[8px] text-slate-500 dark:text-slate-400 font-bold tracking-tight select-none pl-0.5 leading-none pt-px">休憩</span>
                         </div>
                       );
                     })()}
@@ -1350,6 +1454,18 @@ export default function TodayTimelineWidget({
                         <span className="text-[9px] text-slate-400 dark:text-slate-500 tabular-nums">
                           {sched.startTime}–{sched.endTime}
                           {sched.source === "override" && " ✏"}
+                        </span>
+                      )}
+                      {/* 勤務表が未登録のとき。制限なしの先生は営業時間ぜんぶ受け付ける扱い、
+                          出勤日制の先生は出勤日を登録しないと1枠も取れないので、文言を分ける。 */}
+                      {noSchedule && !sched?.isOff && !day.isHoliday && (
+                        <span
+                          className="self-start text-[9px] font-bold text-amber-700 bg-amber-50 border border-amber-200 rounded px-1 py-px dark:bg-amber-900/30 dark:text-amber-300 dark:border-amber-800"
+                          title={canFillWholeDay
+                            ? "この先生の勤務時間が登録されていないため、院の営業時間すべてを『予約を取れる時間』として表示しています。設定＞スタッフ勤務時間 で登録すると正しく色分けされます。"
+                            : "この先生は出勤日・受付時間の設定がある一方で、勤務時間が登録されていません。設定＞スタッフ勤務時間 で登録するまで、取れる時間を色で示せません。"}
+                        >
+                          {canFillWholeDay ? "勤務未登録" : "出勤日 未設定"}
                         </span>
                       )}
                       {sched?.isOff && (
@@ -1625,6 +1741,53 @@ export default function TodayTimelineWidget({
         )}
       </CardContent>
 
+      {/* 担当かぶりで動かせなかったときのお知らせ（直すまで通さない） */}
+      {overlapError && (
+        <div className="fixed inset-0 bg-black/50 z-[60] flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border-2 border-rose-300 max-w-sm w-full p-5 space-y-3">
+            <p className="text-base font-bold text-rose-700 dark:text-rose-300">
+              ⚠ この予約は動かせません
+            </p>
+            <p className="text-sm text-slate-700 dark:text-slate-200 leading-relaxed whitespace-pre-line">
+              {overlapError}
+            </p>
+            <div className="rounded-xl bg-rose-50 dark:bg-rose-900/20 border border-rose-200 dark:border-rose-800 px-3 py-2 text-xs text-rose-800 dark:text-rose-200 leading-relaxed">
+              同じ先生の同じ時間に2件の予約は入れられません。<br />
+              <span className="font-bold">担当の先生を変える</span>か、
+              <span className="font-bold">別の時間にずらす</span>と動かせます。
+              {userRole !== "owner" && (
+                <>
+                  <br />
+                  どうしても重ねる必要があるときは、<span className="font-bold">院長先生の許可</span>が必要です。
+                </>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={() => { setOverlapError(null); setOverlapRetry(null); }}
+              className="w-full h-11 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold"
+            >
+              戻って直す
+            </button>
+            {/* 院長先生だけは、事情が分かっているので承知のうえで通せる */}
+            {userRole === "owner" && overlapRetry && (
+              <button
+                type="button"
+                onClick={async () => {
+                  const retry = overlapRetry;
+                  setOverlapError(null);
+                  setOverlapRetry(null);
+                  await retry();
+                }}
+                className="w-full h-10 rounded-xl border border-amber-300 text-amber-800 dark:text-amber-200 dark:border-amber-700 hover:bg-amber-50 dark:hover:bg-amber-900/20 text-sm font-bold"
+              >
+                重なりを承知で進める（院長）
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* ドラッグで移動したときの確認 */}
       {movePlan && (
         <div
@@ -1708,7 +1871,7 @@ export default function TodayTimelineWidget({
               </Button>
               <Button
                 type="button"
-                onClick={runMove}
+                onClick={() => runMove(false)}
                 disabled={moving}
                 className="flex-1 bg-blue-600 hover:bg-blue-700 text-white"
               >
@@ -1849,6 +2012,16 @@ export default function TodayTimelineWidget({
                         toast.success(`${selectedApt.customer_name ?? "患者"}様の予約を元に戻しました`);
                         setSelectedApt(null);
                         refresh();
+                      } else if ("overlap" in res && res.overlap) {
+                        const target = selectedApt;
+                        if (!("needsOwner" in res && res.needsOwner)) setOverlapRetry(null);
+                        else setOverlapRetry(() => async () => {
+                          const again = await restoreCancelledAppointment(target.id, true);
+                          if (again.success) { toast.success(`${target.customer_name ?? "患者"}様の予約を元に戻しました`); refresh(); }
+                          else toast.error(again.error ?? "元に戻せませんでした");
+                        });
+                        setSelectedApt(null);
+                        setOverlapError(res.error ?? "同じ担当の重複予約はできません。");
                       } else {
                         toast.error(res.error ?? "元に戻せませんでした");
                       }

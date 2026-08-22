@@ -18,6 +18,7 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { createManualReservation, getAddonCourseInfo, checkAddAppointmentOverlap, type AddOverlapResult } from "@/app/actions/adminReserve";
 import { getAdminDaySlots, type AdminDaySlot } from "@/app/actions/adminDaySlots";
+import { getMyRole } from "@/app/actions/auth";
 import { findSameDayAppointmentsByName } from "@/app/actions/duplicateCheck";
 import { searchPatientsForBooking, PatientSuggestion } from "@/app/actions/patientSearch";
 import { getCourses, getStaffList, getRooms, type ReservationCourse, type ReservationStaff, type ReservationRoom } from "@/app/actions/courses";
@@ -83,7 +84,13 @@ export function AddAppointmentDialog({
     customerCount: number;
     formData: FormData;
   } | null>(null);
-  // 担当かぶり時の確認。reassign=さみ整体へ振替を提案 / warn=このままでも登録できる警告。
+  // ログイン中の権限。担当かぶりを承知で通せるのはオーナー（院長先生）だけ
+  // （2026-08-22 ぼーるくん「スタッフレベルではわからないこともあるので」）。
+  const [userRole, setUserRole] = useState<string | null>(null);
+  useEffect(() => { getMyRole().then((r) => setUserRole(r)).catch(() => {}); }, []);
+  const isOwner = userRole === "owner";
+  // 担当かぶり時の確認。reassign=さみ整体へ振替を提案 / warn=かぶっているので登録させない案内。
+  // warn は「閉じる」しか出さない＝直さないと登録できない（2026-08-22 ぼーるくん依頼）。
   const [overlapPrompt, setOverlapPrompt] = useState<
     | {
         mode: "reassign";
@@ -91,7 +98,7 @@ export function AddAppointmentDialog({
         sami: { staffId: string; staffName: string; courseId: string; courseName: string; durationMinutes: number };
         formData: FormData;
       }
-    | { mode: "warn"; staffName: string; formData: FormData }
+    | { mode: "warn"; staffName: string; message?: string; formData: FormData }
     | null
   >(null);
 
@@ -627,6 +634,12 @@ export function AddAppointmentDialog({
       // 重複チェックに失敗しても登録自体は止めない
     }
 
+    // 院長先生が「重なりを承知で登録する」を押したときだけ、かぶりの許可を添える。
+    // スタッフの画面ではボタン自体が押せないので、ここは付かない。
+    if (overlapAlerts.length > 0 && isOwner) {
+      formData.set("allowOverlap", "true");
+    }
+
     await runOverlapGate(formData);
   };
 
@@ -655,6 +668,12 @@ export function AddAppointmentDialog({
       return;
     }
     if (res.kind === "warn") {
+      // 院長先生が「重なりを承知で登録する」を押した場合は通す。
+      // 最終判断はサーバー側（role が owner か）で必ずもう一度見る。
+      if (formData.get("allowOverlap") === "true") {
+        await performSubmit(formData, "重なりを承知のうえで登録しました");
+        return;
+      }
       setOverlapPrompt({ mode: "warn", staffName: res.staffName, formData });
       setIsSubmitting(false);
       return;
@@ -709,6 +728,16 @@ export function AddAppointmentDialog({
         setRoomId("");
         setAdditionalItems([]);
         onSuccess?.();
+      } else if ("overlap" in result && result.overlap) {
+        // 担当かぶりは直してもらわないと登録させない。
+        // トーストは数秒で消えて読み飛ばされるので、閉じるまで残るダイアログにする
+        // （2026-08-22 ぼーるくん「注意メッセージを出しても読まない人がいる」）。
+        setOverlapPrompt({
+          mode: "warn",
+          staffName: commonStaffName ?? "担当",
+          message: String(result.error ?? ""),
+          formData,
+        });
       } else {
         toast.error(result.error || "エラーが発生しました");
       }
@@ -839,22 +868,34 @@ export function AddAppointmentDialog({
               ) : (
                 <>
                   <div>
-                    <p className="text-base font-bold text-amber-900">
-                      ⚠ {overlapPrompt.staffName}さんがこの時間に埋まっています
+                    <p className="text-base font-bold text-rose-700">
+                      ⚠ この予約は登録できません
                     </p>
-                    <p className="text-sm text-slate-600 mt-1 leading-relaxed">
-                      {overlapPrompt.staffName}さんはこの時間にすでにご予約が入っています。<br />
-                      同じ担当の重複予約はできません。担当か時間を変えてください。
+                    <p className="text-sm text-slate-700 mt-1 leading-relaxed whitespace-pre-line">
+                      {overlapPrompt.message
+                        ? overlapPrompt.message
+                        : `${overlapPrompt.staffName}さんは、この時間にすでに別のご予約が入っています。`}
                     </p>
+                  </div>
+                  <div className="rounded-xl bg-rose-50 border border-rose-200 px-3 py-2 text-xs text-rose-800 leading-relaxed">
+                    同じ先生の同じ時間に2件の予約は入れられません。<br />
+                    <span className="font-bold">担当の先生を変える</span>か、
+                    <span className="font-bold">時間をずらす</span>と登録できます。
+                    {!isOwner && (
+                      <>
+                        <br />
+                        どうしても重ねる必要があるときは、<span className="font-bold">院長先生の許可</span>が必要です。
+                      </>
+                    )}
                   </div>
                   <div className="flex gap-2">
                     <Button
                       type="button"
                       onClick={() => setOverlapPrompt(null)}
                       disabled={isSubmitting}
-                      className="flex-1 h-11 rounded-xl"
+                      className="flex-1 h-11 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold"
                     >
-                      閉じる
+                      戻って直す
                     </Button>
                   </div>
                 </>
@@ -914,31 +955,35 @@ export function AddAppointmentDialog({
               </div>
             </div>
 
-            {/* 選んだ日時が既存予約とぶつかっているときの注意（重ねて取れる院でも必ず出す） */}
+            {/* 選んだ日時が既存予約とぶつかっているときの注意。
+                同じ担当のかぶりは登録できないので、必ず赤で「直してください」と出す。
+                以前はここに「重ねて診る予定ならこのまま登録して大丈夫です。」と書いていたが、
+                サーバー側でかぶりを止めるようにしたため、間違った操作を後押ししたうえで
+                弾く形になっていた（2026-08-22 検品指摘）。 */}
             {overlapAlerts.length > 0 && (
-              <div
-                className={`rounded-md border px-3 py-2 text-xs space-y-1 ${
-                  overlapAlerts.some((a) => a.blocked)
-                    ? "border-red-200 bg-red-50 text-red-800"
-                    : "border-amber-200 bg-amber-50 text-amber-900"
-                }`}
-              >
+              <div className="rounded-md border px-3 py-2 text-xs space-y-1 border-red-200 bg-red-50 text-red-800">
                 {overlapAlerts.map((a) => (
                   <div key={a.key}>
                     <span className="font-semibold">⚠ {a.key}</span> は {a.note}
-                    {a.blocked ? (
-                      a.fitMinutes ? (
-                        <>。所要時間を <b>{a.fitMinutes}分</b> にすれば入ります。</>
-                      ) : (
-                        <>。この時間は施術中なので、別の時間を選んでください。</>
-                      )
+                    {a.fitMinutes ? (
+                      <>。所要時間を <b>{a.fitMinutes}分</b> にすれば入ります。</>
                     ) : (
-                      <>。このまま登録すると予約が重なります。</>
+                      <>。この時間は登録できません。</>
                     )}
                   </div>
                 ))}
-                {!overlapAlerts.some((a) => a.blocked) && (
-                  <div className="pt-0.5 opacity-80">重ねて診る予定ならこのまま登録して大丈夫です。</div>
+                <div className="pt-0.5 font-bold">
+                  担当の先生を変えるか、時間をずらしてください。
+                </div>
+                {isOwner ? (
+                  <div className="pt-1 text-[11px] text-red-700 border-t border-red-200 mt-1">
+                    重ねて診ると判断された場合は、院長の権限でそのまま登録できます。
+                  </div>
+                ) : (
+                  <div className="pt-1 text-[11px] font-bold text-red-700 border-t border-red-200 mt-1">
+                    どうしても重ねる必要があるときは、<u>院長先生の許可</u>が必要です。
+                    先生にご確認ください。
+                  </div>
                 )}
               </div>
             )}
@@ -1469,16 +1514,28 @@ export function AddAppointmentDialog({
 
           {/* Footer */}
           <div className="px-5 pb-5 pt-3 border-t sticky bottom-0 bg-white space-y-2">
+            {/* 担当がかぶっている間は押させない。
+                「注意メッセージを出しても読まない人がいる。間違いを直さないと
+                予約できないようにしてほしい」（2026-08-22 ぼーるくん）への対応。 */}
+            {/* 担当がかぶっている間、スタッフには押させない。
+                院長先生（オーナー）だけは判断できるので、承知のうえで登録できる
+                （2026-08-22 ぼーるくん「登録できない場合はオーナーの許可が必要ってことに」）。 */}
             <Button
               type="submit"
-              disabled={isSubmitting || !date || !time}
-              className="w-full h-11 bg-blue-600 hover:bg-blue-700 rounded-xl font-bold"
+              disabled={isSubmitting || !date || !time || (overlapAlerts.length > 0 && !isOwner)}
+              className={`w-full h-11 rounded-xl font-bold disabled:opacity-60 ${
+                overlapAlerts.length > 0 && isOwner
+                  ? "bg-amber-600 hover:bg-amber-700"
+                  : "bg-blue-600 hover:bg-blue-700"
+              }`}
             >
               {isSubmitting
                 ? "保存中..."
-                : pickedCount > 1
-                  ? `この内容で ${pickedCount}件 まとめて登録する`
-                  : "予約を追加する"}
+                : overlapAlerts.length > 0
+                  ? (isOwner ? "重なりを承知で登録する（院長）" : "院長先生の許可が必要です")
+                  : pickedCount > 1
+                    ? `この内容で ${pickedCount}件 まとめて登録する`
+                    : "予約を追加する"}
             </Button>
             <Button
               type="button"

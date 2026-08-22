@@ -172,6 +172,97 @@ export async function addAddonToAppointment(appointmentId: string, timing: "befo
 }
 
 /**
+ * 同じ先生（レーン）の時間かぶりを探す共通ガード。当たったら「その予約」を返す。
+ *
+ * 予約を作る・動かす経路が複数あり、どれか1つでも素通りだと
+ * 「休憩や勤務の設定をしている意味がない」状態になる（2026-08-22 ぼーるくん指摘）。
+ * DB の除外制約は `reservation_staff.prevent_overlap = true` の担当にしか効かず、
+ * からだ鍼灸整骨院は全員 false なので、アプリ側のこの関数が唯一の防波堤になる。
+ *
+ * excludeId: 自分自身（編集中の予約）を除外したいときに渡す。
+ * staffId が null（担当なし）のときはレーンの概念がないので null を返す。
+ */
+async function findLaneConflict(
+  db: any,
+  clinicId: string,
+  staffId: string | null | undefined,
+  startIso: string,
+  endIso: string,
+  excludeId?: string,
+): Promise<{ id: string; start_time: string; end_time: string; customerName: string | null } | null> {
+  if (!staffId) return null;
+  let q = db
+    .from("appointments")
+    .select("id, start_time, end_time, customers(name)")
+    .eq("clinic_id", clinicId)
+    .eq("staff_id", staffId)
+    .neq("status", "cancelled")
+    .lt("start_time", endIso)
+    .gt("end_time", startIso)
+    .limit(1);
+  if (excludeId) q = q.neq("id", excludeId);
+  const { data, error } = await q;
+  // 判定できなかったときは「かぶり無し」で通してはいけない（fail-closed）。
+  // 例: end_time が NULL の予約を復活させようとすると PostgREST が 400 を返し、
+  //     error を見ていないとガードが黙って外れる（2026-08-22 検品指摘）。
+  if (error) {
+    console.error("[findLaneConflict] 判定できませんでした", error);
+    // 呼び出し元の catch でそのまま画面に出ても意味が通る文言にしておく
+    throw new Error("予約の重なりを確認できなかったため、処理を中止しました。もう一度お試しください。");
+  }
+  const hit: any = data?.[0];
+  if (!hit) return null;
+  const customerName = Array.isArray(hit.customers)
+    ? (hit.customers[0]?.name ?? null)
+    : (hit.customers?.name ?? null);
+  return { id: hit.id, start_time: hit.start_time, end_time: hit.end_time, customerName };
+}
+
+/**
+ * 担当かぶりを「承知のうえで」通してよいか。
+ *
+ * スタッフには判断できない事情（院長が2人まとめて診る、応援が入る等）があるため、
+ * かぶりを通せるのは**オーナー（院長先生）が明示的に許可したときだけ**にする。
+ * スタッフの画面からは許可フラグを送れないし、送られてきても role で弾く。
+ * （2026-08-22 ぼーるくん「登録できない場合はオーナーの許可が必要ってことにして。
+ *   スタッフレベルではわからないこともあるので」）
+ */
+function canOverrideOverlap(role: string | null | undefined, allowOverlap: boolean): boolean {
+  return allowOverlap === true && role === "owner";
+}
+
+/**
+ * 院長がかぶりを承知で通したことを、予約のメモに残す印。
+ *
+ * 承認ゲートを作っても、通した事実が残らないと後から「誰の判断だったか」を追えない。
+ * カレンダー上でも一目で分かるようにメモの末尾に足す。
+ */
+function withOverlapStamp(memo: string | null | undefined): string {
+  const stamp = `【重複承知・院長承認 ${new Intl.DateTimeFormat("ja-JP", {
+    timeZone: "Asia/Tokyo", month: "numeric", day: "numeric",
+  }).format(new Date())}】`;
+  const base = (memo ?? "").trim();
+  if (base.includes("【重複承知・院長承認")) return base; // 二重には付けない
+  return base ? `${base} ${stamp}` : stamp;
+}
+
+/** かぶり相手の時間帯を「14:00〜14:20」の形にする */
+function describeLaneConflictRange(hit: { start_time: string; end_time: string }): string {
+  const f = (iso: string) =>
+    new Intl.DateTimeFormat("ja-JP", {
+      timeZone: "Asia/Tokyo", hour: "2-digit", minute: "2-digit", hour12: false,
+    }).format(new Date(iso));
+  return `${f(hit.start_time)}〜${f(hit.end_time)}`;
+}
+
+/** かぶり相手を「14:00〜14:20 近藤様」の形にする（画面にそのまま出す文言用） */
+function describeLaneConflict(
+  hit: { start_time: string; end_time: string; customerName: string | null },
+): string {
+  return `${describeLaneConflictRange(hit)}${hit.customerName ? ` ${hit.customerName}様` : ""}`;
+}
+
+/**
  * 既存予約の直前・直後に任意のコースを追加予約として挿入する。
  * direction: "before" = 現在開始時刻の直前、"after" = 現在終了時刻の直後
  */
@@ -180,8 +271,10 @@ export async function addAdjacentAppointment(
   courseId: string,
   staffId: string | null,
   direction: "before" | "after",
-): Promise<{ success: boolean; error?: string }> {
-  const { clinicId } = await checkAdminAuth();
+  /** 担当かぶりを承知で通す（オーナーのみ有効） */
+  allowOverlap: boolean = false,
+): Promise<{ success: boolean; error?: string; overlap?: boolean; needsOwner?: boolean }> {
+  const { clinicId, role } = await checkAdminAuth();
   const supabase = getAdminSupabase();
   if (!supabase) return { success: false, error: "サーバー設定エラー" };
   try {
@@ -227,10 +320,27 @@ export async function addAdjacentAppointment(
       resolvedStaffName = (st?.name as string) ?? null;
     }
 
+    // 担当かぶりの確認。「直前に追加／直後に追加」は担当の初期値が元予約と同じ先生なので、
+    // 何も見ずに入れると1つ前・1つ後の患者さんの枠にそのまま重なる（2026-08-22 検品指摘）。
+    const conflict = await findLaneConflict(
+      supabase, clinicId, staffId, newStart.toISOString(), newEnd.toISOString(),
+    );
+    if (conflict && !canOverrideOverlap(role, allowOverlap)) {
+      return {
+        success: false,
+        overlap: true as const,
+        needsOwner: true as const,
+        error:
+          `${resolvedStaffName ?? "担当"}さんは、この時間にすでに別のご予約が入っています（${describeLaneConflict(conflict)}）。\n` +
+          `同じ担当の重複予約はできません。担当者を変えるか、別の時間に追加してください。`,
+      };
+    }
+
     const { error } = await supabase.from("appointments").insert([{
       customer_id: apt.customer_id,
       start_time: newStart.toISOString(),
       end_time: newEnd.toISOString(),
+      ...(conflict ? { memo: withOverlapStamp(null) } : {}),
       is_first_visit: false,
       status: "confirmed",
       clinic_id: clinicId,
@@ -476,14 +586,18 @@ export async function checkAddAppointmentOverlap(params: {
     };
     if (!(await laneOccupied(effStaffId, startIso, endIso))) return { kind: "none" };
 
-    // 3. かぶっている。この機能は「ボール担当のかぶり」だけを対象にする。
-    //    ・ボール以外の担当（さみ/水素/ヘッドスパ）は prevent_overlap=true で
-    //      DB の除外制約が二重予約を弾き、createManualReservation 側で分かりやすい
-    //      文言を返すため、ここでの警告は不要。
-    //    ・他院には "ボール" というスタッフが存在しないので、この判定は自然と
-    //      ボール接骨院だけで発火する（院ごとのフラグを持たずに院を限定できる）。
+    // 3. かぶっている。
+    //    ここから先の「さみ整体へ振り替えますか？」の提案はボール接骨院だけの運用なので、
+    //    ボール以外の担当は kind:"warn"（＝登録させない案内）を返して終わる。
+    //
+    //    2026-08-22 まで、ここは `effStaffName !== "ボール"` で **none を返して素通り**していた。
+    //    さみ/水素/ヘッドスパは prevent_overlap=true で DB の除外制約が弾くため問題なかったが、
+    //    からだ鍼灸整骨院のように全員 prevent_overlap=false の院では
+    //    アプリも DB も止めない＝かぶり予約が入り放題になっていた（7〜8月で64件）。
+    //    「注意メッセージを出しても読まない人がいるので、直さないと予約できないようにしてほしい」
+    //    というぼーるくんの依頼にあわせ、院・担当を問わず必ず止める。
     if (effStaffName !== "ボール") {
-      return { kind: "none" };
+      return { kind: "warn", staffName: effStaffName };
     }
 
     // さみ整体コース（さみ担当・有効）を探す。無ければ振替不可＝警告のみ。
@@ -555,7 +669,9 @@ export async function checkAddAppointmentOverlap(params: {
 }
 
 export async function createManualReservation(formData: FormData) {
-  const { clinicId } = await checkAdminAuth();
+  const { clinicId, role } = await checkAdminAuth();
+  // かぶりを承知で通すオーナー許可（スタッフの画面からは送られない。送られても role で弾く）
+  const allowOverlap = formData.get("allowOverlap") === "true";
   try {
     const rawDate = formData.get("date") as string;
     const time = formData.get("time") as string;
@@ -882,6 +998,60 @@ export async function createManualReservation(formData: FormData) {
       };
     });
 
+    // ── 担当かぶりの最終ガード（fail-closed・2026-08-22 ぼーるくん依頼） ──
+    // 同じ先生の同じ時間に2件は入れさせない。
+    // prevent_overlap=true の担当（さみ/水素/ヘッドスパ/ボール）は DB の除外制約が弾くが、
+    // からだ鍼灸整骨院のように全員 false の院は DB では止まらない。
+    // 画面の注意メッセージは読まれないことがあるので、サーバー側で必ず止める。
+    {
+      const conflicts: string[] = [];
+      // かぶった行だけに承認スタンプを付けるための目印
+      // （まとめ予約で1日だけ重なったとき、他の日の予約まで「重複承知」と記録されないように）
+      const conflictRows = new Set<number>();
+      const fmt = (iso: string) =>
+        new Intl.DateTimeFormat("ja-JP", {
+          timeZone: "Asia/Tokyo", month: "numeric", day: "numeric",
+          hour: "2-digit", minute: "2-digit", hour12: false,
+        }).format(new Date(iso));
+      for (let i = 0; i < appointmentsToInsert.length; i++) {
+        const row = appointmentsToInsert[i] as any;
+        const rowStaffId = row.staff_id as string | undefined;
+        if (!rowStaffId) continue; // 担当未設定はレーンの概念がないので対象外
+        const label = staffNameById.get(rowStaffId) ?? "担当者";
+        // (a) いま登録しようとしている行どうしのかぶり（まとめ予約で同じ先生・同じ時間を選んだ場合）
+        const selfHit = appointmentsToInsert.some((o: any, j: number) =>
+          j < i && o.staff_id === rowStaffId && o.start_time < row.end_time && o.end_time > row.start_time,
+        );
+        // (b) すでに入っている予約とのかぶり（他の経路と同じ共通ガードを使う）
+        const conf = await findLaneConflict(
+          supabase, clinicId, rowStaffId, row.start_time, row.end_time,
+        );
+        if (selfHit || conf) {
+          conflictRows.add(i);
+          const line = `${fmt(row.start_time)} ${label}さん`;
+          if (!conflicts.includes(line)) conflicts.push(line);
+        }
+      }
+      if (conflicts.length > 0 && canOverrideOverlap(role, allowOverlap)) {
+        // 院長が承知のうえで通した記録を、実際にかぶった行だけに残す
+        for (const i of conflictRows) {
+          const row = appointmentsToInsert[i] as any;
+          row.memo = withOverlapStamp(row.memo as string | null);
+        }
+      }
+      if (conflicts.length > 0 && !canOverrideOverlap(role, allowOverlap)) {
+        return {
+          success: false,
+          overlap: true as const,
+          needsOwner: true as const,
+          error:
+            `同じ担当の時間かぶりがあるため登録できません。\n\n` +
+            `${conflicts.join("\n")}\n\n` +
+            `すでに別のご予約が入っています。担当者を変えるか、時間をずらしてから登録してください。`,
+        };
+      }
+    }
+
     // tenant-isolation-ignore: appointmentsToInsert の各行に clinic_id を埋め込み済み（L143）
     const { error: appointmentErr } = await supabase
       .from("appointments")
@@ -900,6 +1070,7 @@ export async function createManualReservation(formData: FormData) {
         // どの日が重なったかは insert のエラーからは分からないため、見直しを促す文言にする。
         return {
           success: false,
+          overlap: true as const,
           error: allStarts.length > 1
             ? `選んだ日時のどれかに、${staffLabel}さんの別のご予約が入っています。まとめ予約は1件でも重なると登録されないので、日時を見直してください。`
             : `${staffLabel}さんは、この時間にすでに別のご予約が入っています。担当者か時間を変えてください。`,
@@ -1249,6 +1420,8 @@ export async function updateAppointmentDetails(
     // - string[]   : この ID 群に置き換える（マスタにない ID は無視）
     additionalCourseIds?: string[];
     additionalStaffIds?: string[];
+    /** 担当かぶりを承知で通す（オーナーのみ有効。スタッフが送っても role で弾く） */
+    allowOverlap?: boolean;
   }
 ) {
   const auth = await checkAdminAuth();
@@ -1357,6 +1530,54 @@ export async function updateAppointmentDetails(
           : null;
       }
 
+      // ── 担当かぶりの最終ガード（fail-closed・2026-08-22 ぼーるくん依頼） ──
+      // 時間や担当を変えたときに、同じ先生の別の予約と重ならないか必ず確認する。
+      // prevent_overlap=true の担当は DB の除外制約が弾くが、
+      // からだ鍼灸整骨院のように全員 false の院は DB では止まらないため、ここで止める。
+      // 自分自身（appointmentId）は当然重なるので除外する。
+      {
+        const effStaffId =
+          ("staff_id" in updatePayload)
+            ? (updatePayload.staff_id as string | null)
+            : ((before?.staff_id as string | null) ?? null);
+        // 時間も担当も変えていない（メモや初診/再診だけ直した）ときは確認しない。
+        // すでにかぶっている予約のメモを直すだけなのに保存できない、では現場が詰む。
+        // かぶりを増やす操作＝「時間を動かす」「担当を変える」だけを止める。
+        const timeChanged =
+          !before?.start_time ||
+          new Date(before.start_time as string).getTime() !== new Date(startDateTimeStr).getTime() ||
+          !before?.end_time ||
+          new Date(before.end_time as string).getTime() !== endDate.getTime();
+        const staffChanged = effStaffId !== ((before?.staff_id as string | null) ?? null);
+        if (effStaffId && (timeChanged || staffChanged)) {
+          // 他の経路と同じ共通ガードを使う（条件のズレと fail-open を防ぐ）
+          const hit = await findLaneConflict(
+            supabase, auth.clinicId, effStaffId,
+            new Date(startDateTimeStr).toISOString(), endDate.toISOString(),
+            appointmentId,
+          );
+          if (hit && canOverrideOverlap(auth.role, options?.allowOverlap === true)) {
+            // 院長が承知のうえで通した記録を残す
+            updatePayload.memo = withOverlapStamp(memo);
+          } else if (hit) {
+            const staffLabel =
+              (updatePayload.staff_name as string | undefined) ||
+              (before?.staff_name as string | undefined) ||
+              "担当者";
+            const other = hit.customerName;
+            const range = describeLaneConflictRange(hit);
+            return {
+              success: false,
+              overlap: true as const,
+              needsOwner: true as const,
+              error:
+                `${staffLabel}さんは、この時間にすでに別のご予約が入っています（${range}${other ? ` ${other}様` : ""}）。\n` +
+                `同じ担当の重複予約はできません。担当者を変えるか、時間をずらしてください。`,
+            };
+          }
+        }
+      }
+
       const { error } = await supabase
         .from("appointments")
         .update(updatePayload)
@@ -1374,6 +1595,7 @@ export async function updateAppointmentDetails(
           const staffLabel = (updatePayload.staff_name as string | undefined) || "担当者";
           return {
             success: false,
+            overlap: true as const,
             error: `${staffLabel}さんは、この時間にすでに別のご予約が入っています。担当者か時間を変えてください。（同じ担当者の重複予約はできません）`,
           };
         }
@@ -2209,23 +2431,64 @@ export async function cancelAppointmentKeepRecord(appointmentId: string) {
  * 同じ担当の同じ時間に別の予約がすでに入っている場合は、
  * DB の重複防止制約（23P01）で弾かれるため、わかりやすいエラーで返す。
  */
-export async function restoreCancelledAppointment(appointmentId: string) {
+export async function restoreCancelledAppointment(
+  appointmentId: string,
+  /** 担当かぶりを承知で通す（オーナーのみ有効） */
+  allowOverlap: boolean = false,
+) {
   const auth = await checkAdminAuth();
   try {
     const supabase = getAdminSupabase() || await getSupabase();
 
     const { data: before } = await supabase
       .from("appointments")
-      .select("id, start_time, status, customers(name)")
+      .select("id, start_time, end_time, staff_id, staff_name, status, memo, customers(name)")
       .eq("id", appointmentId)
       .eq("clinic_id", auth.clinicId)
       .maybeSingle();
     if (!before) return { success: false, error: "対象の予約が見つかりませんでした" };
     if (before.status !== "cancelled") return { success: false, error: "キャンセル済みの予約ではありません" };
 
+    let overlapApproved = false;
+    // 復活させると、その間に入った別の予約とかぶることがある。
+    // 23P01 は prevent_overlap=true の担当にしか効かないので、ここでも確認する
+    // （からだ鍼灸整骨院は全員 false＝DBでは止まらない。2026-08-22 検品指摘）。
+    {
+      // end_time が欠けている古い予約でも判定できるよう、院の予約枠サイズで補う。
+      // ここで null をそのまま渡すとクエリが 400 になり、ガードが働かない。
+      const restoreEndIso = before.end_time
+        ? (before.end_time as string)
+        : new Date(
+            new Date(before.start_time as string).getTime() +
+              (await getCurrentSlotDuration()) * 60 * 1000,
+          ).toISOString();
+      const hit = await findLaneConflict(
+        supabase, auth.clinicId, before.staff_id as string | null,
+        before.start_time as string, restoreEndIso, appointmentId,
+      );
+      if (hit && canOverrideOverlap(auth.role, allowOverlap)) {
+        // 院長が承知のうえで戻した記録を残す
+        overlapApproved = true;
+      }
+      if (hit && !canOverrideOverlap(auth.role, allowOverlap)) {
+        return {
+          success: false,
+          overlap: true as const,
+          needsOwner: true as const,
+          error:
+            `${(before.staff_name as string) ?? "担当"}さんは、この時間にすでに別のご予約が入っています（${describeLaneConflict(hit)}）。
+` +
+            `元に戻すと重なってしまうため、戻せません。別の時間で新しく予約を取り直してください。`,
+        };
+      }
+    }
+
     const { error } = await supabase
       .from("appointments")
-      .update({ status: "confirmed", cancel_kind: null, no_show: false, cancel_hidden: false })
+      .update({
+        status: "confirmed", cancel_kind: null, no_show: false, cancel_hidden: false,
+        ...(overlapApproved ? { memo: withOverlapStamp(before.memo as string | null) } : {}),
+      })
       .eq("id", appointmentId)
       .eq("clinic_id", auth.clinicId);
     if (error) {
@@ -2654,6 +2917,33 @@ export async function bulkCreateManualReservations(reservations: any[]) {
       const courseIdValid = r.courseId && courseName !== null;
       const staffIdValid  = r.staffId  && staffName  !== null;
       const roomIdValid   = r.roomId   && roomName   !== null;
+
+      // 担当かぶりの確認（他の登録経路と同じガード）。
+      // いまは呼び出し元が無い経路だが、素通りの登録口を残さない（2026-08-22 検品指摘）。
+      if (staffIdValid) {
+        let hit: Awaited<ReturnType<typeof findLaneConflict>> = null;
+        try {
+          hit = await findLaneConflict(
+            supabase, clinicId, r.staffId, startDateTimeStr, endDate.toISOString(),
+          );
+        } catch {
+          // 判定できないときは通さない。1件失敗しても残りの登録は続ける。
+          results.push({
+            name: r.name,
+            success: false,
+            error: "予約の重なりを確認できなかったため、登録を見送りました。もう一度お試しください。",
+          });
+          continue;
+        }
+        if (hit) {
+          results.push({
+            name: r.name,
+            success: false,
+            error: `${staffName ?? "担当"}さんは、この時間にすでに別のご予約が入っています（${describeLaneConflict(hit)}）。担当者か時間を変えてください。`,
+          });
+          continue;
+        }
+      }
 
       const { error: appointmentErr } = await supabase
         .from("appointments")
