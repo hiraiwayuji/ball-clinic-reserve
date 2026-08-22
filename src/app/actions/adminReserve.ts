@@ -11,6 +11,7 @@ import { getPushTargetsForCustomer, getPushTargetsForCustomers } from "@/lib/lin
 import { isTimeWithinStaffHoursYmd, type StaffSchedule } from "@/lib/staff-availability";
 import { formatDateTimeLine, formatVisitLabel } from "@/lib/appointment-summary";
 import { getCurrentSlotDuration } from "@/app/actions/clinic-slot";
+import { buildStaffSpans } from "@/lib/staff-spans";
 
 /** DB の "HH:MM:SS" / "HH:MM" を "HH:MM" に正規化（未設定は null）。reserve.ts と同じ挙動。 */
 function normStaffTime(v: string | null | undefined): string | null {
@@ -188,34 +189,82 @@ async function findLaneConflict(
   staffId: string | null | undefined,
   startIso: string,
   endIso: string,
-  excludeId?: string,
+  excludeId: string | undefined,
+  /** 所要時間が分からない予約に使う既定値（呼び出し元で1回だけ引いて渡す） */
+  slotMinutes: number,
 ): Promise<{ id: string; start_time: string; end_time: string; customerName: string | null } | null> {
   if (!staffId) return null;
+
+  // その時間に重なりうる予約を、担当を絞らずに取る。
+  // 担当で絞ってしまうと「主担当は別の先生だが、追加担当としてこの先生が入っている」予約を
+  // 見落とす（例: 三浦様は主担当=森川／追加担当=藤川）。
   let q = db
     .from("appointments")
-    .select("id, start_time, end_time, customers(name)")
+    .select("id, start_time, end_time, staff_id, course_id, additional_staff, additional_courses, customers(name)")
     .eq("clinic_id", clinicId)
-    .eq("staff_id", staffId)
     .neq("status", "cancelled")
     .lt("start_time", endIso)
-    .gt("end_time", startIso)
-    .limit(1);
+    .gt("end_time", startIso);
   if (excludeId) q = q.neq("id", excludeId);
   const { data, error } = await q;
   // 判定できなかったときは「かぶり無し」で通してはいけない（fail-closed）。
-  // 例: end_time が NULL の予約を復活させようとすると PostgREST が 400 を返し、
-  //     error を見ていないとガードが黙って外れる（2026-08-22 検品指摘）。
   if (error) {
     console.error("[findLaneConflict] 判定できませんでした", error);
-    // 呼び出し元の catch でそのまま画面に出ても意味が通る文言にしておく
     throw new Error("予約の重なりを確認できなかったため、処理を中止しました。もう一度お試しください。");
   }
-  const hit: any = data?.[0];
-  if (!hit) return null;
-  const customerName = Array.isArray(hit.customers)
-    ? (hit.customers[0]?.name ?? null)
-    : (hit.customers?.name ?? null);
-  return { id: hit.id, start_time: hit.start_time, end_time: hit.end_time, customerName };
+  const rows: any[] = data ?? [];
+  if (rows.length === 0) return null;
+
+  // メニューの所要時間を引く（複数担当の予約を前後に分けるのに使う）
+  const courseIds = new Set<string>();
+  for (const r of rows) {
+    if (r.course_id) courseIds.add(r.course_id);
+    for (const ac of (r.additional_courses ?? []) as { course_id?: string }[]) {
+      if (ac?.course_id) courseIds.add(ac.course_id);
+    }
+  }
+  const durationById = new Map<string, number>();
+  if (courseIds.size > 0) {
+    const { data: courseRows } = await db
+      .from("reservation_courses")
+      .select("id, duration_minutes")
+      .eq("clinic_id", clinicId)
+      .in("id", [...courseIds]);
+    for (const c of (courseRows ?? []) as { id: string; duration_minutes: number | null }[]) {
+      if (c.duration_minutes && c.duration_minutes > 0) durationById.set(c.id, c.duration_minutes);
+    }
+  }
+  const wantStart = new Date(startIso).getTime();
+  const wantEnd = new Date(endIso).getTime();
+
+  for (const r of rows) {
+    // その予約のうち、この先生が実際に受け持つ時間帯だけを見る。
+    // 接骨院では2人の先生が同時に入ることはなく、複数担当は前後に分かれるため
+    //（例: 三浦様 19:00-20:00 は 森川 19:00-19:20／藤川 19:20-20:00）。
+    const spans = buildStaffSpans({
+      startTime: r.start_time,
+      endTime: r.end_time ?? null,
+      staffId: r.staff_id ?? null,
+      mainMinutes: r.course_id ? (durationById.get(r.course_id) ?? null) : null,
+      additionalStaff: (r.additional_staff ?? null) as { staff_id: string }[] | null,
+      additionalCourses: (r.additional_courses ?? null) as { course_id: string }[] | null,
+      additionalMinutes: ((r.additional_courses ?? []) as { course_id?: string }[])
+        .map((ac) => (ac?.course_id ? (durationById.get(ac.course_id) ?? null) : null)),
+      fallbackMinutes: slotMinutes,
+    });
+    const mine = spans.find((sp) => sp.staffId === staffId);
+    if (!mine) continue; // この先生は担当していない
+    const s = new Date(mine.startIso).getTime();
+    const e = new Date(mine.endIso).getTime();
+    if (s < wantEnd && e > wantStart) {
+      const customerName = Array.isArray(r.customers)
+        ? (r.customers[0]?.name ?? null)
+        : (r.customers?.name ?? null);
+      // 画面には「その先生が受け持っている時間」を出す（予約全体の時間ではない）
+      return { id: r.id, start_time: mine.startIso, end_time: mine.endIso, customerName };
+    }
+  }
+  return null;
 }
 
 /**
@@ -322,8 +371,10 @@ export async function addAdjacentAppointment(
 
     // 担当かぶりの確認。「直前に追加／直後に追加」は担当の初期値が元予約と同じ先生なので、
     // 何も見ずに入れると1つ前・1つ後の患者さんの枠にそのまま重なる（2026-08-22 検品指摘）。
+    const slotMinutes = await getCurrentSlotDuration();
     const conflict = await findLaneConflict(
       supabase, clinicId, staffId, newStart.toISOString(), newEnd.toISOString(),
+      undefined, slotMinutes,
     );
     if (conflict && !canOverrideOverlap(role, allowOverlap)) {
       return {
@@ -1013,22 +1064,57 @@ export async function createManualReservation(formData: FormData) {
           timeZone: "Asia/Tokyo", month: "numeric", day: "numeric",
           hour: "2-digit", minute: "2-digit", hour12: false,
         }).format(new Date(iso));
+      const slotMinutesForSpans = await getCurrentSlotDuration();
+      // 登録しようとしている行を「先生ごとの受け持ち時間」に分けておく。
+      // 複数担当は前後に分かれるので、主担当が全時間を占有する扱いにすると誤判定になる
+      //（2026-08-22 ぼーるくん指摘）。
+      const rowSpans = await Promise.all(appointmentsToInsert.map(async (row: any) =>
+        buildStaffSpans({
+          startTime: row.start_time,
+          endTime: row.end_time ?? null,
+          staffId: row.staff_id ?? null,
+          // 行ごとにメニューが違うことがあるので、その行の主メニューの所要時間を使う
+          // （全行を durationMinutes 固定にすると比率が狂う。2026-08-22 検品指摘）
+          mainMinutes: (row.course_id ? courseById.get(row.course_id)?.durationMinutes : null) ?? durationMinutes,
+          additionalStaff: (row.additional_staff ?? null) as { staff_id: string }[] | null,
+          additionalCourses: (row.additional_courses ?? null) as { course_id: string }[] | null,
+          additionalMinutes: await Promise.all(
+            ((row.additional_courses ?? []) as { course_id?: string }[]).map(async (ac) => {
+              if (!ac?.course_id) return null;
+              const { data } = await supabase
+                .from("reservation_courses").select("duration_minutes")
+                .eq("id", ac.course_id).eq("clinic_id", clinicId).maybeSingle();
+              const d = (data as { duration_minutes?: number | null } | null)?.duration_minutes;
+              return d && d > 0 ? d : null;
+            }),
+          ),
+          fallbackMinutes: durationMinutes,
+        }),
+      ));
+
       for (let i = 0; i < appointmentsToInsert.length; i++) {
         const row = appointmentsToInsert[i] as any;
-        const rowStaffId = row.staff_id as string | undefined;
-        if (!rowStaffId) continue; // 担当未設定はレーンの概念がないので対象外
-        const label = staffNameById.get(rowStaffId) ?? "担当者";
-        // (a) いま登録しようとしている行どうしのかぶり（まとめ予約で同じ先生・同じ時間を選んだ場合）
-        const selfHit = appointmentsToInsert.some((o: any, j: number) =>
-          j < i && o.staff_id === rowStaffId && o.start_time < row.end_time && o.end_time > row.start_time,
-        );
-        // (b) すでに入っている予約とのかぶり（他の経路と同じ共通ガードを使う）
-        const conf = await findLaneConflict(
-          supabase, clinicId, rowStaffId, row.start_time, row.end_time,
-        );
-        if (selfHit || conf) {
+        if (!row.staff_id) continue; // 担当未設定はレーンの概念がないので対象外
+        let hitLabel: string | null = null;
+        for (const sp of rowSpans[i]) {
+          const label = staffNameById.get(sp.staffId) ?? "担当者";
+          // (a) いま登録しようとしている行どうしのかぶり（まとめ予約で同じ枠を2回選んだ場合）
+          const selfHit = rowSpans.some((other, j) =>
+            j < i && other.some((o) =>
+              o.staffId === sp.staffId &&
+              new Date(o.startIso) < new Date(sp.endIso) &&
+              new Date(o.endIso) > new Date(sp.startIso)),
+          );
+          // (b) すでに入っている予約とのかぶり（他の経路と同じ共通ガードを使う）
+          const conf = selfHit ? null : await findLaneConflict(
+            supabase, clinicId, sp.staffId, sp.startIso, sp.endIso,
+            undefined, slotMinutesForSpans,
+          );
+          if (selfHit || conf) { hitLabel = label; break; }
+        }
+        if (hitLabel) {
           conflictRows.add(i);
-          const line = `${fmt(row.start_time)} ${label}さん`;
+          const line = `${fmt(row.start_time)} ${hitLabel}さん`;
           if (!conflicts.includes(line)) conflicts.push(line);
         }
       }
@@ -1550,17 +1636,65 @@ export async function updateAppointmentDetails(
           new Date(before.end_time as string).getTime() !== endDate.getTime();
         const staffChanged = effStaffId !== ((before?.staff_id as string | null) ?? null);
         if (effStaffId && (timeChanged || staffChanged)) {
-          // 他の経路と同じ共通ガードを使う（条件のズレと fail-open を防ぐ）
-          const hit = await findLaneConflict(
-            supabase, auth.clinicId, effStaffId,
-            new Date(startDateTimeStr).toISOString(), endDate.toISOString(),
-            appointmentId,
-          );
+          // この予約を「先生ごとの受け持ち時間」に分けてから確認する。
+          // 複数担当は前後に分かれるので、主担当が全時間を占有する扱いだと誤判定になる。
+          const effCourseId = ("course_id" in updatePayload)
+            ? (updatePayload.course_id as string | null)
+            : ((before?.course_id as string | null) ?? null);
+          const effAddStaff = ("additional_staff" in updatePayload)
+            ? (updatePayload.additional_staff as { staff_id: string }[] | null)
+            : ((before?.additional_staff as { staff_id: string }[] | null) ?? null);
+          const effAddCourses = ("additional_courses" in updatePayload)
+            ? (updatePayload.additional_courses as { course_id: string }[] | null)
+            : ((before?.additional_courses as { course_id: string }[] | null) ?? null);
+          const durationOf = async (courseId: string | null | undefined) => {
+            if (!courseId) return null;
+            const { data } = await supabase
+              .from("reservation_courses").select("duration_minutes")
+              .eq("id", courseId).eq("clinic_id", auth.clinicId).maybeSingle();
+            const d = (data as { duration_minutes?: number | null } | null)?.duration_minutes;
+            return d && d > 0 ? d : null;
+          };
+          // 既存予約の割れ方を左右するので、fallback は必ず院の枠サイズを使う
+          // （編集中の予約の長さを渡すと相手側の割れ方まで変わる。2026-08-22 検品指摘）
+          const editSlotMinutes = await getCurrentSlotDuration();
+          const editSpans = buildStaffSpans({
+            startTime: new Date(startDateTimeStr).toISOString(),
+            endTime: endDate.toISOString(),
+            staffId: effStaffId,
+            mainMinutes: await durationOf(effCourseId),
+            additionalStaff: effAddStaff,
+            additionalCourses: effAddCourses,
+            additionalMinutes: await Promise.all(
+              (effAddCourses ?? []).map((ac) => durationOf(ac?.course_id)),
+            ),
+            fallbackMinutes: editSlotMinutes,
+          });
+          let hit: Awaited<ReturnType<typeof findLaneConflict>> = null;
+          let hitStaffId: string | null = null;
+          for (const sp of editSpans) {
+            hit = await findLaneConflict(
+              supabase, auth.clinicId, sp.staffId, sp.startIso, sp.endIso, appointmentId,
+              editSlotMinutes,
+            );
+            if (hit) { hitStaffId = sp.staffId; break; }
+          }
           if (hit && canOverrideOverlap(auth.role, options?.allowOverlap === true)) {
             // 院長が承知のうえで通した記録を残す
             updatePayload.memo = withOverlapStamp(memo);
           } else if (hit) {
+            // かぶったのが追加担当の区間なら、その先生の名前を出す。
+            // 主担当の名前で決め打ちすると「森川さんは…」と出てしまい、
+            // 実際にかぶっている藤川先生のことだと分からない（2026-08-22 検品指摘）。
+            let hitStaffName: string | null = null;
+            if (hitStaffId) {
+              const { data: hs } = await supabase
+                .from("reservation_staff").select("name")
+                .eq("id", hitStaffId).eq("clinic_id", auth.clinicId).maybeSingle();
+              hitStaffName = (hs as { name?: string } | null)?.name ?? null;
+            }
             const staffLabel =
+              hitStaffName ||
               (updatePayload.staff_name as string | undefined) ||
               (before?.staff_name as string | undefined) ||
               "担当者";
@@ -2449,6 +2583,7 @@ export async function restoreCancelledAppointment(
     if (!before) return { success: false, error: "対象の予約が見つかりませんでした" };
     if (before.status !== "cancelled") return { success: false, error: "キャンセル済みの予約ではありません" };
 
+    const restoreSlotMinutes = await getCurrentSlotDuration();
     let overlapApproved = false;
     // 復活させると、その間に入った別の予約とかぶることがある。
     // 23P01 は prevent_overlap=true の担当にしか効かないので、ここでも確認する
@@ -2460,11 +2595,12 @@ export async function restoreCancelledAppointment(
         ? (before.end_time as string)
         : new Date(
             new Date(before.start_time as string).getTime() +
-              (await getCurrentSlotDuration()) * 60 * 1000,
+              restoreSlotMinutes * 60 * 1000,
           ).toISOString();
       const hit = await findLaneConflict(
         supabase, auth.clinicId, before.staff_id as string | null,
         before.start_time as string, restoreEndIso, appointmentId,
+        restoreSlotMinutes,
       );
       if (hit && canOverrideOverlap(auth.role, allowOverlap)) {
         // 院長が承知のうえで戻した記録を残す
@@ -2925,6 +3061,7 @@ export async function bulkCreateManualReservations(reservations: any[]) {
         try {
           hit = await findLaneConflict(
             supabase, clinicId, r.staffId, startDateTimeStr, endDate.toISOString(),
+            undefined, bulkSlotMinutes,
           );
         } catch {
           // 判定できないときは通さない。1件失敗しても残りの登録は続ける。

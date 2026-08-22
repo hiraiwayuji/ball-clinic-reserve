@@ -2,6 +2,7 @@
 
 import { checkAdminAuth } from "./auth";
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
+import { buildStaffSpans } from "@/lib/staff-spans";
 
 function getAdminSupabase() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -43,6 +44,13 @@ export type TimelineAppointment = {
   medical_record_number: string | null;
   additional_courses: { course_id: string; course_name: string }[] | null;
   additional_staff: { staff_id: string; staff_name: string }[] | null;
+  /**
+   * 担当の先生ごとの受け持ち時間帯。
+   * 複数担当の予約は前後に分けて施術するため（2人同時に入ることはない）、
+   * メニューの所要時間で分けた結果をサーバー側で計算して渡す。
+   * 担当1人なら1件、担当なしなら空配列。
+   */
+  staff_spans: { staff_id: string; start: string; end: string; course_name: string | null }[];
   /** 部門（'サロン' | 'カフェ' 等）。部門なし院は null */
   department: string | null;
   /** 席予約（カフェ）の人数。施術予約は null */
@@ -201,6 +209,32 @@ export async function getTimelineRange(
     const visibleRows = (aptRes.data ?? []).filter(
       (a: any) => !(a.status === "cancelled" && a.cancel_hidden),
     );
+    // メニューの所要時間（分）を一括で引く。
+    // 複数担当の予約を「前の先生＝主メニューの時間／後の先生＝追加メニューの時間」で
+    // 分けるために必要（人数で等分すると実際の交代時刻とズレる）。
+    const courseIds = new Set<string>();
+    for (const a of visibleRows as any[]) {
+      if (a.course_id) courseIds.add(a.course_id);
+      for (const ac of (a.additional_courses ?? []) as { course_id?: string }[]) {
+        if (ac?.course_id) courseIds.add(ac.course_id);
+      }
+    }
+    const durationById = new Map<string, number>();
+    if (courseIds.size > 0) {
+      const { data: courseRows } = await sb
+        .from("reservation_courses")
+        .select("id, duration_minutes")
+        .eq("clinic_id", clinicId)
+        .in("id", [...courseIds]);
+      for (const c of (courseRows ?? []) as { id: string; duration_minutes: number | null }[]) {
+        if (c.duration_minutes && c.duration_minutes > 0) durationById.set(c.id, c.duration_minutes);
+      }
+    }
+    const slotForSpans = (() => {
+      const v = settingsRes.data?.slot_duration_minutes;
+      return (v === 10 || v === 15 || v === 20 || v === 30) ? v : 30;
+    })();
+
     const appointments: TimelineAppointment[] = visibleRows.map(a => {
       const cust = Array.isArray(a.customers) ? a.customers[0] : (a.customers as any);
       return {
@@ -227,6 +261,18 @@ export async function getTimelineRange(
         medical_record_number: cust?.medical_record_number ?? null,
         additional_courses: (a.additional_courses ?? null) as { course_id: string; course_name: string }[] | null,
         additional_staff:   (a.additional_staff   ?? null) as { staff_id:  string; staff_name:  string }[] | null,
+        staff_spans: buildStaffSpans({
+          startTime: a.start_time,
+          endTime: a.end_time ?? null,
+          staffId: a.staff_id ?? null,
+          mainMinutes: a.course_id ? (durationById.get(a.course_id) ?? null) : null,
+          mainCourseName: a.course_name ?? null,
+          additionalStaff: (a.additional_staff ?? null) as { staff_id: string }[] | null,
+          additionalCourses: (a.additional_courses ?? null) as { course_id: string; course_name?: string }[] | null,
+          additionalMinutes: ((a.additional_courses ?? []) as { course_id?: string }[])
+            .map((ac) => (ac?.course_id ? (durationById.get(ac.course_id) ?? null) : null)),
+          fallbackMinutes: slotForSpans,
+        }).map((sp) => ({ staff_id: sp.staffId, start: sp.startIso, end: sp.endIso, course_name: sp.courseName })),
         department: (a as any).department ?? null,
         party_size: (a as any).party_size ?? null,
       };

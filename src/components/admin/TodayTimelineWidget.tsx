@@ -707,26 +707,31 @@ export default function TodayTimelineWidget({
         continue;
       }
 
-      // 複数スタッフ: 合計時間をスタッフ数で等分し時間帯をずらす
+      // 複数スタッフ: サーバーが計算した staff_spans（メニューの所要時間で分けたもの）を使う。
+      // 2人の先生が同時に1人の患者さんに入ることはなく、前後に分けて施術するため
+      //（例: 60分＝保険施術20分＋鍼灸3部位40分 なら 20分で交代。人数で等分すると30分になり実際と10分ずれる）。
+      // 古いデータなどで spans が無いときだけ、従来どおり人数で等分する。
+      const spans = a.staff_spans ?? [];
+      const spanOf = (staffId: string) => spans.find((sp) => sp.staff_id === staffId);
+
       const startMin = minuteOfDayJst(a.start_time);
       const endMinRaw = a.end_time ? minuteOfDayJst(a.end_time) : startMin + slotMinutes;
       const totalDuration = Math.max(endMinRaw - startMin, slotMinutes * allStaffIds.length);
       const perStaff = Math.round(totalDuration / allStaffIds.length);
-
-      // ISO 文字列を分単位でずらすヘルパー
       const shiftIso = (isoBase: string, minuteOffset: number): string => {
         return new Date(new Date(isoBase).getTime() + minuteOffset * 60 * 1000).toISOString();
       };
 
       allStaffIds.forEach((staffId, idx) => {
         if (!map.has(staffId)) map.set(staffId, []);
-        const displayStart = shiftIso(a.start_time, idx * perStaff);
-        const displayEnd = shiftIso(a.start_time, (idx + 1) * perStaff);
+        const sp = spanOf(staffId);
+        const displayStart = sp ? sp.start : shiftIso(a.start_time, idx * perStaff);
+        const displayEnd = sp ? sp.end : shiftIso(a.start_time, (idx + 1) * perStaff);
         map.get(staffId)!.push({
           ...a,
           _displayStart: displayStart,
           _displayEnd: displayEnd,
-          _displayCourseName: courseNames[idx] ?? a.course_name ?? undefined,
+          _displayCourseName: sp?.course_name ?? courseNames[idx] ?? a.course_name ?? undefined,
           _splitIndex: idx,
           _splitCount: allStaffIds.length,
         });
