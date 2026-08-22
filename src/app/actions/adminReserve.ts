@@ -8,7 +8,7 @@ import { writeAudit, notifyOwnerOfStaffAction } from "@/lib/audit";
 import { awardPoints } from "@/lib/gamification";
 import { getLineAccessToken, pushLineToCustomer } from "@/lib/admin-notify";
 import { getPushTargetsForCustomer, getPushTargetsForCustomers } from "@/lib/line-links";
-import { isTimeWithinStaffHoursYmd, type StaffSchedule } from "@/lib/staff-availability";
+import { isTimeWithinStaffHoursYmd, isStaffAvailableOnYmd, isStaffSpanBookableYmd, buildStaffSchedule, type StaffSchedule } from "@/lib/staff-availability";
 import { formatDateTimeLine, formatVisitLabel } from "@/lib/appointment-summary";
 import { getCurrentSlotDuration } from "@/app/actions/clinic-slot";
 import { buildStaffSpans } from "@/lib/staff-spans";
@@ -3553,5 +3553,269 @@ export async function getMonthCrossingFirstVisits(
   } catch (err) {
     console.error("getMonthCrossingFirstVisits error:", err);
     return [];
+  }
+}
+
+/* ============================================================================
+ * かぶったときに「代わりにこの時間なら取れます」を出すための計算
+ *
+ * かぶりを止めるだけだと、スタッフは直しようがなくて院長先生に聞くしかない。
+ * 院長先生が全部の判断を引き受けるのは現実的ではない（2026-08-22 ぼーるくん）。
+ * だから「だめ」と言うだけでなく、その場で取れる候補を出して、
+ * スタッフが自分で正しい予約に直せるようにする。
+ * 強引に通す道はオーナーだけに残したまま、使わなくて済むようにするのが狙い。
+ * ========================================================================== */
+
+export type OverlapFix = {
+  /** time = 同じ先生で別の時間 ／ staff = 同じ時間で別の先生 */
+  kind: "time" | "staff";
+  staffId: string;
+  staffName: string | null;
+  startIso: string;
+  endIso: string;
+  /** 画面にそのまま出す文字（例「17:00〜17:20」） */
+  timeLabel: string;
+};
+
+export type OverlapFixes = { sameStaff: OverlapFix[]; otherStaff: OverlapFix[] };
+
+const JST_MS = 9 * 60 * 60 * 1000;
+const jstYmd = (iso: string) => new Date(new Date(iso).getTime() + JST_MS).toISOString().slice(0, 10);
+const jstHm = (iso: string) => new Date(new Date(iso).getTime() + JST_MS).toISOString().slice(11, 16);
+const isoOfJst = (ymd: string, hm: string) => new Date(`${ymd}T${hm}:00+09:00`).toISOString();
+const hmToMin = (hm: string) => {
+  const [h, m] = hm.split(":").map(Number);
+  return (Number.isFinite(h) ? h : 0) * 60 + (Number.isFinite(m) ? m : 0);
+};
+const minToHm = (n: number) =>
+  `${String(Math.floor(n / 60)).padStart(2, "0")}:${String(n % 60).padStart(2, "0")}`;
+
+/**
+ * かぶりを直すための候補を出す。
+ *
+ * ・sameStaff … 同じ先生で、その日のうちに空いている枠（近い順に最大4件）
+ * ・otherStaff … 同じ時間で受けられる別の先生（最大4件）
+ *
+ * 候補は「その先生の勤務時間・休憩・お休み」と「すでに入っている予約」の両方を見て出す。
+ * 出した候補をそのまま登録して、また止まる、ということが起きないようにする。
+ * 候補が出せなくても登録は止めたままにする（ここは案内であって、許可ではない）。
+ */
+export async function suggestOverlapFixes(input: {
+  staffId: string | null;
+  startIso: string;
+  durationMinutes: number;
+  /** 編集中の予約。自分自身とのかぶりを候補から除くために渡す */
+  excludeAppointmentId?: string | null;
+  /** メニュー。担当が固定のメニューでは「別の先生」を出さない */
+  courseId?: string | null;
+}): Promise<OverlapFixes> {
+  const empty: OverlapFixes = { sameStaff: [], otherStaff: [] };
+  try {
+    const { clinicId } = await checkAdminAuth();
+    const meStaffId = input.staffId;
+    if (!meStaffId || !input.startIso) return empty;
+    const duration = input.durationMinutes > 0 ? input.durationMinutes : 20;
+    const ymd = jstYmd(input.startIso);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(ymd)) return empty;
+    const wantStartMin = hmToMin(jstHm(input.startIso));
+
+    const db = getAdminSupabase();
+    if (!db) return empty;
+    const dayStart = isoOfJst(ymd, "00:00");
+    const dayEnd = new Date(new Date(dayStart).getTime() + 24 * 60 * 60 * 1000).toISOString();
+
+    const [
+      settingsRes,
+      staffRes,
+      weeklyRes,
+      dateRes,
+      offRes,
+      aptRes,
+      courseRes,
+      holidayRes,
+    ] = await Promise.all([
+      db.from("clinic_settings")
+        .select("slot_duration_minutes, closed_weekdays, business_open_weekday, business_close_weekday, business_open_saturday, business_close_saturday")
+        .eq("id", clinicId).maybeSingle(),
+      db.from("reservation_staff")
+        .select("id, name, sort_order, schedule_based_booking, booking_weekdays, booking_start_time, booking_end_time, booking_break_start, booking_break_end, booking_until")
+        .eq("clinic_id", clinicId).eq("is_active", true),
+      db.from("staff_working_hours")
+        .select("staff_id, day_of_week, start_time, end_time, break_start, break_end")
+        .eq("clinic_id", clinicId),
+      db.from("staff_booking_dates")
+        .select("staff_id, available, start_time, end_time")
+        .eq("clinic_id", clinicId).eq("date", ymd),
+      db.from("staff_working_overrides")
+        .select("staff_id, kind, start_time, blocks_booking")
+        .eq("clinic_id", clinicId).eq("date", ymd),
+      db.from("appointments")
+        .select("id, start_time, end_time, staff_id, course_id, additional_staff, additional_courses")
+        .eq("clinic_id", clinicId).neq("status", "cancelled")
+        .gte("start_time", dayStart).lt("start_time", dayEnd),
+      input.courseId
+        ? db.from("reservation_courses").select("required_staff_id")
+            .eq("clinic_id", clinicId).eq("id", input.courseId).maybeSingle()
+        : Promise.resolve({ data: null }),
+      db.from("clinic_holidays").select("date").eq("clinic_id", clinicId).eq("date", ymd).maybeSingle(),
+    ]);
+
+    const settings: any = settingsRes?.data ?? null;
+    const staffRows: any[] = staffRes?.data ?? [];
+    const weeklyRows: any[] = weeklyRes?.data ?? [];
+    const dateRows: any[] = dateRes?.data ?? [];
+    const offRows: any[] = offRes?.data ?? [];
+    const aptRows: any[] = aptRes?.data ?? [];
+    if (staffRows.length === 0) return empty;
+
+    const slotMinutes = Number(settings?.slot_duration_minutes) > 0 ? Number(settings.slot_duration_minutes) : 30;
+    // 曜日は UTC 0時で見る。JST 0時（=UTC 前日15時）で getUTCDay() すると1日ずれる
+    // （2026-08-23 検品指摘。土曜だけ営業時間が違う院で、閉院後を「取れます」と出していた）。
+    const dow = new Date(`${ymd}T00:00:00Z`).getUTCDay();
+    const isSaturday = dow === 6;
+    const openHm = normStaffTime(isSaturday ? settings?.business_open_saturday : settings?.business_open_weekday) ?? "09:00";
+    const closeHm = normStaffTime(isSaturday ? settings?.business_close_saturday : settings?.business_close_weekday) ?? "20:00";
+    const closedDows = String(settings?.closed_weekdays ?? "")
+      .split(",").map((v: string) => Number(v.trim())).filter((n: number) => Number.isInteger(n));
+    if (closedDows.includes(dow)) return empty;
+    if ((holidayRes as any)?.data) return empty; // 臨時休診の日は勧めない
+    const openMin = hmToMin(openHm);
+    const closeMin = hmToMin(closeHm);
+    if (!(closeMin > openMin)) return empty;
+
+    // その日の予約を「先生ごとの受け持ち時間」に割ってから、埋まっている時間の一覧にする
+    const rows = aptRows.filter((r) => r.id !== input.excludeAppointmentId);
+    const courseIds = new Set<string>();
+    for (const r of rows) {
+      if (r.course_id) courseIds.add(r.course_id);
+      for (const ac of (r.additional_courses ?? []) as { course_id?: string }[]) {
+        if (ac?.course_id) courseIds.add(ac.course_id);
+      }
+    }
+    const durationById = new Map<string, number>();
+    if (courseIds.size > 0) {
+      const { data: cs } = await db.from("reservation_courses")
+        .select("id, duration_minutes").eq("clinic_id", clinicId).in("id", [...courseIds]);
+      for (const c of (cs ?? []) as { id: string; duration_minutes: number | null }[]) {
+        if (c.duration_minutes && c.duration_minutes > 0) durationById.set(c.id, c.duration_minutes);
+      }
+    }
+    const busy = new Map<string, { s: number; e: number }[]>();
+    for (const r of rows) {
+      const spans = buildStaffSpans({
+        startTime: r.start_time,
+        endTime: r.end_time ?? null,
+        staffId: r.staff_id ?? null,
+        mainMinutes: r.course_id ? (durationById.get(r.course_id) ?? null) : null,
+        additionalStaff: (r.additional_staff ?? null) as { staff_id: string }[] | null,
+        additionalCourses: (r.additional_courses ?? null) as { course_id: string }[] | null,
+        additionalMinutes: ((r.additional_courses ?? []) as { course_id?: string }[])
+          .map((ac) => (ac?.course_id ? (durationById.get(ac.course_id) ?? null) : null)),
+        fallbackMinutes: slotMinutes,
+      });
+      for (const sp of spans) {
+        const list = busy.get(sp.staffId) ?? [];
+        list.push({ s: new Date(sp.startIso).getTime(), e: new Date(sp.endIso).getTime() });
+        busy.set(sp.staffId, list);
+      }
+    }
+
+    // 終日休みで登録されている先生は候補から外す
+    const offSet = new Set(
+      offRows
+        .filter((o) => (o.kind === "off" || o.kind === "leave") && !o.start_time && o.blocks_booking !== false)
+        .map((o) => o.staff_id as string),
+    );
+
+    // 管理画面からの登録なので、ネット予約用の「準備時間」は差し引かない（prep=0）。
+    // 受付時間ぎりぎりの枠も、スタッフが手で入れるぶんには取れるべきなので。
+    const schedOf = new Map<string, StaffSchedule | null>();
+    for (const st of staffRows) {
+      const ovr = dateRows.find((d) => d.staff_id === st.id);
+      schedOf.set(st.id, buildStaffSchedule(
+        st,
+        ovr ? [{ date: ymd, available: !!ovr.available, start: normStaffTime(ovr.start_time), end: normStaffTime(ovr.end_time) }] : [],
+        weeklyRows.filter((w) => w.staff_id === st.id),
+        0,
+      ));
+    }
+
+    // 勤務表（staff_working_hours）に行がある先生は、行が無い曜日は出勤していないとみなす。
+    // buildStaffSchedule は schedule_based_booking=false の院で曜日を見ないため、
+    // それだけに任せると「月火だけ勤務の先生」を土曜の候補に出してしまう（2026-08-23 検品指摘）。
+    const workDows = new Map<string, Set<number>>();
+    for (const w of weeklyRows) {
+      const d = Number(w.day_of_week);
+      if (!Number.isInteger(d)) continue;
+      const set = workDows.get(w.staff_id) ?? new Set<number>();
+      set.add(d);
+      workDows.set(w.staff_id, set);
+    }
+    /** 勤務表からその日に出勤していると分かるか。null = 勤務表そのものが無くて分からない */
+    const worksToday = (staffId: string): boolean | null => {
+      const set = workDows.get(staffId);
+      if (!set) return null;
+      return set.has(dow);
+    };
+
+    const isFree = (staffId: string, startMin: number): boolean => {
+      if (offSet.has(staffId)) return false;
+      if (worksToday(staffId) === false) return false;
+      if (startMin < openMin || startMin + duration > closeMin) return false;
+      const sched = schedOf.get(staffId);
+      if (sched) {
+        if (!isStaffAvailableOnYmd(ymd, sched)) return false;
+        if (!isStaffSpanBookableYmd(ymd, minToHm(startMin), duration, sched)) return false;
+      }
+      const s = new Date(isoOfJst(ymd, minToHm(startMin))).getTime();
+      const e = s + duration * 60000;
+      for (const b of busy.get(staffId) ?? []) {
+        if (b.s < e && b.e > s) return false;
+      }
+      return true;
+    };
+
+    const fixOf = (
+      kind: "time" | "staff",
+      staffId: string,
+      staffName: string | null,
+      startMin: number,
+    ): OverlapFix => {
+      const startIso = isoOfJst(ymd, minToHm(startMin));
+      const endIso = new Date(new Date(startIso).getTime() + duration * 60000).toISOString();
+      return {
+        kind, staffId, staffName, startIso, endIso,
+        timeLabel: `${minToHm(startMin)}〜${minToHm(startMin + duration)}`,
+      };
+    };
+
+    // ① 同じ先生で、空いている枠を近い順に
+    const meName = staffRows.find((s) => s.id === meStaffId)?.name ?? null;
+    const candidates: number[] = [];
+    for (let t = openMin; t + duration <= closeMin; t += slotMinutes) {
+      if (t === wantStartMin) continue;
+      if (isFree(meStaffId, t)) candidates.push(t);
+    }
+    candidates.sort((a, b) => Math.abs(a - wantStartMin) - Math.abs(b - wantStartMin) || a - b);
+    const sameStaff = candidates.slice(0, 4)
+      .sort((a, b) => a - b)
+      .map((t) => fixOf("time", meStaffId, meName, t));
+
+    // ② 同じ時間で受けられる別の先生。担当が固定のメニューでは出さない
+    const requiredStaffId = (courseRes?.data as { required_staff_id?: string | null } | null)?.required_staff_id ?? null;
+    let otherStaff: OverlapFix[] = [];
+    if (!requiredStaffId) {
+      otherStaff = staffRows
+        .filter((st) => st.id !== meStaffId && worksToday(st.id) === true && isFree(st.id, wantStartMin))
+        .sort((a, b) => (a.sort_order ?? 999) - (b.sort_order ?? 999))
+        .slice(0, 4)
+        .map((st) => fixOf("staff", st.id, st.name ?? null, wantStartMin));
+    }
+
+    return { sameStaff, otherStaff };
+  } catch (e) {
+    // 候補が出せなくても、かぶりを止めること自体は変わらない
+    console.error("suggestOverlapFixes failed", e);
+    return empty;
   }
 }

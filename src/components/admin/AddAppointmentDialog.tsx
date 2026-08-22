@@ -24,6 +24,7 @@ import { searchPatientsForBooking, PatientSuggestion } from "@/app/actions/patie
 import { getCourses, getStaffList, getRooms, type ReservationCourse, type ReservationStaff, type ReservationRoom } from "@/app/actions/courses";
 import { toast } from "sonner";
 import { useClinicSlotDuration } from "@/lib/use-clinic-slot-duration";
+import { OverlapFixList } from "@/components/admin/OverlapFixList";
 
 export function AddAppointmentDialog({
   onSuccess,
@@ -888,6 +889,16 @@ export function AddAppointmentDialog({
                       </>
                     )}
                   </div>
+                  {/* 「だめ」で終わらせず、その場で取れる候補を出す（2026-08-22 ぼーるくん） */}
+                  <OverlapFixList
+                    staffId={staffId || null}
+                    dateStr={date ? format(date, "yyyy-MM-dd") : ""}
+                    time={time}
+                    durationMinutes={Number(duration) || slotMinutes}
+                    courseId={courseId || null}
+                    onPickTime={(hm) => { setTime(hm); setOverlapPrompt(null); }}
+                    onPickStaff={(id) => { setStaffId(id); setOverlapPrompt(null); }}
+                  />
                   <div className="flex gap-2">
                     <Button
                       type="button"

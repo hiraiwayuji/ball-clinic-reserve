@@ -36,6 +36,7 @@ import { AddAppointmentDialog } from "./AddAppointmentDialog";
 import { toast } from "sonner";
 import { getTimeSlots } from "@/lib/time-slots";
 import { useClinicSlotDuration } from "@/lib/use-clinic-slot-duration";
+import { OverlapFixList } from "@/components/admin/OverlapFixList";
 
 interface EditAppointmentDialogProps {
   open: boolean;
@@ -1111,6 +1112,17 @@ export function EditAppointmentDialog({
               </>
             )}
           </div>
+          {/* 「だめ」で終わらせず、その場で取れる候補を出す（2026-08-22 ぼーるくん） */}
+          <OverlapFixList
+            staffId={staffId || null}
+            dateStr={date ? format(date, "yyyy-MM-dd") : ""}
+            time={time}
+            durationMinutes={Number(duration) || slotMinutes}
+            excludeAppointmentId={appointment?.id ?? null}
+            courseId={courseId || null}
+            onPickTime={(hm) => { setTime(hm); setOverlapError(null); setPendingOverlapAction(null); }}
+            onPickStaff={(id) => { setStaffId(id); setOverlapError(null); setPendingOverlapAction(null); }}
+          />
           <DialogFooter className="mt-2 flex-col gap-2 sm:flex-col">
             <Button
               type="button"
