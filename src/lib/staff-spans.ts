@@ -57,12 +57,14 @@ export type StaffSpan = {
  * 予約1件を担当ごとの時間帯に分ける。
  *
  * - 担当が1人（またはゼロ）のときは、予約の時間まるごとをその先生の担当として返す
- * - 複数のときは、メニューの所要時間を先頭から積み上げる（20分 → 40分 …）。
- *   最後の1人が残り時間を吸収するので、必ず予約の終了時刻でぴったり終わる
- * - メニュー時間の合計が予約時間に収まらないデータ不整合のときだけ、人数で等分する
+ * - 複数のときは、メニューの所要時間を先頭から積み上げる（20分 → 40分 …）
+ * - 最後の1人が残り時間を吸収するので、通常は予約の終了時刻でぴったり終わる
+ * - メニュー時間の合計が予約時間より長いデータ不整合のときは、はみ出させる。
+ *   枠を崩してまで予約の枠内に押し込めない（はみ出しが「施術時間が足りない予約」の目印になる）
  *
- * 交代時刻は必ず「分」単位にする。比率で按分すると 10:06:40 のような
- * 枠外・秒つきの時刻が生まれ、20分刻みの院では現場が混乱するため。
+ * 交代時刻は必ずメニューの所要時間で決める。所要時間は予約枠の倍数（20/40/60分…）なので、
+ * これを積み上げるかぎり交代時刻も枠に乗る。残り時間を人数で等分すると
+ * 6分・25分のような枠外の時刻が生まれ、20分単位が絶対ルールのからだ鍼灸整骨院で事故になる。
  */
 export function buildStaffSpans(input: StaffSpanInput): StaffSpan[] {
   const startMs = new Date(input.startTime).getTime();
@@ -110,48 +112,46 @@ export function buildStaffSpans(input: StaffSpanInput): StaffSpan[] {
     }];
   }
 
-  // 交代時刻は必ず「分」単位。予約枠は10分・20分刻みなので、
-  // 比率で按分して 10:06:40 のような枠外・秒つきの時刻を作ってはいけない。
-  const totalMinutes = minutes.reduce((a, b) => a + b, 0);
-  const fitsInside = totalMinutes > 0 && totalMinutes * 60000 <= actualMs;
+  // 交代時刻は必ず予約枠に乗せる。
+  //
+  // からだ鍼灸整骨院は予約枠20分単位が絶対ルールで、枠に乗らない時刻を作ってはいけない
+  // （2026-08-22 ぼーるくん再確認）。メニューの所要時間は枠の倍数（20/40/60分…）なので、
+  // それを積み上げるかぎり交代時刻も枠に乗る。「残り時間を人数で等分」すると
+  // 6分・25分のような枠外の時刻が生まれるので、等分はしない。
+  const unitMs = fallback * 60000;
+  const totalMs = minutes.reduce((a, b) => a + b, 0) * 60000;
+
+  // メニュー時間の合計が予約時間に収まらないデータ不整合のときは、
+  // 予約時間のほうを枠単位で人数分に割り直す（例: 40分の予約に2人 → 20分ずつ）。
+  // 枠数より人数が多いときだけ、1人1枠にして予約時間からはみ出させる
+  // （20分の予約に3人など、そもそも施術時間が足りていない予約の目印になる）。
+  const evenMinutes: number[] | null = (() => {
+    if (totalMs <= actualMs) return null;
+    const slots = Math.floor(actualMs / unitMs);
+    if (slots < staffIds.length) return staffIds.map(() => fallback);
+    const per = Math.floor(slots / staffIds.length) * fallback;
+    return staffIds.map(() => per);
+  })();
 
   const spans: StaffSpan[] = [];
   let cursor = startMs;
   for (let i = 0; i < staffIds.length; i++) {
     const isLast = i === staffIds.length - 1;
-    let next: number;
-    if (isLast) {
-      // 最後の1人が残り時間を全部受け持つ（予約の終了時刻でぴったり終わらせる）
-      next = endMs;
-    } else if (fitsInside) {
-      // メニューの所要時間をそのまま積み上げる（例: 20分 → 40分）
-      next = cursor + minutes[i] * 60000;
-    } else {
-      // メニュー時間の合計が予約時間に収まらない（データ不整合）ときだけ、
-      // 従来どおり人数で等分する。
-      // このときも交代時刻は院の予約枠サイズ（20分など）の倍数に丸める。
-      // 50分を2人で25分ずつにすると 10:25 という枠外の時刻が現場に出てしまうため。
-      const unitMs = fallback * 60000;
-      const evenMs = actualMs / staffIds.length;
-      let perMs = Math.max(unitMs, Math.round(evenMs / unitMs) * unitMs);
-      // 枠サイズに丸めた結果が全員ぶん収まらないときは丸めをやめ、分単位で均等に割る。
-      // ここで丸めを優先すると最後の方の先生が「0分」になり、
-      // その先生がかぶり判定から丸ごと消えてしまう（2026-08-22 検品指摘）。
-      if (perMs * staffIds.length > actualMs) {
-        perMs = Math.max(60000, Math.floor(evenMs / 60000) * 60000);
-      }
-      next = cursor + perMs;
-    }
-    next = Math.min(Math.max(next, cursor), endMs);
+    const mins = evenMinutes ? evenMinutes[i] : minutes[i];
+    const own = cursor + mins * 60000;
+    // 最後の1人は予約の終わりまで受け持つ（予約のほうが長ければ残りを吸収）。
+    // 枠数より人数が多い不整合のときだけ、自分のぶんを優先してはみ出す。
+    const next = isLast ? Math.max(endMs, own) : own;
+    const fixed = Math.max(next, cursor + unitMs);
     spans.push({
       staffId: staffIds[i],
       startIso: iso(cursor),
-      endIso: iso(next),
+      endIso: iso(fixed),
       courseName: courseNames[i],
       index: i,
       count: staffIds.length,
     });
-    cursor = next;
+    cursor = fixed;
   }
   return spans;
 }
