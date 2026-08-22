@@ -55,7 +55,8 @@ function SalesPageInner() {
   const [isFirstVisit, setIsFirstVisit] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const formRef = useRef<HTMLFormElement>(null);
-  // 受付スタッフは「受付の売上記帳（入力のみ）」。帳簿一覧・修正/削除・他日閲覧・エクスポート等はオーナー専用。
+  // 受付スタッフは「当日ぶんの記帳と、その日の一覧・修正・削除」まで。
+  // 過去日の帳簿・保険入金・一括入力・Excel取込・エクスポートはオーナー専用。
   const [isOwner, setIsOwner] = useState(false);
 
   // 「次回予約」モーダル（会計成功直後に開く）
@@ -201,6 +202,9 @@ function SalesPageInner() {
     getMyRole().then((r) => setIsOwner(r === "owner"));
   }, []);
 
+  // いま見ているのが「今日」か。受付が触ってよい範囲の判定に使う。
+  const isViewingToday = !!date && format(date, "yyyy-MM-dd") === todayJstStr();
+
   const fetchSales = async (d: Date) => {
     setLoading(true);
     const dateStr = format(d, "yyyy-MM-dd");
@@ -212,9 +216,13 @@ function SalesPageInner() {
   };
 
   useEffect(() => {
-    // 帳簿一覧の取得はオーナーのみ（getCashSales はオーナー専用）。
-    if (date && isOwner) {
+    // 当日ぶんは受付（スタッフ）も一覧を見られる。その日の打ち間違いを自分で直せないと
+    // 院長先生に頼むしかなくなるため（2026-08-23 ぼーるくん）。過去日はオーナーのみ。
+    if (!date) return;
+    if (isOwner || isViewingToday) {
       fetchSales(date);
+    } else {
+      setSales([]);
     }
   }, [date, isOwner]);
 
@@ -853,8 +861,9 @@ function SalesPageInner() {
           </CardContent>
         </Card>
 
-        {/* 売上リスト（オーナー専用：受付スタッフには非表示） */}
-        {isOwner && (
+        {/* 売上リスト。受付スタッフは当日ぶんだけ見られる（その日の打ち間違いを自分で直せるように）。
+            過去日の帳簿はオーナーのみ（2026-08-23 ぼーるくん）。 */}
+        {(isOwner || isViewingToday) && (
         <Card className="lg:col-span-2 shadow-sm border-slate-200 dark:border-white/10 dark:bg-slate-900/50">
           <CardHeader className="flex flex-row items-center justify-between">
             <div>
@@ -1366,6 +1375,12 @@ function SalesModeRouter() {
     return <TallySheet />;
   }
   return <SalesPageInner />;
+}
+
+/** Asia/Tokyo の今日 (yyyy-MM-dd)。端末のタイムゾーンに引きずられないようにする */
+function todayJstStr(): string {
+  const jst = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Tokyo" }));
+  return `${jst.getFullYear()}-${String(jst.getMonth() + 1).padStart(2, "0")}-${String(jst.getDate()).padStart(2, "0")}`;
 }
 
 export default function SalesPage() {

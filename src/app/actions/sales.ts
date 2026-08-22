@@ -4,6 +4,48 @@ import { createClient } from "@/lib/supabase/server";
 import { countNewAndReturnVisits } from "@/lib/patient-count";
 import { findCustomersByName } from "@/lib/customer-match";
 import { checkAdminAuth, requireRole } from "@/app/actions/auth";
+
+/** Asia/Tokyo の今日 (yyyy-MM-dd)。tally.ts と同じ実装 */
+function todayJst(): string {
+  const now = new Date();
+  const jst = new Date(now.toLocaleString("en-US", { timeZone: "Asia/Tokyo" }));
+  return `${jst.getFullYear()}-${String(jst.getMonth() + 1).padStart(2, "0")}-${String(jst.getDate()).padStart(2, "0")}`;
+}
+
+/**
+ * 受付（スタッフ）が当日ぶんの記帳を自分で直せるようにするための線引き。
+ *
+ * 受付は毎日この画面で記帳している。その日の打ち間違いを直せないと院長先生に
+ * 頼むしかなくなり、院長先生に判断が集中してしまう（2026-08-23 ぼーるくん）。
+ * 過去日の帳簿はお金の記録なのでオーナーのみ。tally.ts と同じ考え方でそろえる。
+ */
+/** 既存の記帳1件について、当日ぶんか（＝受付が直してよいか）をDBの現物で判定する */
+async function requireOwnerUnlessTodayById(id: string) {
+  const auth = await checkAdminAuth();
+  if (auth.role === "owner") return auth;
+  const sb = getAdminSupabase();
+  if (!sb) throw new Error("サーバー設定エラーです");
+  const { data, error } = await sb
+    .from("cash_sales")
+    .select("sale_date")
+    .eq("clinic_id", auth.clinicId)
+    .eq("id", id)
+    .maybeSingle();
+  // 判定できないときは通さない（fail-closed）
+  if (error || !data) throw new Error("この記帳の日付を確認できませんでした");
+  if (String(data.sale_date).slice(0, 10) !== todayJst()) {
+    throw new Error("過去・未来日の帳簿はオーナー（院長先生）のみ変更できます");
+  }
+  return auth;
+}
+
+async function requireOwnerUnlessToday(dateStr: string) {
+  const auth = await checkAdminAuth();
+  if (dateStr !== todayJst() && auth.role !== "owner") {
+    throw new Error("過去・未来日の帳簿はオーナー（院長先生）のみ確認できます");
+  }
+  return auth;
+}
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { revalidatePath } from "next/cache";
 import { normalizeNameForMatch } from "@/lib/booking-customer";
@@ -710,7 +752,8 @@ export async function bulkAddCashSales(rows: Array<{
   // lines があれば treatment_fee/payment_type は無視し、各 line を 1 行ずつ cash_sales に insert する。
   lines?: Array<{ payment_type?: CashSalePaymentType | null; treatment_fee: number }>;
 }>) {
-  const { clinicId } = await checkAdminAuth();
+  // 画面では隠しているが、サーバーアクションは直接呼べるのでここでも止める（2026-08-23 検品指摘）。
+  const { clinicId } = await requireRole(["owner"]);
   try {
     const supabase = await getSupabase();
 
@@ -950,6 +993,10 @@ export async function searchSalesPatients(name: string): Promise<SalesPatientSug
 export async function addCashSale(formData: FormData) {
   const auth = await checkAdminAuth();
   const { clinicId } = auth;
+  // 過去・未来日の帳簿に新しい行を作れるのはオーナーだけ（2026-08-23 検品指摘）。
+  if (auth.role !== "owner" && ((formData.get("sale_date") as string) ?? "") !== todayJst()) {
+    return { success: false, error: "当日以外の日付には登録できません。オーナー（院長先生）にご相談ください" };
+  }
   try {
     const saleDate = formData.get("sale_date") as string;
     const customerName = formData.get("customer_name") as string;
@@ -1020,8 +1067,8 @@ export async function addCashSale(formData: FormData) {
 }
 
 export async function getCashSales(dateStr: string) {
-  // 売上帳簿の閲覧はオーナー専用（受付スタッフは入力のみ）
-  const { clinicId } = await requireRole(["owner"]);
+  // 当日ぶんは受付（スタッフ）も見られる。過去日はオーナーのみ。
+  const { clinicId } = await requireOwnerUnlessToday(dateStr);
   try {
     const supabase = await getSupabase();
     // Migration完了につき clinic_id フィルタを有効化
@@ -1113,8 +1160,14 @@ export async function getCashSales(dateStr: string) {
 }
 
 export async function updateCashSale(formData: FormData) {
-  await requireRole(["owner"]);
-  const { clinicId } = await checkAdminAuth();
+  // 当日ぶんの打ち間違いは受付が直せる。日付はフォームの申告ではなくDBの現物で見る。
+  const auth = await requireOwnerUnlessTodayById((formData.get("id") as string) ?? "");
+  const { clinicId } = auth;
+  // 「今日の行」を選んで sale_date だけ過去日にすれば帳簿を動かせてしまうので、
+  // 書き込み先の日付も見る（2026-08-23 検品指摘）。
+  if (auth.role !== "owner" && ((formData.get("sale_date") as string) ?? "") !== todayJst()) {
+    return { success: false, error: "当日以外の日付には移せません。オーナー（院長先生）にご相談ください" };
+  }
   try {
     const id = formData.get("id") as string;
     const saleDate = formData.get("sale_date") as string;
@@ -1195,8 +1248,8 @@ export async function updateCashSale(formData: FormData) {
 }
 
 export async function deleteCashSale(id: string) {
-  await requireRole(["owner"]);
-  const { clinicId } = await checkAdminAuth();
+  // 当日ぶんの誤登録は受付が消せる。過去日はオーナーのみ。
+  const { clinicId } = await requireOwnerUnlessTodayById(id);
   try {
     const supabase = await getSupabase();
     const { error } = await supabase
@@ -2024,7 +2077,8 @@ export async function bulkImportCashSales(rows: ImportCashSaleRow[]): Promise<{
   skipped: number;
   errors: { row: number; name: string; reason: string }[];
 }> {
-  const { clinicId } = await checkAdminAuth();
+  // 画面では隠しているが、サーバーアクションは直接呼べるのでここでも止める（2026-08-23 検品指摘）。
+  const { clinicId } = await requireRole(["owner"]);
   const supabase = await getSupabase();
 
   let inserted = 0;
