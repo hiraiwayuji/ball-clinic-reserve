@@ -132,6 +132,16 @@ export async function addAddonToAppointment(appointmentId: string, timing: "befo
     const aStaffId = (addon.required_staff_id as string | null) ?? null;
     const aName = addon.name as string;
 
+    // 担当(レーン)の表示名は担当者名にする。コース名を入れると
+    // 森藤先生のレーンに「電気鍼」と出てしまう（患者側 reserve.ts と同じ扱いに揃える）
+    let aStaffName: string | null = null;
+    if (aStaffId) {
+      const { data: aStaffRow } = await supabase
+        .from("reservation_staff").select("name")
+        .eq("id", aStaffId).eq("clinic_id", clinicId).maybeSingle();
+      aStaffName = (aStaffRow?.name as string | null) ?? null;
+    }
+
     // 追加メニューの担当レーンの重複チェック
     if (aStaffId) {
       const { data: conf } = await supabase
@@ -158,7 +168,7 @@ export async function addAddonToAppointment(appointmentId: string, timing: "befo
       clinic_id: clinicId,
       course_id: addon.id,
       course_name: aName,
-      ...(aStaffId ? { staff_id: aStaffId, staff_name: aName } : {}),
+      ...(aStaffId ? { staff_id: aStaffId, staff_name: aStaffName } : {}),
     }]);
     if (error) {
       console.error("addAddonToAppointment insert error", error);
@@ -1197,6 +1207,15 @@ export async function createManualReservation(formData: FormData) {
           const aStaffId = (addon.required_staff_id as string | null) ?? null;
           const aName = addon.name as string;
 
+          // 担当(レーン)の表示名は担当者名にする（コース名だとレーンに「電気鍼」と出る）
+          let aStaffName: string | null = null;
+          if (aStaffId) {
+            const { data: aStaffRow } = await supabase
+              .from("reservation_staff").select("name")
+              .eq("id", aStaffId).eq("clinic_id", clinicId).maybeSingle();
+            aStaffName = (aStaffRow?.name as string | null) ?? null;
+          }
+
           // まとめ予約では各回の施術それぞれに追加メニューを付ける（1回目だけ水素、では困るため）
           for (const slot of allStarts) {
             const mainStart = slot.start;
@@ -1235,7 +1254,7 @@ export async function createManualReservation(formData: FormData) {
               series_id: seriesId,
               course_id: addon.id,
               course_name: aName,
-              ...(aStaffId ? { staff_id: aStaffId, staff_name: aName } : {}),
+              ...(aStaffId ? { staff_id: aStaffId, staff_name: aStaffName } : {}),
             }]);
           }
         }
