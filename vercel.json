@@ -6,7 +6,7 @@
     },
     {
       "path": "/api/line/remind/appointments",
-      "schedule": "30 22 * * *"
+      "schedule": "0 0 * * *"
     },
     {
       "path": "/api/cron/birthday",
@@ -22,7 +22,7 @@
     },
     {
       "path": "/api/cron/shift-requests",
-      "schedule": "0 0 * * *"
+      "schedule": "10 0 * * *"
     }
   ]
 }

@@ -32,7 +32,7 @@ function isAuthorized(req: NextRequest, bodySecret?: string): boolean {
 
 /**
  * 自動当日リマインド配信エンドポイント
- * Vercel Cron（毎日 7:30 JST）から GET で呼ばれる。
+ * Vercel Cron（毎日 09:00 JST = 00:00 UTC）から GET で呼ばれる。
  * clinic_settings.auto_remind_enabled が true の院だけ送信する（既定OFF）。
  */
 export async function POST(req: NextRequest) {
@@ -58,8 +58,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ status: "skipped", reason: "auto remind disabled" });
   }
 
-  // Vercel Hobby plan: cron fires once/day at 23:00 UTC = 8:00 JST
-  // Pro plan users can set auto_remind_time and use a more frequent cron
+  // 送信時刻は vercel.json の cron だけで決まる。auto_remind_time は画面表示用で、
+  // ここでは使っていない（2026-08-23 検品指摘。資料に書くときは混同しないこと）。
   const now = new Date();
   const jstNow = new Date(now.toLocaleString("en-US", { timeZone: "Asia/Tokyo" }));
 
@@ -117,10 +117,17 @@ export async function POST(req: NextRequest) {
 
 // Vercel Cron からのGETも受け付ける（cron jobはGETで叩く場合がある）
 export async function GET(req: NextRequest) {
+  // Vercel Cron は GET を `Authorization: Bearer $CRON_SECRET` で呼ぶ。
+  // 以前はここで新しい NextRequest を組み立てており、その Authorization が落ちて
+  // POST 側の認証を通らず 401 になっていた（2026-08-23 検品指摘）。
+  // 全院 auto_remind_enabled=false だったので表面化していなかっただけ。
   const secret = req.nextUrl.searchParams.get("secret");
   return POST(new NextRequest(req.url, {
     method: "POST",
     body: JSON.stringify({ secret }),
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      authorization: req.headers.get("authorization") ?? "",
+    },
   }));
 }
