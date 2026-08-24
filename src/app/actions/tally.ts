@@ -305,11 +305,18 @@ export async function getTallySheet(dateStr: string): Promise<TallySheetData> {
 export async function deleteTallyEntriesForName(
   dateStr: string,
   customerName: string,
+  editorName?: string | null,
 ): Promise<{ success: boolean; error?: string; deleted?: number }> {
   const auth = await checkAdminAuth();
   const { clinicId } = auth;
   const key = nameKey(customerName);
   if (!key) return { success: false, error: "お名前が空です" };
+  // ログインが共用アカウントの院もあり、メールアドレスだけでは「誰が」直したか分からない。
+  // 当日以外を削除するときは、操作した人の名前を必ず添えてもらう(2026-08-24 藤川先生の指摘)。
+  const editor = (editorName ?? "").trim();
+  if (dateStr !== todayJst() && !editor) {
+    return { success: false, error: "当日以外の削除は、操作した方のお名前の指定が必要です" };
+  }
 
   const sb = getAdminSupabase();
   if (!sb) return { success: false, error: "サーバー設定エラーです" };
@@ -348,7 +355,7 @@ export async function deleteTallyEntriesForName(
       actionType: "tally.delete",
       targetTable: "cash_sales",
       targetId: dateStr,
-      before: { customerName: name, ...beforeAgg },
+      before: { customerName: name, editorName: editor || null, ...beforeAgg },
       after: null,
     });
     await notifyOwnerOfStaffAction({
@@ -356,7 +363,7 @@ export async function deleteTallyEntriesForName(
       actorRole: auth.role,
       actorEmail: auth.email,
       actionType: "窓口日計表の削除",
-      summary: `${dateStr} ${name}様の記帳を削除\n${summaryLines.length > 0 ? summaryLines.join("\n") : "（金額の入力なし）"}`,
+      summary: `${dateStr}${editor ? `（操作: ${editor}）` : ""} ${name}様の記帳を削除\n${summaryLines.length > 0 ? summaryLines.join("\n") : "（金額の入力なし）"}`,
     });
   }
 
@@ -372,11 +379,18 @@ export async function deleteTallyEntriesForName(
 export async function saveTallySheet(
   dateStr: string,
   rows: TallyRow[],
+  editorName?: string | null,
 ): Promise<{ success: boolean; error?: string; saved?: number }> {
   const auth = await checkAdminAuth();
   const { clinicId } = auth;
 
   if (!dateStr) return { success: false, error: "日付が不正です" };
+  // ログインが共用アカウントの院もあり、メールアドレスだけでは「誰が」直したか分からない。
+  // 当日以外を保存するときは、操作した人の名前を必ず添えてもらう(2026-08-24 藤川先生の指摘)。
+  const editor = (editorName ?? "").trim();
+  if (dateStr !== todayJst() && !editor) {
+    return { success: false, error: "当日以外の記帳は、操作した方のお名前の指定が必要です" };
+  }
 
   const columns = await getTallyColumns();
   const colKeys = new Set(columns.map((c) => c.key));
@@ -536,8 +550,8 @@ export async function saveTallySheet(
       actionType: "tally.update",
       targetTable: "cash_sales",
       targetId: dateStr,
-      before: before ? { customerName: row.customer_name, ...before } : null,
-      after: { customerName: row.customer_name, ...after },
+      before: before ? { customerName: row.customer_name, editorName: editor || null, ...before } : null,
+      after: { customerName: row.customer_name, editorName: editor || null, ...after },
     });
     changedSummaries.push(`${row.customer_name}様\n${diffLines.map((l) => `　${l}`).join("\n")}`);
   }
@@ -547,7 +561,7 @@ export async function saveTallySheet(
       actorRole: auth.role,
       actorEmail: auth.email,
       actionType: "窓口日計表の修正",
-      summary: `${dateStr}\n${changedSummaries.join("\n")}`,
+      summary: `${dateStr}${editor ? `（操作: ${editor}）` : ""}\n${changedSummaries.join("\n")}`,
     });
   }
 
@@ -565,6 +579,8 @@ export type TallyChangeLogEntry = {
   createdAt: string;
   actorEmail: string | null;
   actorRole: string;
+  // 当日以外の変更で登録してもらった、操作した人の名前（当日の変更にはnull）
+  editorName: string | null;
   action: "update" | "delete";
   customerName: string;
   before: (TallyAgg & { customerName: string }) | null;
@@ -592,6 +608,7 @@ export async function getTallyChangeLog(dateStr: string): Promise<TallyChangeLog
       createdAt: r.created_at,
       actorEmail: r.actor_email,
       actorRole: r.actor_role,
+      editorName: after?.editorName ?? before?.editorName ?? null,
       action: r.action_type === "tally.delete" ? "delete" : "update",
       customerName: after?.customerName ?? before?.customerName ?? "",
       before,

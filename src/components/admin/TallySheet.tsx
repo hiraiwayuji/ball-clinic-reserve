@@ -123,6 +123,7 @@ function changeLogLines(entry: TallyChangeLogEntry, columns: TallyColumn[]): str
 // ※ 幅は端末のlocalStorageに保存されるため、既定値を変えたら必ずキーの版数も上げること
 //   （上げないと以前ドラッグ調整した端末に古い幅が残り、変更が反映されない）。
 const WIDTHS_KEY = "tally-col-widths-v2";
+const EDITOR_KEY = "tally-editor-staff-id";
 const MIN_COL_W = 44;
 const DEFAULT_COL_W = 56; // 施術メニュー・物販の既定幅（旧112の半分）
 const DEFAULT_FIXED_W: Record<string, number> = {
@@ -144,6 +145,22 @@ export default function TallySheet({ initialDate }: { initialDate?: string }) {
   const [saving, startSaving] = useTransition();
   // 次回予約ダイアログ（対象行を1つだけ開く）
   const [nextReserveRow, setNextReserveRow] = useState<UIRow | null>(null);
+
+  // 当日以外を直すときに選んでもらう「操作した人」。ログインが共用アカウントの院もあり、
+  // メールアドレスだけでは誰が直したか分からないため(2026-08-24 藤川先生の指摘)。
+  // この端末の直近の選択を覚えておく（毎回選び直さなくていいように）。
+  const [editorStaffId, setEditorStaffId] = useState<string>("");
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(EDITOR_KEY);
+      if (saved) setEditorStaffId(saved);
+    } catch {}
+  }, []);
+  const setEditorStaffIdPersist = useCallback((id: string) => {
+    setEditorStaffId(id);
+    try { localStorage.setItem(EDITOR_KEY, id); } catch {}
+  }, []);
+  const editorName = staff.find((s) => s.id === editorStaffId)?.name ?? "";
 
   // 横スクロール同期：列が多くて1画面に収まらない時、表の上にも分かりやすいスライドバーを出す。
   // （行が多いと下端のスクロールバーまで遠いので、上からも横移動できるようにする）
@@ -331,9 +348,13 @@ export default function TallySheet({ initialDate }: { initialDate?: string }) {
     const name = row.customer_name.trim();
     const hasData = name !== "" || Object.values(row.amounts).some((v) => v.trim() !== "");
     if (!hasData) { removeRow(row._id); return; } // 空の行はそのまま消すだけ
-    if (!confirm(`${name}様の本日の記帳を削除しますか？\n元に戻せません。`)) return;
+    if (!isToday && !editorName) {
+      toast.error("当日以外を削除するときは、上の「操作者」でお名前を選んでください");
+      return;
+    }
+    if (!confirm(`${name}様の${isToday ? "本日" : date}の記帳を削除しますか？\n元に戻せません。`)) return;
     startSaving(async () => {
-      const res = await deleteTallyEntriesForName(date, name);
+      const res = await deleteTallyEntriesForName(date, name, editorName || null);
       if (res.success) {
         removeRow(row._id);
         toast.success(`${name}様の記帳を削除しました`);
@@ -462,6 +483,10 @@ export default function TallySheet({ initialDate }: { initialDate?: string }) {
   }, [rows, columns]);
 
   const handleSave = () => {
+    if (!isToday && !editorName) {
+      toast.error("当日以外を保存するときは、上の「操作者」でお名前を選んでください");
+      return;
+    }
     // 名前があり、いずれかの金額欄が入力済みの行だけ送る（"0" も計上対象。完全な空行は無視）
     const payload: TallyRow[] = rows
       .filter((r) => r.customer_name.trim() && rowEntered(r))
@@ -487,7 +512,7 @@ export default function TallySheet({ initialDate }: { initialDate?: string }) {
       });
 
     startSaving(async () => {
-      const res = await saveTallySheet(date, payload);
+      const res = await saveTallySheet(date, payload, editorName || null);
       if (res.success) {
         toast.success(`日計表を保存しました（${res.saved ?? 0}件）`);
         load(date);
@@ -540,6 +565,22 @@ export default function TallySheet({ initialDate }: { initialDate?: string }) {
               className="bg-transparent text-sm font-medium text-slate-700 dark:text-slate-200 outline-none"
             />
           </div>
+          {!isToday && (
+            <div className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700/50">
+              <span className="text-xs font-medium text-amber-700 dark:text-amber-300 whitespace-nowrap">操作者</span>
+              <select
+                value={editorStaffId}
+                onChange={(e) => setEditorStaffIdPersist(e.target.value)}
+                className="bg-transparent text-sm font-medium text-amber-800 dark:text-amber-200 outline-none"
+                title="当日以外を直すときは、操作した方のお名前を選んでください"
+              >
+                <option value="">お名前を選択</option>
+                {staff.map((s) => (
+                  <option key={s.id} value={s.id}>{s.name}</option>
+                ))}
+              </select>
+            </div>
+          )}
           <button
             type="button"
             onClick={() => load(date)}
@@ -579,7 +620,8 @@ export default function TallySheet({ initialDate }: { initialDate?: string }) {
 
       {!isToday && (
         <p className="mb-3 text-xs text-slate-500 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2">
-          当日以外の日を表示しています。ここでの記帳・修正・削除は「変更履歴」に記録され、スタッフが直したときは院長へLINEで届きます。
+          当日以外の日を表示しています。保存・削除するときは、上の「操作者」でお名前を選んでください。
+          ここでの記帳・修正・削除は「変更履歴」に記録され、スタッフが直したときは院長へLINEで届きます。
         </p>
       )}
 
@@ -888,7 +930,7 @@ export default function TallySheet({ initialDate }: { initialDate?: string }) {
                     <p className="text-[11px] text-slate-400 mb-2">
                       {new Date(entry.createdAt).toLocaleString("ja-JP", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })}
                       {" ／ "}
-                      {entry.actorEmail ?? "不明なユーザー"}
+                      {entry.editorName ? `${entry.editorName}さん` : (entry.actorEmail ?? "不明なユーザー")}
                     </p>
                     {lines.length > 0 ? (
                       <ul className="text-xs text-slate-600 dark:text-slate-300 flex flex-col gap-0.5">
