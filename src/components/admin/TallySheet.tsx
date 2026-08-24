@@ -4,18 +4,21 @@ import { useEffect, useMemo, useState, useTransition, useCallback, useRef } from
 import { format } from "date-fns";
 import Link from "next/link";
 import { toast } from "sonner";
-import { Loader2, Plus, Trash2, Save, RefreshCw, BarChart3, Coins, UserPlus, CalendarDays, CalendarPlus, CheckCircle2 } from "lucide-react";
+import { Loader2, Plus, Trash2, Save, RefreshCw, BarChart3, Coins, UserPlus, CalendarDays, CalendarPlus, CheckCircle2, History } from "lucide-react";
 import {
   getTallySheet,
   saveTallySheet,
   deleteTallyEntriesForName,
+  getTallyChangeLog,
   type TallyStaff,
   type TallyRow,
+  type TallyChangeLogEntry,
 } from "@/app/actions/tally";
 import { updateCheckinStatusMany, getMonthCrossingFirstVisits, type CheckinStatus } from "@/app/actions/adminReserve";
 import { searchPatientsForBooking } from "@/app/actions/patientSearch";
 import { updateSalePatientIdentity } from "@/app/actions/sales";
 import { AddAppointmentDialog } from "@/components/admin/AddAppointmentDialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import type { TallyColumn } from "@/lib/tally-columns";
 
 type UIRow = {
@@ -89,6 +92,27 @@ const num = (s: string) => {
   const n = parseInt((s ?? "").replace(/[^0-9-]/g, ""), 10);
   return Number.isFinite(n) ? n : 0;
 };
+
+/** 変更履歴1件を「保険施術: ¥1,500 → ¥1,800」のような行の配列にする（削除は変更後がnull） */
+function changeLogLines(entry: TallyChangeLogEntry, columns: TallyColumn[]): string[] {
+  const labelByKey = new Map(columns.map((c) => [c.key, c.label]));
+  const beforeAmounts = entry.before?.amounts ?? {};
+  const afterAmounts = entry.after?.amounts ?? {};
+  const keys = new Set([...Object.keys(beforeAmounts), ...Object.keys(afterAmounts)]);
+  const lines: string[] = [];
+  for (const key of keys) {
+    const b = beforeAmounts[key];
+    const a = afterAmounts[key];
+    if ((b ?? null) === (a ?? null)) continue;
+    const label = labelByKey.get(key) ?? key;
+    if (entry.action === "delete") {
+      if (b != null) lines.push(`${label}: ${yen(b)}`);
+    } else {
+      lines.push(`${label}: ${b == null ? "（なし）" : yen(b)} → ${a == null ? "（なし）" : yen(a)}`);
+    }
+  }
+  return lines;
+}
 
 // ───────── 列幅（ドラッグでリサイズ＋localStorageに保存） ─────────
 // 各列ヘッダの右端をドラッグして幅を変えられる。変えた幅はこの端末に保存され、
@@ -252,7 +276,24 @@ export default function TallySheet({ initialDate }: { initialDate?: string }) {
     load(date);
   }, [date, load]);
 
-  const canEditDate = isOwner; // スタッフは当日のみ（日付固定）
+  // 記帳・修正・削除は誰でも、当日・過去日どちらもできる。その代わり、患者ごとに
+  // 変わった内容をサーバー側で監査ログに残し、この画面から「変更履歴」で確認できる(2026-08-24)。
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyEntries, setHistoryEntries] = useState<TallyChangeLogEntry[]>([]);
+
+  const openHistory = useCallback(async () => {
+    setHistoryOpen(true);
+    setHistoryLoading(true);
+    try {
+      const entries = await getTallyChangeLog(date);
+      setHistoryEntries(entries);
+    } catch {
+      toast.error("変更履歴の取得に失敗しました");
+    } finally {
+      setHistoryLoading(false);
+    }
+  }, [date]);
 
   const updateRow = (id: number, patch: Partial<UIRow>) => {
     setRows((prev) => prev.map((r) => (r._id === id ? { ...r, ...patch } : r)));
@@ -495,9 +536,8 @@ export default function TallySheet({ initialDate }: { initialDate?: string }) {
             <input
               type="date"
               value={date}
-              disabled={!canEditDate}
               onChange={(e) => setDate(e.target.value)}
-              className="bg-transparent text-sm font-medium text-slate-700 dark:text-slate-200 outline-none disabled:opacity-60"
+              className="bg-transparent text-sm font-medium text-slate-700 dark:text-slate-200 outline-none"
             />
           </div>
           <button
@@ -516,6 +556,14 @@ export default function TallySheet({ initialDate }: { initialDate?: string }) {
           >
             列幅リセット
           </button>
+          <button
+            type="button"
+            onClick={openHistory}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 text-sm font-medium hover:bg-slate-50"
+            title="この日の記帳・削除の変更履歴を見る"
+          >
+            <History className="w-4 h-4" /> 変更履歴
+          </button>
           {isOwner && (
             <Link
               href="/admin/sales/analytics"
@@ -529,9 +577,9 @@ export default function TallySheet({ initialDate }: { initialDate?: string }) {
         </div>
       </div>
 
-      {!isToday && !isOwner && (
-        <p className="mb-3 text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-          当日以外の記帳はオーナーのみ可能です。
+      {!isToday && (
+        <p className="mb-3 text-xs text-slate-500 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2">
+          当日以外の日を表示しています。ここでの記帳・修正・削除は「変更履歴」に記録され、スタッフが直したときは院長へLINEで届きます。
         </p>
       )}
 
@@ -772,7 +820,7 @@ export default function TallySheet({ initialDate }: { initialDate?: string }) {
         <button
           type="button"
           onClick={addRow}
-          className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 font-medium hover:bg-slate-50"
+          className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 font-medium hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed"
         >
           <Plus className="w-4 h-4" /> 行を追加
         </button>
@@ -803,6 +851,59 @@ export default function TallySheet({ initialDate }: { initialDate?: string }) {
           }}
         />
       )}
+
+      {/* 変更履歴：この日の記帳・削除を誰が・いつ・どう変えたか */}
+      <Dialog open={historyOpen} onOpenChange={setHistoryOpen}>
+        <DialogContent className="max-w-lg max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <History className="w-4 h-4" /> 変更履歴（{date}）
+            </DialogTitle>
+          </DialogHeader>
+          {historyLoading ? (
+            <div className="py-8 text-center text-slate-500">
+              <Loader2 className="w-5 h-5 animate-spin inline-block" /> 読み込み中...
+            </div>
+          ) : historyEntries.length === 0 ? (
+            <p className="py-6 text-center text-sm text-slate-400">この日にはまだ記帳・削除の履歴がありません。</p>
+          ) : (
+            <ul className="flex flex-col gap-3">
+              {historyEntries.map((entry) => {
+                const lines = changeLogLines(entry, columns);
+                return (
+                  <li key={entry.id} className="rounded-xl border border-slate-200 dark:border-slate-700 p-3">
+                    <div className="flex items-center justify-between gap-2 mb-1.5">
+                      <span className="text-sm font-bold text-slate-800 dark:text-slate-100">
+                        {entry.customerName || "（お名前なし）"}様
+                      </span>
+                      <span className={[
+                        "text-[11px] font-bold px-2 py-0.5 rounded-full",
+                        entry.action === "delete"
+                          ? "bg-rose-50 text-rose-600 dark:bg-rose-900/30 dark:text-rose-300"
+                          : "bg-indigo-50 text-indigo-600 dark:bg-indigo-900/30 dark:text-indigo-300",
+                      ].join(" ")}>
+                        {entry.action === "delete" ? "削除" : "修正"}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-400 mb-2">
+                      {new Date(entry.createdAt).toLocaleString("ja-JP", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+                      {" ／ "}
+                      {entry.actorEmail ?? "不明なユーザー"}
+                    </p>
+                    {lines.length > 0 ? (
+                      <ul className="text-xs text-slate-600 dark:text-slate-300 flex flex-col gap-0.5">
+                        {lines.map((line, i) => <li key={i}>{line}</li>)}
+                      </ul>
+                    ) : (
+                      <p className="text-xs text-slate-400">（金額の変更なし）</p>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

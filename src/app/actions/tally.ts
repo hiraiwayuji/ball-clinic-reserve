@@ -6,6 +6,7 @@ import { checkAdminAuth, requireRole } from "@/app/actions/auth";
 import { getTallyColumns } from "@/app/actions/settings";
 import type { TallyColumn } from "@/lib/tally-columns";
 import { nameKey } from "@/lib/patient-count";
+import { writeAudit, notifyOwnerOfStaffAction } from "@/lib/audit";
 import { revalidatePath } from "next/cache";
 
 function getAdminSupabase() {
@@ -75,6 +76,62 @@ function parseTallyMemo(memo: string | null): { mrn: string; minutes: string; va
   }
 }
 
+/** 日計表の保存済み行（cash_sales の tally: 行）を、患者ごとに1つへ集約した形 */
+type TallyAgg = {
+  amounts: Record<string, number>;
+  variants: Record<string, string>;
+  staff_id: string | null;
+  mrn: string;
+  minutes: string;
+  is_first_visit: boolean;
+};
+
+/** 保存済みの tally: 行（1列1行）を、同一人物（空白ゆれ込み）ごとに1つへ集約する */
+function aggregateTallyRows(rawRows: any[]): Map<string, { name: string } & TallyAgg> {
+  const saved = new Map<string, { name: string } & TallyAgg>();
+  rawRows.forEach((r: any) => {
+    const name = String(r.customer_name ?? "").trim();
+    const key = nameKey(name);
+    if (!key) return;
+    const colKey = String(r.payment_type ?? "").slice(TALLY_PREFIX.length);
+    const meta = parseTallyMemo(r.memo);
+    const prev = saved.get(key) ?? { name, amounts: {}, variants: {}, staff_id: null, mrn: "", minutes: "", is_first_visit: false };
+    prev.amounts[colKey] = (prev.amounts[colKey] ?? 0) + (Number(r.treatment_fee) || 0);
+    if (meta.variant) prev.variants[colKey] = meta.variant;
+    prev.staff_id = prev.staff_id ?? r.staff_id ?? null;
+    prev.mrn = prev.mrn || meta.mrn;
+    prev.minutes = prev.minutes || meta.minutes;
+    prev.is_first_visit = prev.is_first_visit || !!r.is_first_visit;
+    saved.set(key, prev);
+  });
+  return saved;
+}
+
+const yen = (n: number) => `¥${n.toLocaleString("ja-JP")}`;
+
+/** 変更前後のtally集約を列ごとに比べ、「保険施術: ¥1,500 → ¥1,800」の形で差分の行を作る */
+function diffAmountLines(before: TallyAgg | null, after: TallyAgg | null, columns: TallyColumn[]): string[] {
+  const labelByKey = new Map(columns.map((c) => [c.key, c.label]));
+  const keys = new Set([...Object.keys(before?.amounts ?? {}), ...Object.keys(after?.amounts ?? {})]);
+  const lines: string[] = [];
+  for (const key of keys) {
+    const b = before?.amounts?.[key];
+    const a = after?.amounts?.[key];
+    if ((b ?? null) === (a ?? null)) continue;
+    const label = labelByKey.get(key) ?? key;
+    lines.push(`${label}: ${b == null ? "（なし）" : yen(b)} → ${a == null ? "（なし）" : yen(a)}`);
+  }
+  return lines;
+}
+
+/** 削除前の中身を「保険施術: ¥1,500」の形で列挙する */
+function listAmountLines(agg: TallyAgg, columns: TallyColumn[]): string[] {
+  const labelByKey = new Map(columns.map((c) => [c.key, c.label]));
+  return Object.entries(agg.amounts)
+    .filter(([, v]) => v)
+    .map(([k, v]) => `${labelByKey.get(k) ?? k}: ${yen(v)}`);
+}
+
 /**
  * 窓口日計表の入力データを取得。
  * その日の予約・受付済み患者を行に自動展開し、保存済みの日計表(tally:行)があれば金額をプリフィル。
@@ -142,23 +199,7 @@ export async function getTallySheet(dateStr: string): Promise<TallySheetData> {
     .like("payment_type", `${TALLY_PREFIX}%`);
 
   // 同一人物（空白ゆれを含む）ごとに集約
-  type Agg = { name: string; amounts: Record<string, number>; variants: Record<string, string>; staff_id: string | null; mrn: string; minutes: string; is_first_visit: boolean };
-  const saved = new Map<string, Agg>();
-  (savedRows ?? []).forEach((r: any) => {
-    const name = String(r.customer_name ?? "").trim();
-    const key = nameKey(name);
-    if (!key) return;
-    const colKey = String(r.payment_type ?? "").slice(TALLY_PREFIX.length);
-    const meta = parseTallyMemo(r.memo);
-    const prev = saved.get(key) ?? { name, amounts: {}, variants: {}, staff_id: null, mrn: "", minutes: "", is_first_visit: false };
-    prev.amounts[colKey] = (prev.amounts[colKey] ?? 0) + (Number(r.treatment_fee) || 0);
-    if (meta.variant) prev.variants[colKey] = meta.variant;
-    prev.staff_id = prev.staff_id ?? r.staff_id ?? null;
-    prev.mrn = prev.mrn || meta.mrn;
-    prev.minutes = prev.minutes || meta.minutes;
-    prev.is_first_visit = prev.is_first_visit || !!r.is_first_visit;
-    saved.set(key, prev);
-  });
+  const saved = aggregateTallyRows(savedRows ?? []);
 
   // 同じ人が同じ日に複数予約（保険→鍼灸で担当が違う等）でも記帳は1行。
   // 予約ごとに行を作ると、保存済み金額が各行にプリフィルされて保存のたび金額が倍になる。
@@ -267,9 +308,6 @@ export async function deleteTallyEntriesForName(
 ): Promise<{ success: boolean; error?: string; deleted?: number }> {
   const auth = await checkAdminAuth();
   const { clinicId } = auth;
-  if (dateStr !== todayJst() && auth.role !== "owner") {
-    return { success: false, error: "過去・未来日の記帳の削除はオーナーのみ可能です" };
-  }
   const key = nameKey(customerName);
   if (!key) return { success: false, error: "お名前が空です" };
 
@@ -278,15 +316,14 @@ export async function deleteTallyEntriesForName(
 
   const { data: existingRows, error: fetchErr } = await sb
     .from("cash_sales")
-    .select("id, customer_name")
+    .select("id, customer_name, treatment_fee, payment_type, memo, staff_id, is_first_visit")
     .eq("clinic_id", clinicId)
     .eq("sale_date", dateStr)
     .like("payment_type", `${TALLY_PREFIX}%`);
   if (fetchErr) return { success: false, error: "削除準備に失敗しました: " + fetchErr.message };
 
-  const ids = (existingRows ?? [])
-    .filter((r: any) => nameKey(String(r.customer_name ?? "")) === key)
-    .map((r: any) => r.id as string);
+  const matched = (existingRows ?? []).filter((r: any) => nameKey(String(r.customer_name ?? "")) === key);
+  const ids = matched.map((r: any) => r.id as string);
   if (ids.length === 0) return { success: true, deleted: 0 };
 
   const { error: delErr } = await sb
@@ -296,13 +333,41 @@ export async function deleteTallyEntriesForName(
     .in("id", ids);
   if (delErr) return { success: false, error: "削除に失敗しました: " + delErr.message };
 
+  // ── 監査ログ + オーナーへの通知 ──
+  // 誰でも記帳・削除できるようにした代わりに、何を消したか必ず残す(2026-08-24)。
+  const beforeAgg = aggregateTallyRows(matched).get(key);
+  const name = matched[0]?.customer_name ? String(matched[0].customer_name).trim() : customerName.trim();
+  if (beforeAgg) {
+    const columns = await getTallyColumns();
+    const summaryLines = listAmountLines(beforeAgg, columns);
+    await writeAudit({
+      clinicId,
+      actorUserId: auth.userId,
+      actorEmail: auth.email,
+      actorRole: auth.role,
+      actionType: "tally.delete",
+      targetTable: "cash_sales",
+      targetId: dateStr,
+      before: { customerName: name, ...beforeAgg },
+      after: null,
+    });
+    await notifyOwnerOfStaffAction({
+      clinicId,
+      actorRole: auth.role,
+      actorEmail: auth.email,
+      actionType: "窓口日計表の削除",
+      summary: `${dateStr} ${name}様の記帳を削除\n${summaryLines.length > 0 ? summaryLines.join("\n") : "（金額の入力なし）"}`,
+    });
+  }
+
   revalidatePath("/admin/sales");
   return { success: true, deleted: ids.length };
 }
 
 /**
  * 窓口日計表を保存（その日の tally: 行を入れ替え）。
- * 当日入力は受付スタッフ可、過去日の編集はオーナー専用。
+ * 誰でも当日・過去日どちらも記帳できる。その代わり、患者ごとに変更前後の金額を
+ * 比べて監査ログに残し、スタッフが直したときはオーナーへLINEで知らせる(2026-08-24)。
  */
 export async function saveTallySheet(
   dateStr: string,
@@ -312,9 +377,6 @@ export async function saveTallySheet(
   const { clinicId } = auth;
 
   if (!dateStr) return { success: false, error: "日付が不正です" };
-  if (dateStr !== todayJst() && auth.role !== "owner") {
-    return { success: false, error: "過去・未来日の記帳はオーナーのみ可能です" };
-  }
 
   const columns = await getTallyColumns();
   const colKeys = new Set(columns.map((c) => c.key));
@@ -365,7 +427,7 @@ export async function saveTallySheet(
   const submittedKeys = new Set(mergedRows.map((r) => nameKey(r.customer_name)));
   const { data: existingTallyRows, error: fetchErr } = await supabase
     .from("cash_sales")
-    .select("id, customer_name")
+    .select("id, customer_name, treatment_fee, payment_type, memo, staff_id, is_first_visit")
     .eq("clinic_id", clinicId)
     .eq("sale_date", dateStr)
     .like("payment_type", `${TALLY_PREFIX}%`);
@@ -373,6 +435,10 @@ export async function saveTallySheet(
     console.error("saveTallySheet fetch error:", fetchErr);
     return { success: false, error: "保存準備に失敗しました: " + fetchErr.message };
   }
+  // 監査ログ用に「直す前」の状態を、削除する前に患者ごとへ集約しておく
+  const beforeByKey = aggregateTallyRows(
+    (existingTallyRows ?? []).filter((r: any) => submittedKeys.has(nameKey(String(r.customer_name ?? "")))),
+  );
   const deleteIds = (existingTallyRows ?? [])
     .filter((r: any) => submittedKeys.has(nameKey(String(r.customer_name ?? ""))))
     .map((r: any) => r.id as string);
@@ -444,9 +510,94 @@ export async function saveTallySheet(
     }
   }
 
+  // ── 監査ログ + オーナーへの通知 ──
+  // 患者ごとに「直す前」と「直した後」を比べ、実際に変わった人だけ記録する
+  // （毎回その日の全員分を送信し直す作りなので、変わっていない人まで記録すると埋もれる）。
+  const changedSummaries: string[] = [];
+  for (const row of mergedRows) {
+    const key = nameKey(row.customer_name);
+    const before = beforeByKey.get(key) ?? null;
+    const after: TallyAgg = {
+      amounts: row.amounts ?? {},
+      variants: row.variants ?? {},
+      staff_id: row.staff_id ?? null,
+      mrn: row.medical_record_number ?? "",
+      minutes: row.minutes ?? "",
+      is_first_visit: !!row.is_first_visit,
+    };
+    const diffLines = diffAmountLines(before, after, columns);
+    if (diffLines.length === 0) continue; // 金額に変化がなければ記録しない
+
+    await writeAudit({
+      clinicId,
+      actorUserId: auth.userId,
+      actorEmail: auth.email,
+      actorRole: auth.role,
+      actionType: "tally.update",
+      targetTable: "cash_sales",
+      targetId: dateStr,
+      before: before ? { customerName: row.customer_name, ...before } : null,
+      after: { customerName: row.customer_name, ...after },
+    });
+    changedSummaries.push(`${row.customer_name}様\n${diffLines.map((l) => `　${l}`).join("\n")}`);
+  }
+  if (changedSummaries.length > 0) {
+    await notifyOwnerOfStaffAction({
+      clinicId,
+      actorRole: auth.role,
+      actorEmail: auth.email,
+      actionType: "窓口日計表の修正",
+      summary: `${dateStr}\n${changedSummaries.join("\n")}`,
+    });
+  }
+
   revalidatePath("/admin/sales");
   revalidatePath("/admin/dashboard");
   return { success: true, saved: insertRows.length };
+}
+
+/**
+ * ある日の窓口日計表の変更履歴（修正・削除）を新しい順に返す。
+ * 「誰でも記帳・削除できる」代わりに、何が変わったか誰でも確認できるようにする。
+ */
+export type TallyChangeLogEntry = {
+  id: string;
+  createdAt: string;
+  actorEmail: string | null;
+  actorRole: string;
+  action: "update" | "delete";
+  customerName: string;
+  before: (TallyAgg & { customerName: string }) | null;
+  after: (TallyAgg & { customerName: string }) | null;
+};
+
+export async function getTallyChangeLog(dateStr: string): Promise<TallyChangeLogEntry[]> {
+  const auth = await checkAdminAuth();
+  const sb = getAdminSupabase();
+  if (!sb) return [];
+  const { data } = await sb
+    .from("audit_log")
+    .select("id, created_at, actor_email, actor_role, action_type, before_data, after_data")
+    .eq("clinic_id", auth.clinicId)
+    .eq("target_table", "cash_sales")
+    .eq("target_id", dateStr)
+    .in("action_type", ["tally.update", "tally.delete"])
+    .order("created_at", { ascending: false })
+    .limit(200);
+  return (data ?? []).map((r: any) => {
+    const before = r.before_data ?? null;
+    const after = r.after_data ?? null;
+    return {
+      id: r.id,
+      createdAt: r.created_at,
+      actorEmail: r.actor_email,
+      actorRole: r.actor_role,
+      action: r.action_type === "tally.delete" ? "delete" : "update",
+      customerName: after?.customerName ?? before?.customerName ?? "",
+      before,
+      after,
+    } as TallyChangeLogEntry;
+  });
 }
 
 // ───────────────────────── データ分析（オーナー専用） ─────────────────────────
