@@ -546,7 +546,9 @@ export async function updateCustomerCity(
     .select("id, name, birth_date")
     .maybeSingle();
   if (error) return { success: false, error: "保存に失敗しました: " + error.message };
-  if (!target) return { success: true, alsoUpdated: 0 };
+  // 更新が1件も当たらなかった＝保存できていない。成功として返すと「登録しました」と
+  // 出たのに次回また聞かれる、という分かりにくい状態になる。
+  if (!target) return { success: false, error: "この患者さんのカルテが見つかりませんでした" };
 
   // 同一人物とみなせる重複レコードにも展開する（ここでの失敗は本人の保存を妨げない）
   try {
@@ -596,6 +598,61 @@ export async function updateCustomerCity(
   }
 
   return { success: true, alsoUpdated: 0 };
+}
+
+export type OtherKarteCity = {
+  id: string;
+  name: string;
+  cityName: string;
+  medicalRecordNumber: string | null;
+};
+
+/**
+ * 同じ方の「別のカルテ」に登録済みの市町村を探す。
+ *
+ * 予約のたびにカルテが増えることがある（「中島ようこう」で通っていた方に、
+ * 正式なカルテ番号と本当の電話番号で「中島耀光」を新規作成した等）。すると前に答えた
+ * 市町村は古いカルテに残り、新しいカルテでまた「どこの町ですか？」と聞かれてしまう。
+ * 名前も電話も変わるため機械では同一人物と断定できないので、候補として出し、
+ * 採用するかどうかは受付が名前を見て選ぶ（2026-08-25 ぼーるくんの指摘）。
+ */
+export async function findCityFromOtherKarte(
+  customerId: string,
+  customerName: string,
+): Promise<OtherKarteCity[]> {
+  const { clinicId } = await checkAdminAuth();
+  const name = (customerName ?? "").trim();
+  if (!customerId || !name) return [];
+  const sb = getAdminSupabase() ?? (await getSupabase());
+  if (!sb) return [];
+
+  const { data } = await sb
+    .from("customers")
+    .select("id, name, city_name, medical_record_number")
+    .eq("clinic_id", clinicId)
+    .neq("id", customerId)
+    .not("city_name", "is", null)
+    .limit(5000);
+
+  const targetKey = normalizeNameForMatch(name);
+  // 「中島ようこう」と「中島耀光」は姓だけが一致する。姓の区切りが無い日本語名では
+  // 機械的に姓を取り出せないので、先頭2文字の一致を手がかりにする。
+  // 別人（中島太郎など）も混ざりうるが、画面にはフルネームを出して受付に選んでもらう。
+  const targetPrefix = targetKey.slice(0, 2);
+  return (data ?? [])
+    .filter((c: any) => {
+      // 空欄の市町村を候補に出すと「○○様 → 」の押しても何も起きないボタンになる
+      if (!String(c.city_name ?? "").trim()) return false;
+      const key = normalizeNameForMatch(String(c.name ?? ""));
+      return key === targetKey || (targetPrefix.length === 2 && key.startsWith(targetPrefix));
+    })
+    .slice(0, 5)
+    .map((c: any) => ({
+      id: c.id as string,
+      name: String(c.name ?? ""),
+      cityName: String(c.city_name ?? "").trim(),
+      medicalRecordNumber: (c.medical_record_number as string | null) ?? null,
+    }));
 }
 
 /**

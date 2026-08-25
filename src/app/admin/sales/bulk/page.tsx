@@ -9,6 +9,8 @@ import {
   bulkAddCashSales,
   updateCustomerCity,
   updateSalePatientIdentity,
+  findCityFromOtherKarte,
+  type OtherKarteCity,
   type PendingSalePatient,
   type CashSalePaymentType,
 } from "@/app/actions/sales";
@@ -483,6 +485,8 @@ function DraftRowItem({
   const [savingCity, setSavingCity] = useState(false);
   const [cityChoice, setCityChoice] = useState("");
   const [customCity, setCustomCity] = useState("");
+  // 同じ方の別カルテに市町村の登録が無いか（カルテが分かれていると前の答えが引き継がれない）
+  const [otherKarte, setOtherKarte] = useState<OtherKarteCity[]>([]);
   // 子ども医療費助成の判定（市町村＋生年月日）。対象なら医療助成ボタンを色分け。
   const medicalAid = evaluateMedicalAid({
     birthDate: row.birthDate,
@@ -500,6 +504,16 @@ function DraftRowItem({
     : row.paymentTypes.includes("hagukumi");
   // 医療助成を選んだのに住所（市町村）が未登録 → 注意（設定でON時のみ・保存はブロックしない）
   const showAddressAlert = addressAlert && hagukumiSelected && !row.cityName?.trim();
+
+  // 警告が出たときだけ、同じ方の別カルテに登録済みの市町村を探す
+  useEffect(() => {
+    if (!showAddressAlert || !row.customerId) { setOtherKarte([]); return; }
+    let alive = true;
+    findCityFromOtherKarte(row.customerId, row.customerName)
+      .then((found) => { if (alive) setOtherKarte(found); })
+      .catch(() => { if (alive) setOtherKarte([]); });
+    return () => { alive = false; };
+  }, [showAddressAlert, row.customerId, row.customerName]);
 
   // 警告から「その場で市町村を登録」するための候補（院の助成ルールの市町村）と保存処理
   const aidCities = (medicalAidRules?.cities ?? DEFAULT_MEDICAL_AID_RULES.cities).map((c) => c.city);
@@ -1062,6 +1076,28 @@ function DraftRowItem({
                 <span className="text-amber-600/80">このまま保存もできます。</span>
               </p>
             </div>
+            {row.customerId && otherKarte.length > 0 && (
+              <div className="pl-5 space-y-1">
+                <p className="text-[11px] text-amber-700 dark:text-amber-400">
+                  同じお名前・同じ苗字の方に登録があります（カルテが分かれている場合・ごきょうだい）。
+                  同じ町ならこちらを押すだけで登録できます。
+                </p>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {otherKarte.map((k) => (
+                    <button
+                      key={k.id}
+                      type="button"
+                      disabled={savingCity}
+                      onClick={() => saveCity(k.cityName)}
+                      className="h-7 px-2.5 rounded-md border border-amber-400 bg-white dark:bg-slate-800 text-[11px] font-bold text-amber-700 dark:text-amber-300 hover:bg-amber-100 disabled:opacity-50"
+                      title={`${k.name}様${k.medicalRecordNumber ? `（カルテ${k.medicalRecordNumber}）` : "（カルテ番号なし）"}に登録されている市町村`}
+                    >
+                      {k.name}様 → {k.cityName}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
             {row.customerId ? (
               <div className="flex flex-wrap items-center gap-1.5 pl-5">
                 <span className="text-[11px] text-amber-700 font-bold">ここで登録 →</span>
