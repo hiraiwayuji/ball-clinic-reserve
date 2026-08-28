@@ -5,6 +5,7 @@ import AdminSidebar from "@/components/admin/AdminSidebar";
 import AdminTopBar from "@/components/admin/AdminTopBar";
 import RemindersWatcher from "@/components/admin/RemindersWatcher";
 import ReminderQuickAdd from "@/components/admin/ReminderQuickAdd";
+import NewVersionWatcher from "@/components/admin/NewVersionWatcher";
 import { ThemeProvider } from "@/components/ThemeProvider";
 import { isFamilyGift, isDemo } from "@/lib/app-mode";
 import { FlaskConical } from "lucide-react";
@@ -26,6 +27,9 @@ export default async function AdminLayout({
         <AdminSidebar role={auth.role} />
 
         <div className="flex-1 flex flex-col min-w-0">
+          {/* デプロイ後に開きっぱなしの画面を使い続けると「通信エラー」になるため、
+              古い画面には開き直しの案内を出す（2026-08-28 受付で実際に発生） */}
+          <NewVersionWatcher />
           <AdminTopBar role={auth.role} />
 
           {isDemo && (

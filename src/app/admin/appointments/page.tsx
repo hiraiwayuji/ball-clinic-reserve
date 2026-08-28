@@ -553,13 +553,15 @@ export default function AdminWeeklyGridPage() {
           HEADER (shared)
       ==================================================== */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-4">
-        <div>
-          <h1 className="text-2xl md:text-3xl font-bold tracking-tight">予約カレンダー</h1>
-          <p className="text-slate-500 mt-0.5 text-sm hidden sm:block">
+        {/* ボタンが増えても見出しを潰さない（2026-08-28: 予約NG 追加でタイトルが
+            「予約カレ / ンダー」と折れてしまったため shrink-0 で固定する） */}
+        <div className="shrink-0">
+          <h1 className="text-2xl md:text-3xl font-bold tracking-tight whitespace-nowrap">予約カレンダー</h1>
+          <p className="text-slate-500 mt-0.5 text-sm hidden lg:block">
             週間グリッド表示（PC）/ 日別リスト表示（スマホ）
           </p>
         </div>
-        <div className="flex items-center gap-2 w-full sm:w-auto">
+        <div className="flex flex-wrap items-center justify-end gap-2 w-full sm:w-auto">
           <Button
             variant="outline"
             size="sm"
