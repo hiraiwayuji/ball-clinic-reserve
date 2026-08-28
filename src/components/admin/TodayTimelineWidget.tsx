@@ -163,12 +163,18 @@ export default function TodayTimelineWidget({
   showPendingButton = true,
   breakMode = false,
   onBreakCell,
+  ngMode = false,
+  onNgCell,
   compact = false,
 }: {
   showPendingButton?: boolean;
   /** 予約画面の「休憩モード」。ON のあいだは空きセルのタップで休憩を追加する。 */
   breakMode?: boolean;
   onBreakCell?: (date: Date, time: string) => void;
+  /** 予約画面の「予約NGモード」。ON のあいだは、担当未設定でない空きセルのタップで
+   *  その先生・その1コマだけを即座に予約不可にする（ダイアログなし・すぐ×が置ける）。 */
+  ngMode?: boolean;
+  onNgCell?: (date: Date, time: string, staffId: string) => void;
   /** スマホ用。横並びグリッドではなく「先生を1人選んで縦に見る」表示にする */
   compact?: boolean;
 } = {}) {
@@ -223,6 +229,13 @@ export default function TodayTimelineWidget({
   // 落とした先の確認ダイアログ（誤ドラッグでそのまま動くと事故になるため一度確認する）
   const [movePlan, setMovePlan] = useState<MovePlan | null>(null);
   const [moving, setMoving] = useState(false);
+  // Pointer Events でのドラッグ管理（マウスのドラッグと、タブレットの指でのドラッグを同じ経路で処理する）。
+  // HTML5 ネイティブ D&D（旧実装）はタッチ端末では dragstart が発火しないため使えなかった。
+  // state の再レンダー待ちだとタイミングがズレるので、直近の判定は ref で持つ。
+  const pointerDragRef = useRef<{ aptId: string; startX: number; startY: number; moved: boolean } | null>(null);
+  const dropTargetRef = useRef<{ dateKey: string; staffId: string; minute: number } | null>(null);
+  // ドラッグして動かした直後は、その pointerup に続く click（＝詳細モーダルを開く）を無視する
+  const suppressNextClickRef = useRef(false);
 
   // スタッフ勤務スケジュール（"yyyy-MM-dd" → その日のスタッフ勤務）
   const [schedulesByDate, setSchedulesByDate] = useState<Record<string, StaffDaySchedule[]>>({});
@@ -356,10 +369,11 @@ export default function TodayTimelineWidget({
 
   // 休憩枠の削除（帯の × ボタン）
   const handleDeleteBlocked = async (b: BlockedSlot) => {
-    if (!window.confirm(`${b.start_time}〜${b.end_time} の「${b.reason}」を削除しますか？`)) return;
+    const label = b.staff_id ? "予約NG" : "休憩";
+    if (!window.confirm(`${b.start_time}〜${b.end_time} の「${b.reason}」（${label}）を削除しますか？`)) return;
     const res = await deleteBlockedSlot(b.id);
     if (res.success) {
-      toast.success("休憩を削除しました。");
+      toast.success(b.staff_id ? "予約NGを解除しました。" : "休憩を削除しました。");
       refresh();
     } else {
       toast.error(res.error ?? "削除に失敗しました。");
@@ -377,6 +391,15 @@ export default function TodayTimelineWidget({
     const hh = Math.floor(minuteOfDay / 60);
     const mm = minuteOfDay % 60;
     const timeStr = `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
+    // 予約NGモード：担当が確定しているセルだけ即座に×を置く（担当未設定の列は対象外）
+    if (ngMode && onNgCell) {
+      if (staffId && staffId !== UNASSIGNED_KEY) {
+        onNgCell(dateFromKey(dateKey), timeStr, staffId);
+      } else {
+        toast.error("担当未設定の列には予約NGを置けません（先生の列でタップしてください）");
+      }
+      return;
+    }
     if (breakMode && onBreakCell) {
       onBreakCell(dateFromKey(dateKey), timeStr);
       return;
@@ -841,13 +864,16 @@ export default function TodayTimelineWidget({
               const timeMarks = buildTimeMarks(day, data.slotMinutes);
               const aptsByStaff = buildAptsByStaff(day, data.slotMinutes);
               const staffSchedules = schedulesByDate[day.date] ?? [];
-              const dayBlocks = blockedSlots.filter((b) => b.date === day.date);
               const isToday = isSameDay(dayDate, new Date());
               // 受付最終日を過ぎた先生は出さない（PC表示と同じルール）
               const lanes = staffRows.filter(
                 (s) => !s.booking_until || day.date <= String(s.booking_until).slice(0, 10),
               );
               const activeStaff = lanes.find((s) => s.id === compactStaffId) ?? lanes[0] ?? null;
+              // 表示中の先生に関係する枠だけ（院ぜんたいの休憩＝staff_id無し、またはこの先生だけの予約NG）
+              const dayBlocks = blockedSlots.filter(
+                (b) => b.date === day.date && (!b.staff_id || b.staff_id === activeStaff?.id),
+              );
               const apts = activeStaff ? (aptsByStaff.get(activeStaff.id) ?? []) : [];
               const sched = activeStaff ? staffSchedules.find((sc) => sc.staffId === activeStaff.id) : undefined;
               const scheduleStart = day.scheduleStartHour * 60;
@@ -948,17 +974,25 @@ export default function TodayTimelineWidget({
                             {minutesToHm(m.minute)}
                           </div>
                           <div className="flex-1 min-w-0 p-1 space-y-1">
-                            {/* 休憩（予約不可）の帯。先頭の行にだけ内容と削除ボタンを出す。 */}
+                            {/* 休憩（院ぜんたい・staff_id無し）／予約NG（先生1人だけ）の帯。先頭の行にだけ内容と削除ボタンを出す。 */}
                             {isBlockStart && rowBlock && (
-                              <div className="flex items-center gap-1 rounded-lg border border-amber-300 bg-amber-100 px-2 py-1 dark:bg-amber-900/30 dark:border-amber-700">
-                                <span className="text-[11px] font-bold text-amber-800 dark:text-amber-200 truncate">
-                                  🍵 {rowBlock.start_time}〜{rowBlock.end_time} {rowBlock.reason}
+                              <div className={`flex items-center gap-1 rounded-lg border px-2 py-1 ${
+                                rowBlock.staff_id
+                                  ? "border-rose-300 bg-rose-100 dark:bg-rose-900/30 dark:border-rose-700"
+                                  : "border-amber-300 bg-amber-100 dark:bg-amber-900/30 dark:border-amber-700"
+                              }`}>
+                                <span className={`text-[11px] font-bold truncate ${
+                                  rowBlock.staff_id ? "text-rose-800 dark:text-rose-200" : "text-amber-800 dark:text-amber-200"
+                                }`}>
+                                  {rowBlock.staff_id ? "✕" : "🍵"} {rowBlock.start_time}〜{rowBlock.end_time} {rowBlock.reason}
                                 </span>
                                 <button
                                   type="button"
                                   onClick={() => handleDeleteBlocked(rowBlock)}
-                                  className="ml-auto shrink-0 rounded px-1.5 font-bold text-amber-800 dark:text-amber-200"
-                                  aria-label="この休憩を削除"
+                                  className={`ml-auto shrink-0 rounded px-1.5 font-bold ${
+                                    rowBlock.staff_id ? "text-rose-800 dark:text-rose-200" : "text-amber-800 dark:text-amber-200"
+                                  }`}
+                                  aria-label={rowBlock.staff_id ? "この予約NGを解除" : "この休憩を削除"}
                                 >
                                   ×
                                 </button>
@@ -967,8 +1001,10 @@ export default function TodayTimelineWidget({
                             {rowApts.length === 0 ? (
                               rowBlock ? (
                                 isBlockStart ? null : (
-                                  <div className="px-2 py-1.5 text-[11px] font-bold text-amber-700/70 dark:text-amber-300/70">
-                                    休憩中（予約不可）
+                                  <div className={`px-2 py-1.5 text-[11px] font-bold ${
+                                    rowBlock.staff_id ? "text-rose-700/70 dark:text-rose-300/70" : "text-amber-700/70 dark:text-amber-300/70"
+                                  }`}>
+                                    {rowBlock.staff_id ? "予約NG中" : "休憩中（予約不可）"}
                                   </div>
                                 )
                               ) : (
@@ -1211,7 +1247,8 @@ export default function TodayTimelineWidget({
               {/* 臨時の休憩（予約ブロック）ストリップ。
                   院ぜんたいを塞ぐので、スタッフ行とは別に1本の帯で出す。× で削除できる。 */}
               {(() => {
-                const dayBlocks = blockedSlots.filter((b) => b.date === day.date);
+                // 院ぜんたいを塞ぐ休憩だけ（staff_id が入った「先生1人だけの予約NG」は各先生の行に出す）
+                const dayBlocks = blockedSlots.filter((b) => b.date === day.date && !b.staff_id);
                 if (dayBlocks.length === 0) return null;
                 const scheduleStart = day.scheduleStartHour * 60;
                 const scheduleEnd = day.scheduleEndHour * 60;
@@ -1416,6 +1453,25 @@ export default function TodayTimelineWidget({
                         </div>
                       );
                     })()}
+                    {/* この先生だけの予約NG帯（受付が忙しい時に即置きした×）。クリックで解除できる。 */}
+                    {blockedSlots
+                      .filter((b) => b.date === day.date && b.staff_id === s.id)
+                      .map((b) => {
+                        const ngBand = bandStyle(hmToMinutes(b.start_time), hmToMinutes(b.end_time), scheduleStart, scheduleEnd);
+                        if (!ngBand) return null;
+                        return (
+                          <button
+                            key={b.id}
+                            type="button"
+                            onClick={() => handleDeleteBlocked(b)}
+                            className="absolute top-0 bottom-0 flex items-center justify-center gap-0.5 border-x border-rose-400/60 bg-rose-200/70 dark:bg-rose-800/50 hover:bg-rose-300/80 dark:hover:bg-rose-700/60"
+                            style={{ ...ngBand, zIndex: 2 }}
+                            title={`${s.name}さんの ${b.start_time}〜${b.end_time} は予約NG（${b.reason}）・クリックで解除`}
+                          >
+                            <span className="text-[10px] font-black text-rose-800 dark:text-rose-100">✕</span>
+                          </button>
+                        );
+                      })}
                     <div className="px-2 py-1 text-sm font-medium text-slate-800 dark:text-slate-100 flex flex-col gap-0.5 sticky left-0 bg-white dark:bg-slate-900 z-10 border-r border-slate-200 dark:border-slate-700" style={{ gridRow: "1 / -1" }}>
                       <div className="flex items-center justify-between gap-1">
                       {userRole === "owner" ? (
@@ -1562,16 +1618,9 @@ export default function TodayTimelineWidget({
                           key={i}
                           type="button"
                           onClick={() => handleEmptyCellClick(day.date, s.id, m.minute)}
-                          onDragOver={(e) => {
-                            if (!draggingAptId) return;
-                            e.preventDefault(); // これを呼ばないとドロップできない
-                            e.dataTransfer.dropEffect = "move";
-                            if (!isDropHere) setDropTarget({ dateKey: day.date, staffId: s.id, minute: m.minute });
-                          }}
-                          onDrop={(e) => {
-                            e.preventDefault();
-                            handleDropOnCell(day.date, s.id, m.minute);
-                          }}
+                          data-cell-date={day.date}
+                          data-cell-staff={s.id}
+                          data-cell-minute={m.minute}
                           aria-label={`${format(dayDate, "M月d日", { locale: ja })} ${s.name} ${m.label} に${breakMode ? "休憩を追加" : "新規予約を追加"}`}
                           title={breakMode
                             ? `${format(dayDate, "M/d", { locale: ja })} ${m.label} ・クリックで休憩（予約ブロック）`
@@ -1642,19 +1691,82 @@ export default function TodayTimelineWidget({
                         <button
                           key={`${a.id}-${s.id}`}
                           type="button"
-                          onClick={() => setSelectedApt(a)}
+                          onClick={() => {
+                            if (suppressNextClickRef.current) { suppressNextClickRef.current = false; return; }
+                            setSelectedApt(a);
+                          }}
                           onMouseEnter={() => setHoverCustomerId(a.customer_id)}
                           onMouseLeave={() => setHoverCustomerId(null)}
                           onFocus={() => setHoverCustomerId(a.customer_id)}
                           onBlur={() => setHoverCustomerId(null)}
-                          draggable={draggable}
-                          onDragStart={(e) => {
-                            e.dataTransfer.effectAllowed = "move";
-                            // Firefox はデータをセットしないとドラッグが始まらない
-                            e.dataTransfer.setData("text/plain", a.id);
-                            setDraggingAptId(a.id);
+                          draggable={false}
+                          onPointerDown={(e) => {
+                            if (!draggable || e.button !== 0) return;
+                            pointerDragRef.current = { aptId: a.id, startX: e.clientX, startY: e.clientY, moved: false };
                           }}
-                          onDragEnd={() => { setDraggingAptId(null); setDropTarget(null); }}
+                          onPointerMove={(e) => {
+                            const st = pointerDragRef.current;
+                            if (!st || st.aptId !== a.id) return;
+                            if (!st.moved) {
+                              const dx = e.clientX - st.startX;
+                              const dy = e.clientY - st.startY;
+                              // 数px以上動いてから「ドラッグ」とみなす（タップと区別するため）
+                              if (Math.hypot(dx, dy) < 6) return;
+                              st.moved = true;
+                              suppressNextClickRef.current = true;
+                              setDraggingAptId(a.id);
+                              (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+                            }
+                            e.preventDefault();
+                            // ドラッグ中は全バーが pointer-events-none になるので、下のセルを直接拾える
+                            const el = document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null;
+                            const cell = el?.closest<HTMLElement>("[data-cell-date]");
+                            if (cell) {
+                              const next = {
+                                dateKey: cell.dataset.cellDate!,
+                                staffId: cell.dataset.cellStaff!,
+                                minute: Number(cell.dataset.cellMinute),
+                              };
+                              dropTargetRef.current = next;
+                              setDropTarget((prev) =>
+                                prev?.dateKey === next.dateKey && prev.staffId === next.staffId && prev.minute === next.minute
+                                  ? prev
+                                  : next,
+                              );
+                            } else {
+                              dropTargetRef.current = null;
+                              setDropTarget(null);
+                            }
+                          }}
+                          onPointerUp={(e) => {
+                            const st = pointerDragRef.current;
+                            pointerDragRef.current = null;
+                            if (!st || st.aptId !== a.id) return;
+                            if (st.moved) {
+                              e.preventDefault();
+                              const target = dropTargetRef.current;
+                              setDraggingAptId(null);
+                              setDropTarget(null);
+                              dropTargetRef.current = null;
+                              if (target) handleDropOnCell(target.dateKey, target.staffId, target.minute);
+                            }
+                          }}
+                          onPointerCancel={() => {
+                            pointerDragRef.current = null;
+                            dropTargetRef.current = null;
+                            suppressNextClickRef.current = false;
+                            setDraggingAptId(null);
+                            setDropTarget(null);
+                          }}
+                          style={{
+                            touchAction: draggable ? "none" : undefined,
+                            gridColumn: `${gridColStart} / span ${colSpan}`,
+                            gridRow: (laneOf.get(`${a.id}-${s.id}`) ?? laneOf.get(a.id) ?? 0) + 1,
+                            alignSelf: "stretch",
+                            marginLeft: `${(offsetFrac / colSpan) * 100}%`,
+                            width: `${Math.min((widthCols / colSpan) * 100, 100)}%`,
+                            ...(linkColor ? { borderColor: linkColor, borderWidth: "2px" } : {}),
+                          }}
                           className={`text-[11px] leading-tight rounded border px-1 py-0.5 my-0.5 text-left truncate transition-all ${cls} ${
                             isLinkedCustomer ? "ring-2 ring-violet-400" : "hover:ring-2 hover:ring-blue-400"
                           } ${
@@ -1663,14 +1775,6 @@ export default function TodayTimelineWidget({
                             // ドラッグ中はバーを「透過」させ、下に隠れているセルにも落とせるようにする
                             draggingAptId ? "pointer-events-none" : ""
                           } ${opacityCls}`}
-                          style={{
-                            gridColumn: `${gridColStart} / span ${colSpan}`,
-                            gridRow: (laneOf.get(`${a.id}-${s.id}`) ?? laneOf.get(a.id) ?? 0) + 1,
-                            alignSelf: "stretch",
-                            marginLeft: `${(offsetFrac / colSpan) * 100}%`,
-                            width: `${Math.min((widthCols / colSpan) * 100, 100)}%`,
-                            ...(linkColor ? { borderColor: linkColor, borderWidth: "2px" } : {}),
-                          }}
                           title={isCancelled
                             ? `${displayStartLabel} ${a.customer_name ?? ""} ${cancelKindLabel(a.cancel_kind, a.no_show)}（タップで復活できます）`
                             : hasMultiStaff

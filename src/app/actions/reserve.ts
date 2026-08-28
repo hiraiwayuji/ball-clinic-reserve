@@ -38,7 +38,7 @@ async function notifyOwner(
 
 import { createClient as createServerClient } from "@/lib/supabase/server";
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
-import { getTimeSlots, isDateWithinAllowedRange, isTimeSlotWithinTwoHours, isTodayJST } from "@/lib/time-slots";
+import { getTimeSlots, isDateWithinAllowedRange, isTimeSlotWithinTwoHours, isTodayJST, isAddonSpanWithinBusinessHours } from "@/lib/time-slots";
 import { getSpecialDayForDate } from "@/app/actions/special-days";
 import { isTimeWithinStaffHoursYmd, isStaffAvailableOnYmd, isStaffSpanBookableYmd, buildStaffSchedule, type StaffSchedule } from "@/lib/staff-availability";
 
@@ -289,6 +289,33 @@ async function pickStaffForBooking(
         .map((o: any) => o.staff_id),
     );
 
+    // 先生1人だけの予約NG（clinic_blocked_slots.staff_id）は、担当自由のコースで
+    // 自動割当する候補からも除外する。ここを見ないと、受付がNGにした先生に
+    // まさにその時間の予約が自動で入ってしまう（fail-closedの抜け穴になる）。
+    const { data: staffBreaks } = await db
+      .from("clinic_blocked_slots")
+      .select("start_time, end_time, staff_id")
+      .eq("clinic_id", clinicId)
+      .eq("date", dateStr)
+      .not("staff_id", "is", null);
+    const toDayMin = (hm?: string | null) => {
+      if (!hm) return null;
+      const [h, m] = hm.slice(0, 5).split(":").map(Number);
+      return h * 60 + m;
+    };
+    const reqStart = toDayMin(time)!;
+    const reqEnd = reqStart + durationMinutes;
+    const ngBlockedStaffIds = new Set(
+      (staffBreaks ?? [])
+        .filter((b: any) => {
+          const bs = toDayMin(b.start_time);
+          const be = toDayMin(b.end_time);
+          if (bs === null || be === null) return false;
+          return reqStart < be && reqEnd > bs;
+        })
+        .map((b: any) => b.staff_id as string),
+    );
+
     // 優先の先生を先頭に、あとは表示順
     const ordered = [...staffRows].sort((a: any, b: any) => {
       if (preferredStaffId) {
@@ -301,6 +328,7 @@ async function pickStaffForBooking(
     for (const st of ordered as any[]) {
       if (st.booking_until && dateStr > String(st.booking_until).slice(0, 10)) continue;
       if (offSet.has(st.id)) continue;
+      if (ngBlockedStaffIds.has(st.id)) continue;
 
       const ovr = (dateRows ?? []).find((d: any) => d.staff_id === st.id);
       const sched = buildStaffSchedule(
@@ -705,10 +733,14 @@ export async function getDailyAvailability(
     const blockedSet = new Set(bookedTimes);
     const { data: breaks } = await supabase
       .from("clinic_blocked_slots")
-      .select("start_time, end_time")
+      .select("start_time, end_time, staff_id")
       .eq("clinic_id", DEFAULT_CLINIC_ID)
       .eq("date", dateStr);
-    (breaks ?? []).forEach((b: { start_time?: string; end_time?: string }) => {
+    (breaks ?? []).forEach((b: { start_time?: string; end_time?: string; staff_id?: string | null }) => {
+      // staff_id 指定の枠（受付が特定の先生だけを予約NGにしたもの）は、
+      // その先生が必須のコース（requiredStaffId一致）だけを塞ぐ。担当自由のコースは
+      // 他の先生が空いていれば予約できるので、ここでは塞がない。
+      if (b.staff_id && b.staff_id !== requiredStaffId) return;
       const toMin = (hm?: string) => {
         if (!hm) return null;
         const [h, m] = hm.slice(0, 5).split(":").map(Number);
@@ -1170,11 +1202,13 @@ export async function createReservation(formData: FormData) {
         const reqEnd = reqStart + durationMinutes;
         const { data: dayBreaks } = await adminDb
           .from("clinic_blocked_slots")
-          .select("start_time, end_time")
+          .select("start_time, end_time, staff_id")
           .eq("clinic_id", DEFAULT_CLINIC_ID)
           .eq("date", rawDate);
-        const hitBreak = (dayBreaks ?? []).some((b: { start_time?: string; end_time?: string }) => {
+        const hitBreak = (dayBreaks ?? []).some((b: { start_time?: string; end_time?: string; staff_id?: string | null }) => {
           if (!b.start_time || !b.end_time) return false;
+          // 先生1人だけの予約NG枠は、その先生で確定している予約だけを弾く（他の先生は空いていれば予約可）
+          if (b.staff_id && b.staff_id !== staffId) return false;
           const bs = toDayMin(b.start_time);
           const be = toDayMin(b.end_time);
           return reqStart < be && reqEnd > bs; // 時間帯が重なる
@@ -1323,9 +1357,8 @@ export async function createReservation(formData: FormData) {
       const reservationNumber = appointmentData.id.split('-')[0].toUpperCase();
 
       // 追加メニュー（水素・ヘッドスパ・汎用addon）の営業時間判定は、必ず院の実スケジュール
-      // （slot_duration_minutes と営業時間）で行う。引数なし getTimeSlots はボール既定
-      // （30分・平日12時開始）になり、20分枠・10時開始のからだ等で追加鍼が弾かれていた。
-      const clinicSlotMinutes = await getCurrentSlotDuration();
+      // （営業時間・休憩時間）で行う。枠の目盛り(slot_duration_minutes)には合わせない
+      // （本メニューの所要時間が枠サイズの倍数でないとズレて誤って弾かれるため）。
       const clinicSchedule = await getCurrentSchedule();
 
       // ── 「水素を追加」：施術の直後30分に水素予約も入れる ──
@@ -1352,8 +1385,9 @@ export async function createReservation(formData: FormData) {
             // 開始スロット(HH:mm JST)が営業時間内か
             const wHHMM = new Intl.DateTimeFormat("ja-JP", { timeZone: "Asia/Tokyo", hour: "2-digit", minute: "2-digit", hour12: false }).format(wStart);
             // 曜日判定はサーバ(UTC)でも JST の暦日と一致させる（+09:00 を付けると前日にズレるので付けない）
-            const businessSlots = getTimeSlots(new Date(`${rawDate}T00:00:00`), { slotMinutes: clinicSlotMinutes, schedule: clinicSchedule });
-            const inHours = businessSlots.includes(wHHMM);
+            // 枠の目盛りではなく [開始, 開始+所要時間) が営業時間に収まるかで判定
+            // （本メニューの所要時間が枠サイズの倍数でないと目盛りからズレて誤って弾かれるため）
+            const inHours = isAddonSpanWithinBusinessHours(new Date(`${rawDate}T00:00:00`), wHHMM, wDur, clinicSchedule);
             // 水素レーンが空いているか
             let laneFree = true;
             if (wStaffId) {
@@ -1448,9 +1482,10 @@ export async function createReservation(formData: FormData) {
               const hEndIso = new Date(hStart.getTime() + hDur * 60000).toISOString();
               const hHHMM = new Intl.DateTimeFormat("ja-JP", { timeZone: "Asia/Tokyo", hour: "2-digit", minute: "2-digit", hour12: false }).format(hStart);
               // 曜日判定はサーバ(UTC)でも JST の暦日と一致させる（+09:00 を付けると前日にズレる）
-              const businessSlots = getTimeSlots(new Date(`${rawDate}T00:00:00`), { slotMinutes: clinicSlotMinutes, schedule: clinicSchedule });
-              // 院の営業時間内 かつ ヘッドスパの出勤時間内（出勤時間が設定されていれば）
-              const inHours = businessSlots.includes(hHHMM) && (!hsSched || isTimeWithinStaffHoursYmd(rawDate, hHHMM, hsSched));
+              // 枠の目盛りではなく [開始, 開始+所要時間) が営業時間に収まるかで判定
+              // （本メニューの所要時間が枠サイズの倍数でないと目盛りからズレて誤って弾かれるため）
+              const inHours = isAddonSpanWithinBusinessHours(new Date(`${rawDate}T00:00:00`), hHHMM, hDur, clinicSchedule)
+                && (!hsSched || isTimeWithinStaffHoursYmd(rawDate, hHHMM, hsSched));
               let laneFree = true;
               if (hStaffId) {
                 const { data: hConf } = await adminDb
@@ -1524,8 +1559,9 @@ export async function createReservation(formData: FormData) {
               aStaffName = (aStaffRow?.name as string | null) ?? null;
             }
             const aHHMM = new Intl.DateTimeFormat("ja-JP", { timeZone: "Asia/Tokyo", hour: "2-digit", minute: "2-digit", hour12: false }).format(aStart);
-            const businessSlots = getTimeSlots(new Date(`${rawDate}T00:00:00`), { slotMinutes: clinicSlotMinutes, schedule: clinicSchedule });
-            const inHours = businessSlots.includes(aHHMM);
+            // 枠の目盛りではなく [開始, 開始+所要時間) が営業時間に収まるかで判定
+            // （本メニューの所要時間が枠サイズの倍数でないと目盛りからズレて誤って弾かれるため）
+            const inHours = isAddonSpanWithinBusinessHours(new Date(`${rawDate}T00:00:00`), aHHMM, aDur, clinicSchedule);
             // 空き判定: 専用レーン(required_staff)があればそのレーン、無ければその日の定員で
             let free = true;
             if (aStaffId) {

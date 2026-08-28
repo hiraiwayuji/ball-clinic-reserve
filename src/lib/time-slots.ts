@@ -197,6 +197,39 @@ export function isWithinBusinessHours(date: Date, timeSlot: string, schedule: Sc
   return true;
 }
 
+/**
+ * 「施術の直後」に続けて置く追加メニュー（水素・ヘッドスパ・汎用addon）向けの営業時間判定。
+ *
+ * 🚨 これまでは `getTimeSlots(...).includes(開始時刻)` で判定していたため、
+ * 本メニューの所要時間が院の枠サイズ(slot_duration_minutes)の倍数でないと
+ * （例: 30分刻みの院で20分の保険施術）、施術終了時刻が枠の目盛りからズレて
+ * 「営業時間外」と誤判定され、実際には何も埋まっていないのに追加メニューが弾かれていた。
+ * （2026-08-29 実例: ボール接骨院・保険施術20分の直後の水素が11:20開始で弾かれた）
+ *
+ * 枠の目盛りに乗っているかではなく、[開始, 開始+所要時間) が
+ * 営業時間内に収まり、休憩時間と重ならないかで判定する。
+ */
+export function isAddonSpanWithinBusinessHours(
+  date: Date,
+  startHHMM: string,
+  durationMinutes: number,
+  schedule: Schedule,
+): boolean {
+  const day = date.getDay();
+  if (schedule.closedDays.includes(day)) return false;
+  const range = day === 6 ? schedule.saturday : schedule.weekday;
+  const toMin = (hm: string) => { const [h, m] = hm.split(":").map(Number); return h * 60 + m; };
+  const startMin = toMin(startHHMM);
+  const endMin = startMin + durationMinutes;
+  if (startMin < toMin(range.start) || endMin > toMin(range.end)) return false;
+  if (range.breakStart && range.breakEnd) {
+    const bs = toMin(range.breakStart);
+    const be = toMin(range.breakEnd);
+    if (startMin < be && endMin > bs) return false; // 休憩時間帯と重なる
+  }
+  return true;
+}
+
 export type GetTimeSlotsOptions = {
   /** 予約枠サイズ（分）。default 30。clinic_settings.slot_duration_minutes から渡す */
   slotMinutes?: SlotMinutes;

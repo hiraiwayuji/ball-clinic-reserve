@@ -113,7 +113,7 @@ export async function getAdminDaySlots(params: {
 
     const { data: breakRows } = await supabase
       .from("clinic_blocked_slots")
-      .select("start_time, end_time, reason")
+      .select("start_time, end_time, reason, staff_id")
       .eq("clinic_id", clinicId)
       .eq("date", dateStr);
 
@@ -145,11 +145,15 @@ export async function getAdminDaySlots(params: {
     }
 
     const isHoliday = !!holiday;
-    const breaks = ((breakRows ?? []) as { start_time: string; end_time: string; reason: string | null }[]).map((b) => ({
-      start: new Date(`${dateStr}T${normTime(b.start_time) ?? "00:00"}:00+09:00`).getTime(),
-      end: new Date(`${dateStr}T${normTime(b.end_time) ?? "00:00"}:00+09:00`).getTime(),
-      reason: (b.reason || "休憩").trim(),
-    }));
+    // 先生1人だけの予約NG枠（staff_id あり）は、今まさにその先生で組もうとしているときだけ効かせる。
+    // 院ぜんたいの休憩（staff_id 無し）は従来どおり全レーンに注記する。
+    const breaks = ((breakRows ?? []) as { start_time: string; end_time: string; reason: string | null; staff_id: string | null }[])
+      .filter((b) => !b.staff_id || b.staff_id === effStaffId)
+      .map((b) => ({
+        start: new Date(`${dateStr}T${normTime(b.start_time) ?? "00:00"}:00+09:00`).getTime(),
+        end: new Date(`${dateStr}T${normTime(b.end_time) ?? "00:00"}:00+09:00`).getTime(),
+        reason: (b.reason || "休憩").trim(),
+      }));
     // 注記に出す時刻は必ず日本時間で（Vercel の実行環境は UTC）。
     const jstHm = new Intl.DateTimeFormat("en-GB", {
       timeZone: "Asia/Tokyo",

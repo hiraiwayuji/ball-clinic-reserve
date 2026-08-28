@@ -23,7 +23,7 @@ import { AddBreakDialog } from "@/components/admin/AddBreakDialog";
 import { PatientSearchPanel } from "@/components/admin/PatientSearchPanel";
 import { getAdminTimeSlots, isWithinBusinessHours } from "@/lib/time-slots";
 import { useSpecialDays, findSpecialDay } from "@/lib/use-special-days";
-import { getBlockedSlots, deleteBlockedSlot, type BlockedSlot } from "@/app/actions/blocked-slots";
+import { getBlockedSlots, deleteBlockedSlot, createBlockedSlot, type BlockedSlot } from "@/app/actions/blocked-slots";
 import { toast } from "sonner";
 import { useClinicSlotDuration } from "@/lib/use-clinic-slot-duration";
 import { useClinicSchedule } from "@/lib/use-clinic-schedule";
@@ -61,6 +61,10 @@ export default function AdminWeeklyGridPage() {
   const [loading, setLoading] = useState(true);
   // 休憩モード: ON のときカレンダーの枠をタップすると「予約」ではなく「休憩」を追加する
   const [breakMode, setBreakMode] = useState(false);
+  // 予約NGモード: ON のとき先生の枠をタップすると、ダイアログなしでその1コマだけ即座に予約NGにする
+  // （受付が忙しい時に「この先生この時間は入れないで」をパッと置くための機能。2026-08-28 藤川先生要望）
+  const [ngMode, setNgMode] = useState(false);
+  const [ngSaving, setNgSaving] = useState(false);
   const [isBreakDialogOpen, setIsBreakDialogOpen] = useState(false);
   const [breakDialogDate, setBreakDialogDate] = useState<Date | undefined>();
   const [breakDialogStart, setBreakDialogStart] = useState<string>("");
@@ -462,6 +466,25 @@ export default function AdminWeeklyGridPage() {
     setIsBreakDialogOpen(true);
   };
 
+  // 予約NGモードでセルをタップ → ダイアログを挟まず、その1コマだけ即座に予約NGにする
+  const handleNgCell = async (date: Date, slot: string, staffId: string) => {
+    if (ngSaving) return;
+    setNgSaving(true);
+    try {
+      const dateStr = format(date, "yyyy-MM-dd");
+      const endSlot = minToHm(Math.min(hmToMin(slot) + (slotMinutes || 30), 23 * 60 + 59));
+      const res = await createBlockedSlot(dateStr, slot, endSlot, "対応不可", staffId);
+      if (res.success) {
+        toast.success(`${slot} を予約NGにしました`);
+        setRefreshKey((k) => k + 1);
+      } else {
+        toast.error(res.error || "予約NGの設定に失敗しました。");
+      }
+    } finally {
+      setNgSaving(false);
+    }
+  };
+
   // 部門・room フィルタ適用後の appointments（キャンセル済み含む・隠したものも含む）
   const filteredAppointments = useMemo(() => {
     let list = appointments;
@@ -563,7 +586,7 @@ export default function AdminWeeklyGridPage() {
             <Button
               variant={breakMode ? "default" : "outline"}
               size="sm"
-              onClick={() => setBreakMode((v) => !v)}
+              onClick={() => { setBreakMode((v) => !v); setNgMode(false); }}
               className={breakMode
                 ? "bg-amber-600 hover:bg-amber-700 text-white shadow-sm flex items-center gap-2"
                 : "border-amber-300 text-amber-700 hover:bg-amber-50 hover:border-amber-400 flex items-center gap-2"}
@@ -571,6 +594,18 @@ export default function AdminWeeklyGridPage() {
             >
               <Coffee className="w-4 h-4" />
               <span className="font-bold">{breakMode ? "休憩モード ON" : "休憩"}</span>
+            </Button>
+            <Button
+              variant={ngMode ? "default" : "outline"}
+              size="sm"
+              onClick={() => { setNgMode((v) => !v); setBreakMode(false); }}
+              className={ngMode
+                ? "bg-rose-600 hover:bg-rose-700 text-white shadow-sm flex items-center gap-2"
+                : "border-rose-300 text-rose-700 hover:bg-rose-50 hover:border-rose-400 flex items-center gap-2"}
+              title="ONのあいだ、先生の枠をタップするとダイアログなしでその1コマだけ即座に予約NGにできます（院長へLINE通知されます）"
+            >
+              <X className="w-4 h-4" />
+              <span className="font-bold">{ngMode ? "予約NGモード ON" : "予約NG"}</span>
             </Button>
             <Link href="/admin/waitlist">
               <Button
@@ -679,6 +714,8 @@ export default function AdminWeeklyGridPage() {
             compact
             breakMode={breakMode}
             onBreakCell={openBreakDialogForCell}
+            ngMode={ngMode}
+            onNgCell={handleNgCell}
           />
         ) : (
         <>
@@ -1218,6 +1255,8 @@ export default function AdminWeeklyGridPage() {
               showPendingButton={false}
               breakMode={breakMode}
               onBreakCell={openBreakDialogForCell}
+              ngMode={ngMode}
+              onNgCell={handleNgCell}
             />
           </div>
         )}

@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { checkAdminAuth } from "@/app/actions/auth";
 import { unstable_noStore as noStore } from "next/cache";
 import { PUBLIC_CLINIC_ID } from "@/lib/default-clinic-id";
+import { notifyOwnerOfStaffAction } from "@/lib/audit";
 
 async function getSupabase() {
   return await createClient();
@@ -17,6 +18,8 @@ export type BlockedSlot = {
   start_time: string; // HH:MM
   end_time: string;   // HH:MM
   reason: string;
+  // NULL = 院ぜんたいを塞ぐ従来の「休憩」。値あり = その先生の行だけを塞ぐ「予約NG」。
+  staff_id: string | null;
 };
 
 /** "HH:MM:SS" / "HH:MM" → "HH:MM" に正規化 */
@@ -50,7 +53,7 @@ export async function getBlockedSlots(fromDate: string, toDate: string): Promise
 
   const { data, error } = await supabase
     .from("clinic_blocked_slots")
-    .select("id, date, start_time, end_time, reason")
+    .select("id, date, start_time, end_time, reason, staff_id")
     .eq("clinic_id", clinicId)
     .gte("date", fromDate)
     .lte("date", toDate)
@@ -67,6 +70,7 @@ export async function getBlockedSlots(fromDate: string, toDate: string): Promise
     start_time: hhmm(r.start_time),
     end_time: hhmm(r.end_time),
     reason: r.reason ?? "休憩",
+    staff_id: r.staff_id ?? null,
   }));
 }
 
@@ -84,7 +88,7 @@ export async function getBlockedSlotsForDate(
 
   const { data, error } = await supabase
     .from("clinic_blocked_slots")
-    .select("id, date, start_time, end_time, reason")
+    .select("id, date, start_time, end_time, reason, staff_id")
     .eq("clinic_id", clinicId)
     .eq("date", dateStr)
     .order("start_time", { ascending: true });
@@ -99,17 +103,23 @@ export async function getBlockedSlotsForDate(
     start_time: hhmm(r.start_time),
     end_time: hhmm(r.end_time),
     reason: r.reason ?? "休憩",
+    staff_id: r.staff_id ?? null,
   }));
 }
 
-/** 休憩枠を追加。date="YYYY-MM-DD", start/end="HH:MM"。 */
+/**
+ * 休憩枠（または特定の先生だけの予約NG枠）を追加。date="YYYY-MM-DD", start/end="HH:MM"。
+ * staffId を渡すと、その先生の行だけを塞ぐ（院ぜんたいの休憩とは別枠）。
+ * staffId 指定時は「誰が置いたか」をオーナーへLINE通知する（オーナー自身の操作は通知しない）。
+ */
 export async function createBlockedSlot(
   dateStr: string,
   startTime: string,
   endTime: string,
   reason?: string,
+  staffId?: string | null,
 ): Promise<{ success: boolean; error?: string }> {
-  const { clinicId } = await checkAdminAuth();
+  const { clinicId, role, email } = await checkAdminAuth();
   const supabase = await getSupabase();
   if (!supabase) return { success: false, error: "Database not configured" };
 
@@ -132,12 +142,30 @@ export async function createBlockedSlot(
         start_time: startTime,
         end_time: endTime,
         reason: (reason && reason.trim()) || "休憩",
+        staff_id: staffId || null,
       }]);
 
-    // UNIQUE 制約違反（同じ開始時刻が既にある）は既登録とみなして成功扱い
+    // UNIQUE 制約違反（同じ先生・同じ開始時刻が既にある）は既登録とみなして成功扱い
     if (error && error.code !== "23505") {
       throw error;
     }
+
+    if (staffId) {
+      const { data: staff } = await supabase
+        .from("reservation_staff")
+        .select("name")
+        .eq("id", staffId)
+        .eq("clinic_id", clinicId)
+        .maybeSingle();
+      void notifyOwnerOfStaffAction({
+        actorRole: role,
+        actorEmail: email,
+        actionType: "予約NGブロック",
+        summary: `${staff?.name ?? "担当"}先生の ${dateStr} ${startTime}〜${endTime} を予約不可にしました（${(reason && reason.trim()) || "理由未記入"}）`,
+        clinicId,
+      });
+    }
+
     return { success: true };
   } catch (error: any) {
     console.error("Create blocked slot error:", error);
