@@ -384,6 +384,24 @@ export function AddAppointmentDialog({
   const isSlotBlocked = (d: Date | undefined, t: string, sid: string) =>
     !!slotInfoOf(d, t, sid)?.blocked;
 
+  /**
+   * 「院長先生でも選べない」枠か。
+   *
+   * 2026-08-22 に埋まっている枠を院を問わず選べなくしたが、そのとき
+   * プルダウンの option を院長先生ぶんまで disabled にしてしまい、
+   * 同じ 8/22 に作った「重なりを承知で登録する（院長）」の承認ルートが
+   * 画面から一切たどり着けなくなっていた（2026-08-29 藤川先生より報告）。
+   *
+   * DB の除外制約が効く担当（prevent_overlap=true・ボール系）は院長先生でも
+   * 登録できないので今までどおり選ばせない。アプリのガードだけで止めている担当
+   * （からだ・マッスル等、同時に複数人を診る運用）は院長先生だけ選べるようにする。
+   */
+  const isSlotHardBlocked = (d: Date | undefined, t: string, sid: string) => {
+    const info = slotInfoOf(d, t, sid);
+    if (!info?.blocked) return false;
+    return !isOwner || info.dbEnforced === true;
+  };
+
   // 選んだ日時が既存予約とぶつかっているものだけを拾う（休憩・休診日はここでは出さない）。
   // 重ねて取れる院（prevent_overlap=false）でも、気づかず重ねてしまわないよう必ず知らせる。
   const overlapAlerts = pickedSlots
@@ -394,7 +412,14 @@ export function AddAppointmentDialog({
       note: x.slot!.note as string,
       blocked: x.slot!.blocked,
       fitMinutes: x.slot!.fitMinutes ?? null,
+      dbEnforced: x.slot!.dbEnforced === true,
     }));
+
+  // 院長先生なら、そのまま重ねて登録できる状態か。
+  // DB の除外制約が効く担当（ボール系）が1つでも混ざっていたら登録自体が通らないので、
+  // そのときは「できます」と書かない（できないことを できるように書かない）。
+  const ownerCanPassOverlap =
+    isOwner && overlapAlerts.length > 0 && overlapAlerts.every((a) => !a.dbEnforced);
 
   // 時間プルダウンの中身。その行の担当がすでに埋まっている枠は選ばせない。
   // 休憩・休診日は「（休憩）」等と添えるだけで選べる（院内は例外的にねじ込む運用があるため）。
@@ -411,9 +436,13 @@ export function AddAppointmentDialog({
       <>
         <option value="" disabled>時間を選択</option>
         {[...extra, ...slots].map((s) => (
-          <option key={s.time} value={s.time} disabled={s.blocked}>
+          <option key={s.time} value={s.time} disabled={s.blocked && (!isOwner || s.dbEnforced === true)}>
+            {/* 院長先生が承知のうえで選べる枠に「×」を出すと、選べるのに選べないように見える。
+                選べるものは「▲…重ねて登録できます」と書き分ける（2026-08-29） */}
             {s.blocked
-              ? `× ${s.time}（${s.note ?? "予約あり"}）`
+              ? s.blocked && isOwner && s.dbEnforced !== true
+                ? `▲ ${s.time}（${s.note ?? "予約あり"}・重ねて登録できます）`
+                : `× ${s.time}（${s.note ?? "予約あり"}）`
               : s.note
                 ? `${s.time}（${s.note}）`
                 : s.time}
@@ -523,7 +552,9 @@ export function AddAppointmentDialog({
     }
     // 担当が埋まっている枠が選ばれたまま残っていないか
     // （時間を選んだあとに担当やメニューを変えると、埋まりに変わることがある）
-    const blockedPicked = pickedSlots.filter((s) => isSlotBlocked(s.date, s.time, s.staffId));
+    // 院長先生がアプリのガードだけの枠を選んだときは、ここでは止めない。
+    // このあとの runOverlapGate で「重なりを承知で登録する」の確認に進む。
+    const blockedPicked = pickedSlots.filter((s) => isSlotHardBlocked(s.date, s.time, s.staffId));
     if (blockedPicked.length > 0) {
       // どの予約とぶつかっているか・何分なら入るかまで出す（ただ「埋まっています」だと直しようがない）
       const label = blockedPicked
@@ -972,29 +1003,45 @@ export function AddAppointmentDialog({
                 サーバー側でかぶりを止めるようにしたため、間違った操作を後押ししたうえで
                 弾く形になっていた（2026-08-22 検品指摘）。 */}
             {overlapAlerts.length > 0 && (
-              <div className="rounded-md border px-3 py-2 text-xs space-y-1 border-red-200 bg-red-50 text-red-800">
+              <div
+                className={`rounded-md border px-3 py-2 text-xs space-y-1 ${
+                  ownerCanPassOverlap
+                    ? "border-amber-300 bg-amber-50 text-amber-900"
+                    : "border-red-200 bg-red-50 text-red-800"
+                }`}
+              >
                 {overlapAlerts.map((a) => (
                   <div key={a.key}>
                     <span className="font-semibold">⚠ {a.key}</span> は {a.note}
                     {a.fitMinutes ? (
-                      <>。所要時間を <b>{a.fitMinutes}分</b> にすれば入ります。</>
+                      <>。所要時間を <b>{a.fitMinutes}分</b> にすれば重なりません。</>
+                    ) : ownerCanPassOverlap ? (
+                      <>。</>
                     ) : (
                       <>。この時間は登録できません。</>
                     )}
                   </div>
                 ))}
-                <div className="pt-0.5 font-bold">
-                  担当の先生を変えるか、時間をずらしてください。
-                </div>
-                {isOwner ? (
-                  <div className="pt-1 text-[11px] text-red-700 border-t border-red-200 mt-1">
-                    重ねて診ると判断された場合は、院長の権限でそのまま登録できます。
-                  </div>
+                {ownerCanPassOverlap ? (
+                  <>
+                    <div className="pt-0.5 font-bold">
+                      重ねて診る予定なら、このまま登録できます。
+                    </div>
+                    <div className="pt-1 text-[11px] text-amber-800 border-t border-amber-300 mt-1">
+                      下の「重なりを承知で登録する（院長）」で登録すると、予約のメモに
+                      院長承認の印が残ります。重ねない予定なら、担当の先生を変えるか時間をずらしてください。
+                    </div>
+                  </>
                 ) : (
-                  <div className="pt-1 text-[11px] font-bold text-red-700 border-t border-red-200 mt-1">
-                    どうしても重ねる必要があるときは、<u>院長先生の許可</u>が必要です。
-                    先生にご確認ください。
-                  </div>
+                  <>
+                    <div className="pt-0.5 font-bold">
+                      担当の先生を変えるか、時間をずらしてください。
+                    </div>
+                    <div className="pt-1 text-[11px] font-bold text-red-700 border-t border-red-200 mt-1">
+                      どうしても重ねる必要があるときは、<u>院長先生の許可</u>が必要です。
+                      先生にご確認ください。
+                    </div>
+                  </>
                 )}
               </div>
             )}

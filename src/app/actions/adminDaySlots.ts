@@ -39,6 +39,12 @@ export type AdminDaySlot = {
    * 枠の頭からすでに施術中なら null（時間を短くしても入らない）。
    */
   fitMinutes?: number | null;
+  /**
+   * true = DB の除外制約（appointments_single_resource_no_overlap）が効く担当。
+   * この枠は院長先生でも登録できない（DB が 23P01 で弾く）ので、承認ルートを出さない。
+   * false = アプリのガードだけで止めている枠。院長先生は承知のうえで登録できる。
+   */
+  dbEnforced?: boolean;
 };
 
 /**
@@ -127,6 +133,21 @@ export async function getAdminDaySlots(params: {
     // 重ねて診たいときは担当を分ける運用にそろえる。
     const laneExclusive = true;
 
+    // その担当が DB の除外制約の対象か（prevent_overlap=true = 1人ずつしか診ない担当）。
+    // true なら院長先生でも登録できない（DB が弾く）ので、承認ルートを出してはいけない。
+    // false（からだ・マッスル等、同時に複数人を診る運用）はアプリのガードだけなので、
+    // 院長先生は「重なりを承知で登録する」で通せる ＝ 選ばせないと承認ルートが死ぬ。
+    let dbEnforced = false;
+    if (effStaffId) {
+      const { data: st } = await supabase
+        .from("reservation_staff")
+        .select("prevent_overlap")
+        .eq("id", effStaffId)
+        .eq("clinic_id", clinicId)
+        .maybeSingle();
+      dbEnforced = st?.prevent_overlap === true;
+    }
+
     // レーンの既存予約。キャンセルは無視。
     // C待ち(waiting)は「その時間帯に空きが出たら」の希望登録で枠を持たないので除外する
     // （reserve.ts の getDailyAvailability と同じ考え方）。
@@ -178,7 +199,7 @@ export async function getAdminDaySlots(params: {
         const covering = hits.find((b) => b.start <= s);
         if (covering) {
           const more = hits.length > 1 ? ` 他${hits.length - 1}件` : "";
-          return { time: t, blocked: laneExclusive, note: `${covering.label}に予約あり${more}`, fitMinutes: null };
+          return { time: t, blocked: laneExclusive, note: `${covering.label}に予約あり${more}`, fitMinutes: null, dbEnforced };
         }
         // 枠の頭は空いていて、後ろの予約に食い込んでいるだけ。
         // 「何分までなら重ならないか」を、実際に選べる所要時間（slotMinutes の倍数）に丸めて出す。
@@ -192,7 +213,7 @@ export async function getAdminDaySlots(params: {
               ? `${head}・${fit}分ならOK`
               : `${head}・${fit}分なら重なりません`
             : head;
-        return { time: t, blocked: laneExclusive, note, fitMinutes: fit >= slotMinutes ? fit : null };
+        return { time: t, blocked: laneExclusive, note, fitMinutes: fit >= slotMinutes ? fit : null, dbEnforced };
       }
       const hitBreak = breaks.find((b) => s < b.end && e > b.start);
       if (hitBreak) return { time: t, blocked: false, note: hitBreak.reason };
