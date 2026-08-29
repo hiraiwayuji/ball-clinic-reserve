@@ -960,6 +960,7 @@ export function AddAppointmentDialog({
                     courseId={courseId || null}
                     onPickTime={(hm) => { setTime(hm); setOverlapPrompt(null); }}
                     onPickStaff={(id) => { setStaffId(id); setOverlapPrompt(null); }}
+                    viewerIsOwner={isOwner}
                   />
                   <div className="flex flex-col gap-2">
                     {/* 院長先生の逃げ道。ここが無いと、プルダウンの空き情報が読めていない

@@ -32,6 +32,12 @@ type Props = {
   onPickTime: (hm: string) => void;
   /** 「この先生なら取れます」を押したとき */
   onPickStaff: (staffId: string, staffName: string | null) => void;
+  /**
+   * 見ている人が院長先生（オーナー）か。
+   * 院長本人の画面で「院長先生にご相談ください」と出すと意味が通らないので、
+   * 候補が1つも無いときの文面を変えるためだけに使う（2026-08-29）。
+   */
+  viewerIsOwner?: boolean;
 };
 
 const hmOf = (iso: string) =>
@@ -48,6 +54,7 @@ export function OverlapFixList({
   courseId,
   onPickTime,
   onPickStaff,
+  viewerIsOwner = false,
 }: Props) {
   const [loading, setLoading] = useState(true);
   const [fixes, setFixes] = useState<OverlapFixes | null>(null);
@@ -86,7 +93,9 @@ export function OverlapFixList({
       <div className="rounded-xl bg-slate-50 border border-slate-200 px-3 py-2.5 text-xs text-slate-600 leading-relaxed dark:bg-slate-800 dark:border-slate-700 dark:text-slate-300">
         この日は、代わりに取れる時間が見つかりませんでした。
         <br />
-        別の日でお取りいただくか、院長先生にご相談ください。
+        {viewerIsOwner
+          ? "別の日でお取りいただくか、担当の先生を変えてください。"
+          : "別の日でお取りいただくか、院長先生にご相談ください。"}
       </div>
     );
   }

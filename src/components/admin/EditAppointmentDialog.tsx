@@ -1122,6 +1122,7 @@ export function EditAppointmentDialog({
             courseId={courseId || null}
             onPickTime={(hm) => { setTime(hm); setOverlapError(null); setPendingOverlapAction(null); }}
             onPickStaff={(id) => { setStaffId(id); setOverlapError(null); setPendingOverlapAction(null); }}
+            viewerIsOwner={isOwner}
           />
           <DialogFooter className="mt-2 flex-col gap-2 sm:flex-col">
             <Button
