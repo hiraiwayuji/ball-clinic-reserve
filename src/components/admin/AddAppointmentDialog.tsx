@@ -668,7 +668,7 @@ export function AddAppointmentDialog({
 
     // 院長先生が「重なりを承知で登録する」を押したときだけ、かぶりの許可を添える。
     // スタッフの画面ではボタン自体が押せないので、ここは付かない。
-    if (overlapAlerts.length > 0 && isOwner) {
+    if (ownerCanPassOverlap) {
       formData.set("allowOverlap", "true");
     }
 
@@ -1037,10 +1037,19 @@ export function AddAppointmentDialog({
                     <div className="pt-0.5 font-bold">
                       担当の先生を変えるか、時間をずらしてください。
                     </div>
-                    <div className="pt-1 text-[11px] font-bold text-red-700 border-t border-red-200 mt-1">
-                      どうしても重ねる必要があるときは、<u>院長先生の許可</u>が必要です。
-                      先生にご確認ください。
-                    </div>
+                    {isOwner ? (
+                      // 院長本人が見ている画面で「院長先生の許可が必要」と出すと意味が通らない。
+                      // この担当は DB 側で重ねられないので、院長でも登録できないことをそのまま書く。
+                      <div className="pt-1 text-[11px] font-bold text-red-700 border-t border-red-200 mt-1">
+                        この担当は、同じ時間に2件を重ねて登録できない設定です。
+                        院長の権限でも登録できません。
+                      </div>
+                    ) : (
+                      <div className="pt-1 text-[11px] font-bold text-red-700 border-t border-red-200 mt-1">
+                        どうしても重ねる必要があるときは、<u>院長先生の許可</u>が必要です。
+                        先生にご確認ください。
+                      </div>
+                    )}
                   </>
                 )}
               </div>
@@ -1580,9 +1589,11 @@ export function AddAppointmentDialog({
                 （2026-08-22 ぼーるくん「登録できない場合はオーナーの許可が必要ってことに」）。 */}
             <Button
               type="submit"
-              disabled={isSubmitting || !date || !time || (overlapAlerts.length > 0 && !isOwner)}
+              disabled={
+                isSubmitting || !date || !time || (overlapAlerts.length > 0 && !ownerCanPassOverlap)
+              }
               className={`w-full h-11 rounded-xl font-bold disabled:opacity-60 ${
-                overlapAlerts.length > 0 && isOwner
+                ownerCanPassOverlap
                   ? "bg-amber-600 hover:bg-amber-700"
                   : "bg-blue-600 hover:bg-blue-700"
               }`}
@@ -1590,7 +1601,11 @@ export function AddAppointmentDialog({
               {isSubmitting
                 ? "保存中..."
                 : overlapAlerts.length > 0
-                  ? (isOwner ? "重なりを承知で登録する（院長）" : "院長先生の許可が必要です")
+                  ? ownerCanPassOverlap
+                    ? "重なりを承知で登録する（院長）"
+                    : isOwner
+                      ? "この時間は重ねて登録できません"
+                      : "院長先生の許可が必要です"
                   : pickedCount > 1
                     ? `この内容で ${pickedCount}件 まとめて登録する`
                     : "予約を追加する"}
