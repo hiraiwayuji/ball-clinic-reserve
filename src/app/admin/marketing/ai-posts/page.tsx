@@ -2,7 +2,8 @@
 
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Sparkles, History, Settings2, Lightbulb, BarChart3 } from "lucide-react";
+import Link from "next/link";
+import { Sparkles, History, Settings2, Lightbulb, BarChart3, ChevronLeft } from "lucide-react";
 import AiPostStudio, { type PrefillData } from "@/components/admin/ai-posts/AiPostStudio";
 import PostHistory from "@/components/admin/ai-posts/PostHistory";
 import ProfileEditor from "@/components/admin/ai-posts/ProfileEditor";
@@ -19,6 +20,9 @@ export default function AiPostsPage() {
 
   return (
     <div className="max-w-3xl mx-auto p-4 sm:p-6 space-y-5">
+      <Link href="/admin/marketing" className="inline-flex items-center gap-1 text-sm text-slate-500 hover:text-slate-700">
+        <ChevronLeft className="w-4 h-4" /> 集客ツールへ戻る
+      </Link>
       <div className="flex items-center justify-between gap-3">
         <div>
           <h1 className="text-lg sm:text-xl font-bold text-slate-900 flex items-center gap-2">
