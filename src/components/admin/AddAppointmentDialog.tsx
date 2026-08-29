@@ -911,9 +911,18 @@ export function AddAppointmentDialog({
                 </>
               ) : (
                 <>
+                  {/* 院長先生がこの場で通せるときに「登録できません」と書くと、
+                      すぐ下の承認ボタンと真逆のことを言うことになる（2026-08-29 検品指摘）。
+                      通せるときは「すでに予約が入っています」という事実だけを書く。 */}
                   <div>
-                    <p className="text-base font-bold text-rose-700">
-                      ⚠ この予約は登録できません
+                    <p
+                      className={`text-base font-bold ${
+                        isOwner && overlapPrompt.ownerOverridable ? "text-amber-700" : "text-rose-700"
+                      }`}
+                    >
+                      {isOwner && overlapPrompt.ownerOverridable
+                        ? "⚠ この時間には、すでに予約が入っています"
+                        : "⚠ この予約は登録できません"}
                     </p>
                     <p className="text-sm text-slate-700 mt-1 leading-relaxed whitespace-pre-line">
                       {overlapPrompt.message
@@ -921,25 +930,27 @@ export function AddAppointmentDialog({
                         : `${overlapPrompt.staffName}さんは、この時間にすでに別のご予約が入っています。`}
                     </p>
                   </div>
-                  <div className="rounded-xl bg-rose-50 border border-rose-200 px-3 py-2 text-xs text-rose-800 leading-relaxed">
-                    同じ先生の同じ時間に2件の予約は入れられません。<br />
-                    <span className="font-bold">担当の先生を変える</span>か、
-                    <span className="font-bold">時間をずらす</span>と登録できます。
-                    {!isOwner && (
-                      <>
-                        <br />
-                        どうしても重ねる必要があるときは、<span className="font-bold">院長先生の許可</span>が必要です。
-                      </>
-                    )}
-                    {isOwner && overlapPrompt.ownerOverridable && (
-                      <>
-                        <br />
-                        重ねて診る予定なら、下の
-                        <span className="font-bold">「重なりを承知で登録する（院長）」</span>
-                        でそのまま登録できます。
-                      </>
-                    )}
-                  </div>
+                  {isOwner && overlapPrompt.ownerOverridable ? (
+                    <div className="rounded-xl bg-amber-50 border border-amber-300 px-3 py-2 text-xs text-amber-900 leading-relaxed">
+                      <span className="font-bold">重ねて診る予定なら</span>、下の
+                      <span className="font-bold">「重なりを承知で登録する（院長）」</span>
+                      でそのまま登録できます。予約のメモに院長承認の印が残ります。<br />
+                      重ねない予定なら、<span className="font-bold">担当の先生を変える</span>か、
+                      <span className="font-bold">時間をずらして</span>ください。
+                    </div>
+                  ) : (
+                    <div className="rounded-xl bg-rose-50 border border-rose-200 px-3 py-2 text-xs text-rose-800 leading-relaxed">
+                      同じ先生の同じ時間に2件の予約は入れられません。<br />
+                      <span className="font-bold">担当の先生を変える</span>か、
+                      <span className="font-bold">時間をずらす</span>と登録できます。
+                      {!isOwner && (
+                        <>
+                          <br />
+                          どうしても重ねる必要があるときは、<span className="font-bold">院長先生の許可</span>が必要です。
+                        </>
+                      )}
+                    </div>
+                  )}
                   {/* 「だめ」で終わらせず、その場で取れる候補を出す（2026-08-22 ぼーるくん） */}
                   <OverlapFixList
                     staffId={staffId || null}
