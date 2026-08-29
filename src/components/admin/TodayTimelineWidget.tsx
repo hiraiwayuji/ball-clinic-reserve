@@ -1853,7 +1853,13 @@ export default function TodayTimelineWidget({
       {/* 担当かぶりで動かせなかったときのお知らせ（直すまで通さない） */}
       {overlapError && (
         <div className="fixed inset-0 bg-black/50 z-[60] flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border-2 border-rose-300 max-w-sm w-full p-5 space-y-3">
+          <div
+            className={`bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border-2 max-w-sm w-full p-5 space-y-3 ${
+              userRole === "owner" && overlapRetry
+                ? "border-amber-300 dark:border-amber-700"
+                : "border-rose-300"
+            }`}
+          >
             {/* 院長先生が通せる場面で「動かせません」と言い切らない（2026-08-29。
                 新規追加・予約編集のダイアログと同じ形にそろえた） */}
             <p

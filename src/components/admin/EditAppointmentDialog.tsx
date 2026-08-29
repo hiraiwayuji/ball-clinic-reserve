@@ -1090,7 +1090,11 @@ export function EditAppointmentDialog({
 
       {/* 担当かぶりで保存できなかったときのお知らせ（直すまで保存させない） */}
       <Dialog open={!!overlapError} onOpenChange={(o) => { if (!o) setOverlapError(null); }}>
-        <DialogContent className="max-w-sm border-2 border-rose-300">
+        <DialogContent
+          className={`max-w-sm border-2 ${
+            isOwner && pendingOverlapAction ? "border-amber-300" : "border-rose-300"
+          }`}
+        >
           <DialogHeader>
             {/* 院長先生が通せる場面で「保存できません」と言い切ると、下の承認ボタンと
                 真逆のことを言うことになる。見出しだけ読んで諦める形になるので出し分ける
