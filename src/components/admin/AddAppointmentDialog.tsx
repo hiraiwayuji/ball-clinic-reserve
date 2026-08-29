@@ -876,7 +876,15 @@ export function AddAppointmentDialog({
         {/* 担当かぶりの確認（さみ整体へ振替 / 重複はできない案内） */}
         {overlapPrompt && (
           <div className="fixed inset-0 z-[310] flex items-center justify-center bg-black/50 p-4">
-            <div className="w-full max-w-sm bg-white rounded-2xl shadow-2xl border border-amber-300 p-5 space-y-4">
+            {/* 枠の色も見出しにそろえる。振替の提案は従来どおり琥珀、
+                かぶりの案内は「院長が通せるか」で琥珀／赤（2026-08-29 検品指摘） */}
+            <div
+              className={`w-full max-w-sm bg-white rounded-2xl shadow-2xl border-2 p-5 space-y-4 ${
+                overlapPrompt.mode === "reassign" || (isOwner && overlapPrompt.ownerOverridable)
+                  ? "border-amber-300"
+                  : "border-rose-300"
+              }`}
+            >
               {overlapPrompt.mode === "reassign" ? (
                 <>
                   <div>

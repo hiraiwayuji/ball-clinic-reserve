@@ -335,10 +335,12 @@ export function EditAppointmentDialog({
         );
         onSuccess?.();
         onOpenChange(false);
-      } else if ("overlap" in res && res.overlap) {
-        setPendingOverlapAction(("needsOwner" in res && res.needsOwner) ? "adjacent" : null);
-        setOverlapError(res.error ?? "同じ担当の重複予約はできません。");
       } else {
+        // NOTE: addAddonToAppointment は overlap / needsOwner を返さない（承認ルートが無い）。
+        // 以前ここに overlap 分岐があったが、到達しないうえに pendingOverlapAction に
+        // "adjacent" を入れており、将来 needsOwner を返すようにすると
+        // 承認ボタンが handleAddAdjacent を呼んで無反応になる罠だった（2026-08-29 検品指摘）。
+        // 承認ルートを付けるときは "addon" として別に配線すること。
         toast.error(res.error ?? "追加に失敗しました");
       }
     } catch {
@@ -560,6 +562,13 @@ export function EditAppointmentDialog({
         setAdjacentStaffId("");
         onSuccess?.();
         onOpenChange(false);
+      } else if ("overlap" in res && res.overlap) {
+        // 「直前に追加」「直後に追加」は担当の初期値が元予約と同じ先生なので、
+        // 1つ前・1つ後の患者さんの枠にそのまま重なりやすい。
+        // ここに分岐が無く、院長が押しても消えるトーストで終わっていた
+        // （＝画面は「担当者を変えてください」と言うのに、実際は院長なら通せる。2026-08-29 検品指摘）。
+        setPendingOverlapAction(("needsOwner" in res && res.needsOwner) ? "adjacent" : null);
+        setOverlapError(res.error ?? "同じ担当の重複予約はできません。");
       } else {
         toast.error(res.error ?? "追加に失敗しました");
       }
