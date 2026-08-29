@@ -565,7 +565,16 @@ export async function createWaitlistEntryByStaff(formData: FormData) {
 
 export type AddOverlapResult =
   | { kind: "none" }
-  | { kind: "warn"; staffName: string }
+  | {
+      kind: "warn";
+      staffName: string;
+      /**
+       * true = アプリのガードだけで止めている担当（prevent_overlap=false）。
+       *        院長先生が「重なりを承知で登録する」で通せる。
+       * false = DB の除外制約が効く担当。院長先生でも登録できないので承認ボタンを出さない。
+       */
+      ownerOverridable: boolean;
+    }
   | {
       kind: "reassign_sami";
       staffName: string;
@@ -622,12 +631,16 @@ export async function checkAddAppointmentOverlap(params: {
 
     const { data: effStaff } = await supabase
       .from("reservation_staff")
-      .select("id, name")
+      .select("id, name, prevent_overlap")
       .eq("id", effStaffId)
       .eq("clinic_id", clinicId)
       .maybeSingle();
     if (!effStaff) return { kind: "none" };
     const effStaffName = (effStaff.name as string) ?? "担当";
+    // DB の除外制約（trg_set_overlap_lock_staff → appointments_single_resource_no_overlap）は
+    // prevent_overlap=true の担当にだけ overlap_lock_staff を立てて効く。
+    // true の担当は院長先生が承知でも insert が 23P01 で弾かれるので、承認ルートを出さない。
+    const ownerOverridable = effStaff.prevent_overlap !== true;
 
     // 2. その担当レーンで時間がかぶる予約があるか（キャンセル除く）。
     const start = new Date(`${date}T${time}:00+09:00`);
@@ -658,7 +671,7 @@ export async function checkAddAppointmentOverlap(params: {
     //    「注意メッセージを出しても読まない人がいるので、直さないと予約できないようにしてほしい」
     //    というぼーるくんの依頼にあわせ、院・担当を問わず必ず止める。
     if (effStaffName !== "ボール") {
-      return { kind: "warn", staffName: effStaffName };
+      return { kind: "warn", staffName: effStaffName, ownerOverridable };
     }
 
     // さみ整体コース（さみ担当・有効）を探す。無ければ振替不可＝警告のみ。
@@ -670,7 +683,7 @@ export async function checkAddAppointmentOverlap(params: {
       .eq("is_active", true)
       .maybeSingle();
     const samiStaffId = (samiCourse?.required_staff_id as string | null) ?? null;
-    if (!samiCourse || !samiStaffId) return { kind: "warn", staffName: effStaffName };
+    if (!samiCourse || !samiStaffId) return { kind: "warn", staffName: effStaffName, ownerOverridable };
 
     const { data: sami } = await supabase
       .from("reservation_staff")
@@ -678,7 +691,7 @@ export async function checkAddAppointmentOverlap(params: {
       .eq("id", samiStaffId)
       .eq("clinic_id", clinicId)
       .maybeSingle();
-    if (!sami) return { kind: "warn", staffName: effStaffName };
+    if (!sami) return { kind: "warn", staffName: effStaffName, ownerOverridable };
 
     // さみは出勤日制。その日出勤していない／受付時間外なら振替不可＝警告のみ。
     if (sami.schedule_based_booking) {
@@ -693,7 +706,7 @@ export async function checkAddAppointmentOverlap(params: {
         .maybeSingle();
       const wd = new Date(`${date}T00:00:00`).getDay();
       const available = ovr ? !!ovr.available : weekdays.includes(wd);
-      if (!available) return { kind: "warn", staffName: effStaffName };
+      if (!available) return { kind: "warn", staffName: effStaffName, ownerOverridable };
       const sched: StaffSchedule = {
         weekdays,
         dates: ovr
@@ -702,14 +715,14 @@ export async function checkAddAppointmentOverlap(params: {
         defaultStart: normStaffTime(sami.booking_start_time as string | null),
         defaultEnd: normStaffTime(sami.booking_end_time as string | null),
       };
-      if (!isTimeWithinStaffHoursYmd(date, time, sched)) return { kind: "warn", staffName: effStaffName };
+      if (!isTimeWithinStaffHoursYmd(date, time, sched)) return { kind: "warn", staffName: effStaffName, ownerOverridable };
     }
 
     // さみ整体の所要時間でさみレーンの空きを確認。さみも埋まっていれば警告のみ。
     const samiDur = Number(samiCourse.duration_minutes ?? 30) || 30;
     const samiEndIso = new Date(start.getTime() + samiDur * 60000).toISOString();
     if (await laneOccupied(samiStaffId, startIso, samiEndIso)) {
-      return { kind: "warn", staffName: effStaffName };
+      return { kind: "warn", staffName: effStaffName, ownerOverridable };
     }
 
     return {

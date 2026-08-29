@@ -99,7 +99,14 @@ export function AddAppointmentDialog({
         sami: { staffId: string; staffName: string; courseId: string; courseName: string; durationMinutes: number };
         formData: FormData;
       }
-    | { mode: "warn"; staffName: string; message?: string; formData: FormData }
+    | {
+        mode: "warn";
+        staffName: string;
+        message?: string;
+        formData: FormData;
+        /** true = 院長先生がこの場で「重なりを承知で登録する」を押して通せる */
+        ownerOverridable?: boolean;
+      }
     | null
   >(null);
 
@@ -666,12 +673,6 @@ export function AddAppointmentDialog({
       // 重複チェックに失敗しても登録自体は止めない
     }
 
-    // 院長先生が「重なりを承知で登録する」を押したときだけ、かぶりの許可を添える。
-    // スタッフの画面ではボタン自体が押せないので、ここは付かない。
-    if (ownerCanPassOverlap) {
-      formData.set("allowOverlap", "true");
-    }
-
     await runOverlapGate(formData);
   };
 
@@ -682,6 +683,13 @@ export function AddAppointmentDialog({
   const runOverlapGate = async (formData: FormData) => {
     setIsSubmitting(true);
     setDupWarning(null);
+    // 院長先生が「重なりを承知で登録する」を押したときだけ、かぶりの許可を添える。
+    // ここで付けるのは、同日重複の確認ダイアログ（「それでも登録する」）を通ると
+    // handleSubmit を経由せずこの関数に入るため。以前は handleSubmit 側で付けており、
+    // 同日に同名の予約がある患者さんだと院長でも永久に登録できなかった（2026-08-29 検品指摘）。
+    // スタッフの画面ではボタン自体が押せないので、ここは付かない。
+    // 最終判断はサーバー側（role が owner か）で必ずもう一度見る。
+    if (ownerCanPassOverlap) formData.set("allowOverlap", "true");
     let res: AddOverlapResult = { kind: "none" };
     try {
       res = await checkAddAppointmentOverlap({
@@ -700,13 +708,14 @@ export function AddAppointmentDialog({
       return;
     }
     if (res.kind === "warn") {
+      const canOwnerPass = isOwner && res.ownerOverridable;
       // 院長先生が「重なりを承知で登録する」を押した場合は通す。
       // 最終判断はサーバー側（role が owner か）で必ずもう一度見る。
       if (formData.get("allowOverlap") === "true") {
         await performSubmit(formData, "重なりを承知のうえで登録しました");
         return;
       }
-      setOverlapPrompt({ mode: "warn", staffName: res.staffName, formData });
+      setOverlapPrompt({ mode: "warn", staffName: res.staffName, formData, ownerOverridable: canOwnerPass });
       setIsSubmitting(false);
       return;
     }
@@ -769,6 +778,9 @@ export function AddAppointmentDialog({
           staffName: commonStaffName ?? "担当",
           message: String(result.error ?? ""),
           formData,
+          // ここはサーバーに弾かれた後。DB制約で弾かれたのかアプリのガードなのかを
+          // この場では区別できないので、承認ボタンは出さない（できないことを見せない）。
+          ownerOverridable: false,
         });
       } else {
         toast.error(result.error || "エラーが発生しました");
@@ -919,6 +931,14 @@ export function AddAppointmentDialog({
                         どうしても重ねる必要があるときは、<span className="font-bold">院長先生の許可</span>が必要です。
                       </>
                     )}
+                    {isOwner && overlapPrompt.ownerOverridable && (
+                      <>
+                        <br />
+                        重ねて診る予定なら、下の
+                        <span className="font-bold">「重なりを承知で登録する（院長）」</span>
+                        でそのまま登録できます。
+                      </>
+                    )}
                   </div>
                   {/* 「だめ」で終わらせず、その場で取れる候補を出す（2026-08-22 ぼーるくん） */}
                   <OverlapFixList
@@ -930,12 +950,30 @@ export function AddAppointmentDialog({
                     onPickTime={(hm) => { setTime(hm); setOverlapPrompt(null); }}
                     onPickStaff={(id) => { setStaffId(id); setOverlapPrompt(null); }}
                   />
-                  <div className="flex gap-2">
+                  <div className="flex flex-col gap-2">
+                    {/* 院長先生の逃げ道。ここが無いと、プルダウンの空き情報が読めていない
+                        （読込中・時間外の枠など）ときに院長でも行き止まりになる
+                        （2026-08-29 検品指摘）。DB制約で弾かれる担当では出さない。 */}
+                    {isOwner && overlapPrompt.ownerOverridable && (
+                      <Button
+                        type="button"
+                        disabled={isSubmitting}
+                        onClick={() => {
+                          const fd = overlapPrompt.formData;
+                          fd.set("allowOverlap", "true");
+                          setOverlapPrompt(null);
+                          performSubmit(fd, "重なりを承知のうえで登録しました");
+                        }}
+                        className="h-11 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold"
+                      >
+                        重なりを承知で登録する（院長）
+                      </Button>
+                    )}
                     <Button
                       type="button"
                       onClick={() => setOverlapPrompt(null)}
                       disabled={isSubmitting}
-                      className="flex-1 h-11 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold"
+                      className="h-11 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold"
                     >
                       戻って直す
                     </Button>
@@ -1041,8 +1079,8 @@ export function AddAppointmentDialog({
                       // 院長本人が見ている画面で「院長先生の許可が必要」と出すと意味が通らない。
                       // この担当は DB 側で重ねられないので、院長でも登録できないことをそのまま書く。
                       <div className="pt-1 text-[11px] font-bold text-red-700 border-t border-red-200 mt-1">
-                        この担当は、同じ時間に2件を重ねて登録できない設定です。
-                        院長の権限でも登録できません。
+                        重ねて登録できない担当（1人ずつしか診ない設定の先生）が含まれています。
+                        院長の権限でも登録できないので、その日時の担当か時間を変えてください。
                       </div>
                     ) : (
                       <div className="pt-1 text-[11px] font-bold text-red-700 border-t border-red-200 mt-1">
