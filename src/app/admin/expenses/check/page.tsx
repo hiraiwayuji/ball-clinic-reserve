@@ -11,6 +11,7 @@ import {
   convertEntryToIncome,
   markEntryChecked,
 } from "@/app/actions/entry-audit";
+import { getMyRole } from "@/app/actions/auth";
 import type { AuditFinding } from "@/lib/entry-audit";
 
 /**
@@ -26,6 +27,8 @@ export default function ExpenseCheckPage() {
   const [scannedCount, setScannedCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
+  // 直せるのは院長先生（owner）と管理者だけ。受付には押せないボタンを見せない。
+  const [canFix, setCanFix] = useState(false);
   const [, startTransition] = useTransition();
 
   const load = useCallback(async () => {
@@ -43,6 +46,7 @@ export default function ExpenseCheckPage() {
 
   useEffect(() => {
     load();
+    getMyRole().then((role) => setCanFix(role === "owner" || role === "admin"));
   }, [load]);
 
   const handleToIncome = (finding: AuditFinding) => {
@@ -153,7 +157,12 @@ export default function ExpenseCheckPage() {
                       <p className="text-xs text-slate-600 leading-relaxed">{f.reason}</p>
                     </div>
                     <div className="flex gap-2 flex-wrap">
-                      {f.action === "to_income" && (
+                      {!canFix && (
+                        <span className="text-xs text-slate-500 self-center">
+                          直せるのは院長先生だけです
+                        </span>
+                      )}
+                      {canFix && f.action === "to_income" && (
                         <Button
                           size="sm"
                           onClick={() => handleToIncome(f)}
@@ -167,15 +176,17 @@ export default function ExpenseCheckPage() {
                           収入に直す
                         </Button>
                       )}
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => handleChecked(f)}
-                        disabled={busyId === f.entry.id}
-                      >
-                        <Check className="w-4 h-4" />
-                        これで正しい
-                      </Button>
+                      {canFix && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => handleChecked(f)}
+                          disabled={busyId === f.entry.id}
+                        >
+                          <Check className="w-4 h-4" />
+                          これで正しい
+                        </Button>
+                      )}
                     </div>
                   </div>
                 </li>
