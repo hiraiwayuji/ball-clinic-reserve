@@ -1092,26 +1092,45 @@ export function EditAppointmentDialog({
       <Dialog open={!!overlapError} onOpenChange={(o) => { if (!o) setOverlapError(null); }}>
         <DialogContent className="max-w-sm border-2 border-rose-300">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-rose-700">
+            {/* 院長先生が通せる場面で「保存できません」と言い切ると、下の承認ボタンと
+                真逆のことを言うことになる。見出しだけ読んで諦める形になるので出し分ける
+                （2026-08-29。新規追加ダイアログと同じ形にそろえた） */}
+            <DialogTitle
+              className={`flex items-center gap-2 ${
+                isOwner && pendingOverlapAction ? "text-amber-700" : "text-rose-700"
+              }`}
+            >
               <span aria-hidden>⚠</span>
-              この予約は保存できません
+              {isOwner && pendingOverlapAction
+                ? "この時間には、すでに予約が入っています"
+                : "この予約は保存できません"}
             </DialogTitle>
             <DialogDescription className="whitespace-pre-line text-slate-700 leading-relaxed">
               {overlapError}
             </DialogDescription>
           </DialogHeader>
-          <div className="rounded-xl bg-rose-50 border border-rose-200 px-3 py-2 text-xs text-rose-800 leading-relaxed">
-            同じ先生の同じ時間に2件の予約は入れられません。<br />
-            <span className="font-bold">担当の先生を変える</span>か、
-            <span className="font-bold">時間をずらす</span>と保存できます。
-            {!isOwner && (
-              <>
-                <br />
-                どうしても重ねる必要があるときは、<span className="font-bold">院長先生の許可</span>が必要です。
-                先生にご確認ください。
-              </>
-            )}
-          </div>
+          {isOwner && pendingOverlapAction ? (
+            <div className="rounded-xl bg-amber-50 border border-amber-300 px-3 py-2 text-xs text-amber-900 leading-relaxed">
+              <span className="font-bold">重ねて診る予定なら</span>、下の
+              <span className="font-bold">「重なりを承知で進める（院長）」</span>
+              でそのまま保存できます。予約のメモに院長承認の印が残ります。<br />
+              重ねない予定なら、<span className="font-bold">担当の先生を変える</span>か、
+              <span className="font-bold">時間をずらして</span>ください。
+            </div>
+          ) : (
+            <div className="rounded-xl bg-rose-50 border border-rose-200 px-3 py-2 text-xs text-rose-800 leading-relaxed">
+              同じ先生の同じ時間に2件の予約は入れられません。<br />
+              <span className="font-bold">担当の先生を変える</span>か、
+              <span className="font-bold">時間をずらす</span>と保存できます。
+              {!isOwner && (
+                <>
+                  <br />
+                  どうしても重ねる必要があるときは、<span className="font-bold">院長先生の許可</span>が必要です。
+                  先生にご確認ください。
+                </>
+              )}
+            </div>
+          )}
           {/* 「だめ」で終わらせず、その場で取れる候補を出す（2026-08-22 ぼーるくん） */}
           <OverlapFixList
             staffId={staffId || null}

@@ -1854,23 +1854,43 @@ export default function TodayTimelineWidget({
       {overlapError && (
         <div className="fixed inset-0 bg-black/50 z-[60] flex items-center justify-center p-4">
           <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border-2 border-rose-300 max-w-sm w-full p-5 space-y-3">
-            <p className="text-base font-bold text-rose-700 dark:text-rose-300">
-              ⚠ この予約は動かせません
+            {/* 院長先生が通せる場面で「動かせません」と言い切らない（2026-08-29。
+                新規追加・予約編集のダイアログと同じ形にそろえた） */}
+            <p
+              className={`text-base font-bold ${
+                userRole === "owner" && overlapRetry
+                  ? "text-amber-700 dark:text-amber-300"
+                  : "text-rose-700 dark:text-rose-300"
+              }`}
+            >
+              {userRole === "owner" && overlapRetry
+                ? "⚠ その時間には、すでに予約が入っています"
+                : "⚠ この予約は動かせません"}
             </p>
             <p className="text-sm text-slate-700 dark:text-slate-200 leading-relaxed whitespace-pre-line">
               {overlapError}
             </p>
-            <div className="rounded-xl bg-rose-50 dark:bg-rose-900/20 border border-rose-200 dark:border-rose-800 px-3 py-2 text-xs text-rose-800 dark:text-rose-200 leading-relaxed">
-              同じ先生の同じ時間に2件の予約は入れられません。<br />
-              <span className="font-bold">担当の先生を変える</span>か、
-              <span className="font-bold">別の時間にずらす</span>と動かせます。
-              {userRole !== "owner" && (
-                <>
-                  <br />
-                  どうしても重ねる必要があるときは、<span className="font-bold">院長先生の許可</span>が必要です。
-                </>
-              )}
-            </div>
+            {userRole === "owner" && overlapRetry ? (
+              <div className="rounded-xl bg-amber-50 dark:bg-amber-900/20 border border-amber-300 dark:border-amber-700 px-3 py-2 text-xs text-amber-900 dark:text-amber-200 leading-relaxed">
+                <span className="font-bold">重ねて診る予定なら</span>、下の
+                <span className="font-bold">「重なりを承知で進める（院長）」</span>
+                でそのまま動かせます。予約のメモに院長承認の印が残ります。<br />
+                重ねない予定なら、<span className="font-bold">担当の先生を変える</span>か、
+                <span className="font-bold">別の時間にずらして</span>ください。
+              </div>
+            ) : (
+              <div className="rounded-xl bg-rose-50 dark:bg-rose-900/20 border border-rose-200 dark:border-rose-800 px-3 py-2 text-xs text-rose-800 dark:text-rose-200 leading-relaxed">
+                同じ先生の同じ時間に2件の予約は入れられません。<br />
+                <span className="font-bold">担当の先生を変える</span>か、
+                <span className="font-bold">別の時間にずらす</span>と動かせます。
+                {userRole !== "owner" && (
+                  <>
+                    <br />
+                    どうしても重ねる必要があるときは、<span className="font-bold">院長先生の許可</span>が必要です。
+                  </>
+                )}
+              </div>
+            )}
             <button
               type="button"
               onClick={() => { setOverlapError(null); setOverlapRetry(null); }}
