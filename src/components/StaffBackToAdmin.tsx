@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { cookies } from "next/headers";
 import { ChevronLeft } from "lucide-react";
 import { checkAdminAuthLite } from "@/app/actions/auth";
 
@@ -11,8 +12,18 @@ import { checkAdminAuthLite } from "@/app/actions/auth";
  * ログインしていない人（タブレット・LINE から開いた人）には管理画面の入口を見せても
  * 迷わせるだけなので、ログイン済みのときだけ表示する。
  * checkAdminAuthLite は未ログインなら null を返すだけでリダイレクトしない。
+ *
+ * ただし打刻ページは元々「認証ゼロ」で開けるのが取り柄なので、Supabase の認証Cookieが
+ * そもそも無いときは問い合わせ自体を行わない。Supabase が詰まっている時に共用タブレットの
+ * 打刻画面が出てこない、という事故を持ち込まないため。
  */
 export default async function StaffBackToAdmin() {
+  const jar = await cookies();
+  const hasAuthCookie = jar
+    .getAll()
+    .some((c) => c.name.startsWith("sb-") && c.name.includes("auth-token"));
+  if (!hasAuthCookie) return null;
+
   let loggedIn = false;
   try {
     loggedIn = !!(await checkAdminAuthLite());
