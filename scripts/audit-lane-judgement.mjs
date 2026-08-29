@@ -18,6 +18,7 @@
  * 原因はいつも同じ。**「予約が取れるか」を決める場所が複数あり、片方だけ直す**こと。
  *   - 院内の画面（時間プルダウンの空き）: src/app/actions/adminDaySlots.ts
  *   - 院内の登録（サーバーの最終ガード）: src/app/actions/adminReserve.ts の findLaneConflict
+ *   - 患者さんのWeb予約（空き時間の表示）: src/app/actions/reserve.ts の getDailyAvailability
  * ここがズレると必ず「選べるのに登録できない」か「選べないのに実は取れる」になる。
  *
  * この監査は2段構えで見る。
@@ -25,8 +26,6 @@
  *       （呼んでいるかを grep するだけだと、中身を壊されても素通りするため）
  *   (2) 上の2ファイルが、その土台を使い続けているか／重なり判定が半開区間か
  *
- * ⚠ 患者さん側の予約エンジン（src/app/actions/reserve.ts）は、追加担当を見ていない別実装。
- *    そちらをそろえたら、このファイルの FILE_RULES に足すこと。
  */
 import { readFileSync, existsSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -199,6 +198,15 @@ const FILE_RULES = [
       "   画面では取れるのに登録で弾かれる、という食い違いになります。",
     badBoundary: /\bs\s*<=\s*wantEnd\b|\be\s*>=\s*wantStart\b/,
   },
+  {
+    file: "src/app/actions/reserve.ts",
+    must: "buildStaffSpans(",
+    why:
+      "患者さんのWeb予約の空き表示が、1件の予約を先生ごとに分けずに見ています。\n" +
+      "   担当が決まっているコースで、前半だけ担当する先生の後半が予約できなくなり、\n" +
+      "   逆に後半だけ担当する先生の枠が空きに見えて二重に予約されます。",
+    badBoundary: null,
+  },
 ];
 
 /** コメント（// と ...）を落としてから探す。コメントに名前だけ残して素通り、を防ぐ。 */
@@ -214,7 +222,7 @@ for (const rule of FILE_RULES) {
   if (!code.includes(rule.must)) {
     fail(`${rule.file} が buildStaffSpans を呼んでいません`, `   ${rule.why}`);
   }
-  if (rule.badBoundary.test(code)) {
+  if (rule.badBoundary && rule.badBoundary.test(code)) {
     fail(
       `${rule.file} の重なり判定が「端を含む」書き方になっています`,
       "   前の予約の終了時刻と、次の予約の開始時刻が同じときは重なりません。\n" +
@@ -234,7 +242,6 @@ if (ng > 0) {
   process.exit(1);
 }
 
-console.log(`${GREEN}✅ 予約の空き判定 OK（院内の画面と登録の2か所）${RESET}`);
+console.log(`${GREEN}✅ 予約の空き判定 OK（院内の画面・院内の登録・患者さんのWeb予約の3か所）${RESET}`);
 console.log("   ・buildStaffSpans を実際に動かして、先生ごとの受け持ち時間の分け方が変わっていないことを確認");
-console.log("   ・adminDaySlots と adminReserve が、どちらもその土台を使っていることを確認");
-console.log(`   ${YELLOW}※ 患者さん側の reserve.ts はまだ追加担当を見ていません（別途対応）${RESET}`);
+console.log("   ・adminDaySlots / adminReserve / reserve が、どれもその土台を使っていることを確認");

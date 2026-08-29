@@ -39,6 +39,7 @@ async function notifyOwner(
 import { createClient as createServerClient } from "@/lib/supabase/server";
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { getTimeSlots, isDateWithinAllowedRange, isTimeSlotWithinTwoHours, isTodayJST, isAddonSpanWithinBusinessHours } from "@/lib/time-slots";
+import { buildStaffSpans } from "@/lib/staff-spans";
 import { getSpecialDayForDate } from "@/app/actions/special-days";
 import { isTimeWithinStaffHoursYmd, isStaffAvailableOnYmd, isStaffSpanBookableYmd, buildStaffSchedule, type StaffSchedule } from "@/lib/staff-availability";
 
@@ -677,7 +678,7 @@ export async function getDailyAvailability(
 
     const { data, error } = await supabase
       .from("appointments")
-      .select("start_time, end_time, staff_id, status")
+      .select("start_time, end_time, staff_id, status, course_id, additional_staff, additional_courses")
       .eq("clinic_id", DEFAULT_CLINIC_ID)
       .gte("start_time", startOfDay)
       .lte("start_time", endOfDay)
@@ -688,6 +689,57 @@ export async function getDailyAvailability(
       return [];
     }
 
+    // 🚨 1件の予約を2人の先生が前後に分けて受け持つことがある（からだ鍼灸整骨院）。
+    //   例) 的場様 14:20-15:00 ＝ 森川（保険施術20分）14:20-14:40 ＋ 森藤（鍼灸1部位20分）14:40-15:00
+    // 主担当(staff_id)だけを見て予約まるごとを塞ぐと、
+    //   ・森川先生は 14:40 に空いているのに患者さんが予約できない
+    //   ・森藤先生は 14:40 が埋まっているのに空きに見えて二重に予約できてしまう
+    // 院内側（adminDaySlots / findLaneConflict）は buildStaffSpans で先生ごとに
+    // 分けて判定しているので、患者さん側もそろえる（2026-08-29）。
+    // メニューの所要時間は交代時刻を決めるのに使う。
+    const slotMinutes = await getCurrentSlotDuration();
+    const spanCourseIds = new Set<string>();
+    for (const app of (data ?? []) as { course_id?: string | null; additional_courses?: { course_id?: string }[] | null }[]) {
+      if (app.course_id) spanCourseIds.add(app.course_id);
+      for (const ac of app.additional_courses ?? []) if (ac?.course_id) spanCourseIds.add(ac.course_id);
+    }
+    const spanDurationById = new Map<string, number>();
+    if (spanCourseIds.size > 0) {
+      const { data: spanCourses } = await supabase
+        .from("reservation_courses")
+        .select("id, duration_minutes")
+        .eq("clinic_id", DEFAULT_CLINIC_ID)
+        .in("id", [...spanCourseIds]);
+      for (const c of (spanCourses ?? []) as { id: string; duration_minutes: number | null }[]) {
+        if (c.duration_minutes && c.duration_minutes > 0) spanDurationById.set(c.id, c.duration_minutes);
+      }
+    }
+    /** 指定の先生が、その予約で実際に受け持つ時間帯（担当していなければ null） */
+    const laneSpanOf = (
+      app: {
+        start_time: string; end_time?: string | null; staff_id?: string | null;
+        course_id?: string | null;
+        additional_staff?: { staff_id: string }[] | null;
+        additional_courses?: { course_id: string }[] | null;
+      },
+      staffId: string,
+    ): { start: Date; end: Date } | null => {
+      const spans = buildStaffSpans({
+        startTime: app.start_time,
+        endTime: app.end_time ?? null,
+        staffId: app.staff_id ?? null,
+        mainMinutes: app.course_id ? (spanDurationById.get(app.course_id) ?? null) : null,
+        additionalStaff: app.additional_staff ?? null,
+        additionalCourses: app.additional_courses ?? null,
+        additionalMinutes: (app.additional_courses ?? []).map((ac) =>
+          ac?.course_id ? (spanDurationById.get(ac.course_id) ?? null) : null,
+        ),
+        fallbackMinutes: slotMinutes,
+      });
+      const mine = spans.find((sp) => sp.staffId === staffId);
+      return mine ? { start: new Date(mine.startIso), end: new Date(mine.endIso) } : null;
+    };
+
     // 取得した予約日時の開始・終了から、時刻ごとの予約数をカウント。
     // 🚨 以前は 30分刻みで展開していたため、20分刻みの院（からだ鍼灸整骨院）で
     //    10:00〜10:40 の予約が「10:00」「10:30」になり、実在する枠 10:20 が
@@ -695,17 +747,32 @@ export async function getDailyAvailability(
     //    休憩枠と同じ 5分刻みで展開すれば 10/15/20/30分 どの院でも正しく塞がる。
     const EXPAND_STEP_MS = 5 * 60000;
     const slotCounts: Record<string, number> = {};
-    (data ?? []).forEach((app: { start_time: string, end_time?: string, staff_id?: string | null, status?: string }) => {
+    (data ?? []).forEach((app: {
+      start_time: string, end_time?: string, staff_id?: string | null, status?: string,
+      course_id?: string | null,
+      additional_staff?: { staff_id: string }[] | null,
+      additional_courses?: { course_id: string }[] | null,
+    }) => {
       // コース担当が指定されている場合は、そのレーンの予約を数える。
       // 担当未設定の実予約（pending/confirmed）はどのレーンを使うか確定していないため、
       // 安全側に倒して全レーンの埋まり扱いにする（キャンセル待ち waiting は時間帯の希望
       // 登録であって枠を持たないので除外）。
-      if (requiredStaffId && app.staff_id !== requiredStaffId) {
-        const isUnassignedRealBooking = !app.staff_id && app.status !== "waiting";
-        if (!isUnassignedRealBooking) return;
+      //
+      // その先生が主担当でも追加担当でも、受け持つのは予約まるごとではなく自分の時間帯だけ。
+      let start = new Date(app.start_time);
+      let end = app.end_time ? new Date(app.end_time) : new Date(start.getTime() + EXPAND_STEP_MS);
+      if (requiredStaffId) {
+        const mine = laneSpanOf(app, requiredStaffId);
+        if (mine) {
+          // 主担当・追加担当のどちらでも、この先生が受け持つ時間だけを塞ぐ
+          start = mine.start;
+          end = mine.end;
+        } else {
+          // この先生は担当していない。担当未設定の実予約だけは安全側に倒して塞ぐ。
+          const isUnassignedRealBooking = !app.staff_id && app.status !== "waiting";
+          if (!isUnassignedRealBooking) return;
+        }
       }
-      const start = new Date(app.start_time);
-      const end = app.end_time ? new Date(app.end_time) : new Date(start.getTime() + EXPAND_STEP_MS);
 
       let current = start.getTime();
       while (current < end.getTime()) {
