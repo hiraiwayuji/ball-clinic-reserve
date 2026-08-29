@@ -3,6 +3,7 @@
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { checkAdminAuth } from "./auth";
 import { getTimeSlots, type SlotMinutes } from "@/lib/time-slots";
+import { buildStaffSpans } from "@/lib/staff-spans";
 
 /**
  * 院内の予約追加ダイアログ用の空き枠取得。
@@ -151,18 +152,72 @@ export async function getAdminDaySlots(params: {
     // レーンの既存予約。キャンセルは無視。
     // C待ち(waiting)は「その時間帯に空きが出たら」の希望登録で枠を持たないので除外する
     // （reserve.ts の getDailyAvailability と同じ考え方）。
+    //
+    // 🚨 担当で絞って「予約まるごと」を占有扱いにしてはいけない（2026-08-29 藤川先生より報告）。
+    // からだ鍼灸整骨院では1件の予約を2人の先生が前後に分けて受け持つ。
+    //   例) 的場様 14:20-15:00 ＝ 森川（保険施術20分）14:20-14:40 ＋ 森藤（鍼灸1部位20分）14:40-15:00
+    // 従来はこの予約を「森川が14:20-15:00ずっと埋まっている」と扱っていたため、
+    // 実際には空いている森川の 14:40 が「× 14:40（14:20〜15:00に予約あり）」になり、
+    // 予約が取れなかった。逆に、追加担当としてだけ入っている森藤の 14:40 は
+    // staff_id で絞ると見えず、空きに見えてしまう（二重に入れてしまう）。
+    //
+    // 予約を作る側（adminReserve.ts の findLaneConflict）は buildStaffSpans で
+    // 先生ごとに分けて判定している。画面もそれに合わせないと、
+    // 「選べないのに実は取れる」「選べるのに登録できない」の食い違いになる。
     let laneRows: { start_time: string; end_time: string | null }[] = [];
     if (effStaffId) {
       const { data } = await supabase
         .from("appointments")
-        .select("start_time, end_time")
+        .select("start_time, end_time, staff_id, course_id, additional_staff, additional_courses")
         .eq("clinic_id", clinicId)
-        .eq("staff_id", effStaffId)
         .neq("status", "cancelled")
         .neq("status", "waiting")
         .gte("start_time", dayStartIso)
         .lte("start_time", dayEndIso);
-      laneRows = (data ?? []) as { start_time: string; end_time: string | null }[];
+      const rows = (data ?? []) as {
+        start_time: string;
+        end_time: string | null;
+        staff_id: string | null;
+        course_id: string | null;
+        additional_staff: { staff_id: string }[] | null;
+        additional_courses: { course_id: string }[] | null;
+      }[];
+
+      // メニューの所要時間（先生の交代時刻を決めるのに使う）をまとめて引く
+      const courseIds = new Set<string>();
+      for (const r of rows) {
+        if (r.course_id) courseIds.add(r.course_id);
+        for (const ac of r.additional_courses ?? []) if (ac?.course_id) courseIds.add(ac.course_id);
+      }
+      const durationById = new Map<string, number>();
+      if (courseIds.size > 0) {
+        const { data: courseRows } = await supabase
+          .from("reservation_courses")
+          .select("id, duration_minutes")
+          .eq("clinic_id", clinicId)
+          .in("id", [...courseIds]);
+        for (const c of (courseRows ?? []) as { id: string; duration_minutes: number | null }[]) {
+          if (c.duration_minutes && c.duration_minutes > 0) durationById.set(c.id, c.duration_minutes);
+        }
+      }
+
+      for (const r of rows) {
+        const spans = buildStaffSpans({
+          startTime: r.start_time,
+          endTime: r.end_time ?? null,
+          staffId: r.staff_id ?? null,
+          mainMinutes: r.course_id ? (durationById.get(r.course_id) ?? null) : null,
+          additionalStaff: r.additional_staff ?? null,
+          additionalCourses: r.additional_courses ?? null,
+          additionalMinutes: (r.additional_courses ?? []).map((ac) =>
+            ac?.course_id ? (durationById.get(ac.course_id) ?? null) : null,
+          ),
+          fallbackMinutes: slotMinutes,
+        });
+        const mine = spans.find((sp) => sp.staffId === effStaffId);
+        // この先生が受け持つ時間だけを「埋まっている時間」として使う
+        if (mine) laneRows.push({ start_time: mine.startIso, end_time: mine.endIso });
+      }
     }
 
     const isHoliday = !!holiday;
