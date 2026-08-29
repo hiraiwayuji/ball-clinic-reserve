@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Calendar as CalendarIcon, Plus, Trash2, Loader2, Receipt, AlertCircle, Save, Camera, Sparkles, Pencil, Check, X, Banknote, Download, FileSpreadsheet, Settings2, BookOpen } from "lucide-react";
+import { Calendar as CalendarIcon, Plus, Trash2, Loader2, Receipt, AlertCircle, Save, Camera, Sparkles, Pencil, Check, X, Banknote, Download, FileSpreadsheet, Settings2, BookOpen, ShieldCheck } from "lucide-react";
 import { addExpense, getExpenses, deleteExpense, addPendingExpense, updateExpense, getMonthDetailedExpenses } from "@/app/actions/sales";
 import { getCustomExpenseCategories, addCustomExpenseCategory, deleteCustomExpenseCategory, getClinicSettings } from "@/app/actions/settings";
 import { BASE_EXPENSE_CATEGORIES } from "@/lib/expense-categories";
@@ -443,6 +443,13 @@ export default function ExpensesPage() {
             <Button variant="outline" className="flex items-center gap-2">
               <AlertCircle className="w-4 h-4 text-amber-500" />
               仕分け待ちを確認
+            </Button>
+          </Link>
+          {/* 入ってきたお金が経費に入っていないかの自動点検（2026-08-29 追加） */}
+          <Link href="/admin/expenses/check">
+            <Button variant="outline" className="flex items-center gap-2">
+              <ShieldCheck className="w-4 h-4 text-emerald-600" />
+              記帳チェック
             </Button>
           </Link>
           <div className="flex items-center gap-2 bg-white dark:bg-slate-900 p-2 border dark:border-slate-800 rounded-lg shadow-sm">

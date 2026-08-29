@@ -1,0 +1,164 @@
+/**
+ * 記帳チェック（入ってきたお金が経費に紛れていないか、などの自動点検）
+ *
+ * 2026-08-29、ボール接骨院の記帳から「子ども医療療養費 13,160円（板野町）」と
+ * 「診療報酬 15,203円（徳島県国保連）」の入金通知が、経費として登録されているのが見つかった。
+ * どちらも入ってきたお金なので、経費に入れると利益が実際より悪く見える（この2件で56,726円ぶん）。
+ * 人が毎回目で探すのは無理なので、見つけ方を規則にしてここに置く。
+ *
+ * ここは DB にも React にも依存しない純粋な関数にしてある。
+ * 他のツール（BMR・ガードワークなど）でも同じ規則を使い回せるようにするため。
+ */
+
+export type AuditEntry = {
+  id: string;
+  expense_date: string;
+  category: string | null;
+  description: string | null;
+  amount: number;
+  memo: string | null;
+  entry_type: string | null;
+};
+
+export type AuditRule = "income_as_expense" | "card_bulk" | "duplicate" | "odd_date";
+
+export type AuditFinding = {
+  entry: AuditEntry;
+  rule: AuditRule;
+  /** high = ほぼ確実におかしい／medium = 目で見て決めてほしい */
+  level: "high" | "medium";
+  title: string;
+  reason: string;
+  /** to_income = ボタン1つで収入に直せる／review = 中身を見て直す */
+  action: "to_income" | "review";
+};
+
+/** 「見たうえで、これで正しい」と判断した記帳につける印。memo に足して次回から除外する。 */
+export const CHECKED_MARK = "【記帳チェック済】";
+
+/** 収入に直したときに使う区分。経費記帳ページの収入カテゴリと合わせている。 */
+export const INCOME_FIX_CATEGORY = "その他収入";
+
+/** これが出てきたら、まず入ってきたお金（入金通知・支給決定）とみてよい言葉。 */
+const INCOME_WORDS_HIGH =
+  /(支給決定|支払額決定|決定通知|振込通知|入金通知|医療報酬|診療報酬|報酬等支払|助成金|給付金|補助金|還付金|支援金|協力金)/;
+
+/** 収入のことが多いが、支出のこともある言葉。目で見て決めてもらう。 */
+const INCOME_WORDS_MEDIUM =
+  /(子ども医療|こども医療|はぐくみ医療|療養費|保険金|返戻|雑収入|物販売上|売上金)/;
+
+/** 明細ではなく請求まるごとを記帳している疑い。カード明細と二重に数えやすい。 */
+const CARD_BULK_WORDS =
+  /(カード請求|カード支払|カードお支払|クレジット請求|クレジットカード請求|カード引き落と|イオンカード|PayPayカード|ペイペイカード)/;
+
+const norm = (s: string | null | undefined) => (s ?? "").replace(/\s+/g, "");
+
+/** 「これで正しい」と印をつけた記帳か。 */
+export function isChecked(entry: AuditEntry): boolean {
+  return norm(entry.memo).includes(norm(CHECKED_MARK));
+}
+
+/**
+ * 経費として記帳されている行を点検して、あやしいものだけ返す。
+ * @param entries clinic_expenses の行（収入として登録ずみのものは呼び出し側で混ぜてよい。ここで外す）
+ * @param today 判定に使う日（テストしやすいように差し込めるようにしてある）
+ */
+export function auditEntries(entries: AuditEntry[], today = new Date()): AuditFinding[] {
+  const targets = entries.filter(
+    (e) => (e.entry_type ?? "expense") === "expense" && !isChecked(e),
+  );
+
+  // 重複の判定に使う「日付＋金額＋品名」の出現回数。全部の経費行で数える。
+  const seen = new Map<string, number>();
+  for (const e of targets) {
+    const key = `${e.expense_date}|${e.amount}|${norm(e.description)}`;
+    seen.set(key, (seen.get(key) ?? 0) + 1);
+  }
+
+  const todayStr = toDateString(today);
+  const twoYearsAgo = new Date(today);
+  twoYearsAgo.setFullYear(twoYearsAgo.getFullYear() - 2);
+  const twoYearsAgoStr = toDateString(twoYearsAgo);
+
+  const findings: AuditFinding[] = [];
+
+  for (const entry of targets) {
+    const text = `${norm(entry.description)} ${norm(entry.memo)} ${norm(entry.category)}`;
+
+    if (INCOME_WORDS_HIGH.test(text)) {
+      findings.push({
+        entry,
+        rule: "income_as_expense",
+        level: "high",
+        title: "入ってきたお金が、経費に入っているかもしれません",
+        reason: `品名に「${(text.match(INCOME_WORDS_HIGH) ?? [""])[0]}」が入っています。入金の通知は経費ではなく収入です。`,
+        action: "to_income",
+      });
+    } else if (INCOME_WORDS_MEDIUM.test(text)) {
+      findings.push({
+        entry,
+        rule: "income_as_expense",
+        level: "medium",
+        title: "入ってきたお金かもしれません",
+        reason: `品名に「${(text.match(INCOME_WORDS_MEDIUM) ?? [""])[0]}」が入っています。助成金や療養費の入金なら収入です（自分が窓口で払ったぶんなら、このままで正しいです）。`,
+        action: "to_income",
+      });
+    }
+
+    if (CARD_BULK_WORDS.test(text)) {
+      findings.push({
+        entry,
+        rule: "card_bulk",
+        level: "medium",
+        title: "カードの請求をまるごと記帳しているかもしれません",
+        reason:
+          "カードの請求額をそのまま入れると、1件ずつ入れた領収書と二重に数えてしまいます。中身（何を買ったか）で入れ直してください。",
+        action: "review",
+      });
+    }
+
+    const key = `${entry.expense_date}|${entry.amount}|${norm(entry.description)}`;
+    if ((seen.get(key) ?? 0) > 1) {
+      findings.push({
+        entry,
+        rule: "duplicate",
+        level: "medium",
+        title: "同じ内容が2件以上あります",
+        reason: "日付・金額・品名がまったく同じ記帳が複数あります。同じ領収書を2回入れていないか確かめてください。",
+        action: "review",
+      });
+    }
+
+    if (entry.expense_date > todayStr) {
+      findings.push({
+        entry,
+        rule: "odd_date",
+        level: "medium",
+        title: "日付が未来になっています",
+        reason: "領収書の日付の読み取り違いが多いところです。",
+        action: "review",
+      });
+    } else if (entry.expense_date < twoYearsAgoStr) {
+      findings.push({
+        entry,
+        rule: "odd_date",
+        level: "medium",
+        title: "日付が2年より前になっています",
+        reason: "「令和8年」を「2014年」と読むような読み取り違いが起きていないか確かめてください。",
+        action: "review",
+      });
+    }
+  }
+
+  // 直してほしい順（確実なもの→金額が大きいもの）に並べる。
+  const levelOrder = { high: 0, medium: 1 } as const;
+  return findings.sort(
+    (a, b) => levelOrder[a.level] - levelOrder[b.level] || b.entry.amount - a.entry.amount,
+  );
+}
+
+/** ローカル時間の YYYY-MM-DD。toISOString だと日本時間の朝に前日へずれるため使わない。 */
+function toDateString(d: Date): string {
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
