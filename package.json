@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "node scripts/check-clinic-env.mjs && npm run audit:tenant && npm run audit:clinic-leaks && npm run audit:use-server && npm run audit:duration && node scripts/migrate-on-build.mjs && next build",
+    "build": "node scripts/check-clinic-env.mjs && npm run audit:tenant && npm run audit:clinic-leaks && npm run audit:use-server && npm run audit:duration && npm run audit:lane && node scripts/migrate-on-build.mjs && next build",
     "build:no-migrate": "next build",
     "start": "next start",
     "lint": "eslint",
@@ -14,7 +14,8 @@
     "audit:clinic-leaks": "node scripts/audit-clinic-leaks.mjs",
     "audit:use-server": "node scripts/audit-use-server-exports.mjs",
     "audit:duration": "node scripts/audit-patient-duration.mjs",
-    "audit": "node scripts/check-clinic-env.mjs && npm run audit:tenant && npm run audit:clinic-leaks && npm run audit:use-server && npm run audit:duration",
+    "audit:lane": "node scripts/audit-lane-judgement.mjs",
+    "audit": "node scripts/check-clinic-env.mjs && npm run audit:tenant && npm run audit:clinic-leaks && npm run audit:use-server && npm run audit:duration && npm run audit:lane",
     "smoke": "node scripts/post-deploy-smoke.mjs",
     "verify:clinic": "node scripts/verify-clinic-identity.mjs",
     "check:schema": "node scripts/preflight-schema.mjs",
