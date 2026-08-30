@@ -4,7 +4,8 @@ import { useCallback, useEffect, useState, useTransition } from "react";
 import Link from "next/link";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { AlertTriangle, ArrowDownToLine, Check, CheckCircle2, Loader2, ShieldCheck } from "lucide-react";
+import { AlertTriangle, ArrowDownToLine, CalendarDays, Check, CheckCircle2, Loader2, ShieldCheck, Trash2, X } from "lucide-react";
+import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
 import {
   getEntryAuditFindings,
@@ -12,6 +13,7 @@ import {
   markEntryChecked,
 } from "@/app/actions/entry-audit";
 import { getMyRole } from "@/app/actions/auth";
+import { updateExpense, deleteExpense } from "@/app/actions/sales";
 import type { AuditFinding } from "@/lib/entry-audit";
 
 /**
@@ -29,6 +31,9 @@ export default function ExpenseCheckPage() {
   const [busyId, setBusyId] = useState<string | null>(null);
   // 直せるのは院長先生（owner）と管理者だけ。受付には押せないボタンを見せない。
   const [canFix, setCanFix] = useState(false);
+  // 日付を直しているところ（記帳のid）と、入力中の日付。
+  const [editingDateId, setEditingDateId] = useState<string | null>(null);
+  const [editingDate, setEditingDate] = useState("");
   const [, startTransition] = useTransition();
 
   const load = useCallback(async () => {
@@ -79,6 +84,42 @@ export default function ExpenseCheckPage() {
     });
   };
 
+  const handleSaveDate = (finding: AuditFinding) => {
+    if (!editingDate) {
+      toast.error("日付を入れてください");
+      return;
+    }
+    setBusyId(finding.entry.id);
+    startTransition(async () => {
+      const res = await updateExpense(finding.entry.id, { expense_date: editingDate });
+      setBusyId(null);
+      if (res.success) {
+        toast.success("日付を直しました");
+        setEditingDateId(null);
+        load();
+      } else {
+        toast.error(res.error ?? "変更に失敗しました");
+      }
+    });
+  };
+
+  const handleDelete = (finding: AuditFinding) => {
+    const label = finding.entry.description || "この記帳";
+    if (!confirm(`「${label}　${finding.entry.amount.toLocaleString()}円」を消します。
+元に戻せません。よろしいですか？`)) return;
+    setBusyId(finding.entry.id);
+    startTransition(async () => {
+      const res = await deleteExpense(finding.entry.id);
+      setBusyId(null);
+      if (res.success) {
+        toast.success("消しました");
+        load();
+      } else {
+        toast.error(res.error ?? "削除に失敗しました");
+      }
+    });
+  };
+
   const highCount = findings.filter((f) => f.level === "high").length;
   const totalAmount = findings.reduce((sum, f) => sum + f.entry.amount, 0);
 
@@ -112,11 +153,13 @@ export default function ExpenseCheckPage() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
-          <p className="text-xs text-slate-500 leading-relaxed">
-            入金の通知書（子ども医療費の支給決定・国保連の診療報酬など）を経費として登録すると、
-            <b className="text-slate-700">経費が増えたうえに収入も減る</b>
-            ので、利益が実際より悪く見えます。ここに出たものは、その場で収入に直せます。
-          </p>
+          <div className="text-xs text-slate-600 leading-relaxed bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-1">
+            <p className="font-bold text-slate-700">出てきたものは、この4つのどれかで片づきます。</p>
+            <p>① 見て問題なければ <b>「これで正しい」</b> … 次から出ません</p>
+            <p>② 入ってきたお金だった <b>「収入に直す」</b> … 経費から収入に移します</p>
+            <p>③ 日付が違う <b>「日付を直す」</b> … 領収書の日付を入れて保存します</p>
+            <p>④ 二重・まるごと記帳だった <b>「消す」</b> … その1件を消します（元に戻せません）</p>
+          </div>
 
           {loading ? (
             <div className="h-40 grid place-items-center">
@@ -176,16 +219,67 @@ export default function ExpenseCheckPage() {
                           収入に直す
                         </Button>
                       )}
-                      {canFix && (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => handleChecked(f)}
-                          disabled={busyId === f.entry.id}
-                        >
-                          <Check className="w-4 h-4" />
-                          これで正しい
-                        </Button>
+                      {canFix && editingDateId === f.entry.id ? (
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <Input
+                            type="date"
+                            className="w-[160px]"
+                            value={editingDate}
+                            onChange={(e) => setEditingDate(e.target.value)}
+                          />
+                          <Button
+                            size="sm"
+                            onClick={() => handleSaveDate(f)}
+                            disabled={busyId === f.entry.id}
+                          >
+                            {busyId === f.entry.id ? (
+                              <Loader2 className="w-4 h-4 animate-spin" />
+                            ) : (
+                              <Check className="w-4 h-4" />
+                            )}
+                            保存
+                          </Button>
+                          <Button size="sm" variant="ghost" onClick={() => setEditingDateId(null)}>
+                            <X className="w-4 h-4" />
+                            やめる
+                          </Button>
+                        </div>
+                      ) : (
+                        canFix && (
+                          <>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => {
+                                setEditingDateId(f.entry.id);
+                                setEditingDate(f.entry.expense_date);
+                              }}
+                              disabled={busyId === f.entry.id}
+                            >
+                              <CalendarDays className="w-4 h-4" />
+                              日付を直す
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="text-red-600 border-red-200 hover:bg-red-50"
+                              onClick={() => handleDelete(f)}
+                              disabled={busyId === f.entry.id}
+                            >
+                              <Trash2 className="w-4 h-4" />
+                              消す
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => handleChecked(f)}
+                              disabled={busyId === f.entry.id}
+                            >
+                              <Check className="w-4 h-4" />
+                              これで正しい
+                            </Button>
+                          </>
+                        )
                       )}
                     </div>
                   </div>
