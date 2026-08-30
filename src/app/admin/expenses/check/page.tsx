@@ -31,7 +31,8 @@ export default function ExpenseCheckPage() {
   const [busyId, setBusyId] = useState<string | null>(null);
   // 直せるのは院長先生（owner）と管理者だけ。受付には押せないボタンを見せない。
   const [canFix, setCanFix] = useState(false);
-  // 日付を直しているところ（記帳のid）と、入力中の日付。
+  // 日付を直しているところ（押した行のキー）と、入力中の日付。
+  // 同じ記帳が2つの規則で2行に出ることがあるので、記帳idではなく行ごとのキーで持つ。
   const [editingDateId, setEditingDateId] = useState<string | null>(null);
   const [editingDate, setEditingDate] = useState("");
   const [, startTransition] = useTransition();
@@ -172,9 +173,11 @@ export default function ExpenseCheckPage() {
             </div>
           ) : (
             <ul className="space-y-3">
-              {findings.map((f, i) => (
+              {findings.map((f, i) => {
+                const rowKey = `${f.entry.id}-${f.rule}-${i}`;
+                return (
                 <li
-                  key={`${f.entry.id}-${f.rule}-${i}`}
+                  key={rowKey}
                   className={`rounded-lg border p-4 ${
                     f.level === "high" ? "border-red-200 bg-red-50/40" : "border-amber-200 bg-amber-50/30"
                   }`}
@@ -219,7 +222,7 @@ export default function ExpenseCheckPage() {
                           収入に直す
                         </Button>
                       )}
-                      {canFix && editingDateId === f.entry.id ? (
+                      {canFix && editingDateId === rowKey ? (
                         <div className="flex items-center gap-2 flex-wrap">
                           <Input
                             type="date"
@@ -251,7 +254,7 @@ export default function ExpenseCheckPage() {
                               size="sm"
                               variant="outline"
                               onClick={() => {
-                                setEditingDateId(f.entry.id);
+                                setEditingDateId(rowKey);
                                 setEditingDate(f.entry.expense_date);
                               }}
                               disabled={busyId === f.entry.id}
@@ -284,7 +287,8 @@ export default function ExpenseCheckPage() {
                     </div>
                   </div>
                 </li>
-              ))}
+                );
+              })}
             </ul>
           )}
         </CardContent>
