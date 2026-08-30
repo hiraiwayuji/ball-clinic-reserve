@@ -11,7 +11,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Calendar as CalendarIcon, Plus, Trash2, Loader2, Receipt, AlertCircle, Save, Camera, Sparkles, Pencil, Check, X, Banknote, Download, FileSpreadsheet, Settings2, BookOpen, ShieldCheck } from "lucide-react";
 import { addExpense, getExpenses, deleteExpense, addPendingExpense, updateExpense, getMonthDetailedExpenses } from "@/app/actions/sales";
 import { getCustomExpenseCategories, addCustomExpenseCategory, deleteCustomExpenseCategory, getClinicSettings } from "@/app/actions/settings";
-import { BASE_EXPENSE_CATEGORIES } from "@/lib/expense-categories";
+import { BASE_EXPENSE_CATEGORIES, INCOME_CATEGORIES } from "@/lib/expense-categories";
 import { createClient } from "@/lib/supabase/client";
 import { toast } from "sonner";
 import Image from "next/image";
@@ -19,9 +19,6 @@ import Link from "next/link";
 import { exportToExcel } from "@/lib/excel";
 import ExpensesImportDialog from "@/components/admin/ExpensesImportDialog";
 import { CategorySelect } from "@/components/admin/CategorySelect";
-
-// 収入（その他収入）のカテゴリ。受付の患者売上とは別に、雑収入・物販などを記帳する用途。
-const INCOME_CATEGORIES = ["物販", "自販機", "雑収入", "受取手数料", "受取利息", "その他収入"];
 
 type EntryType = "expense" | "income";
 

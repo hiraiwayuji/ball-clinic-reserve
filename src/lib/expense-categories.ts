@@ -31,3 +31,8 @@ export const BASE_EXPENSE_CATEGORIES = [
 ] as const;
 
 export type BaseExpenseCategory = typeof BASE_EXPENSE_CATEGORIES[number];
+
+/** 収入（その他収入）のカテゴリ。受付の患者売上とは別に、雑収入・物販などを記帳する用途。 */
+export const INCOME_CATEGORIES = ["物販", "自販機", "雑収入", "受取手数料", "受取利息", "その他収入"] as const;
+
+export type IncomeCategory = typeof INCOME_CATEGORIES[number];

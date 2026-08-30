@@ -7,6 +7,7 @@ import {
   auditEntries,
   CHECKED_MARK,
   INCOME_FIX_CATEGORY,
+  EXPENSE_FIX_CATEGORY,
   type AuditEntry,
   type AuditFinding,
 } from "@/lib/entry-audit";
@@ -91,6 +92,46 @@ export async function convertEntryToIncome(
     return { success: true };
   } catch (error) {
     console.error("Error converting entry to income:", error);
+    return { success: false, error: "変更に失敗しました" };
+  }
+}
+
+/** 「買い物・支払いだった」ぶんを経費に付け替える（収入→経費の逆方向）。 */
+export async function convertEntryToExpense(
+  id: string,
+): Promise<{ success: boolean; error?: string }> {
+  await requireRole(["owner", "admin"]);
+  const { clinicId } = await checkAdminAuth();
+  try {
+    const supabase = await createClient();
+    const { data: current, error: readError } = await supabase
+      .from("clinic_expenses")
+      .select("memo")
+      .eq("clinic_id", clinicId)
+      .eq("id", id)
+      .maybeSingle();
+    if (readError) throw readError;
+    if (!current) return { success: false, error: "その記帳が見つかりませんでした" };
+
+    const stamp = `【${today()} 記帳チェック】買い物・支払いなので、収入から経費に直しました。区分は見直してください。`;
+    const { error } = await supabase
+      .from("clinic_expenses")
+      .update({
+        entry_type: "expense",
+        category: EXPENSE_FIX_CATEGORY,
+        memo: `${current.memo ?? ""} ${stamp}`.trim(),
+      })
+      .eq("clinic_id", clinicId)
+      .eq("id", id);
+
+    if (error) throw error;
+
+    revalidatePath("/admin/expenses");
+    revalidatePath("/admin/expenses/check");
+    revalidatePath("/admin/dashboard");
+    return { success: true };
+  } catch (error) {
+    console.error("Error converting entry to expense:", error);
     return { success: false, error: "変更に失敗しました" };
   }
 }

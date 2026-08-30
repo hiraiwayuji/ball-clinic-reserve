@@ -4,12 +4,24 @@ import { useCallback, useEffect, useState, useTransition } from "react";
 import Link from "next/link";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { AlertTriangle, ArrowDownToLine, CalendarDays, Check, CheckCircle2, Loader2, ShieldCheck, Trash2, X } from "lucide-react";
+import {
+  AlertTriangle,
+  ArrowLeftRight,
+  ArrowRight,
+  CalendarDays,
+  Check,
+  CheckCircle2,
+  Loader2,
+  ShieldCheck,
+  Trash2,
+  X,
+} from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
 import {
   getEntryAuditFindings,
   convertEntryToIncome,
+  convertEntryToExpense,
   markEntryChecked,
 } from "@/app/actions/entry-audit";
 import { getMyRole } from "@/app/actions/auth";
@@ -19,9 +31,14 @@ import type { AuditFinding } from "@/lib/entry-audit";
 /**
  * 記帳チェック
  *
- * 「入ってきたお金なのに経費になっている」記帳を、自動であぶり出す画面。
- * 2026-08-29 に実際の記帳から2件（子ども医療療養費・診療報酬）見つかったため作った。
- * 見つけるだけでなく、その場で収入に直せるようにしてある。
+ * 「経費と収入を取り違えている」記帳を、自動であぶり出す画面。
+ * 2026-08-29 に実際の記帳から2件（子ども医療療養費・診療報酬）が
+ * 収入なのに経費として登録されているのが見つかったため作った。
+ *
+ * 2026-08-30、「経費なのか収入なのか、何を確認しているのか分からない」との指摘を受けて作り直した：
+ * ・各カードに「今：経費」「今：収入」の色つきバッジを必ず出す（現在の状態を先に見せる）
+ * ・「直すと → 収入になります／経費になります」を矢印で明示する
+ * ・逆方向（収入に登録された買い物）も見るようにした（見つけるだけでなく、その場で直せる）
  */
 export default function ExpenseCheckPage() {
   const [findings, setFindings] = useState<AuditFinding[]>([]);
@@ -57,13 +74,29 @@ export default function ExpenseCheckPage() {
 
   const handleToIncome = (finding: AuditFinding) => {
     const label = finding.entry.description || "この記帳";
-    if (!confirm(`「${label}」を収入に直します。よろしいですか？`)) return;
+    if (!confirm(`「${label}」を経費から収入に直します。よろしいですか？`)) return;
     setBusyId(finding.entry.id);
     startTransition(async () => {
       const res = await convertEntryToIncome(finding.entry.id);
       setBusyId(null);
       if (res.success) {
         toast.success("収入に直しました");
+        load();
+      } else {
+        toast.error(res.error ?? "変更に失敗しました");
+      }
+    });
+  };
+
+  const handleToExpense = (finding: AuditFinding) => {
+    const label = finding.entry.description || "この記帳";
+    if (!confirm(`「${label}」を収入から経費に直します。よろしいですか？`)) return;
+    setBusyId(finding.entry.id);
+    startTransition(async () => {
+      const res = await convertEntryToExpense(finding.entry.id);
+      setBusyId(null);
+      if (res.success) {
+        toast.success("経費に直しました");
         load();
       } else {
         toast.error(res.error ?? "変更に失敗しました");
@@ -106,8 +139,11 @@ export default function ExpenseCheckPage() {
 
   const handleDelete = (finding: AuditFinding) => {
     const label = finding.entry.description || "この記帳";
-    if (!confirm(`「${label}　${finding.entry.amount.toLocaleString()}円」を消します。
-元に戻せません。よろしいですか？`)) return;
+    if (
+      !confirm(`「${label}　${finding.entry.amount.toLocaleString()}円」を消します。
+元に戻せません。よろしいですか？`)
+    )
+      return;
     setBusyId(finding.entry.id);
     startTransition(async () => {
       const res = await deleteExpense(finding.entry.id);
@@ -130,7 +166,7 @@ export default function ExpenseCheckPage() {
         <div>
           <h1 className="text-2xl font-bold text-slate-900">記帳チェック</h1>
           <p className="text-slate-500">
-            入ってきたお金が経費に入っていないか、同じ領収書を2回入れていないかを自動で調べます
+            経費と収入を取り違えていないか、同じ領収書を2回入れていないかを自動で調べます
           </p>
         </div>
         <Link href="/admin/expenses">
@@ -154,12 +190,26 @@ export default function ExpenseCheckPage() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
-          <div className="text-xs text-slate-600 leading-relaxed bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-1">
-            <p className="font-bold text-slate-700">出てきたものは、この4つのどれかで片づきます。</p>
-            <p>① 見て問題なければ <b>「これで正しい」</b> … 次から出ません</p>
-            <p>② 入ってきたお金だった <b>「収入に直す」</b> … 経費から収入に移します</p>
-            <p>③ 日付が違う <b>「日付を直す」</b> … 領収書の日付を入れて保存します</p>
-            <p>④ 二重・まるごと記帳だった <b>「消す」</b> … その1件を消します（元に戻せません）</p>
+          <div className="text-xs text-slate-600 leading-relaxed bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-1.5">
+            <p className="font-bold text-slate-700">
+              カードの左上に「今：経費」「今：収入」と出ます。まずそれを見てください。
+            </p>
+            <p className="flex items-center gap-1.5 flex-wrap">
+              <span className="inline-flex items-center text-[11px] font-bold px-2 py-0.5 rounded-full whitespace-nowrap bg-sky-100 text-sky-700 border border-sky-200">今：経費</span>
+              <ArrowRight className="w-3.5 h-3.5 text-slate-400" />
+              <span className="inline-flex items-center text-[11px] font-bold px-2 py-0.5 rounded-full whitespace-nowrap bg-emerald-100 text-emerald-700 border border-emerald-200">収入</span>
+              <span>… 入ってきたお金だったら「収入に直す」</span>
+            </p>
+            <p className="flex items-center gap-1.5 flex-wrap">
+              <span className="inline-flex items-center text-[11px] font-bold px-2 py-0.5 rounded-full whitespace-nowrap bg-emerald-100 text-emerald-700 border border-emerald-200">今：収入</span>
+              <ArrowRight className="w-3.5 h-3.5 text-slate-400" />
+              <span className="inline-flex items-center text-[11px] font-bold px-2 py-0.5 rounded-full whitespace-nowrap bg-sky-100 text-sky-700 border border-sky-200">経費</span>
+              <span>… 買い物・支払いだったら「経費に直す」</span>
+            </p>
+            <p>
+              見て問題なければ <b>「これで正しい」</b>（次から出ません）／日付の読み違いは <b>「日付を直す」</b>
+              ／二重・まるごと記帳は <b>「消す」</b>
+            </p>
           </div>
 
           {loading ? (
@@ -175,118 +225,138 @@ export default function ExpenseCheckPage() {
             <ul className="space-y-3">
               {findings.map((f, i) => {
                 const rowKey = `${f.entry.id}-${f.rule}-${i}`;
+                const isIncomeNow = f.currentType === "income";
                 return (
-                <li
-                  key={rowKey}
-                  className={`rounded-lg border p-4 ${
-                    f.level === "high" ? "border-red-200 bg-red-50/40" : "border-amber-200 bg-amber-50/30"
-                  }`}
-                >
-                  <div className="flex items-start gap-3 flex-wrap">
-                    <span
-                      className={`text-[11px] font-bold px-2 py-1 rounded-full whitespace-nowrap ${
-                        f.level === "high" ? "bg-red-100 text-red-700" : "bg-amber-100 text-amber-700"
-                      }`}
-                    >
-                      {f.level === "high" ? "ほぼ確実" : "確認したい"}
-                    </span>
-                    <div className="flex-1 min-w-[240px] space-y-1">
-                      <p className="font-semibold text-slate-900 flex items-center gap-2">
-                        <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0" />
-                        {f.title}
-                      </p>
-                      <p className="text-sm text-slate-700">
-                        {f.entry.expense_date}　{f.entry.description || "(品名なし)"}
-                        <b>{f.entry.amount.toLocaleString()}円</b>
-                        <span className="text-slate-400">（区分：{f.entry.category || "未設定"}）</span>
-                      </p>
-                      <p className="text-xs text-slate-600 leading-relaxed">{f.reason}</p>
-                    </div>
-                    <div className="flex gap-2 flex-wrap">
-                      {!canFix && (
-                        <span className="text-xs text-slate-500 self-center">
-                          直せるのは院長先生だけです
+                  <li
+                    key={rowKey}
+                    className={`rounded-lg border p-4 ${
+                      f.level === "high" ? "border-red-200 bg-red-50/40" : "border-amber-200 bg-amber-50/30"
+                    }`}
+                  >
+                    <div className="flex items-start gap-3 flex-wrap">
+                      <div className="flex flex-col gap-1.5 items-start shrink-0">
+                        <span className={isIncomeNow ? "inline-flex items-center text-[11px] font-bold px-2 py-0.5 rounded-full whitespace-nowrap bg-emerald-100 text-emerald-700 border border-emerald-200" : "inline-flex items-center text-[11px] font-bold px-2 py-0.5 rounded-full whitespace-nowrap bg-sky-100 text-sky-700 border border-sky-200"}>
+                          今：{isIncomeNow ? "収入" : "経費"}
                         </span>
-                      )}
-                      {canFix && f.action === "to_income" && (
-                        <Button
-                          size="sm"
-                          onClick={() => handleToIncome(f)}
-                          disabled={busyId === f.entry.id}
+                        <span
+                          className={`text-[11px] font-bold px-2 py-1 rounded-full whitespace-nowrap ${
+                            f.level === "high" ? "bg-red-100 text-red-700" : "bg-amber-100 text-amber-700"
+                          }`}
                         >
-                          {busyId === f.entry.id ? (
-                            <Loader2 className="w-4 h-4 animate-spin" />
-                          ) : (
-                            <ArrowDownToLine className="w-4 h-4" />
-                          )}
-                          収入に直す
-                        </Button>
-                      )}
-                      {canFix && editingDateId === rowKey ? (
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <Input
-                            type="date"
-                            className="w-[160px]"
-                            value={editingDate}
-                            onChange={(e) => setEditingDate(e.target.value)}
-                          />
-                          <Button
-                            size="sm"
-                            onClick={() => handleSaveDate(f)}
-                            disabled={busyId === f.entry.id}
-                          >
+                          {f.level === "high" ? "ほぼ確実" : "確認したい"}
+                        </span>
+                      </div>
+                      <div className="flex-1 min-w-[240px] space-y-1">
+                        <p className="font-semibold text-slate-900 flex items-center gap-2">
+                          <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0" />
+                          {f.title}
+                        </p>
+                        <p className="text-sm text-slate-700">
+                          {f.entry.expense_date}　{f.entry.description || "(品名なし)"}
+                          <b>{f.entry.amount.toLocaleString()}円</b>
+                          <span className="text-slate-400">（区分：{f.entry.category || "未設定"}）</span>
+                        </p>
+                        <p className="text-xs text-slate-600 leading-relaxed">{f.reason}</p>
+                        {(f.action === "to_income" || f.action === "to_expense") && (
+                          <p className="text-xs font-bold flex items-center gap-1.5 pt-0.5">
+                            <ArrowLeftRight className="w-3.5 h-3.5 text-slate-400" />
+                            直すと：
+                            <span className={f.action === "to_income" ? "inline-flex items-center text-[11px] font-bold px-2 py-0.5 rounded-full whitespace-nowrap bg-emerald-100 text-emerald-700 border border-emerald-200" : "inline-flex items-center text-[11px] font-bold px-2 py-0.5 rounded-full whitespace-nowrap bg-sky-100 text-sky-700 border border-sky-200"}>
+                              {f.action === "to_income" ? "収入" : "経費"}
+                            </span>
+                            になります
+                          </p>
+                        )}
+                      </div>
+                      <div className="flex gap-2 flex-wrap">
+                        {!canFix && (
+                          <span className="text-xs text-slate-500 self-center">
+                            直せるのは院長先生だけです
+                          </span>
+                        )}
+                        {canFix && f.action === "to_income" && (
+                          <Button size="sm" onClick={() => handleToIncome(f)} disabled={busyId === f.entry.id}>
                             {busyId === f.entry.id ? (
                               <Loader2 className="w-4 h-4 animate-spin" />
                             ) : (
-                              <Check className="w-4 h-4" />
+                              <ArrowLeftRight className="w-4 h-4" />
                             )}
-                            保存
+                            収入に直す
                           </Button>
-                          <Button size="sm" variant="ghost" onClick={() => setEditingDateId(null)}>
-                            <X className="w-4 h-4" />
-                            やめる
+                        )}
+                        {canFix && f.action === "to_expense" && (
+                          <Button size="sm" onClick={() => handleToExpense(f)} disabled={busyId === f.entry.id}>
+                            {busyId === f.entry.id ? (
+                              <Loader2 className="w-4 h-4 animate-spin" />
+                            ) : (
+                              <ArrowLeftRight className="w-4 h-4" />
+                            )}
+                            経費に直す
                           </Button>
-                        </div>
-                      ) : (
-                        canFix && (
-                          <>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => {
-                                setEditingDateId(rowKey);
-                                setEditingDate(f.entry.expense_date);
-                              }}
-                              disabled={busyId === f.entry.id}
-                            >
-                              <CalendarDays className="w-4 h-4" />
-                              日付を直す
+                        )}
+                        {canFix && editingDateId === rowKey ? (
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <Input
+                              type="date"
+                              className="w-[160px]"
+                              value={editingDate}
+                              onChange={(e) => setEditingDate(e.target.value)}
+                            />
+                            <Button size="sm" onClick={() => handleSaveDate(f)} disabled={busyId === f.entry.id}>
+                              {busyId === f.entry.id ? (
+                                <Loader2 className="w-4 h-4 animate-spin" />
+                              ) : (
+                                <Check className="w-4 h-4" />
+                              )}
+                              保存
                             </Button>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="text-red-600 border-red-200 hover:bg-red-50"
-                              onClick={() => handleDelete(f)}
-                              disabled={busyId === f.entry.id}
-                            >
-                              <Trash2 className="w-4 h-4" />
-                              消す
+                            <Button size="sm" variant="ghost" onClick={() => setEditingDateId(null)}>
+                              <X className="w-4 h-4" />
+                              やめる
                             </Button>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => handleChecked(f)}
-                              disabled={busyId === f.entry.id}
-                            >
-                              <Check className="w-4 h-4" />
-                              これで正しい
-                            </Button>
-                          </>
-                        )
-                      )}
+                          </div>
+                        ) : (
+                          canFix && (
+                            <>
+                              {!isIncomeNow && (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => {
+                                    setEditingDateId(rowKey);
+                                    setEditingDate(f.entry.expense_date);
+                                  }}
+                                  disabled={busyId === f.entry.id}
+                                >
+                                  <CalendarDays className="w-4 h-4" />
+                                  日付を直す
+                                </Button>
+                              )}
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="text-red-600 border-red-200 hover:bg-red-50"
+                                onClick={() => handleDelete(f)}
+                                disabled={busyId === f.entry.id}
+                              >
+                                <Trash2 className="w-4 h-4" />
+                                消す
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => handleChecked(f)}
+                                disabled={busyId === f.entry.id}
+                              >
+                                <Check className="w-4 h-4" />
+                                これで正しい
+                              </Button>
+                            </>
+                          )
+                        )}
+                      </div>
                     </div>
-                  </div>
-                </li>
+                  </li>
                 );
               })}
             </ul>
