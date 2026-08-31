@@ -25,6 +25,7 @@ export type AuditEntry = {
   amount: number;
   memo: string | null;
   entry_type: string | null;
+  image_url: string | null;
 };
 
 export type AuditRule = "income_as_expense" | "expense_as_income" | "card_bulk" | "duplicate" | "odd_date";

@@ -39,7 +39,7 @@ export async function getEntryAuditFindings(): Promise<{
     const supabase = await createClient();
     const { data, error } = await supabase
       .from("clinic_expenses")
-      .select("id, expense_date, category, description, amount, memo, entry_type")
+      .select("id, expense_date, category, description, amount, memo, entry_type, image_url")
       .eq("clinic_id", clinicId)
       .order("expense_date", { ascending: false })
       .limit(MAX_ROWS);

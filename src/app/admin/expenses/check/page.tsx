@@ -11,12 +11,15 @@ import {
   CalendarDays,
   Check,
   CheckCircle2,
+  ImageOff,
   Loader2,
+  Receipt,
   ShieldCheck,
   Trash2,
   X,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
+import Image from "next/image";
 import { toast } from "sonner";
 import {
   getEntryAuditFindings,
@@ -52,6 +55,8 @@ export default function ExpenseCheckPage() {
   // 同じ記帳が2つの規則で2行に出ることがあるので、記帳idではなく行ごとのキーで持つ。
   const [editingDateId, setEditingDateId] = useState<string | null>(null);
   const [editingDate, setEditingDate] = useState("");
+  // 見ている領収書画像（クリックで大きく表示するため）。null なら閉じている。
+  const [viewingImage, setViewingImage] = useState<{ url: string; label: string } | null>(null);
   const [, startTransition] = useTransition();
 
   const load = useCallback(async () => {
@@ -257,6 +262,26 @@ export default function ExpenseCheckPage() {
                           <span className="text-slate-400">（区分：{f.entry.category || "未設定"}）</span>
                         </p>
                         <p className="text-xs text-slate-600 leading-relaxed">{f.reason}</p>
+                        {f.entry.image_url ? (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setViewingImage({
+                                url: f.entry.image_url as string,
+                                label: `${f.entry.expense_date}　${f.entry.description || "(品名なし)"}　${f.entry.amount.toLocaleString()}円`,
+                              })
+                            }
+                            className="inline-flex items-center gap-1 text-xs font-bold text-blue-700 hover:underline pt-0.5"
+                          >
+                            <Receipt className="w-3.5 h-3.5" />
+                            この記帳の写真・領収書を見る
+                          </button>
+                        ) : (
+                          <p className="inline-flex items-center gap-1 text-xs text-slate-400 pt-0.5">
+                            <ImageOff className="w-3.5 h-3.5" />
+                            写真・領収書はありません（手入力の記帳）
+                          </p>
+                        )}
                         {(f.action === "to_income" || f.action === "to_expense") && (
                           <p className="text-xs font-bold flex items-center gap-1.5 pt-0.5">
                             <ArrowLeftRight className="w-3.5 h-3.5 text-slate-400" />
@@ -363,6 +388,49 @@ export default function ExpenseCheckPage() {
           )}
         </CardContent>
       </Card>
+
+      {viewingImage && (
+        <div
+          className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4"
+          onClick={() => setViewingImage(null)}
+        >
+          <div
+            className="bg-white rounded-lg overflow-hidden max-w-2xl w-full max-h-[90vh] flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between p-3 border-b">
+              <p className="text-sm font-semibold text-slate-800">{viewingImage.label}</p>
+              <button
+                type="button"
+                aria-label="閉じる"
+                onClick={() => setViewingImage(null)}
+                className="p-1.5 rounded-full hover:bg-slate-100"
+              >
+                <X className="w-5 h-5 text-slate-500" />
+              </button>
+            </div>
+            <div className="relative flex-1 min-h-[300px] bg-slate-50">
+              <Image
+                src={viewingImage.url}
+                alt="領収書・記帳の写真"
+                fill
+                className="object-contain"
+                sizes="(max-width: 768px) 100vw, 640px"
+              />
+            </div>
+            <div className="p-3 border-t text-center">
+              <a
+                href={viewingImage.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-xs text-blue-700 hover:underline"
+              >
+                新しいタブで大きく開く
+              </a>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
