@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { countVisits } from "@/lib/patient-count";
 import { checkAdminAuth } from "@/app/actions/auth";
 import { COURSE_CATEGORIES, type CourseCategory } from "@/lib/course-categories";
+import { NON_EXPENSE_CATEGORIES } from "@/lib/expense-categories";
 
 // 「営業日」を判定: closed_weekdays（NULL なら "0,3"）に含まれず、かつ
 // clinic_holidays に登録されていない日。1日平均来院数の分母に使う。
@@ -435,7 +436,11 @@ export async function getMonthAnalytics(year: number, month: number): Promise<Mo
     .eq("clinic_id", clinicId)
     .gte("expense_date", startDate)
     .lte("expense_date", endDate);
-  const expRows = (ledgerRows ?? []).filter((r) => r.entry_type !== "income");
+  // 収入として登録した行と、借入返済（経費にならないカテゴリ）は経費合計から除く
+  const nonExpenseSet = new Set<string>(NON_EXPENSE_CATEGORIES as readonly string[]);
+  const expRows = (ledgerRows ?? []).filter(
+    (r) => r.entry_type !== "income" && !nonExpenseSet.has(r.category),
+  );
   const otherIncome = (ledgerRows ?? [])
     .filter((r) => r.entry_type === "income")
     .reduce((s, r) => s + r.amount, 0);

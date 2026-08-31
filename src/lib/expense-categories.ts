@@ -25,12 +25,25 @@ export const BASE_EXPENSE_CATEGORIES = [
   "衛生用品",
   "美容材料費",
   "タオル・リネン費",
+  // お金の借り入れ・返済
+  "支払利息",
+  "借入返済（経費にしない）",
   // その他
   "雑費",
   "その他",
 ] as const;
 
 export type BaseExpenseCategory = typeof BASE_EXPENSE_CATEGORIES[number];
+
+/**
+ * 経費の合計・確定申告には入れないカテゴリ。
+ *
+ * 借入金の元本返済は「経費」ではない（損益計算書に乗らないお金の動き）。
+ * 利息の部分だけが経費になる（「支払利息」）。ここに入れておけば見た目は経費記帳の
+ * 一覧に残るが、経費の合計・経営評価・確定申告の集計からは自動で除かれる。
+ * 2026-08-30、PayPayカードの請求が実は借入の返済だったケースで追加。
+ */
+export const NON_EXPENSE_CATEGORIES = ["借入返済（経費にしない）"] as const;
 
 /** 収入（その他収入）のカテゴリ。受付の患者売上とは別に、雑収入・物販などを記帳する用途。 */
 export const INCOME_CATEGORIES = ["物販", "自販機", "雑収入", "受取手数料", "受取利息", "その他収入"] as const;

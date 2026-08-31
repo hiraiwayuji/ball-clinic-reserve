@@ -11,6 +11,7 @@ import {
   type AuditEntry,
   type AuditFinding,
 } from "@/lib/entry-audit";
+import { NON_EXPENSE_CATEGORIES } from "@/lib/expense-categories";
 
 /**
  * 記帳チェック（/admin/expenses/check）のサーバー側。
@@ -136,6 +137,49 @@ export async function convertEntryToExpense(
   }
 }
 
+/**
+ * 「借入の返済だった」ぶんを、経費の合計に入らない区分に直す。
+ * 元金の返済は経費ではないので、entry_type は expense のまま区分だけ変える
+ * （経費記帳の一覧には残るが、月次・年間の経費合計・確定申告からは自動で除かれる）。
+ */
+export async function convertEntryToRepayment(
+  id: string,
+): Promise<{ success: boolean; error?: string }> {
+  await requireRole(["owner", "admin"]);
+  const { clinicId } = await checkAdminAuth();
+  try {
+    const supabase = await createClient();
+    const { data: current, error: readError } = await supabase
+      .from("clinic_expenses")
+      .select("memo")
+      .eq("clinic_id", clinicId)
+      .eq("id", id)
+      .maybeSingle();
+    if (readError) throw readError;
+    if (!current) return { success: false, error: "その記帳が見つかりませんでした" };
+
+    const stamp = `【${today()} 記帳チェック】借入の返済なので、経費の合計に入らない区分に直しました。利息だけを経費にしたい場合は、金額を分けて登録し直してください。`;
+    const { error } = await supabase
+      .from("clinic_expenses")
+      .update({
+        category: NON_EXPENSE_CATEGORIES[0],
+        memo: `${current.memo ?? ""} ${stamp}`.trim(),
+      })
+      .eq("clinic_id", clinicId)
+      .eq("id", id);
+
+    if (error) throw error;
+
+    revalidatePath("/admin/expenses");
+    revalidatePath("/admin/expenses/check");
+    revalidatePath("/admin/dashboard");
+    return { success: true };
+  } catch (error) {
+    console.error("Error converting entry to repayment:", error);
+    return { success: false, error: "変更に失敗しました" };
+  }
+}
+
 /** 「見たけれど、これで正しい」ぶんに印をつけて、次回から出さないようにする。 */
 export async function markEntryChecked(
   id: string,
@@ -167,6 +211,47 @@ export async function markEntryChecked(
   } catch (error) {
     console.error("Error marking entry checked:", error);
     return { success: false, error: "更新に失敗しました" };
+  }
+}
+
+/**
+ * この記帳にコメントを書き足す（「違う」「修正した理由」「その他」など自由に）。
+ * 既存のメモは消さず、末尾に追記する。
+ */
+export async function addEntryComment(
+  id: string,
+  comment: string,
+): Promise<{ success: boolean; error?: string }> {
+  await requireRole(["owner", "admin"]);
+  const { clinicId } = await checkAdminAuth();
+  const trimmed = comment.trim();
+  if (!trimmed) return { success: false, error: "コメントを入れてください" };
+  try {
+    const supabase = await createClient();
+    const { data: current, error: readError } = await supabase
+      .from("clinic_expenses")
+      .select("memo")
+      .eq("clinic_id", clinicId)
+      .eq("id", id)
+      .maybeSingle();
+    if (readError) throw readError;
+    if (!current) return { success: false, error: "その記帳が見つかりませんでした" };
+
+    const stamp = `【${today()} コメント】${trimmed}`;
+    const { error } = await supabase
+      .from("clinic_expenses")
+      .update({ memo: `${current.memo ?? ""} ${stamp}`.trim() })
+      .eq("clinic_id", clinicId)
+      .eq("id", id);
+
+    if (error) throw error;
+
+    revalidatePath("/admin/expenses");
+    revalidatePath("/admin/expenses/check");
+    return { success: true };
+  } catch (error) {
+    console.error("Error adding entry comment:", error);
+    return { success: false, error: "保存に失敗しました" };
   }
 }
 

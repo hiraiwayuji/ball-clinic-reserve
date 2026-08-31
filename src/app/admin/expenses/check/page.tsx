@@ -12,24 +12,36 @@ import {
   Check,
   CheckCircle2,
   ImageOff,
+  Landmark,
   Loader2,
+  MessageSquarePlus,
   Receipt,
   ShieldCheck,
   Trash2,
   X,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import Image from "next/image";
 import { toast } from "sonner";
 import {
   getEntryAuditFindings,
   convertEntryToIncome,
   convertEntryToExpense,
+  convertEntryToRepayment,
   markEntryChecked,
+  addEntryComment,
 } from "@/app/actions/entry-audit";
 import { getMyRole } from "@/app/actions/auth";
 import { updateExpense, deleteExpense } from "@/app/actions/sales";
 import type { AuditFinding } from "@/lib/entry-audit";
+
+/** memo に追記されたユーザーコメント（【YYYY-MM-DD コメント】本文）だけを取り出す。 */
+function extractComments(memo: string | null): { date: string; text: string }[] {
+  if (!memo) return [];
+  const matches = [...memo.matchAll(/【(\d{4}-\d{2}-\d{2}) コメント】([^【]*)/g)];
+  return matches.map((m) => ({ date: m[1], text: m[2].trim() })).filter((c) => c.text);
+}
 
 /**
  * 記帳チェック
@@ -42,6 +54,12 @@ import type { AuditFinding } from "@/lib/entry-audit";
  * ・各カードに「今：経費」「今：収入」の色つきバッジを必ず出す（現在の状態を先に見せる）
  * ・「直すと → 収入になります／経費になります」を矢印で明示する
  * ・逆方向（収入に登録された買い物）も見るようにした（見つけるだけでなく、その場で直せる）
+ * ・領収書の写真をその場で見られるようにした
+ *
+ * 同じ日、「違う・修正・その他のときにコメントできるように」「PayPayの借入返済は
+ * どの経費にすればいいか分からない」との声を受けてさらに追加：
+ * ・自由記述のコメントを残せるようにした（何を確認したか・なぜ直したかの記録用）
+ * ・「借入返済」の区分を新設（元金の返済は経費ではないため、経費の合計から自動で除く）
  */
 export default function ExpenseCheckPage() {
   const [findings, setFindings] = useState<AuditFinding[]>([]);
@@ -55,6 +73,9 @@ export default function ExpenseCheckPage() {
   // 同じ記帳が2つの規則で2行に出ることがあるので、記帳idではなく行ごとのキーで持つ。
   const [editingDateId, setEditingDateId] = useState<string | null>(null);
   const [editingDate, setEditingDate] = useState("");
+  // コメントを書いているところ（押した行のキー）と、入力中の本文。
+  const [commentingId, setCommentingId] = useState<string | null>(null);
+  const [commentText, setCommentText] = useState("");
   // 見ている領収書画像（クリックで大きく表示するため）。null なら閉じている。
   const [viewingImage, setViewingImage] = useState<{ url: string; label: string } | null>(null);
   const [, startTransition] = useTransition();
@@ -109,6 +130,27 @@ export default function ExpenseCheckPage() {
     });
   };
 
+  const handleToRepayment = (finding: AuditFinding) => {
+    const label = finding.entry.description || "この記帳";
+    if (
+      !confirm(
+        `「${label}」を「借入返済（経費にしない）」に直します。\n元金の返済は経費ではないので、経費の合計・確定申告からは自動で除かれます。\nよろしいですか？`,
+      )
+    )
+      return;
+    setBusyId(finding.entry.id);
+    startTransition(async () => {
+      const res = await convertEntryToRepayment(finding.entry.id);
+      setBusyId(null);
+      if (res.success) {
+        toast.success("借入返済に直しました");
+        load();
+      } else {
+        toast.error(res.error ?? "変更に失敗しました");
+      }
+    });
+  };
+
   const handleChecked = (finding: AuditFinding) => {
     setBusyId(finding.entry.id);
     startTransition(async () => {
@@ -138,6 +180,26 @@ export default function ExpenseCheckPage() {
         load();
       } else {
         toast.error(res.error ?? "変更に失敗しました");
+      }
+    });
+  };
+
+  const handleSaveComment = (finding: AuditFinding) => {
+    if (!commentText.trim()) {
+      toast.error("コメントを入れてください");
+      return;
+    }
+    setBusyId(finding.entry.id);
+    startTransition(async () => {
+      const res = await addEntryComment(finding.entry.id, commentText);
+      setBusyId(null);
+      if (res.success) {
+        toast.success("コメントを保存しました");
+        setCommentingId(null);
+        setCommentText("");
+        load();
+      } else {
+        toast.error(res.error ?? "保存に失敗しました");
       }
     });
   };
@@ -213,7 +275,8 @@ export default function ExpenseCheckPage() {
             </p>
             <p>
               見て問題なければ <b>「これで正しい」</b>（次から出ません）／日付の読み違いは <b>「日付を直す」</b>
-              ／二重・まるごと記帳は <b>「消す」</b>
+              ／二重・まるごと記帳は <b>「消す」</b>／借入の返済だったら <b>「借入返済に直す」</b>
+              ／違う・修正した理由などは <b>「コメント」</b> に残せます
             </p>
           </div>
 
@@ -231,6 +294,7 @@ export default function ExpenseCheckPage() {
               {findings.map((f, i) => {
                 const rowKey = `${f.entry.id}-${f.rule}-${i}`;
                 const isIncomeNow = f.currentType === "income";
+                const comments = extractComments(f.entry.memo);
                 return (
                   <li
                     key={rowKey}
@@ -292,6 +356,50 @@ export default function ExpenseCheckPage() {
                             になります
                           </p>
                         )}
+
+                        {comments.length > 0 && (
+                          <div className="mt-1.5 space-y-1 rounded-md bg-white/70 border border-slate-200 p-2">
+                            {comments.map((c, ci) => (
+                              <p key={ci} className="text-xs text-slate-600">
+                                <span className="font-bold text-slate-500">{c.date}のコメント：</span>
+                                {c.text}
+                              </p>
+                            ))}
+                          </div>
+                        )}
+
+                        {canFix && commentingId === rowKey && (
+                          <div className="mt-1.5 space-y-2">
+                            <Textarea
+                              value={commentText}
+                              onChange={(e) => setCommentText(e.target.value)}
+                              placeholder="例：これは違う、〇〇の理由で△△に直した、内訳が分からず保留 など"
+                              className="text-sm"
+                              rows={3}
+                            />
+                            <div className="flex gap-2">
+                              <Button size="sm" onClick={() => handleSaveComment(f)} disabled={busyId === f.entry.id}>
+                                {busyId === f.entry.id ? (
+                                  <Loader2 className="w-4 h-4 animate-spin" />
+                                ) : (
+                                  <Check className="w-4 h-4" />
+                                )}
+                                コメントを保存
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => {
+                                  setCommentingId(null);
+                                  setCommentText("");
+                                }}
+                              >
+                                <X className="w-4 h-4" />
+                                やめる
+                              </Button>
+                            </div>
+                          </div>
+                        )}
                       </div>
                       <div className="flex gap-2 flex-wrap">
                         {!canFix && (
@@ -317,6 +425,18 @@ export default function ExpenseCheckPage() {
                               <ArrowLeftRight className="w-4 h-4" />
                             )}
                             経費に直す
+                          </Button>
+                        )}
+                        {canFix && f.rule === "card_bulk" && !isIncomeNow && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="text-indigo-700 border-indigo-200 hover:bg-indigo-50"
+                            onClick={() => handleToRepayment(f)}
+                            disabled={busyId === f.entry.id}
+                          >
+                            <Landmark className="w-4 h-4" />
+                            借入返済に直す
                           </Button>
                         )}
                         {canFix && editingDateId === rowKey ? (
@@ -357,6 +477,18 @@ export default function ExpenseCheckPage() {
                                   日付を直す
                                 </Button>
                               )}
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => {
+                                  setCommentingId(rowKey);
+                                  setCommentText("");
+                                }}
+                                disabled={busyId === f.entry.id}
+                              >
+                                <MessageSquarePlus className="w-4 h-4" />
+                                コメント
+                              </Button>
                               <Button
                                 size="sm"
                                 variant="outline"

@@ -15,7 +15,7 @@
  * 他のツール（BMR・ガードワークなど）でも同じ規則を使い回せるようにするため。
  */
 
-import { BASE_EXPENSE_CATEGORIES } from "./expense-categories";
+import { BASE_EXPENSE_CATEGORIES, NON_EXPENSE_CATEGORIES } from "./expense-categories";
 
 export type AuditEntry = {
   id: string;
@@ -70,6 +70,7 @@ const EXPENSE_WORDS =
 
 const norm = (s: string | null | undefined) => (s ?? "").replace(/\s+/g, "");
 const EXPENSE_CATEGORY_SET = new Set<string>(BASE_EXPENSE_CATEGORIES as readonly string[]);
+const NON_EXPENSE_CATEGORY_SET = new Set<string>(NON_EXPENSE_CATEGORIES as readonly string[]);
 
 /** 「これで正しい」と印をつけた記帳か。 */
 export function isChecked(entry: AuditEntry): boolean {
@@ -83,7 +84,10 @@ export function isChecked(entry: AuditEntry): boolean {
  * @param today 判定に使う日（テストしやすいように差し込めるようにしてある）
  */
 export function auditEntries(entries: AuditEntry[], today = new Date()): AuditFinding[] {
-  const targets = entries.filter((e) => !isChecked(e));
+  // 借入返済に直した行は、もう経費の合計に入らない＝もはや「経費か収入か」を問う対象ではない。
+  const targets = entries.filter(
+    (e) => !isChecked(e) && !NON_EXPENSE_CATEGORY_SET.has((e.category ?? "").trim()),
+  );
   const expenseRows = targets.filter((e) => (e.entry_type ?? "expense") === "expense");
   const incomeRows = targets.filter((e) => e.entry_type === "income");
 

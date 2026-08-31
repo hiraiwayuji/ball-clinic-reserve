@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { countNewAndReturnVisits } from "@/lib/patient-count";
 import { findCustomersByName } from "@/lib/customer-match";
 import { checkAdminAuth, requireRole } from "@/app/actions/auth";
+import { NON_EXPENSE_CATEGORIES } from "@/lib/expense-categories";
 
 /** Asia/Tokyo の今日 (yyyy-MM-dd)。tally.ts と同じ実装 */
 function todayJst(): string {
@@ -1676,6 +1677,7 @@ export async function getMonthlyExpenses(year: number, month: number) {
       .select("amount, category")
       .eq("clinic_id", clinicId)
       .eq("entry_type", "expense") // 収入（その他収入）は経費合計に含めない
+      .not("category", "in", `(${NON_EXPENSE_CATEGORIES.map((c) => `"${c}"`).join(",")})`) // 借入返済は経費ではない
       .gte("expense_date", startOfMonth)
       .lte("expense_date", endOfMonth);
 
@@ -2025,11 +2027,13 @@ export async function getAnnualTaxData(
             .select("amount")
             .eq("clinic_id", clinicId)
             .eq("payment_month", startDate),
-          // 経費
+          // 経費（収入として登録した行・借入返済は含めない）
           supabase
             .from("clinic_expenses")
             .select("amount, category")
             .eq("clinic_id", clinicId)
+            .eq("entry_type", "expense")
+            .not("category", "in", `(${NON_EXPENSE_CATEGORIES.map((c) => `"${c}"`).join(",")})`)
             .gte("expense_date", startDate)
             .lte("expense_date", endDate),
           // 来院数（自費）。人数を数えるので名前と日付も要る
@@ -2090,6 +2094,8 @@ export async function getAnnualTaxData(
       .from("clinic_expenses")
       .select("expense_date, category, description, amount, memo")
       .eq("clinic_id", clinicId)
+      .eq("entry_type", "expense")
+      .not("category", "in", `(${NON_EXPENSE_CATEGORIES.map((c) => `"${c}"`).join(",")})`)
       .gte("expense_date", startOfYear)
       .lte("expense_date", endOfYear)
       .order("expense_date", { ascending: true });
