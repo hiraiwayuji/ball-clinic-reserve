@@ -801,7 +801,9 @@ function ReserveContent() {
                   <div className="order-0 bg-emerald-500/10 border border-emerald-500/30 rounded-2xl p-4 text-sm text-emerald-100">
                     <p className="font-bold mb-1">📋 ご予約の流れ</p>
                     <p className="text-emerald-200/80 text-xs leading-relaxed">
-                      ① まず「施術コース」をお選びください ② 続いて「スタッフ指名」（任意） ③ そのコース時間で空いている日時をご選択ください
+                      {canPickStaff
+                        ? "① まず「施術コース」をお選びください ② 続いて「スタッフ指名」（任意） ③ そのコース時間で空いている日時をご選択ください"
+                        : "① まず「施術コース」をお選びください ② そのコース時間で空いている日時をご選択ください"}
                     </p>
                   </div>
                 )}

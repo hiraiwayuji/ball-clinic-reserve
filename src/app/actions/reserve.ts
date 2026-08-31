@@ -78,7 +78,7 @@ async function getStaffWeeklyHours(
     return { weekly: [], prep: 0 };
   }
 }
-import { getBookingHorizonDays, getCurrentSchedule, getCurrentSlotDuration, getRequireLineLink } from "@/app/actions/clinic-slot";
+import { getBookingHorizonDays, getCurrentSchedule, getCurrentSlotDuration, getRequireLineLink, getCurrentPatientCanPickStaff } from "@/app/actions/clinic-slot";
 import { getCustomerLineState } from "@/lib/line-links";
 import { unstable_noStore as noStore } from "next/cache";
 
@@ -1011,6 +1011,18 @@ export async function createReservation(formData: FormData) {
             staffViaRequiredCourse = true;
           }
         }
+      }
+
+      // ── 患者の指名不可（patient_can_pick_staff=false）の院では、クライアントが
+      // 送ってきた staffId を無条件に信用しない ──
+      // required_staff_id 由来（staffViaRequiredCourse）はメニュー側の正当な固定担当なので通す。
+      // それ以外の staffId（画面のタブ切り替えの状態不整合・古い画面・直接送信など）は
+      // 「担当なし」として無視し、この後の pickStaffForBooking の自動割当（からだの場合
+      // available_for_online_booking=false の先生は候補から除外される）に委ねる。
+      // 2026-08-31: からだ・藤川先生の枠にリメイク/ピラティス以外の予約が入る事故で追加。
+      if (staffId && !staffViaRequiredCourse && !(await getCurrentPatientCanPickStaff())) {
+        staffId = null;
+        staffName = null;
       }
 
       // ── 指名スタッフの出勤日チェック ──
