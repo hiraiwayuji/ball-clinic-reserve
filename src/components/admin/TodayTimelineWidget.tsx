@@ -234,6 +234,30 @@ export default function TodayTimelineWidget({
   // state の再レンダー待ちだとタイミングがズレるので、直近の判定は ref で持つ。
   const pointerDragRef = useRef<{ aptId: string; startX: number; startY: number; moved: boolean } | null>(null);
   const dropTargetRef = useRef<{ dateKey: string; staffId: string; minute: number } | null>(null);
+
+  /**
+   * カーソル座標から「その予約の新しい開始時刻」を求める。
+   * カーソルが乗っているマス＝そのまま新しい開始時刻（掴んだ位置による補正はしない。
+   * 補正ありだと「バーのどこを掴んだか」で結果が変わり、ハイライトと登録時刻が
+   * 食い違って見えるため。2026-09-01 藤川先生指摘で単純化）。
+   * pointermove の連発は setState のたびに巨大なタイムライン全体を再描画するため、
+   * 動きが速いドラッグだと描画が追いつかず、古いカーソル位置が残ることがある。
+   * そのため pointerup では必ずその時点の座標でこの関数を呼び直し、
+   * pointermove側の dropTargetRef には頼らない（あちらはハイライト表示専用）。
+   */
+  const computeDropTarget = (
+    clientX: number,
+    clientY: number,
+  ): { dateKey: string; staffId: string; minute: number } | null => {
+    const el = document.elementFromPoint(clientX, clientY) as HTMLElement | null;
+    const cell = el?.closest<HTMLElement>("[data-cell-date]");
+    if (!cell) return null;
+    return {
+      dateKey: cell.dataset.cellDate!,
+      staffId: cell.dataset.cellStaff!,
+      minute: Number(cell.dataset.cellMinute),
+    };
+  };
   // ドラッグして動かした直後は、その pointerup に続く click（＝詳細モーダルを開く）を無視する
   const suppressNextClickRef = useRef(false);
 
@@ -534,6 +558,18 @@ export default function TodayTimelineWidget({
 
   // 担当未設定の予約を表示するデフォルト行（先頭スタッフ＝sort_order 最小のメイン担当）
   const defaultStaffId = data?.staff[0]?.id ?? null;
+
+  // ドラッグ中の予約の所要時間（分）。ドロップ先のハイライトを「1コマだけ」ではなく
+  // 実際の予約の長さぶん出すために使う（40分の予約を20分幅のマスだけでハイライトすると、
+  // どちらの端をどこに合わせればいいか分からず誤操作の原因になる＝2026-09-01 藤川先生指摘）。
+  const draggingAptDuration = (() => {
+    if (!draggingAptId || !data) return null;
+    const apt = allAppointments.find((x) => x.id === draggingAptId);
+    if (!apt) return null;
+    const s = minuteOfDayJst(apt.start_time);
+    const e = apt.end_time ? minuteOfDayJst(apt.end_time) : s + data.slotMinutes;
+    return Math.max(e - s, data.slotMinutes);
+  })();
 
   // キャンセル済みは動かす意味がないのでドラッグ不可。
   // 複数担当の予約は行ごとに時間を分割して描いているが、掴めるのは先頭担当のバーだけにして
@@ -1472,7 +1508,7 @@ export default function TodayTimelineWidget({
                           </button>
                         );
                       })}
-                    <div className="px-2 py-1 text-sm font-medium text-slate-800 dark:text-slate-100 flex flex-col gap-0.5 sticky left-0 bg-white dark:bg-slate-900 z-10 border-r border-slate-200 dark:border-slate-700" style={{ gridRow: "1 / -1" }}>
+                    <div data-staff-name-col className="px-2 py-1 text-sm font-medium text-slate-800 dark:text-slate-100 flex flex-col gap-0.5 sticky left-0 bg-white dark:bg-slate-900 z-10 border-r border-slate-200 dark:border-slate-700" style={{ gridRow: "1 / -1", gridColumn: "1" }}>
                       <div className="flex items-center justify-between gap-1">
                       {userRole === "owner" ? (
                         <button
@@ -1611,8 +1647,15 @@ export default function TodayTimelineWidget({
                     </div>
                     {/* グリッドセル（クリックで新規予約 / 予約バーのドロップ先） */}
                     {timeMarks.map((m, i) => {
+                      // ハイライトは1マスだけでなく、予約の所要時間ぶんの範囲で出す
+                      // （40分の予約を20分幅のマスだけでハイライトすると、バーとマスの大きさが
+                      // 合わず「どちらの端をどこに合わせるか」分からなくなるため）。
                       const isDropHere =
-                        dropTarget?.dateKey === day.date && dropTarget?.staffId === s.id && dropTarget?.minute === m.minute;
+                        dropTarget != null &&
+                        dropTarget.dateKey === day.date &&
+                        dropTarget.staffId === s.id &&
+                        m.minute >= dropTarget.minute &&
+                        m.minute < dropTarget.minute + (draggingAptDuration ?? data.slotMinutes);
                       return (
                         <button
                           key={i}
@@ -1625,7 +1668,14 @@ export default function TodayTimelineWidget({
                           title={breakMode
                             ? `${format(dayDate, "M/d", { locale: ja })} ${m.label} ・クリックで休憩（予約ブロック）`
                             : `${format(dayDate, "M/d", { locale: ja })} ${s.name} ${m.label} ・クリックで新規予約`}
-                          style={{ gridRow: "1 / -1" }}
+                          // 🚨 gridColumn は必ず明示する。auto配置に任せると、位置を明示している
+                          // 予約バーが先に席を取り、マスはバーの列を「スキップ」して右へ流れる
+                          // （CSS Grid自動配置の仕様）。その結果、バーより右のマス全部が
+                          // バーの幅ぶんズレて、ヘッダーの時刻・ドラッグの落下地点・空きクリックの
+                          // 時刻がすべて狂っていた（2026-09-01 藤川先生報告のドラッグずれの根本原因。
+                          // 例: バー2本(各40分)の右側では常に80分手前に登録されていた）。
+                          // 1列目はスタッフ名なので +2。
+                          style={{ gridRow: "1 / -1", gridColumn: `${i + 2}` }}
                           className={`h-full transition-colors cursor-pointer ${
                             isDropHere
                               ? "bg-blue-200 dark:bg-blue-800/60 ring-1 ring-inset ring-blue-500"
@@ -1718,25 +1768,17 @@ export default function TodayTimelineWidget({
                               (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
                             }
                             e.preventDefault();
-                            // ドラッグ中は全バーが pointer-events-none になるので、下のセルを直接拾える
-                            const el = document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null;
-                            const cell = el?.closest<HTMLElement>("[data-cell-date]");
-                            if (cell) {
-                              const next = {
-                                dateKey: cell.dataset.cellDate!,
-                                staffId: cell.dataset.cellStaff!,
-                                minute: Number(cell.dataset.cellMinute),
-                              };
-                              dropTargetRef.current = next;
-                              setDropTarget((prev) =>
-                                prev?.dateKey === next.dateKey && prev.staffId === next.staffId && prev.minute === next.minute
-                                  ? prev
-                                  : next,
-                              );
-                            } else {
-                              dropTargetRef.current = null;
-                              setDropTarget(null);
-                            }
+                            // ドラッグ中は全バーが pointer-events-none になるので、下のセルを直接拾える。
+                            // ここでの計算は「ハイライト表示用」の目安。巨大なタイムライン全体の再描画を
+                            // 伴うため、動きが速いドラッグだと処理が追いつかず古い座標になりうる
+                            // （実際に落とす場所は onPointerUp でその時点の座標から取り直す＝下記参照）。
+                            const next = computeDropTarget(e.clientX, e.clientY);
+                            dropTargetRef.current = next;
+                            setDropTarget((prev) =>
+                              prev?.dateKey === next?.dateKey && prev?.staffId === next?.staffId && prev?.minute === next?.minute
+                                ? prev
+                                : next,
+                            );
                           }}
                           onPointerUp={(e) => {
                             const st = pointerDragRef.current;
@@ -1744,7 +1786,9 @@ export default function TodayTimelineWidget({
                             if (!st || st.aptId !== a.id) return;
                             if (st.moved) {
                               e.preventDefault();
-                              const target = dropTargetRef.current;
+                              // pointermove側のdropTargetRefは描画の遅れで古い可能性があるため使わず、
+                              // 離した瞬間の座標でその場で計算し直す（ドラッグのズレの主原因への対策）。
+                              const target = computeDropTarget(e.clientX, e.clientY);
                               setDraggingAptId(null);
                               setDropTarget(null);
                               dropTargetRef.current = null;
@@ -1763,6 +1807,13 @@ export default function TodayTimelineWidget({
                             gridColumn: `${gridColStart} / span ${colSpan}`,
                             gridRow: (laneOf.get(`${a.id}-${s.id}`) ?? laneOf.get(a.id) ?? 0) + 1,
                             alignSelf: "stretch",
+                            // グリッドアイテムの既定 min-width は auto。className の truncate（overflow:hidden;
+                            // white-space:nowrap）だけでは、長い患者名・メニュー名が「省略される前の
+                            // 折り返さない全文の幅」で列の最小サイズ計算に効いてしまい、その予約が
+                            // またがる列だけヘッダーより広がって、ヘッダーのラベルと実際のマス位置が
+                            // ズレる（＝ドラッグの登録時刻が離した場所より手前になる）原因になっていた。
+                            // 2026-09-01 実測で発見（藤川先生指摘のドラッグのズレの根本原因）。
+                            minWidth: 0,
                             marginLeft: `${(offsetFrac / colSpan) * 100}%`,
                             width: `${Math.min((widthCols / colSpan) * 100, 100)}%`,
                             ...(linkColor ? { borderColor: linkColor, borderWidth: "2px" } : {}),
