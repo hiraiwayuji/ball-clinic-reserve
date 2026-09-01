@@ -13,7 +13,7 @@ import {
   type AttendanceStaff, type AttendanceConfig, type TodayAttendance, type OvertimeReasonType, type TodayTask, type AttendanceGate,
   type MyAttendanceDay,
 } from "@/app/actions/attendance";
-import { OVERTIME_REASONS } from "@/lib/attendance-constants";
+import { OVERTIME_REASONS, OVERTIME_REASON_LABEL } from "@/lib/attendance-constants";
 import { CLINIC_CONFIG } from "@/lib/clinic-config";
 
 export default function AttendancePage() {
@@ -186,7 +186,6 @@ export default function AttendancePage() {
 
   const submitReason = async () => {
     if (!reasonType) { toast.error("理由を選んでください"); return; }
-    if (reasonType === "valid" && !reasonNote.trim()) { toast.error("正当な理由の内容を入力してください"); return; }
     setBusy(true);
     const r = await clockOut(staffId, { type: reasonType, note: reasonNote });
     setBusy(false);
@@ -379,7 +378,7 @@ export default function AttendancePage() {
             <div className="mt-3 text-xs bg-amber-50 border border-amber-200 rounded-lg p-2 text-amber-800 flex items-start gap-1.5">
               <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
               <span>
-                残業として記録：{OVERTIME_REASONS.find((r) => r.value === today.reasonType)?.label}
+                残業として記録：{OVERTIME_REASON_LABEL[today.reasonType]}
                 {today.reasonNote ? `（${today.reasonNote}）` : ""}
               </span>
             </div>
@@ -657,12 +656,12 @@ export default function AttendancePage() {
               ))}
             </div>
 
-            {(reasonType === "valid" || reasonType === "other") && (
+            {reasonType && (
               <textarea
                 value={reasonNote}
                 onChange={(e) => setReasonNote(e.target.value)}
                 rows={2}
-                placeholder={reasonType === "valid" ? "理由を入力してください（必須）" : "補足があれば（任意）"}
+                placeholder="補足があれば（任意）"
                 className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm bg-white"
               />
             )}

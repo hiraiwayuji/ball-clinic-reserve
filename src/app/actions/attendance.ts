@@ -6,6 +6,8 @@ import { CLINIC_CONFIG } from "@/lib/clinic-config";
 import { pushLineToOwners } from "@/lib/admin-notify";
 import { requireRole } from "@/app/actions/auth";
 import { OVERTIME_REASON_LABEL } from "@/lib/attendance-constants";
+import { judgeOvertime } from "@/lib/attendance-judgment";
+import type { OvertimeReasonType, AttendanceJudgment } from "@/lib/attendance-judgment";
 import {
   isAttendanceDeviceUnlocked,
   setAttendanceDeviceUnlocked,
@@ -29,7 +31,9 @@ import { writeAudit } from "@/lib/audit";
 
 // ── 共通 ───────────────────────────────────────────────
 
-export type OvertimeReasonType = "requested" | "closing" | "valid" | "other";
+// 残業理由の型と判定は "@/lib/attendance-judgment"（純粋関数・単体テスト可）に置く。
+// ここからは型を再 export するだけ（"use server" は値を export できないが型は消えるのでOK）。
+export type { OvertimeReasonType, AttendanceJudgment } from "@/lib/attendance-judgment";
 
 // 値（OVERTIME_REASONS / OVERTIME_REASON_LABEL / JUDGMENT_LABEL）は
 // "@/lib/attendance-constants" に分離（"use server" は値を export できないため）。
@@ -121,6 +125,29 @@ async function getShiftEndMinutes(
   }
   if (weekly?.end_time) return toMinutes(String(weekly.end_time).slice(0, 5));
   return null;
+}
+
+/**
+ * その日その人の「これを過ぎたら残業（＝理由の入力が要る）」時刻を分で返す。
+ *
+ * シフトが登録されている日 … シフト終了 ＋ 猶予（clinic_settings.overtime_grace_minutes、既定10分）
+ * シフトが無い日           … 固定時刻（clinic_settings.overtime_reason_after、既定20:15）
+ *
+ * ※退勤打刻(clockOut)と院長の時刻修正(setAttendanceTimes)の両方がこの1本を使う。
+ *   片方だけ直すと「打刻では残業なのに一覧では定時」のような食い違いが出るため、
+ *   計算式をここ以外に書かないこと。
+ */
+async function overtimeThresholdMinutes(
+  db: ReturnType<typeof admin>,
+  clinicId: string,
+  staffId: string,
+  dateStr: string,
+  cfg: AttendanceConfig,
+): Promise<number> {
+  const shiftEndMin = await getShiftEndMinutes(db, clinicId, staffId, dateStr);
+  return shiftEndMin != null
+    ? shiftEndMin + cfg.overtimeGraceMinutes
+    : toMinutes(cfg.overtimeReasonAfter);
 }
 
 // ── 打刻ページ（ログイン不要） ─────────────────────────
@@ -531,10 +558,7 @@ export async function clockOut(
   // シフト終わりから10分以内の退社は残業扱いにしない。それを過ぎたら理由の入力が要る。
   // シフトが登録されていない日（休みの日に出た／曜日テンプレも単発設定も無い）は、
   // 判定材料が無いので従来どおり固定時刻（既定20:15）にフォールバックする。
-  const shiftEndMin = await getShiftEndMinutes(db, PUBLIC_CLINIC_ID, staffId, date);
-  const overtimeAfterMin = shiftEndMin != null
-    ? shiftEndMin + cfg.overtimeGraceMinutes
-    : toMinutes(cfg.overtimeReasonAfter);
+  const overtimeAfterMin = await overtimeThresholdMinutes(db, PUBLIC_CLINIC_ID, staffId, date, cfg);
   const isOvertime = minutes > overtimeAfterMin;
 
   // ── 退勤ゲート：当日の業務が全部「できた/できない」申告済みでないと退勤できない ──
@@ -550,6 +574,8 @@ export async function clockOut(
 
   if (isOvertime) {
     if (!reason?.type) return { success: false, requireReason: true, isOvertime: true };
+    // 旧タイプ "valid"（正当な理由）用のガード。現在の選択肢には無いので通常は通らないが、
+    // 古い画面を開きっぱなしのタブから送られてきたときのために残す。
     if (reason.type === "valid" && !reason.note?.trim()) {
       return { success: false, requireReason: true, isOvertime: true, error: "「正当な理由」を選んだ場合は内容を入力してください。" };
     }
@@ -866,10 +892,7 @@ export async function setAttendanceTimes(
 
   // 退勤を直したら残業かどうかも判定し直す（時刻だけ直って判定が古いままだと辻褄が合わない）
   const cfg = await getAttendanceConfig();
-  const shiftEndMin = await getShiftEndMinutes(db, auth.clinicId, before.staff_id as string, workDate);
-  const overtimeAfterMin = shiftEndMin != null
-    ? shiftEndMin + cfg.overtimeGraceMinutes
-    : toMinutes(cfg.overtimeReasonAfter);
+  const overtimeAfterMin = await overtimeThresholdMinutes(db, auth.clinicId, before.staff_id as string, workDate, cfg);
   const isOvertime = clockOutAt
     ? jstPartsOf(clockOutAt).minutes > overtimeAfterMin
     : false;
@@ -918,16 +941,7 @@ export async function setAttendanceTimes(
 
 // ── Phase 2/3: 無駄な被り判定＋コスト・折半計算 ──────────
 
-/**
- * 残業の正当性判定。
- * - requested  : 院長の依頼（理由＝requested）
- * - reservation: 20:00超の予約の担当だった（予約表と突合）
- * - closing    : 締め担当が締め許容時刻内に締め作業（理由＝closing）
- * - valid      : 正当な理由（自己申告。owner確認用）
- * - wasteful   : 上記いずれでもない＝ムダな残業（折半の対象候補）
- */
-export type AttendanceJudgment = "requested" | "reservation" | "closing" | "valid" | "wasteful";
-
+// AttendanceJudgment の型定義と判定関数は "@/lib/attendance-judgment"、
 // JUDGMENT_LABEL の値は "@/lib/attendance-constants" に分離。
 
 export type NotDoneTask = { title: string; reason: string | null };
@@ -1121,11 +1135,12 @@ export async function getAttendanceReport(
       const apptEnd = lastApptEnd.get(`${staffId}|${workDate}`) ?? 0;
       const hasLateReservation = apptEnd > baseMin;
 
-      if (reasonType === "requested") judgment = "requested";
-      else if (hasLateReservation) judgment = "reservation";
-      else if (reasonType === "closing" && closingStaffId === staffId && coMin <= closingUntilMin) judgment = "closing";
-      else if (reasonType === "valid") judgment = "valid";
-      else judgment = "wasteful";
+      judgment = judgeOvertime({
+        reasonType,
+        hasLateReservation,
+        isClosingStaff: closingStaffId === staffId,
+        withinClosingAllowance: coMin <= closingUntilMin,
+      });
 
       if (judgment === "wasteful" && wage != null) {
         fullPayYen = Math.round((wage * overtimeMinutes) / 60);

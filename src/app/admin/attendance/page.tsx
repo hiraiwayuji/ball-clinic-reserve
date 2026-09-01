@@ -15,7 +15,7 @@ import {
   getMonthlyAttendanceForExcel, getAttendanceClinicName,
   type AttendanceConfig, type OwnerStaffWage, type AttendanceReportRecord, type AttendanceSummary, type AttendanceJudgment,
 } from "@/app/actions/attendance";
-import { JUDGMENT_LABEL } from "@/lib/attendance-constants";
+import { JUDGMENT_LABEL, OVERTIME_REASON_LABEL } from "@/lib/attendance-constants";
 import { downloadMonthlyAttendanceExcel } from "@/lib/attendance-excel";
 
 const COLOR: Record<string, string> = {
@@ -618,6 +618,11 @@ export default function AttendanceAdminPage() {
                           {r.judgment === "wasteful" && <AlertTriangle className="w-3 h-3" />}
                           {JUDGMENT_LABEL[r.judgment]}
                         </span>
+                        {r.reasonType && (
+                          <span className="block text-[11px] text-slate-500">
+                            選んだ理由：{OVERTIME_REASON_LABEL[r.reasonType]}
+                          </span>
+                        )}
                         {r.reasonNote && <span className="block text-[11px] text-slate-500">{r.reasonNote}</span>}
                         {r.judgment === "wasteful" && (
                           <span className="block text-[11px] text-rose-600">
