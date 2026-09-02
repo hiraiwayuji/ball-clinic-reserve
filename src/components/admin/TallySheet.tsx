@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState, useTransition, useCallback, useRef } from
 import { format } from "date-fns";
 import Link from "next/link";
 import { toast } from "sonner";
-import { Loader2, Plus, Trash2, Save, RefreshCw, BarChart3, Coins, UserPlus, CalendarDays, CalendarPlus, CheckCircle2, History } from "lucide-react";
+import { Loader2, Plus, Trash2, Save, RefreshCw, BarChart3, Coins, UserPlus, CalendarDays, CalendarPlus, CheckCircle2, History, X, AlertTriangle } from "lucide-react";
 import {
   getTallySheet,
   saveTallySheet,
@@ -20,6 +20,7 @@ import { updateSalePatientIdentity } from "@/app/actions/sales";
 import { AddAppointmentDialog } from "@/components/admin/AddAppointmentDialog";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import type { TallyColumn } from "@/lib/tally-columns";
+import { nameKey } from "@/lib/patient-count";
 
 type UIRow = {
   _id: number;
@@ -88,10 +89,87 @@ function blankRow(): UIRow {
 }
 
 const yen = (n: number) => `¥${n.toLocaleString()}`;
+
+/**
+ * 金額欄の文字列を半角の数字だけにそろえる。
+ * 全角数字（１５００）・全角や長音のマイナス（－ − ー）・カンマ・「円」「¥」・空白を吸収する。
+ * 以前は全角数字がそのまま 0 扱いになり、画面では入っているのに保存すると消える
+ * 「数字が静かに狂う」事故があった。
+ */
+const normalizeAmountText = (v: unknown): string =>
+  String(v ?? "")
+    .normalize("NFKC")
+    .replace(/[\u2212\u30FC\u2015\u2013\u2014]/g, "-")
+    .replace(/[,，¥￥円\s]/g, "");
+
+/** 金額欄の中身が「数字だけ」（先頭のマイナスは許す）か。空欄は未入力なので問題なし扱い */
+const isValidAmountText = (v: string): boolean => {
+  const t = normalizeAmountText(v);
+  return t === "" || /^-?\d+$/.test(t);
+};
+
 const num = (s: string) => {
-  const n = parseInt((s ?? "").replace(/[^0-9-]/g, ""), 10);
+  const n = parseInt(normalizeAmountText(s), 10);
   return Number.isFinite(n) ? n : 0;
 };
+
+/** 金額欄のエラー文言（無ければ null）。マイナスと数字以外は保存させない */
+const amountCellError = (v: string): string | null => {
+  if ((v ?? "").trim() === "") return null;
+  if (!isValidAmountText(v)) return "数字以外が入っています";
+  if (num(v) < 0) return "マイナスは入れられません";
+  return null;
+};
+
+/** 明示的に 0 が入っている欄か（未入力の空欄とは区別する） */
+const isExplicitZero = (v: string): boolean =>
+  normalizeAmountText(v) !== "" && amountCellError(v) === null && num(v) === 0;
+
+/**
+ * 「未保存の入力があるか」を見るための行の指紋。
+ * 会計済チェック（その場で保存される）と画面内だけの値は含めない。
+ */
+function rowSignature(r: UIRow): string {
+  const amounts: Record<string, string> = {};
+  for (const [k, v] of Object.entries(r.amounts)) {
+    const t = normalizeAmountText(v);
+    if (t !== "") amounts[k] = t;
+  }
+  const variants: Record<string, string> = {};
+  for (const [k, v] of Object.entries(r.variants)) if ((v ?? "").trim()) variants[k] = v.trim();
+  return JSON.stringify({
+    n: r.customer_name.trim(),
+    m: r.medical_record_number.trim(),
+    t: r.minutes.trim(),
+    s: r.staff_id ?? null,
+    f: r.is_first_visit,
+    a: amounts,
+    v: variants,
+  });
+}
+
+/** 何も入っていない行（末尾の空行など）。未保存の判定から外す */
+function isBlankRow(r: UIRow): boolean {
+  return (
+    r.customer_name.trim() === "" &&
+    r.medical_record_number.trim() === "" &&
+    r.minutes.trim() === "" &&
+    !r.staff_id &&
+    !r.is_first_visit &&
+    !Object.values(r.amounts).some((v) => (v ?? "").trim() !== "")
+  );
+}
+
+/** いちばん近いスクロールする親要素（管理画面は main がスクロールすることがある） */
+function getScrollParent(el: HTMLElement | null): HTMLElement | Window {
+  let cur = el?.parentElement ?? null;
+  while (cur) {
+    const oy = getComputedStyle(cur).overflowY;
+    if ((oy === "auto" || oy === "scroll") && cur.scrollHeight > cur.clientHeight) return cur;
+    cur = cur.parentElement;
+  }
+  return window;
+}
 
 /** 変更履歴1件を「保険施術: ¥1,500 → ¥1,800」のような行の配列にする（削除は変更後がnull） */
 function changeLogLines(entry: TallyChangeLogEntry, columns: TallyColumn[]): string[] {
@@ -131,10 +209,21 @@ const DEFAULT_FIXED_W: Record<string, number> = {
   __total: 92, __new: 48, __done: 58, __next: 86, __del: 36,
 };
 
-export default function TallySheet({ initialDate }: { initialDate?: string }) {
+export default function TallySheet({
+  initialDate,
+  focusName,
+  focusAppointmentId,
+}: {
+  initialDate?: string;
+  /** 受付カウンターの「日計表で会計」から来たときの、案内したい方のお名前 */
+  focusName?: string;
+  /** 同じく、その方の予約ID（こちらが優先。同姓同名でも間違えない） */
+  focusAppointmentId?: string;
+}) {
   const [date, setDate] = useState<string>(
     initialDate || format(new Date(), "yyyy-MM-dd"),
   );
+  const rootRef = useRef<HTMLDivElement>(null);
   const [columns, setColumns] = useState<TallyColumn[]>([]);
   const [monthCrossIds, setMonthCrossIds] = useState<Set<string>>(new Set());
   const [staff, setStaff] = useState<TallyStaff[]>([]);
@@ -268,8 +357,14 @@ export default function TallySheet({ initialDate }: { initialDate?: string }) {
     if (tableScrollRef.current && topScrollRef.current) topScrollRef.current.scrollLeft = tableScrollRef.current.scrollLeft;
   };
 
-  const load = useCallback((d: string) => {
-    setLoading(true);
+  // 読み込んだ時点（または保存した時点）の各行の指紋。これと今の行を比べて「未保存」を出す。
+  // 行ごと（_id ごと）に持つので、飛び込み行を消しても他の行の未保存状態は消えない。
+  const [baseline, setBaseline] = useState<Map<number, string>>(new Map());
+  const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
+
+  const load = useCallback((d: string, opts?: { silent?: boolean }) => {
+    // silent: 保存直後の再読み込みなど。表を出したまま差し替える（画面が「読み込み中」に切り替わらない）
+    if (!opts?.silent) setLoading(true);
     // 月またぎ（今月1回目）の予約IDを取って「月初」の印を出す。保険証確認・署名の見落とし防止。
     getMonthCrossingFirstVisits(`${d}T00:00:00+09:00`, `${d}T23:59:59+09:00`)
       .then((ids) => setMonthCrossIds(new Set(ids)))
@@ -284,14 +379,81 @@ export default function TallySheet({ initialDate }: { initialDate?: string }) {
         // 入力しやすいよう常に末尾に空行を1つ用意
         ui.push(blankRow());
         setRows(ui);
+        setBaseline(new Map(ui.map((r) => [r._id, rowSignature(r)])));
       })
       .catch(() => toast.error("日計表の読み込みに失敗しました"))
-      .finally(() => setLoading(false));
+      .finally(() => { if (!opts?.silent) setLoading(false); });
   }, []);
 
   useEffect(() => {
     load(date);
+    setLastSavedAt(null);
   }, [date, load]);
+
+  // 未保存の入力があるか（読み込み時／保存時の指紋と今の行を比べる）
+  const isDirty = useMemo(() => {
+    for (const r of rows) {
+      const b = baseline.get(r._id);
+      if (b == null) {
+        if (!isBlankRow(r)) return true; // 追加した行に何か入っている
+      } else if (b !== rowSignature(r)) {
+        return true;
+      }
+    }
+    return false;
+  }, [rows, baseline]);
+
+  // 未保存のままタブを閉じる・別ページへ移るときにブラウザの確認を出す
+  useEffect(() => {
+    if (!isDirty) return;
+    const handler = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [isDirty]);
+
+  const DISCARD_CONFIRM = "保存していない入力があります。捨てて進みますか？";
+  const changeDate = (next: string) => {
+    if (!next || next === date) return;
+    if (isDirty && !confirm(DISCARD_CONFIRM)) return;
+    setDate(next);
+  };
+  const reload = () => {
+    if (isDirty && !confirm(DISCARD_CONFIRM)) return;
+    load(date);
+  };
+
+  // ── 受付カウンターから来たときの案内（該当行へスクロール・数秒ハイライト・金額欄にフォーカス） ──
+  const rowRefs = useRef(new Map<number, HTMLTableRowElement>());
+  const firstAmountRefs = useRef(new Map<number, HTMLInputElement>());
+  const [highlightId, setHighlightId] = useState<number | null>(null);
+  const [focusBanner, setFocusBanner] = useState<{ name: string; found: boolean } | null>(null);
+  const focusHandledRef = useRef(false);
+  useEffect(() => {
+    if (loading || focusHandledRef.current) return;
+    if (!focusName && !focusAppointmentId) return;
+    focusHandledRef.current = true;
+    // 予約IDで探す（同姓同名でも間違えない）→ 無ければ名前（空白ゆれ込み）で探す
+    let target: UIRow | undefined;
+    if (focusAppointmentId) {
+      target = rows.find((r) => r.appointment_id === focusAppointmentId || r.appointment_ids.includes(focusAppointmentId));
+    }
+    if (!target && focusName) {
+      const k = nameKey(focusName);
+      target = rows.find((r) => nameKey(r.customer_name) === k);
+    }
+    setFocusBanner({ name: (target?.customer_name || focusName || "").trim(), found: !!target });
+    if (!target) return;
+    const id = target._id;
+    setHighlightId(id);
+    requestAnimationFrame(() => {
+      rowRefs.current.get(id)?.scrollIntoView({ block: "center", behavior: "smooth" });
+      firstAmountRefs.current.get(id)?.focus();
+    });
+    setTimeout(() => setHighlightId((cur) => (cur === id ? null : cur)), 2500);
+  }, [loading, rows, focusName, focusAppointmentId]);
 
   // 記帳・修正・削除は誰でも、当日・過去日どちらもできる。その代わり、患者ごとに
   // 変わった内容をサーバー側で監査ログに残し、この画面から「変更履歴」で確認できる(2026-08-24)。
@@ -341,8 +503,34 @@ export default function TallySheet({ initialDate }: { initialDate?: string }) {
   const handleDeleteRow = (row: UIRow) => {
     if (row.appointment_id) {
       if (!Object.values(row.amounts).some((v) => v.trim() !== "")) return; // 空なら何もしない
-      if (!confirm(`${row.customer_name || "この行"}様の金額をクリアしますか？\n（本日の予約は残るので、行自体は消えません）`)) return;
-      updateRow(row._id, { amounts: {}, variants: {} });
+      // 以前は画面の金額欄を空にするだけで、保存しても「金額の無い行は送らない」ため
+      // サーバーの記帳が残ったままだった（消したつもりが次に開くと復活する）。
+      // ここでサーバーの記帳もその場で消す。行（予約）は残る。
+      const serverName = (row._originalName || row.customer_name).trim();
+      if (!isToday && !editorName) {
+        toast.error("当日以外を消すときは、上の「操作者」でお名前を選んでください");
+        return;
+      }
+      if (!confirm(`${row.customer_name || "この行"}様の金額を消しますか？\n（この日の予約は残るので、行自体は消えません）`)) return;
+      startSaving(async () => {
+        // カルテ番号は空でも "" で渡す（同姓同名で「番号なしの人」を見分けるため。null は「指定なし」の意味になる）
+        const res = await deleteTallyEntriesForName(date, serverName, editorName || null, row.medical_record_number.trim());
+        if (res.success && (res.deleted ?? 0) === 0) {
+          // サーバーに消せる記帳が無かった（同姓同名の日に、カルテ番号の無い古い記帳が
+          // 番号ありの人の行に出ている等）。画面だけ消すと「消したのに次に開くと戻る」になるので消さない。
+          toast.error("消せる記帳が見つかりませんでした。画面を再読み込みして、もう一度お試しください");
+          return;
+        }
+        if (res.success) {
+          const cleared: UIRow = { ...row, amounts: {}, variants: {} };
+          updateRow(row._id, { amounts: {}, variants: {} });
+          // 消した状態を「保存済み」の基準にする（この行だけ）
+          setBaseline((prev) => { const m = new Map(prev); m.set(row._id, rowSignature(cleared)); return m; });
+          toast.success("金額を消しました（行は残ります）");
+        } else {
+          toast.error(res.error ?? "削除に失敗しました");
+        }
+      });
       return;
     }
     const name = row.customer_name.trim();
@@ -354,7 +542,7 @@ export default function TallySheet({ initialDate }: { initialDate?: string }) {
     }
     if (!confirm(`${name}様の${isToday ? "本日" : date}の記帳を削除しますか？\n元に戻せません。`)) return;
     startSaving(async () => {
-      const res = await deleteTallyEntriesForName(date, name, editorName || null);
+      const res = await deleteTallyEntriesForName(date, name, editorName || null, row.medical_record_number.trim());
       if (res.success) {
         removeRow(row._id);
         toast.success(`${name}様の記帳を削除しました`);
@@ -432,7 +620,9 @@ export default function TallySheet({ initialDate }: { initialDate?: string }) {
       ? row.appointment_ids
       : row.appointment_id ? [row.appointment_id] : [];
     if (ids.length === 0) {
-      // 予約に紐づかない飛び込み行はこの画面内だけの印（カウンター連動なし）
+      // 予約に紐づかない飛び込み行は印を保存する先が無い（チェック自体を無効にしている）
+      updateRow(row._id, { checkin_status: row.checkin_status });
+      toast.error("予約のない方は会計済の印を保存できません");
       return;
     }
     updateCheckinStatusMany(ids, nextStatus)
@@ -482,14 +672,38 @@ export default function TallySheet({ initialDate }: { initialDate?: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rows, columns]);
 
+  // 同じ名前が2行以上ある（同姓同名、または同じ人を2行に分けた）名前。
+  // その行にはカルテ番号を常時見せて、どちらの人か分かるようにする。
+  const dupNameKeys = useMemo(() => {
+    const count = new Map<string, number>();
+    for (const r of rows) {
+      const k = nameKey(r.customer_name);
+      if (!k) continue;
+      count.set(k, (count.get(k) ?? 0) + 1);
+    }
+    return new Set(Array.from(count.entries()).filter(([, n]) => n >= 2).map(([k]) => k));
+  }, [rows]);
+
+  // 赤枠（マイナス・数字以外）の金額欄の数。1つでもあれば保存を止める
+  const invalidCellCount = useMemo(() => {
+    let n = 0;
+    for (const r of rows) for (const c of columns) if (amountCellError(r.amounts[c.key] ?? "")) n++;
+    return n;
+  }, [rows, columns]);
+
   const handleSave = () => {
     if (!isToday && !editorName) {
       toast.error("当日以外を保存するときは、上の「操作者」でお名前を選んでください");
       return;
     }
+    if (invalidCellCount > 0) {
+      toast.error("赤枠の金額を直してください（マイナスや数字以外は入れられません）");
+      return;
+    }
     // 名前があり、いずれかの金額欄が入力済みの行だけ送る（"0" も計上対象。完全な空行は無視）
-    const payload: TallyRow[] = rows
-      .filter((r) => r.customer_name.trim() && rowEntered(r))
+    const sentRows = rows.filter((r) => r.customer_name.trim() && rowEntered(r));
+    const sentIds = new Set(sentRows.map((r) => r._id));
+    const payload: TallyRow[] = sentRows
       .map((r) => {
         const amounts: Record<string, number> = {};
         const variants: Record<string, string> = {};
@@ -511,15 +725,49 @@ export default function TallySheet({ initialDate }: { initialDate?: string }) {
         };
       });
 
+    // 同じ人（名前＋カルテ番号）が2行に分かれているとサーバー側で1つにまとめられるので、
+    // そのときだけ表を読み直す。それ以外は表をそのまま残す（スクロール位置や入力中の場所が飛ばない）。
+    const personKeys = payload.map((r) => `${nameKey(r.customer_name)}|${r.medical_record_number}`);
+    const needsReload = new Set(personKeys).size !== personKeys.length;
+
     startSaving(async () => {
       const res = await saveTallySheet(date, payload, editorName || null);
       if (res.success) {
-        toast.success(`日計表を保存しました（${res.saved ?? 0}件）`);
-        load(date);
+        const now = format(new Date(), "HH:mm");
+        toast.success(`日計表を保存しました（${res.saved ?? 0}件・${now}）`);
+        setLastSavedAt(now);
+        // 表は読み直さず、「保存済み」の基準と読み込み時の名前だけ更新する。
+        // 更新するのは実際にサーバーへ送った行だけ（名前や担当だけ入れて金額の無い行は
+        // 保存されていないので「未保存」のまま残す）。
+        setRows((prev) => prev.map((r) => (sentIds.has(r._id) ? { ...r, _originalName: r.customer_name.trim() } : r)));
+        setBaseline((prev) => {
+          const m = new Map(prev);
+          for (const r of rows) if (sentIds.has(r._id)) m.set(r._id, rowSignature(r));
+          return m;
+        });
+        if (needsReload) {
+          // スクロール位置を覚えておいて、読み直したあと同じ場所に戻す
+          const sp = getScrollParent(rootRef.current);
+          const y = sp instanceof Window ? sp.scrollY : sp.scrollTop;
+          const x = tableScrollRef.current?.scrollLeft ?? 0;
+          load(date, { silent: true });
+          setTimeout(() => {
+            if (sp instanceof Window) sp.scrollTo({ top: y }); else sp.scrollTop = y;
+            if (tableScrollRef.current) tableScrollRef.current.scrollLeft = x;
+          }, 300);
+        }
       } else {
         toast.error(res.error ?? "保存に失敗しました");
       }
     });
+  };
+
+  // 金額欄からフォーカスが外れたとき、全角や「円」を半角数字に直して書き戻す（見た目と保存が一致する）
+  const normalizeAmountOnBlur = (id: number, key: string, raw: string) => {
+    if ((raw ?? "").trim() === "") return;
+    if (amountCellError(raw)) return; // 直せないものは赤枠のまま残す
+    const fixed = String(num(raw));
+    if (fixed !== raw) updateAmount(id, key, fixed);
   };
 
   const saveButton = (
@@ -543,7 +791,7 @@ export default function TallySheet({ initialDate }: { initialDate?: string }) {
   }
 
   return (
-    <div className="p-3 sm:p-5 max-w-[1280px] mx-auto">
+    <div ref={rootRef} className="p-3 sm:p-5 max-w-[1280px] mx-auto">
       {/* ヘッダー */}
       <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
         <div className="flex items-center gap-2">
@@ -552,7 +800,7 @@ export default function TallySheet({ initialDate }: { initialDate?: string }) {
           </div>
           <div>
             <h1 className="text-lg font-bold text-slate-800 dark:text-slate-100 leading-tight">窓口日計表</h1>
-            <p className="text-xs text-slate-500">受付・会計・次回予約までこの1画面で</p>
+            <p className="text-xs text-slate-500">金額の記帳と会計済チェック。来院・待合の管理は「受付」で</p>
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -561,7 +809,7 @@ export default function TallySheet({ initialDate }: { initialDate?: string }) {
             <input
               type="date"
               value={date}
-              onChange={(e) => setDate(e.target.value)}
+              onChange={(e) => changeDate(e.target.value)}
               className="bg-transparent text-sm font-medium text-slate-700 dark:text-slate-200 outline-none"
             />
           </div>
@@ -583,7 +831,7 @@ export default function TallySheet({ initialDate }: { initialDate?: string }) {
           )}
           <button
             type="button"
-            onClick={() => load(date)}
+            onClick={reload}
             className="p-2 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-500 hover:text-slate-700"
             title="再読み込み"
           >
@@ -625,10 +873,40 @@ export default function TallySheet({ initialDate }: { initialDate?: string }) {
         </p>
       )}
 
+      {/* 受付カウンターから来たときの案内 */}
+      {focusBanner && (
+        <div
+          className={[
+            "mb-3 flex items-start gap-2 rounded-xl border px-3 py-2.5 text-sm",
+            focusBanner.found
+              ? "bg-amber-50 border-amber-300 text-amber-900 dark:bg-amber-900/20 dark:border-amber-700/60 dark:text-amber-100"
+              : "bg-rose-50 border-rose-300 text-rose-900 dark:bg-rose-900/20 dark:border-rose-700/60 dark:text-rose-100",
+          ].join(" ")}
+          role="status"
+        >
+          <span className="flex-1 leading-snug">
+            {focusBanner.found ? (
+              <>受付から来ました：<b className="text-base">{focusBanner.name}様</b> の金額を入れて「保存」を押してください</>
+            ) : (
+              <><b>{focusBanner.name || "その方"}様</b>の行が見つかりません。「行を追加」で入力してください</>
+            )}
+          </span>
+          <button
+            type="button"
+            onClick={() => setFocusBanner(null)}
+            className="shrink-0 p-1 rounded-lg hover:bg-black/5 dark:hover:bg-white/10"
+            aria-label="閉じる"
+            title="閉じる"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
       {/* 集計サマリ */}
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-4">
         <div className="rounded-2xl bg-gradient-to-br from-indigo-600 to-violet-600 text-white p-4 shadow">
-          <p className="text-[11px] opacity-80">本日合計</p>
+          <p className="text-[11px] opacity-80">この日の合計</p>
           <p className="text-2xl font-black tracking-tight">{yen(grandTotal)}</p>
         </div>
         <div className="rounded-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 p-4">
@@ -643,6 +921,11 @@ export default function TallySheet({ initialDate }: { initialDate?: string }) {
           </div>
         </div>
       </div>
+
+      {/* 使い方の1行（受付の方が迷わないように） */}
+      <p className="mb-2 text-[12px] text-slate-600 dark:text-slate-300">
+        金額は「保存」で記帳、会計済チェックはその場で受付画面に反映されます。予約のない方（行を追加した方）は会計済の印を保存できません。
+      </p>
 
       {/* 横スクロール用スライドバー（表の上）。列幅を広げて1画面に収まらない時だけ出す */}
       {needsHScroll && (
@@ -709,12 +992,20 @@ export default function TallySheet({ initialDate }: { initialDate?: string }) {
             {rows.map((r) => {
               const total = rowTotal(r);
               const isDone = r.checkin_status === "done";
+              const isHighlighted = highlightId === r._id;
+              const isDupName = !!nameKey(r.customer_name) && dupNameKeys.has(nameKey(r.customer_name));
+              const hasAppointment = !!r.appointment_id || r.appointment_ids.length > 0;
               return (
-                <tr key={r._id} className={[
-                  "border-t border-slate-100 dark:border-slate-700/50 hover:bg-slate-50/60 dark:hover:bg-slate-900/30",
-                  isDone ? "bg-emerald-50/40 dark:bg-emerald-900/10" : "",
-                ].join(" ")}>
-                  <td className="px-1 py-1 sticky left-0 bg-white dark:bg-slate-800">
+                <tr
+                  key={r._id}
+                  ref={(el) => { if (el) rowRefs.current.set(r._id, el); else rowRefs.current.delete(r._id); }}
+                  className={[
+                    "border-t border-slate-100 dark:border-slate-700/50 hover:bg-slate-50/60 dark:hover:bg-slate-900/30 transition-colors duration-700",
+                    isDone ? "bg-emerald-50/40 dark:bg-emerald-900/10" : "",
+                    isHighlighted ? "!bg-yellow-100 dark:!bg-yellow-500/20 ring-2 ring-inset ring-yellow-400" : "",
+                  ].join(" ")}
+                >
+                  <td className={["px-1 py-1 sticky left-0", isHighlighted ? "bg-yellow-100 dark:bg-yellow-500/20" : "bg-white dark:bg-slate-800"].join(" ")}>
                     {r.appointment_id && monthCrossIds.has(r.appointment_id) && (
                       <span
                         className="block text-[9px] font-black text-violet-700 dark:text-violet-300 leading-none mb-0.5"
@@ -730,6 +1021,15 @@ export default function TallySheet({ initialDate }: { initialDate?: string }) {
                       placeholder="お名前"
                       className="w-full px-2 py-1.5 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 outline-none focus:border-indigo-400"
                     />
+                    {isDupName && (
+                      <span
+                        className="mt-0.5 flex items-center gap-1 text-[10px] leading-tight text-amber-700 dark:text-amber-300"
+                        title="同じ名前の方がこの日に2人以上います。カルテ番号でどちらの方か確かめてください"
+                      >
+                        <AlertTriangle className="w-3 h-3 shrink-0" />
+                        <span className="truncate">同姓同名あり／カルテ {r.medical_record_number.trim() || "番号なし"}</span>
+                      </span>
+                    )}
                   </td>
                   <td className="px-1 py-1">
                     <input
@@ -754,14 +1054,17 @@ export default function TallySheet({ initialDate }: { initialDate?: string }) {
                       className="w-full px-0.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-[11px] text-slate-600 dark:text-slate-300 outline-none focus:border-indigo-400"
                       title={staff.find((s) => s.id === r.staff_id)?.name ?? "担当を選択"}
                     >
-                      <option value="">—</option>
+                      <option value="">未選択</option>
                       {staff.map((s) => (
                         <option key={s.id} value={s.id}>{s.name}</option>
                       ))}
                     </select>
                   </td>
-                  {columns.map((c) => {
+                  {columns.map((c, ci) => {
                     const hasVariants = (c.variants?.length ?? 0) > 0;
+                    const cellValue = r.amounts[c.key] ?? "";
+                    const cellError = amountCellError(cellValue);
+                    const zero = isExplicitZero(cellValue);
                     return (
                       <td key={c.key} className="px-1 py-1 align-top">
                         <div className="flex flex-col gap-1">
@@ -772,19 +1075,33 @@ export default function TallySheet({ initialDate }: { initialDate?: string }) {
                               className="w-full px-0.5 py-1 rounded-lg border border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-700/60 text-[10px] text-slate-600 dark:text-slate-300 outline-none focus:border-indigo-400"
                               title={r.variants[c.key] ? `${c.label}：${r.variants[c.key]}` : "種別を選択"}
                             >
-                              <option value="">種別</option>
+                              <option value="">未選択</option>
                               {c.variants!.map((v) => (
                                 <option key={v} value={v}>{v}</option>
                               ))}
                             </select>
                           )}
                           <input
-                            value={r.amounts[c.key] ?? ""}
+                            ref={ci === 0 ? (el) => { if (el) firstAmountRefs.current.set(r._id, el); else firstAmountRefs.current.delete(r._id); } : undefined}
+                            value={cellValue}
                             onChange={(e) => updateAmount(r._id, c.key, e.target.value)}
+                            onBlur={(e) => normalizeAmountOnBlur(r._id, c.key, e.target.value)}
                             inputMode="numeric"
-                            placeholder="0"
-                            className="w-full px-1 py-1.5 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-right text-[13px] text-slate-800 dark:text-slate-100 outline-none focus:border-indigo-400"
+                            placeholder="—"
+                            aria-invalid={!!cellError}
+                            title={cellError ?? (zero ? "0円（窓口負担なし）" : undefined)}
+                            className={[
+                              "w-full px-1 py-1.5 rounded-lg border text-right text-[13px] outline-none",
+                              cellError
+                                ? "border-rose-500 bg-rose-50 text-rose-700 dark:bg-rose-900/30 dark:text-rose-200 focus:border-rose-500"
+                                : zero
+                                  ? "border-emerald-300 bg-emerald-50 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-200 dark:border-emerald-700 focus:border-emerald-500"
+                                  : "border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 focus:border-indigo-400",
+                            ].join(" ")}
                           />
+                          {cellError && (
+                            <span className="text-[9px] leading-tight text-rose-600 dark:text-rose-300">{cellError}</span>
+                          )}
                         </div>
                       </td>
                     );
@@ -804,11 +1121,15 @@ export default function TallySheet({ initialDate }: { initialDate?: string }) {
                   <td className="px-1 py-1 text-center">
                     <input
                       type="checkbox"
-                      checked={isDone}
+                      checked={hasAppointment ? isDone : false}
+                      disabled={!hasAppointment}
                       onChange={(e) => toggleDone(r, e.target.checked)}
-                      className="w-4 h-4 accent-indigo-600"
-                      title={r.appointment_id ? "会計済（受付カウンターと連動）" : "会計済（この画面内の印）"}
+                      className="w-4 h-4 accent-indigo-600 disabled:opacity-30 disabled:cursor-not-allowed"
+                      title={hasAppointment ? "会計済（その場で受付画面に反映されます）" : "予約のない方は印を保存できません"}
                     />
+                    {!hasAppointment && (
+                      <span className="block text-[9px] leading-tight text-slate-400" title="予約のない方は印を保存できません">保存不可</span>
+                    )}
                   </td>
                   <td className="px-1 py-1 text-center">
                     <button
@@ -830,7 +1151,7 @@ export default function TallySheet({ initialDate }: { initialDate?: string }) {
                       className="p-1 rounded-lg text-slate-300 hover:text-rose-500 hover:bg-rose-50 disabled:opacity-40"
                       title={
                         r.appointment_id
-                          ? "金額をクリアします（本日の予約は残るので行は消えません）"
+                          ? "この方の金額を消します（保存済みの記帳もその場で消えます。予約は残るので行は消えません）"
                           : "この行の記帳を完全に削除します"
                       }
                     >
@@ -866,14 +1187,55 @@ export default function TallySheet({ initialDate }: { initialDate?: string }) {
         >
           <Plus className="w-4 h-4" /> 行を追加
         </button>
-        {/* 下部にも保存（長い表でスクロールしても押せるように） */}
-        {saveButton}
       </div>
       <p className="mt-2 text-[11px] text-slate-400">
-        ※ 保存するとこの日の日計表は入力内容で上書きされます。金額が入っていない行は登録されません。<br />
-        ※「会計済」は予約のある方は受付カウンターの「会計完了」と連動します（金額の保存ボタンとは別に、その場で反映されます）。<br />
+        ※「保存」を押すと、金額の入っている行がこの日の日計表として記帳されます（入っていない行は登録されません）。<br />
+        ※ ゴミ箱で金額を消すと、保存済みの記帳もその場で消えます（予約のある方は行が残ります）。<br />
+        ※「会計済」は予約のある方の受付画面の「会計完了」と連動します（保存ボタンとは別に、その場で反映されます）。<br />
         ※ 各列の見出しの右端をドラッグすると列幅を変えられます。変えた幅はこの端末に保存され、次に開いたときも同じ幅になります（「列幅リセット」で初期化）。
       </p>
+
+      {/* 画面下に貼りつく保存バー：合計・保存状態・保存ボタン（長い表でも迷わず押せる） */}
+      <div className="sticky bottom-0 z-30 -mx-3 sm:-mx-5 mt-4 px-3 sm:px-5 py-3 bg-white/95 dark:bg-slate-900/95 backdrop-blur border-t border-slate-200 dark:border-slate-700 shadow-[0_-6px_16px_rgba(15,23,42,0.08)]">
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <div className="flex items-center gap-3 flex-wrap">
+            <div>
+              <p className="text-[11px] text-slate-500 leading-none mb-1">この日の合計</p>
+              <p className="text-xl font-black tracking-tight text-slate-800 dark:text-slate-100 leading-none">{yen(grandTotal)}</p>
+            </div>
+            {isDirty ? (
+              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-rose-600 text-white text-xs font-bold shadow-sm">
+                ● 未保存
+              </span>
+            ) : lastSavedAt ? (
+              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-200 dark:border-emerald-700 text-xs font-bold">
+                <CheckCircle2 className="w-3.5 h-3.5" /> 保存済み {lastSavedAt}
+              </span>
+            ) : (
+              <span className="inline-flex items-center px-2.5 py-1 rounded-full bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400 text-xs font-medium">
+                変更なし
+              </span>
+            )}
+            {invalidCellCount > 0 && (
+              <span className="text-xs font-bold text-rose-600 dark:text-rose-300">赤枠の金額を直してください（{invalidCellCount}か所）</span>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={handleSave}
+            disabled={saving}
+            className={[
+              "flex items-center gap-2 px-8 py-3 rounded-xl text-white text-base font-bold shadow-md active:scale-95 transition-all disabled:opacity-60",
+              isDirty
+                ? "bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-700 hover:to-violet-700 ring-4 ring-indigo-200 dark:ring-indigo-800"
+                : "bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-700 hover:to-violet-700",
+            ].join(" ")}
+          >
+            {saving ? <Loader2 className="w-5 h-5 animate-spin" /> : <Save className="w-5 h-5" />}
+            保存
+          </button>
+        </div>
+      </div>
 
       {/* 次回予約ダイアログ（対象行の患者をプリフィル） */}
       {nextReserveRow && (

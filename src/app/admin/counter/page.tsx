@@ -14,15 +14,17 @@ import {
   type IntakeChecklist,
 } from "@/app/actions/adminReserve";
 import { IntakeChecklistPanel } from "@/components/admin/IntakeChecklistPanel";
-import { getMyStaffName } from "@/app/actions/auth";
+import { getMyStaffName, getMyRole } from "@/app/actions/auth";
 import { getSalesPrediction, type SalesPrediction } from "@/app/actions/sales";
+import { getSalesInputMode } from "@/app/actions/tally";
+import { getCurrentAiSecretaryMode } from "@/app/actions/clinic-slot";
 import { createClient } from "@/lib/supabase/client";
 import { getMyClinicId } from "@/app/actions/auth";
 import {
   Clock, User, RefreshCw, Loader2, CheckCircle2,
   Stethoscope, CreditCard, CalendarPlus, ArrowRight,
   Phone, MessageCircleMore, ChevronRight, Bot, ChevronDown, ChevronLeft,
-  Zap,
+  Zap, Coins,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -138,9 +140,21 @@ function AppointmentCard({
   onRefresh,
   onCompleteUpTo,
   isMonthCrossing,
+  tallyMode = false,
+  perPatientMode = false,
+  hideSecretaryTip = false,
 }: {
   /** 同じ患者さんの当日の施術すべて（開始時刻の昇順）。1人1枚のカードにする */
   apts: Appointment[];
+  /** 窓口日計表（sales_input_mode='tally'）の院。会計は日計表で行うので、
+   *  ここでは受付ステータスを勝手に会計完了にせず、その方の行へ案内するだけにする */
+  tallyMode?: boolean;
+  /** 個別入力（sales_input_mode='per_patient'）の院と確定したとき true。
+   *  院の設定を読み込み中は tallyMode も perPatientMode も false＝どちらの会計ボタンも出さない
+   *  （日計表の院で「⭐受付→会計」が一瞬出て、押されて会計完了にされる事故を防ぐ） */
+  perPatientMode?: boolean;
+  /** AI秘書が院長専用（ai_secretary_mode='admin_only'）で、ログインがスタッフのときは出さない */
+  hideSecretaryTip?: boolean;
   /** 先月から続けて来ている方の今月1回目＝保険証確認・署名が必要 */
   isMonthCrossing?: boolean;
   onStatusChange: (ids: string[], status: CheckinStatus) => void;
@@ -196,6 +210,14 @@ function AppointmentCard({
     }
     return `/admin/sales?${params.toString()}`;
   }, [apt, prediction]);
+
+  // 日計表（tally）の院向け。その方の行へまっすぐ案内するだけ（受付ステータスは変えない）
+  const tallyUrl = (() => {
+    const params = new URLSearchParams();
+    params.set("name", apt.customers?.name ?? "");
+    params.set("apt_id", apt.id);
+    return `/admin/sales?${params.toString()}`;
+  })();
 
   // 「未来院」状態から一発で会計画面（売上記帳ページ）まで進めるショートカット
   const handleQuickToCheckout = () => {
@@ -505,8 +527,9 @@ function AppointmentCard({
           </button>
         )}
 
-        {/* 未来院から会計まで一発ジャンプ（checkin_status を done に更新しつつ /admin/sales へ） */}
-        {groupStatus === null && (
+        {/* 未来院から会計まで一発ジャンプ（checkin_status を done に更新しつつ /admin/sales へ）。
+            日計表の院では受付ステータスを勝手に進めないので出さない */}
+        {perPatientMode && groupStatus === null && (
           <button
             type="button"
             onClick={handleQuickToCheckout}
@@ -525,8 +548,26 @@ function AppointmentCard({
           </button>
         )}
 
+        {/* 日計表の院：会計は日計表で。その方の行へ飛ぶだけで、受付ステータスは変えない */}
+        {tallyMode && (
+          <Link
+            href={tallyUrl}
+            onClick={() => recordAction(COUNTER_DONE_KEY, SALES_PAGE_KEY)}
+            className={[
+              "flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-bold transition-all shadow-sm active:scale-95",
+              isDone
+                ? "text-slate-600 dark:text-slate-300 bg-white/70 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700 hover:bg-white dark:hover:bg-slate-700"
+                : "bg-indigo-600 hover:bg-indigo-700 text-white",
+            ].join(" ")}
+            title="日計表を開いて、この方の行に金額を入れます（受付の状態はここでは変わりません）"
+          >
+            <Coins className="w-3.5 h-3.5" />
+            日計表で会計
+          </Link>
+        )}
+
         {/* 会計登録へリンク（名前・初診フラグ・予測データをクエリパラメータで渡す） */}
-        {(groupStatus === "in_treatment" || groupStatus === "arrived" || groupStatus === "done") && (
+        {perPatientMode && (groupStatus === "in_treatment" || groupStatus === "arrived" || groupStatus === "done") && (
           <div className="relative">
             <Link
               href={buildSalesUrl()}
@@ -542,8 +583,9 @@ function AppointmentCard({
               {justDone ? "売上入力へ ✨" : "会計"}
             </Link>
 
-            {/* AI秘書ツールチップ（予測あり／なしで内容を切り替え） */}
-            {showSecretaryTip && (
+            {/* AI秘書ツールチップ（予測あり／なしで内容を切り替え）。
+                AI秘書が院長専用の設定で、スタッフのログインのときは出さない */}
+            {showSecretaryTip && !hideSecretaryTip && (
               <div
                 className="absolute bottom-full left-0 mb-2 w-64 z-20 [animation:var(--animate-secretary-pop)]"
                 onMouseEnter={() => setShowSecretaryTip(true)}
@@ -666,6 +708,14 @@ export default function CounterPage() {
   const [clinicId, setClinicId] = useState<string | null>(null);
   const [staffName, setStaffName] = useState<string>("スタッフ");
   const [isClosingDay, startClosingDayTransition] = useTransition();
+  // 売上の記帳のしかた（院の設定 sales_input_mode）。
+  // "tally"＝窓口日計表の院。会計は日計表で行うので、一括入力・まとめて会計完了の導線は出さない。
+  // 読み込み中(null)はどちらの導線も出さない（tally の院で一括入力が一瞬見えないように）。
+  const [salesMode, setSalesMode] = useState<"per_patient" | "tally" | null>(null);
+  const isTally = salesMode === "tally";
+  const isPerPatient = salesMode === "per_patient";
+  // AI秘書が院長専用（admin_only）で、ログインがスタッフなら AI秘書の吹き出しを出さない
+  const [hideSecretaryTip, setHideSecretaryTip] = useState(false);
 
   const isViewingToday = isToday(targetDate);
 
@@ -725,6 +775,10 @@ export default function CounterPage() {
     setCurrentTime(new Date());
     getMyClinicId().then(setClinicId);
     getMyStaffName().then(setStaffName);
+    getSalesInputMode().then(setSalesMode).catch(() => setSalesMode("per_patient"));
+    Promise.all([getCurrentAiSecretaryMode(), getMyRole()])
+      .then(([mode, role]) => setHideSecretaryTip(mode === "admin_only" && role === "staff"))
+      .catch(() => setHideSecretaryTip(false));
     fetchAppointments();
 
     // 時計更新
@@ -833,6 +887,13 @@ export default function CounterPage() {
           <h1 className="text-2xl font-black text-slate-900 dark:text-slate-100">
             受付カウンター
           </h1>
+          {isTally && (
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+              金額の記帳は
+              <Link href="/admin/sales" className="mx-0.5 font-bold text-indigo-600 dark:text-indigo-300 underline underline-offset-2">「日計表」</Link>
+              で行います
+            </p>
+          )}
           <div className="flex items-center gap-2 mt-2">
             <button
               onClick={() => setTargetDate(prev => new Date(prev.getFullYear(), prev.getMonth(), prev.getDate() - 1))}
@@ -872,21 +933,35 @@ export default function CounterPage() {
             <CalendarPlus className="w-4 h-4" />
             予約追加
           </Link>
-          <Link
-            href="/admin/sales"
-            className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-bold bg-blue-600 hover:bg-blue-700 text-white transition-colors shadow-sm"
-          >
-            <CreditCard className="w-4 h-4" />
-            売上記帳
-          </Link>
-          <Link
-            href={`/admin/sales/bulk?date=${format(targetDate, "yyyy-MM-dd")}`}
-            className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-bold bg-amber-500 hover:bg-amber-600 text-white transition-colors shadow-sm"
-          >
-            <MessageCircleMore className="w-4 h-4" />
-            一括入力
-          </Link>
-          {hasActiveAppointments && (
+          {/* 日計表の院：会計は日計表1本。一括入力・まとめて会計完了は出さない */}
+          {isTally && (
+            <Link
+              href="/admin/sales"
+              className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-bold bg-indigo-600 hover:bg-indigo-700 text-white transition-colors shadow-sm"
+            >
+              <Coins className="w-4 h-4" />
+              日計表を開く
+            </Link>
+          )}
+          {isPerPatient && (
+            <Link
+              href="/admin/sales"
+              className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-bold bg-blue-600 hover:bg-blue-700 text-white transition-colors shadow-sm"
+            >
+              <CreditCard className="w-4 h-4" />
+              売上記帳
+            </Link>
+          )}
+          {isPerPatient && (
+            <Link
+              href={`/admin/sales/bulk?date=${format(targetDate, "yyyy-MM-dd")}`}
+              className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-bold bg-amber-500 hover:bg-amber-600 text-white transition-colors shadow-sm"
+            >
+              <MessageCircleMore className="w-4 h-4" />
+              一括入力
+            </Link>
+          )}
+          {isPerPatient && hasActiveAppointments && (
             <Button
               type="button"
               onClick={handleCloseDay}
@@ -922,7 +997,7 @@ export default function CounterPage() {
         ))}
       </div>
 
-      {canSuggestClosing && (
+      {isPerPatient && canSuggestClosing && (
         <div className="rounded-2xl border border-indigo-200 bg-indigo-50/80 p-4 dark:border-indigo-900/60 dark:bg-indigo-950/30">
           <div className="flex items-start justify-between gap-3 flex-wrap">
             <div>
@@ -975,9 +1050,13 @@ export default function CounterPage() {
                   staffName={staffName}
                   onIntakeUpdate={(id, cl) => setAppointments(prev => prev.map(a => a.id === id ? { ...a, intake_checklist: cl } : a))}
                   onRefresh={fetchAppointments}
-                  // 一番下の予約は「本日の施術はすべて終了」と同じ結果になるので出さない
+                  tallyMode={isTally}
+                  perPatientMode={isPerPatient}
+                  hideSecretaryTip={hideSecretaryTip}
+                  // 一番下の予約は「本日の施術はすべて終了」と同じ結果になるので出さない。
+                  // 日計表の院では「ここまで終了」（まとめて会計完了→一括入力）自体を出さない。
                   onCompleteUpTo={
-                    i < activeGroups.length - 1 && !isClosingDay
+                    isPerPatient && i < activeGroups.length - 1 && !isClosingDay
                       ? () => handleCompleteUpTo(i)
                       : undefined
                   }
@@ -1006,6 +1085,9 @@ export default function CounterPage() {
                     staffName={staffName}
                     onIntakeUpdate={(id, cl) => setAppointments(prev => prev.map(a => a.id === id ? { ...a, intake_checklist: cl } : a))}
                     onRefresh={fetchAppointments}
+                    tallyMode={isTally}
+                    perPatientMode={isPerPatient}
+                    hideSecretaryTip={hideSecretaryTip}
                   />
                 ))}
               </div>

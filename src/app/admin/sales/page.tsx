@@ -1362,6 +1362,10 @@ function LineItemRow({
 
 function SalesModeRouter() {
   const [mode, setMode] = useState<"per_patient" | "tally" | null>(null);
+  // 受付カウンターの「日計表で会計」から来たとき、その方の行にまっすぐ案内するための情報
+  const searchParams = useSearchParams();
+  const focusName = searchParams.get("name") ?? undefined;
+  const focusAppointmentId = searchParams.get("apt_id") ?? undefined;
   useEffect(() => {
     getSalesInputMode()
       .then(setMode)
@@ -1372,7 +1376,7 @@ function SalesModeRouter() {
     return <div className="p-8 text-center text-slate-500">読み込み中...</div>;
   }
   if (mode === "tally") {
-    return <TallySheet />;
+    return <TallySheet focusName={focusName || undefined} focusAppointmentId={focusAppointmentId || undefined} />;
   }
   return <SalesPageInner />;
 }

@@ -5,7 +5,8 @@ import SettingsForm from "@/components/admin/SettingsForm";
 import CourseStaffSettings from "@/components/admin/CourseStaffSettings";
 import AccountSettingsForm from "@/components/admin/AccountSettingsForm";
 import TermsAndPolicySection from "@/components/admin/TermsAndPolicySection";
-import ManualSection from "@/components/admin/ManualSection";
+import Link from "next/link";
+import { BookOpen } from "lucide-react";
 import SettingsPasscodeGate from "@/components/admin/SettingsPasscodeGate";
 import SettingsLockBar from "@/components/admin/SettingsLockBar";
 import SettingsPasscodeChangeForm from "@/components/admin/SettingsPasscodeChangeForm";
@@ -38,7 +39,15 @@ export default async function SettingsPage() {
     <div className="container mx-auto space-y-10">
       <SettingsLockBar />
 
-      <ManualSection />
+      {/* 操作マニュアルは全員が開ける /admin/help に移動（受付も見られるように） */}
+      <Link
+        href="/admin/help"
+        className="flex items-center gap-3 bg-blue-50 border border-blue-200 rounded-2xl px-5 py-4 text-blue-800 hover:bg-blue-100 transition"
+      >
+        <BookOpen className="w-5 h-5 shrink-0" />
+        <span className="font-bold">操作マニュアル・困ったときは「使い方・困ったとき」ページへ</span>
+        <span className="ml-auto text-sm">開く →</span>
+      </Link>
 
       <SettingsForm initialSettings={initialSettings} />
 

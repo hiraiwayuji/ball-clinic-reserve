@@ -3,7 +3,7 @@
 import { useState, useEffect, useTransition, Suspense } from "react";
 import { format, parseISO } from "date-fns";
 import { ja } from "date-fns/locale";
-import { useSearchParams } from "next/navigation";
+import { useSearchParams, useRouter } from "next/navigation";
 import {
   getTodayPendingSales,
   bulkAddCashSales,
@@ -15,6 +15,7 @@ import {
   type CashSalePaymentType,
 } from "@/app/actions/sales";
 import { markAppointmentNoShow, markAppointmentClinicCancel, getMonthCrossingFirstVisits } from "@/app/actions/adminReserve";
+import { getSalesInputMode } from "@/app/actions/tally";
 import { usePaymentCategories } from "@/lib/use-payment-categories";
 import { getPaymentCategoryColor } from "@/lib/payment-category-color";
 import { evaluateMedicalAid, effectiveWindowBurden, DEFAULT_MEDICAL_AID_RULES, type MedicalAidRules } from "@/lib/medical-aid";
@@ -411,10 +412,47 @@ function BulkSalesPageInner() {
   );
 }
 
+/**
+ * 窓口日計表（tally）で記帳する院では、この一括入力は使わない。
+ * 同じ日の売上が日計表と二重に立ってしまうので、開いても /admin/sales（日計表）へ戻す。
+ * 院ごとの分岐ではなく、設定値 sales_input_mode で自然に出し分ける。
+ */
+function BulkSalesModeGate() {
+  const router = useRouter();
+  const [mode, setMode] = useState<"per_patient" | "tally" | null>(null);
+  useEffect(() => {
+    getSalesInputMode()
+      .then(setMode)
+      .catch(() => setMode("per_patient"));
+  }, []);
+  useEffect(() => {
+    if (mode !== "tally") return;
+    // 「なぜ戻されたか」が分かるよう1秒だけ案内を見せてから日計表へ
+    const t = setTimeout(() => router.replace("/admin/sales"), 1000);
+    return () => clearTimeout(t);
+  }, [mode, router]);
+
+  if (mode === null) {
+    return <div className="flex items-center justify-center h-40"><Loader2 className="w-6 h-6 animate-spin" /></div>;
+  }
+  if (mode === "tally") {
+    return (
+      <div className="max-w-md mx-auto mt-16 rounded-2xl border border-indigo-200 bg-indigo-50/80 dark:border-indigo-800 dark:bg-indigo-950/30 p-6 text-center">
+        <p className="text-base font-bold text-indigo-800 dark:text-indigo-200">この院は日計表で記帳します</p>
+        <p className="text-sm text-indigo-700/80 dark:text-indigo-300/80 mt-1">日計表の画面へ移動しています…</p>
+        <Link href="/admin/sales" className="inline-block mt-3 text-sm font-bold text-indigo-600 underline">
+          すぐに日計表を開く
+        </Link>
+      </div>
+    );
+  }
+  return <BulkSalesPageInner />;
+}
+
 export default function BulkSalesPage() {
   return (
     <Suspense fallback={<div className="flex items-center justify-center h-40"><Loader2 className="w-6 h-6 animate-spin" /></div>}>
-      <BulkSalesPageInner />
+      <BulkSalesModeGate />
     </Suspense>
   );
 }

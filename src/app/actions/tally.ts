@@ -86,15 +86,28 @@ type TallyAgg = {
   is_first_visit: boolean;
 };
 
-/** 保存済みの tally: 行（1列1行）を、同一人物（空白ゆれ込み）ごとに1つへ集約する */
-function aggregateTallyRows(rawRows: any[]): Map<string, { name: string } & TallyAgg> {
+/**
+ * 同じ人かどうかを見分けるキー。
+ * ふだんは名前（空白ゆれ込み）だけで足りるが、同じ日に同姓同名の2人が来ると
+ * 名前だけでは1人に合体してしまう（金額が合算され、片方の記帳が消えたように見える）。
+ * そこで「その日に同じ名前が複数いる」ときだけ、カルテ番号を足して見分ける。
+ * cash_sales は customer_id を持たないので、保存済み行との突合はこのキー（名前＋カルテ番号）で行う。
+ */
+function personKey(name: string, mrn: string | null | undefined, dupNames: Set<string>): string {
+  const k = nameKey(name);
+  return dupNames.has(k) ? `${k}|${String(mrn ?? "").trim()}` : k;
+}
+
+/** 保存済みの tally: 行（1列1行）を、同一人物（空白ゆれ込み）ごとに1つへ集約する。
+ *  dupNames に入っている名前だけは、カルテ番号も含めて別人として分ける。 */
+function aggregateTallyRows(rawRows: any[], dupNames: Set<string> = new Set()): Map<string, { name: string } & TallyAgg> {
   const saved = new Map<string, { name: string } & TallyAgg>();
   rawRows.forEach((r: any) => {
     const name = String(r.customer_name ?? "").trim();
-    const key = nameKey(name);
-    if (!key) return;
+    if (!nameKey(name)) return;
     const colKey = String(r.payment_type ?? "").slice(TALLY_PREFIX.length);
     const meta = parseTallyMemo(r.memo);
+    const key = personKey(name, meta.mrn, dupNames);
     const prev = saved.get(key) ?? { name, amounts: {}, variants: {}, staff_id: null, mrn: "", minutes: "", is_first_visit: false };
     prev.amounts[colKey] = (prev.amounts[colKey] ?? 0) + (Number(r.treatment_fee) || 0);
     if (meta.variant) prev.variants[colKey] = meta.variant;
@@ -198,18 +211,17 @@ export async function getTallySheet(dateStr: string): Promise<TallySheetData> {
     .eq("sale_date", dateStr)
     .like("payment_type", `${TALLY_PREFIX}%`);
 
-  // 同一人物（空白ゆれを含む）ごとに集約
-  const saved = aggregateTallyRows(savedRows ?? []);
-
   // 同じ人が同じ日に複数予約（保険→鍼灸で担当が違う等）でも記帳は1行。
   // 予約ごとに行を作ると、保存済み金額が各行にプリフィルされて保存のたび金額が倍になる。
+  // まとめる単位は「患者ID」。患者IDが無い予約だけ名前でまとめる。
+  // （名前だけでまとめると、同姓同名の2人が1行に合体して片方の会計が消えていた）
   type ApptGroup = { name: string; mrn: string; minutes: number; staff_id: string | null; is_first_visit: boolean; appointment_id: string | null; appointment_ids: string[]; customer_id: string | null; phone: string; checkin_status: string | null };
   const apptGroups = new Map<string, ApptGroup>();
   (appts ?? []).forEach((a: any) => {
     const cust = Array.isArray(a.customers) ? a.customers[0] : a.customers;
     const name = (cust?.name ?? "").trim();
-    const key = nameKey(name);
-    if (!key) return;
+    if (!nameKey(name)) return;
+    const key: string = cust?.id ? `id:${cust.id}` : `name:${nameKey(name)}`;
     let mins = 0;
     try {
       const m = Math.round((new Date(a.end_time).getTime() - new Date(a.start_time).getTime()) / 60000);
@@ -240,12 +252,33 @@ export async function getTallySheet(dateStr: string): Promise<TallySheetData> {
     if (a.id) prev.appointment_ids.push(a.id as string);
   });
 
+  // その日に同じ名前の患者が2人以上いるか（同姓同名）。いる名前だけカルテ番号で見分ける。
+  const nameCount = new Map<string, number>();
+  apptGroups.forEach((g) => {
+    const k = nameKey(g.name);
+    nameCount.set(k, (nameCount.get(k) ?? 0) + 1);
+  });
+  const dupNames = new Set<string>(Array.from(nameCount.entries()).filter(([, n]) => n >= 2).map(([k]) => k));
+
+  // 保存済み行を同一人物（空白ゆれを含む。同姓同名はカルテ番号でも分ける）ごとに集約
+  const saved = aggregateTallyRows(savedRows ?? [], dupNames);
+
   const usedNames = new Set<string>();
   const rows: TallyRow[] = [];
 
   // 予約ベースの行
-  apptGroups.forEach((g, key) => {
-    const s = saved.get(key);
+  apptGroups.forEach((g) => {
+    let key = personKey(g.name, g.mrn, dupNames);
+    let s = saved.get(key);
+    // 同姓同名で、保存済み行にカルテ番号が無かった（＝どちらの人か分からない）ときは、
+    // 消えたように見えないよう、最初に出てきた同名の人の行に出す。
+    if (!s && dupNames.has(nameKey(g.name))) {
+      const fallbackKey = `${nameKey(g.name)}|`;
+      if (!usedNames.has(fallbackKey) && saved.has(fallbackKey)) {
+        key = fallbackKey;
+        s = saved.get(fallbackKey);
+      }
+    }
     rows.push({
       customer_name: g.name,
       medical_record_number: s?.mrn || g.mrn || "",
@@ -264,12 +297,12 @@ export async function getTallySheet(dateStr: string): Promise<TallySheetData> {
   });
 
   // 予約に無い保存済み患者（飛び込み）も行として追加
-  saved.forEach((agg, name) => {
-    if (usedNames.has(name)) return;
+  saved.forEach((agg, key) => {
+    if (usedNames.has(key)) return;
     // その日の予約が全部キャンセルになっていて、金額も入っていない行は出さない。
     // （受付でキャンセルにした人が0円のまま残り、来院人数に1名として数えられていた）
     // お金が入っている行は「実際に来て会計した」ので必ず残す。
-    if (cancelledNames.has(name)) {
+    if (cancelledNames.has(nameKey(agg.name))) {
       const total = Object.values(agg.amounts).reduce((s, v) => s + (Number(v) || 0), 0);
       if (total === 0) return;
     }
@@ -306,6 +339,9 @@ export async function deleteTallyEntriesForName(
   dateStr: string,
   customerName: string,
   editorName?: string | null,
+  // 同姓同名の2人がいる日に、片方だけ消すためのカルテ番号（省略可）。
+  // 保存済み行のカルテ番号が1種類しか無ければ、従来どおり名前だけで消す。
+  medicalRecordNumber?: string | null,
 ): Promise<{ success: boolean; error?: string; deleted?: number }> {
   const auth = await checkAdminAuth();
   const { clinicId } = auth;
@@ -329,7 +365,20 @@ export async function deleteTallyEntriesForName(
     .like("payment_type", `${TALLY_PREFIX}%`);
   if (fetchErr) return { success: false, error: "削除準備に失敗しました: " + fetchErr.message };
 
-  const matched = (existingRows ?? []).filter((r: any) => nameKey(String(r.customer_name ?? "")) === key);
+  let matched = (existingRows ?? []).filter((r: any) => nameKey(String(r.customer_name ?? "")) === key);
+  // 同じ名前でカルテ番号が2種類以上ある（＝同姓同名の2人分）ときだけ、指定のカルテ番号の人に絞る。
+  // 「カルテ番号なし」(空文字) も1人分として扱う。番号なしの人のゴミ箱で、番号ありの人の記帳まで
+  // 消えないように、空でも必ず絞り込む（undefined/null＝指定なし のときだけ従来どおり名前で全部）。
+  const mrn = String(medicalRecordNumber ?? "").trim();
+  const distinctMrns = new Set(matched.map((r: { memo: string | null }) => parseTallyMemo(r.memo).mrn));
+  const dupNames = distinctMrns.size >= 2 ? new Set([key]) : new Set<string>();
+  if (distinctMrns.size >= 2) {
+    // どちらの人か指定が無いときは、2人分まとめて消すのではなく止める（片方の記帳を巻き添えにしない）
+    if (medicalRecordNumber == null) {
+      return { success: false, error: "同じお名前の方が2人いるので、カルテ番号を入れてから消してください" };
+    }
+    matched = matched.filter((r: { memo: string | null }) => parseTallyMemo(r.memo).mrn === mrn);
+  }
   const ids = matched.map((r: any) => r.id as string);
   if (ids.length === 0) return { success: true, deleted: 0 };
 
@@ -342,7 +391,8 @@ export async function deleteTallyEntriesForName(
 
   // ── 監査ログ + オーナーへの通知 ──
   // 誰でも記帳・削除できるようにした代わりに、何を消したか必ず残す(2026-08-24)。
-  const beforeAgg = aggregateTallyRows(matched).get(key);
+  const beforeAgg = aggregateTallyRows(matched, dupNames).get(personKey(customerName, mrn, dupNames))
+    ?? Array.from(aggregateTallyRows(matched, dupNames).values())[0];
   const name = matched[0]?.customer_name ? String(matched[0].customer_name).trim() : customerName.trim();
   if (beforeAgg) {
     const columns = await getTallyColumns();
@@ -404,12 +454,26 @@ export async function saveTallySheet(
   // 同じ人の行が2つ届いた場合の取り扱い。
   // 中身が同じなら「画面の重複表示」なので1つに畳む（そのまま入れると金額が倍になる）。
   // 中身が違うなら別会計なので列ごとに合算する。
+  //
+  // ただし同姓同名の2人（名前が同じでカルテ番号が違う）は別人なので合算しない。
+  // 「同じ名前でカルテ番号が2種類以上ある」名前だけ、カルテ番号込みで見分ける。
+  const mrnsByName = new Map<string, Set<string>>();
+  for (const r of rows) {
+    const k = nameKey(r.customer_name ?? "");
+    if (!k) continue;
+    if (!mrnsByName.has(k)) mrnsByName.set(k, new Set());
+    mrnsByName.get(k)!.add((r.medical_record_number ?? "").trim());
+  }
+  const dupNames = new Set<string>(
+    Array.from(mrnsByName.entries()).filter(([, s]) => s.size >= 2).map(([k]) => k),
+  );
+
   const mergedRows: TallyRow[] = [];
   const rowByName = new Map<string, TallyRow>();
   for (const r of rows) {
     const name = (r.customer_name ?? "").trim();
     if (!name) continue;
-    const key = nameKey(name);
+    const key = personKey(name, r.medical_record_number, dupNames);
     const prev = rowByName.get(key);
     if (!prev) {
       const copy: TallyRow = { ...r, customer_name: name, amounts: { ...r.amounts }, variants: { ...(r.variants ?? {}) } };
@@ -452,6 +516,7 @@ export async function saveTallySheet(
   // 監査ログ用に「直す前」の状態を、削除する前に患者ごとへ集約しておく
   const beforeByKey = aggregateTallyRows(
     (existingTallyRows ?? []).filter((r: any) => submittedKeys.has(nameKey(String(r.customer_name ?? "")))),
+    dupNames,
   );
   const deleteIds = (existingTallyRows ?? [])
     .filter((r: any) => submittedKeys.has(nameKey(String(r.customer_name ?? ""))))
@@ -529,7 +594,7 @@ export async function saveTallySheet(
   // （毎回その日の全員分を送信し直す作りなので、変わっていない人まで記録すると埋もれる）。
   const changedSummaries: string[] = [];
   for (const row of mergedRows) {
-    const key = nameKey(row.customer_name);
+    const key = personKey(row.customer_name, row.medical_record_number, dupNames);
     const before = beforeByKey.get(key) ?? null;
     const after: TallyAgg = {
       amounts: row.amounts ?? {},

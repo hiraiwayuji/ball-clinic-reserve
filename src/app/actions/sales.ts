@@ -812,6 +812,21 @@ export async function bulkAddCashSales(rows: Array<{
 }>) {
   // 画面では隠しているが、サーバーアクションは直接呼べるのでここでも止める（2026-08-23 検品指摘）。
   const { clinicId } = await requireRole(["owner"]);
+  // 窓口日計表（tally）で記帳する院では、一括入力を通すと同じ日の売上が
+  // 日計表と二重に立つ。画面で /admin/sales へ戻すのに加えて、ここでも止める。
+  {
+    const sb = getAdminSupabase();
+    if (sb) {
+      const { data: cs } = await sb
+        .from("clinic_settings")
+        .select("sales_input_mode")
+        .eq("id", clinicId)
+        .maybeSingle();
+      if (cs?.sales_input_mode === "tally") {
+        return { success: false, error: "この院は日計表で記帳します" };
+      }
+    }
+  }
   try {
     const supabase = await getSupabase();
 

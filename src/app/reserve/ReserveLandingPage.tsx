@@ -208,7 +208,14 @@ export default function ReserveLandingPage() {
               {/* 4ステップで「いつ仮予約になり、いつ完了か」を最初に伝える */}
               <ol className="space-y-2.5">
                 {[
-                  { n: "1", t: "「はじめての予約はこちら」から日時を選ぶ" },
+                  // 院の予約フローに合わせる。からだ等（menu_first）は先にメニューを選ぶ導線なので
+                  // ボタン名と同じ言葉で案内する（「はじめての予約はこちら」というボタンは無い）。
+                  {
+                    n: "1",
+                    t: settings?.public_reserve_flow === "menu_first"
+                      ? "「メニューを選んで予約する」からメニューと日時を選ぶ"
+                      : "「はじめての予約はこちら」から日時を選ぶ",
+                  },
                   { n: "2", t: "お名前などを入れて申し込む" },
                   { n: "3", t: "初めての方は1回だけアンケート（選んだ日時はそのまま引き継ぎ）" },
                   { n: "4", t: "院からLINEで「予約確定」の連絡 → 完了！" },
@@ -312,7 +319,9 @@ export default function ReserveLandingPage() {
             <CalendarDays className="w-5 h-5 text-blue-300 shrink-0 mt-0.5" />
             <div className="space-y-1.5">
               <p className="text-blue-50 font-bold text-sm leading-snug">
-                初めての方も、上の「はじめての予約はこちら」からお進みください
+                {settings?.public_reserve_flow === "menu_first"
+                  ? "初めての方も、上の「メニューを選んで予約する」からお進みください"
+                  : "初めての方も、上の「はじめての予約はこちら」からお進みください"}
               </p>
               <p className="text-blue-100/70 text-xs leading-relaxed">
                 お申し込みの途中で、初めての方だけ1回かんたんなアンケート登録があります。

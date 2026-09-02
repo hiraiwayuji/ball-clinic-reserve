@@ -24,7 +24,12 @@ import { searchPatientsForBooking, PatientSuggestion } from "@/app/actions/patie
 import { getCourses, getStaffList, getRooms, type ReservationCourse, type ReservationStaff, type ReservationRoom } from "@/app/actions/courses";
 import { toast } from "sonner";
 import { useClinicSlotDuration } from "@/lib/use-clinic-slot-duration";
+import type { SlotMinutes } from "@/lib/time-slots";
 import { OverlapFixList } from "@/components/admin/OverlapFixList";
+
+/** 院の枠として扱える値（10/15/20/30）か。それ以外が来たらフックの値に任せる */
+const isSlotMinutes = (v: number | undefined): v is SlotMinutes =>
+  v === 10 || v === 15 || v === 20 || v === 30;
 
 export function AddAppointmentDialog({
   onSuccess,
@@ -40,6 +45,7 @@ export function AddAppointmentDialog({
   defaultVisitType,
   defaultCustomerId,
   hideTrigger = false,
+  slotMinutes: slotMinutesProp,
 }: {
   onSuccess?: () => void;
   open?: boolean;
@@ -55,8 +61,17 @@ export function AddAppointmentDialog({
   /** この患者の予約と確定している場合の customer_id。氏名・電話を変更せず登録すれば、電話/氏名照合をバイパスして確実に同一患者へひもづく。 */
   defaultCustomerId?: string;
   hideTrigger?: boolean;
+  /**
+   * 院の予約枠（分）。タイムテーブルのようにすでに取得済みの画面から渡すと、
+   * フックの初回値（30）で一瞬「30分」と出てから切り替わる、を防げる。
+   * 渡されればフックより優先する。
+   */
+  slotMinutes?: number;
 }) {
-  const slotMinutes = useClinicSlotDuration();
+  const hookSlotMinutes = useClinicSlotDuration();
+  const slotMinutes: SlotMinutes = isSlotMinutes(slotMinutesProp) ? slotMinutesProp : hookSlotMinutes;
+  // 所要時間をユーザーが手で触ったか。触るまでは院の枠（slotMinutes）の変化に追従させる。
+  const [durationTouched, setDurationTouched] = useState(false);
   const [internalOpen, setInternalOpen] = useState(false);
   const open = externalOpen !== undefined ? externalOpen : internalOpen;
   const setOpen = (val: boolean) => {
@@ -195,6 +210,7 @@ export function AddAppointmentDialog({
       setExtraSlots([]);
       setDaySlots({});
       setDuration(String(slotMinutes));
+      setDurationTouched(false);
       setCourseId("");
       setStaffId("");
       setRoomId("");
@@ -267,6 +283,13 @@ export function AddAppointmentDialog({
     if (selectedCoursesDuration == null) return;
     setDuration(String(selectedCoursesDuration));
   }, [selectedCoursesDuration]);
+
+  // メニュー未選択で、所要時間をまだ手で触っていない間は、院の枠に追従させる。
+  // フックの初回値は 30 なので、これが無いと 20分枠の院で「30分」のまま登録される。
+  useEffect(() => {
+    if (durationTouched || selectedCoursesDuration != null) return;
+    setDuration(String(slotMinutes));
+  }, [slotMinutes, durationTouched, selectedCoursesDuration]);
 
   // ── まとめ予約（1回で複数日を押さえる） ──
   // 1件目は上の「予約日」「時間」「担当スタッフ」。2件目以降が extraSlots。
@@ -764,6 +787,7 @@ export function AddAppointmentDialog({
         setExtraSlots([]);
         setDaySlots({});
         setDuration(String(slotMinutes));
+        setDurationTouched(false);
         setCourseId("");
         setStaffId("");
         setRoomId("");
@@ -954,7 +978,8 @@ export function AddAppointmentDialog({
                       {!isOwner && (
                         <>
                           <br />
-                          どうしても重ねる必要があるときは、<span className="font-bold">院長先生の許可</span>が必要です。
+                          院長先生に頼むとき：院長のログインでこの画面を開き
+                          『重なりを承知で登録する（院長）』を押してもらってください。
                         </>
                       )}
                     </div>
@@ -1047,7 +1072,11 @@ export function AddAppointmentDialog({
                 <Label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">
                   所要時間
                 </Label>
-                <select value={duration} onChange={(e) => setDuration(e.target.value)} className={selectClass}>
+                <select
+                  value={duration}
+                  onChange={(e) => { setDurationTouched(true); setDuration(e.target.value); }}
+                  className={selectClass}
+                >
                   {durationOptions.map((m) => (
                     <option key={m} value={m}>{m}分</option>
                   ))}
@@ -1663,18 +1692,26 @@ export function AddAppointmentDialog({
                     ? "重なりを承知で登録する（院長）"
                     : isOwner
                       ? "この時間は重ねて登録できません"
-                      : "院長先生の許可が必要です"
+                      : "重なっているので登録できません"
                   : pickedCount > 1
                     ? `この内容で ${pickedCount}件 まとめて登録する`
                     : "予約を追加する"}
             </Button>
+            {/* スタッフには「許可が必要」だけでは何をすればいいか分からない。
+                院長に頼むときの手順を1行で書く（2026-09-02 からだ受付向け） */}
+            {overlapAlerts.length > 0 && !isOwner && (
+              <p className="text-[11px] text-rose-700 leading-snug">
+                院長先生に頼むとき：院長のログインでこの画面を開き
+                『重なりを承知で登録する（院長）』を押してもらってください。
+              </p>
+            )}
             <Button
               type="button"
               variant="outline"
               onClick={() => setOpen(false)}
               className="w-full h-10 rounded-xl text-sm"
             >
-              キャンセル
+              閉じる
             </Button>
           </div>
         </form>

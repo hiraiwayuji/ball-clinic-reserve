@@ -13,6 +13,17 @@ import { formatDateTimeLine, formatVisitLabel } from "@/lib/appointment-summary"
 import { getCurrentSlotDuration } from "@/app/actions/clinic-slot";
 import { buildStaffSpans } from "@/lib/staff-spans";
 
+/**
+ * 所要時間（分）を院の予約枠の倍数に切り上げる。
+ * 0・未指定・数字でないときは枠1つぶん。すでに倍数ならそのまま。
+ * 予約は枠単位が絶対ルール（からだは20分）。30分などが紛れ込んでもここで枠に乗せる。
+ */
+function roundUpToSlot(minutes: number, slotMinutes: number): number {
+  const slot = slotMinutes > 0 ? slotMinutes : 30;
+  if (!Number.isFinite(minutes) || minutes <= 0) return slot;
+  return Math.ceil(minutes / slot) * slot;
+}
+
 /** DB の "HH:MM:SS" / "HH:MM" を "HH:MM" に正規化（未設定は null）。reserve.ts と同じ挙動。 */
 function normStaffTime(v: string | null | undefined): string | null {
   if (v == null) return null;
@@ -756,8 +767,15 @@ export async function createManualReservation(formData: FormData) {
     const recurringWeeksStr = formData.get("recurringWeeks") as string;
     const recurringWeeks = recurringWeeksStr ? parseInt(recurringWeeksStr, 10) : 1;
     const durationStr = formData.get("duration") as string;
-    // 未指定なら院の予約枠サイズ（からだ鍼灸整骨院は20分。30分決め打ちにしない）
-    const durationMinutes = durationStr ? parseInt(durationStr, 10) : await getCurrentSlotDuration();
+    // 未指定なら院の予約枠サイズ（からだ鍼灸整骨院は20分。30分決め打ちにしない）。
+    // 指定があっても院の枠の倍数でなければ切り上げて枠に乗せる（fail-closed・エラーにはしない）。
+    // 例: 枠20分の院に 30 が届いたら 40 にする。枠に乗らない終了時刻が入ると
+    // タイムテーブルのマスとズレ、次の枠が「取れるのに取れない」状態になるため。
+    const clinicSlotMinutes = await getCurrentSlotDuration();
+    const durationMinutes = roundUpToSlot(
+      durationStr ? parseInt(durationStr, 10) : NaN,
+      clinicSlotMinutes,
+    );
 
     // コース・スタッフ・個室の選択（任意）
     // 患者側 reserve と同じく ID と snapshot 名を併存させる。
@@ -1087,7 +1105,7 @@ export async function createManualReservation(formData: FormData) {
           timeZone: "Asia/Tokyo", month: "numeric", day: "numeric",
           hour: "2-digit", minute: "2-digit", hour12: false,
         }).format(new Date(iso));
-      const slotMinutesForSpans = await getCurrentSlotDuration();
+      const slotMinutesForSpans = clinicSlotMinutes;
       // 登録しようとしている行を「先生ごとの受け持ち時間」に分けておく。
       // 複数担当は前後に分かれるので、主担当が全時間を占有する扱いにすると誤判定になる
       //（2026-08-22 ぼーるくん指摘）。
@@ -2083,6 +2101,51 @@ export async function markAppointmentNoShow(
 }
 
 /**
+ * 「来院なし（無断キャンセル）」を1回で確定させる。
+ *
+ * タイムテーブルの予約詳細から、開始時刻を過ぎても来なかった予約をその場で
+ * 無断キャンセル扱いにするためのもの。
+ * markAppointmentNoShow（status=cancelled・no_show=true）だけだと cancel_kind が空のまま
+ * 「未仕分け」に残り、あとで「キャンセル仕分け」でもう一度押す手間になる。
+ * ここでは既存の classifyCancellation("unexcused") まで通して、
+ * 無断キャンセルの回数制限（noshow_block_*）の判定も同じ経路で走らせる。
+ */
+export async function markAppointmentNoShowUnexcused(
+  appointmentId: string,
+): Promise<{ success: boolean; error?: string; blockedUntil?: string | null; customerName?: string | null }> {
+  try {
+    const auth = await checkAdminAuth();
+    const supabase = getAdminSupabase();
+    if (!supabase) return { success: false, error: "サーバー設定エラー" };
+
+    const { data: before } = await supabase
+      .from("appointments")
+      .select("id, status, start_time")
+      .eq("id", appointmentId)
+      .eq("clinic_id", auth.clinicId)
+      .maybeSingle();
+    if (!before) return { success: false, error: "対象の予約が見つかりませんでした" };
+    if (before.status === "cancelled") return { success: false, error: "すでにキャンセル済みの予約です" };
+    // 来ていない、を押せるのは開始時刻を過ぎてから（未来の予約を誤って無断扱いにしない）
+    if (new Date(before.start_time as string).getTime() > Date.now()) {
+      return { success: false, error: "開始時刻がまだ来ていない予約は「来院なし」にできません" };
+    }
+
+    const marked = await markAppointmentNoShow(appointmentId);
+    if (!marked.success) return marked;
+    const classified = await classifyCancellation(appointmentId, "unexcused");
+    if (!classified.success) return classified;
+
+    revalidatePath("/admin");
+    revalidatePath("/admin/appointments");
+    return classified;
+  } catch (err) {
+    console.error("markAppointmentNoShowUnexcused error:", err);
+    return { success: false, error: "予期せぬエラーが発生しました" };
+  }
+}
+
+/**
  * 院都合キャンセル。
  * 本人はキャンセルしていないが、院側の都合（水素を当日できなかった等）で
  * やむなくキャンセル扱いにするケース。
@@ -2639,14 +2702,16 @@ export async function restoreCancelledAppointment(
         overlapApproved = true;
       }
       if (hit && !canOverrideOverlap(auth.role, allowOverlap)) {
+        // ここは事実だけを書く。「戻せません・取り直してください」の判断文は
+        // 画面側が role（院長なら通せる／スタッフは院長に頼む）に合わせて付ける。
+        // サーバーで判断文まで書くと、院長の画面でも「戻せません」と出て承認ボタンと矛盾する。
         return {
           success: false,
           overlap: true as const,
           needsOwner: true as const,
           error:
-            `${(before.staff_name as string) ?? "担当"}さんは、この時間にすでに別のご予約が入っています（${describeLaneConflict(hit)}）。
-` +
-            `元に戻すと重なってしまうため、戻せません。別の時間で新しく予約を取り直してください。`,
+            `${(before.staff_name as string) ?? "担当"}さんは ${describeLaneConflictRange(hit)} に` +
+            `${hit.customerName ? `${hit.customerName}様の` : "別の"}予約があります。`,
         };
       }
     }

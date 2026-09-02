@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { createContext, useContext, useState } from "react";
 import {
   BookOpen,
   ChevronDown,
@@ -20,8 +20,13 @@ import {
   Clock,
 } from "lucide-react";
 
-const MANUAL_VERSION = "v1.4";
-const MANUAL_UPDATED_AT = "2026-08-09";
+const MANUAL_VERSION = "v1.5";
+const MANUAL_UPDATED_AT = "2026-09-02";
+
+type ManualRole = "owner" | "admin" | "staff";
+type ManualCtxValue = { role: ManualRole; salesInputMode: "per_patient" | "tally" };
+/** 誰向けのマニュアルかを Section に伝える（受付には院長専用の章を出さない） */
+const ManualCtx = createContext<ManualCtxValue>({ role: "owner", salesInputMode: "per_patient" });
 
 type Item = {
   icon: React.ReactNode;
@@ -29,8 +34,20 @@ type Item = {
   body: React.ReactNode;
 };
 
-const Section = ({ icon, title, color, children }: { icon: React.ReactNode; title: React.ReactNode; color: string; children: React.ReactNode }) => {
+const Section = ({ icon, title, color, children, ownerOnly, salesMode }: {
+  icon: React.ReactNode;
+  title: React.ReactNode;
+  color: string;
+  children: React.ReactNode;
+  /** 院長（owner）だけに見せる章 */
+  ownerOnly?: boolean;
+  /** 記帳方式が一致する院だけに見せる章 */
+  salesMode?: "per_patient" | "tally";
+}) => {
   const [open, setOpen] = useState(false);
+  const ctx = useContext(ManualCtx);
+  if (ownerOnly && ctx.role !== "owner") return null;
+  if (salesMode && ctx.salesInputMode !== salesMode) return null;
   return (
     <div className={`border rounded-xl overflow-hidden ${color}`}>
       <button
@@ -71,8 +88,15 @@ const Tip = ({ children }: { children: React.ReactNode }) => (
   </div>
 );
 
-export default function ManualSection() {
+export default function ManualSection({
+  role = "owner",
+  salesInputMode = "per_patient",
+}: {
+  role?: ManualRole;
+  salesInputMode?: "per_patient" | "tally";
+} = {}) {
   return (
+    <ManualCtx.Provider value={{ role, salesInputMode }}>
     <div className="bg-white dark:bg-slate-900 rounded-2xl border p-6 shadow-sm">
       <div className="flex items-start justify-between mb-4">
         <div>
@@ -81,7 +105,9 @@ export default function ManualSection() {
             操作マニュアル
           </h2>
           <p className="text-sm text-slate-500">
-            ツールの使い方をまとめています。アップデートに合わせて自動的に最新版に更新されます。
+            {role === "owner"
+              ? "ツールの使い方をまとめています。章の見出しを押すと開きます。"
+              : "受付でよく使う操作をまとめています。章の見出しを押すと開きます。"}
           </p>
         </div>
         <div className="text-xs text-slate-400 dark:text-slate-500 whitespace-nowrap">
@@ -92,6 +118,7 @@ export default function ManualSection() {
       <div className="space-y-3">
         <Section
           icon={<ScrollText className="w-4 h-4 text-rose-600" />}
+          ownerOnly
           title={
             <span className="flex items-center gap-2">
               療養費改定（令和8年7月〜）
@@ -216,7 +243,7 @@ export default function ManualSection() {
                 ※下4桁を送ってもらった場合、登録済み顧客であれば自動で紐づきます。
               </span>
             </Step>
-            <Step n={3} title="管理画面の「顧客管理」を開く">
+            <Step n={3} title="管理画面の「患者さん」を開く">
               対象の患者さんの行で <b>「未紐づけ」</b> ボタンをタップ。
             </Step>
             <Step n={4} title="紐づけダイアログで方法を選ぶ">
@@ -245,13 +272,13 @@ export default function ManualSection() {
           title="予約の追加・変更・キャンセル"
           color="border-blue-200 dark:border-blue-900 bg-blue-50/50 dark:bg-blue-950/30"
         >
-          <Step n={1} title="予約一覧 or 受付画面から新規追加">
+          <Step n={1} title="予約タイムテーブルの空いているマス、または予約カレンダーから新規追加">
             「+ 予約を追加」ボタンで日時・コース・患者さんを選んで保存。
           </Step>
           <Step n={2} title="編集はカードをタップ">
             時間変更・コース変更・メモ追加が可能。
           </Step>
-          <Step n={3} title="キャンセルは編集画面の「キャンセル」ボタン">
+          <Step n={3} title="キャンセルは予約を押して「この予約をキャンセルにする」">
             キャンセル理由を入れておくと統計に反映されます。
           </Step>
           <Tip>受付画面では本日の予約一覧と来院状況（待合中・施術中・完了）が一目で見えます。</Tip>
@@ -259,6 +286,7 @@ export default function ManualSection() {
 
         <Section
           icon={<Tag className="w-4 h-4 text-amber-600" />}
+          ownerOnly
           title="コース・クーポンメニューを編集する（スマホでもOK）"
           color="border-amber-200 dark:border-amber-900 bg-amber-50/50 dark:bg-amber-950/30"
         >
@@ -373,6 +401,8 @@ export default function ManualSection() {
 
         <Section
           icon={<Wallet className="w-4 h-4 text-emerald-600" />}
+          ownerOnly
+          salesMode="per_patient"
           title="売上・経費の入力"
           color="border-emerald-200 dark:border-emerald-900 bg-emerald-50/50 dark:bg-emerald-950/30"
         >
@@ -393,7 +423,30 @@ export default function ManualSection() {
         </Section>
 
         <Section
+          icon={<Wallet className="w-4 h-4 text-emerald-600" />}
+          salesMode="tally"
+          title="日計表（その日の金額をまとめて記帳）"
+          color="border-emerald-200 dark:border-emerald-900 bg-emerald-50/50 dark:bg-emerald-950/30"
+        >
+          <p>この院は、患者さん1人ずつではなく<b>「日計表」で1日分をまとめて記帳</b>します。</p>
+          <Step n={1} title="左メニューの「日計表」を開く">
+            その日の予約（キャンセル除く）が自動で行に並びます。予約のない方は「行を追加」で足します。
+          </Step>
+          <Step n={2} title="お名前の行に金額を入れる">
+            数字は半角で入れてください（全角で打っても自動で直ります）。窓口0円の方は「0」を入れます。
+          </Step>
+          <Step n={3} title="「保存」を押す">
+            保存するまで金額は記録されません。画面下の保存バーに「未保存」と出ている間は必ず保存を。
+          </Step>
+          <Step n={4} title="会計済チェック">
+            チェックはその場で受付画面に反映されます（保存ボタンは不要）。
+          </Step>
+          <Tip>受付画面の「日計表で会計」を押すと、その方の行に自動で移動します。</Tip>
+        </Section>
+
+        <Section
           icon={<LineChart className="w-4 h-4 text-rose-600" />}
+          ownerOnly
           title="経営評価とKPIダッシュボード"
           color="border-rose-200 dark:border-rose-900 bg-rose-50/50 dark:bg-rose-950/30"
         >
@@ -410,10 +463,11 @@ export default function ManualSection() {
 
         <Section
           icon={<Megaphone className="w-4 h-4 text-orange-600" />}
+          ownerOnly
           title="LINE一括配信・販促"
           color="border-orange-200 dark:border-orange-900 bg-orange-50/50 dark:bg-orange-950/30"
         >
-          <Step n={1} title="LINE・販促タブを開く">
+          <Step n={1} title="「SNS・LINE等」または「LINEでお知らせ」を開く">
             紐づけ済み患者さんの一覧が出ます。
           </Step>
           <Step n={2} title="配信メッセージを作成">
@@ -430,6 +484,7 @@ export default function ManualSection() {
 
         <Section
           icon={<Sparkles className="w-4 h-4 text-violet-600" />}
+          ownerOnly
           title="AI秘書ブリーフィング"
           color="border-violet-200 dark:border-violet-900 bg-violet-50/50 dark:bg-violet-950/30"
         >
@@ -532,22 +587,24 @@ export default function ManualSection() {
             <div className="font-semibold mb-1">Q. 予約画面が真っ白になる</div>
             <p>
               A. ブラウザを再読み込み（プルダウン更新）してください。
-              改善しない場合はキャッシュクリア。それでも直らなければ管理者へ連絡を。
+              画面上部に「システムが新しくなりました」と出ているときは、その帯を押して開き直してください。
+              それでも直らなければ、このページ下の連絡先へ。
             </p>
           </div>
           <div>
             <div className="font-semibold mb-1">Q. 過去のデータをまとめて入れたい</div>
             <p>
-              A.「売上記帳」「顧客管理」「経費」それぞれに CSV インポート機能があります。
+              A.「売上記帳」「患者さん」「経費」それぞれに CSV インポート機能があります（院長のみ）。
               テンプレートもダウンロードできます。
             </p>
           </div>
           <div>
             <div className="font-semibold mb-1">Q. パスワードを変更したい</div>
-            <p>A. 設定タブの「アカウント設定」からいつでも変更できます。</p>
+            <p>A. 院長は「設定」の「アカウント設定」から変更できます。受付の方はログイン画面の「パスワードをお忘れの方はこちら」から再設定メールを送るか、院長にお伝えください。</p>
           </div>
         </Section>
       </div>
     </div>
+    </ManualCtx.Provider>
   );
 }

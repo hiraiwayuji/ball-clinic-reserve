@@ -196,12 +196,18 @@ html[data-clinic-light] body:has([data-dark-page]) {
    markup は触らず、ここで Tailwind ユーティリティを再マッピングする。
    @layer utilities 内に置き、生成ユーティリティより後勝ち＋高詳細度で確実に勝たせる。
    ============================================================ */
-@layer utilities {
+/* html/body の背景は unlayered で書く。ダーク既定（unlayered）に @layer 内のルールは勝てず、
+   実機では html が濃紺のまま（スクロールの端やコンテンツの外に濃紺が見える）になっていた。 */
 html[data-clinic-warm]:has([data-dark-page]),
 html[data-clinic-warm] body:has([data-dark-page]) {
   background-color: #fbf6ee;
 }
+@layer utilities {
+/* コンテナ自体の基本文字色（クラス無しテキストや継承の白抜けを防ぐ） */
+html[data-clinic-warm] [data-dark-page] { color: #3a2c1d !important; }
 /* 背景面 */
+html[data-clinic-warm] [data-dark-page].bg-slate-950,
+html[data-clinic-warm] [data-dark-page] .bg-slate-950 { background-color: #f3e9d8 !important; }
 html[data-clinic-warm] [data-dark-page].bg-slate-900,
 html[data-clinic-warm] [data-dark-page] .bg-slate-900 { background-color: #fbf6ee !important; }
 html[data-clinic-warm] [data-dark-page] .bg-slate-800 { background-color: #f3e9d8 !important; }
@@ -284,6 +290,57 @@ html[data-clinic-warm] [data-dark-page] .text-zinc-600 { color: #8a7a60 !importa
 html[data-clinic-warm] [data-dark-page] .bg-slate-900\/95,
 html[data-clinic-warm] [data-dark-page] .bg-slate-900\/90,
 html[data-clinic-warm] [data-dark-page] .bg-slate-900\/80 { background-color: #fbf6ee !important; }
+/* ── 2026-09-02 追加：light テーマにはあって warm に無かった対応（からだ本番の実測で判明） ──
+   空き案内「最短 9/3 に空きあり」の本文が text-emerald-50（ほぼ白）で薄緑の上に載り読めない、
+   時間枠の「◯ 空き」「予約済」が bg-emerald-950 / bg-rose-950 の濃い面のまま、など。
+   [class*=] で /opacity 付きも拾う（"-50" は "-500" に部分一致するので個別指定）。 */
+html[data-clinic-warm] [data-dark-page] .text-emerald-50,
+html[data-clinic-warm] [data-dark-page] :is([class*="text-emerald-100"],[class*="text-emerald-200"],[class*="text-emerald-300"],[class*="text-emerald-400"]) { color: #0a7a5a !important; }
+html[data-clinic-warm] [data-dark-page] .text-green-50,
+html[data-clinic-warm] [data-dark-page] :is([class*="text-green-200"],[class*="text-green-300"],[class*="text-green-400"]) { color: #166534 !important; }
+html[data-clinic-warm] [data-dark-page] .text-amber-50,
+html[data-clinic-warm] [data-dark-page] :is([class*="text-amber-100"],[class*="text-amber-200"],[class*="text-amber-300"]) { color: #8a5106 !important; }
+html[data-clinic-warm] [data-dark-page] :is([class*="text-amber-400"],[class*="text-amber-500"]) { color: #b45309 !important; }
+html[data-clinic-warm] [data-dark-page] :is([class*="text-rose-100"],[class*="text-rose-200"],[class*="text-rose-300"],[class*="text-rose-400"]) { color: #b4474f !important; }
+html[data-clinic-warm] [data-dark-page] :is([class*="text-red-200"],[class*="text-red-300"],[class*="text-red-400"]) { color: #b91c1c !important; }
+html[data-clinic-warm] [data-dark-page] :is([class*="text-purple-300"],[class*="text-purple-400"]) { color: #7e22ce !important; }
+html[data-clinic-warm] [data-dark-page] :is([class*="text-sky-200"],[class*="text-sky-300"],[class*="text-sky-400"]) { color: #0369a1 !important; }
+html[data-clinic-warm] [data-dark-page] :is([class*="text-cyan-100"],[class*="text-cyan-200"],[class*="text-cyan-300"],[class*="text-cyan-400"]) { color: #0e7490 !important; }
+html[data-clinic-warm] [data-dark-page] .text-blue-50,
+html[data-clinic-warm] [data-dark-page] :is([class*="text-blue-100"],[class*="text-blue-200"]) { color: #6b5b45 !important; }
+html[data-clinic-warm] [data-dark-page] :is([class*="text-slate-100"],[class*="text-slate-200"],[class*="text-slate-300"],[class*="text-zinc-100"],[class*="text-zinc-200"]) { color: #5a4a35 !important; }
+html[data-clinic-warm] [data-dark-page] :is([class*="text-slate-400"],[class*="text-slate-500"]) { color: #8a7a60 !important; }
+html[data-clinic-warm] [data-dark-page] :is([class*="text-white/90"],[class*="text-white/80"]) { color: #4a3a28 !important; }
+html[data-clinic-warm] [data-dark-page] :is([class*="text-white/70"],[class*="text-white/60"],[class*="text-white/50"],[class*="text-white/40"],[class*="text-white/30"]) { color: #8a7a60 !important; }
+/* 濃い色付き面（時間枠の「◯空き」= emerald-950、「予約済」= rose-950、選択日の blue-950、注意の amber-950） */
+html[data-clinic-warm] [data-dark-page] [class*="bg-emerald-950"],
+html[data-clinic-warm] [data-dark-page] [class*="bg-emerald-900"] { background-color: #e6f7ef !important; }
+html[data-clinic-warm] [data-dark-page] [class*="hover:bg-emerald-900"]:hover,
+html[data-clinic-warm] [data-dark-page] [class*="hover:bg-emerald-800"]:hover { background-color: #cdeedd !important; }
+html[data-clinic-warm] [data-dark-page] [class*="bg-rose-950"] { background-color: #fde8e8 !important; }
+html[data-clinic-warm] [data-dark-page] [class*="hover:bg-rose-950"]:hover { background-color: #fbdada !important; }
+html[data-clinic-warm] [data-dark-page] [class*="bg-blue-950"] { background-color: #ffe9cc !important; }
+html[data-clinic-warm] [data-dark-page] [class*="bg-amber-950"],
+html[data-clinic-warm] [data-dark-page] [class*="bg-amber-900"] { background-color: #fff1d6 !important; }
+html[data-clinic-warm] [data-dark-page] [class*="hover:bg-amber-950"]:hover { background-color: #ffe9c2 !important; }
+html[data-clinic-warm] [data-dark-page] .bg-zinc-700,
+html[data-clinic-warm] [data-dark-page] .hover\:bg-zinc-700:hover { background-color: #eedfc8 !important; }
+html[data-clinic-warm] [data-dark-page] .bg-zinc-950 { background-color: #f6ecdb !important; }
+/* 濃い色付き枠線 → 明るい同系色に */
+html[data-clinic-warm] [data-dark-page] [class*="border-emerald-700"],
+html[data-clinic-warm] [data-dark-page] [class*="border-emerald-800"] { border-color: #7fd0ac !important; }
+html[data-clinic-warm] [data-dark-page] [class*="border-rose-900"] { border-color: #f5b5b5 !important; }
+html[data-clinic-warm] [data-dark-page] [class*="border-blue-800"] { border-color: #f4c78a !important; }
+html[data-clinic-warm] [data-dark-page] [class*="border-amber-700"] { border-color: #f2cf8a !important; }
+/* 影（濃紺の影は暖色地で汚れて見える） */
+html[data-clinic-warm] [data-dark-page] :is([class*="shadow-blue-950"],[class*="shadow-emerald-950"],[class*="shadow-amber-950"],[class*="shadow-zinc-950"],[class*="shadow-black/40"]) { --tw-shadow-color: rgba(120, 80, 20, 0.18) !important; }
+/* 色付き（単色の濃い）面の上の文字は白のまま。上の blanket `.text-white → 茶` が
+   オレンジCTA・各色バッジまで茶文字にしてしまうのを打ち消す（最後に置いて後勝ち）。 */
+html[data-clinic-warm] [data-dark-page] :is(.bg-blue-500,.bg-blue-600,.bg-blue-700,.bg-sky-500,.bg-sky-600,.bg-indigo-500,.bg-indigo-600,.bg-violet-500,.bg-violet-600,.bg-purple-500,.bg-purple-600,.bg-rose-500,.bg-rose-600,.bg-red-500,.bg-red-600,.bg-emerald-500,.bg-emerald-600,.bg-green-500,.bg-green-600,.bg-teal-500,.bg-teal-600,.bg-cyan-600,.bg-amber-500,.bg-amber-600,.bg-orange-500,.bg-orange-600) { color: #ffffff !important; }
+html[data-clinic-warm] [data-dark-page] :is(.bg-blue-500,.bg-blue-600,.bg-blue-700,.bg-sky-500,.bg-sky-600,.bg-indigo-500,.bg-indigo-600,.bg-violet-500,.bg-violet-600,.bg-purple-500,.bg-purple-600,.bg-rose-500,.bg-rose-600,.bg-red-500,.bg-red-600,.bg-emerald-500,.bg-emerald-600,.bg-green-500,.bg-green-600,.bg-teal-500,.bg-teal-600,.bg-cyan-600,.bg-amber-500,.bg-amber-600,.bg-orange-500,.bg-orange-600):is([class*="text-white"]),
+html[data-clinic-warm] [data-dark-page] :is(.bg-blue-500,.bg-blue-600,.bg-blue-700,.bg-sky-500,.bg-sky-600,.bg-indigo-500,.bg-indigo-600,.bg-violet-500,.bg-violet-600,.bg-purple-500,.bg-purple-600,.bg-rose-500,.bg-rose-600,.bg-red-500,.bg-red-600,.bg-emerald-500,.bg-emerald-600,.bg-green-500,.bg-green-600,.bg-teal-500,.bg-teal-600,.bg-cyan-600,.bg-amber-500,.bg-amber-600,.bg-orange-500,.bg-orange-600) :is([class*="text-white"]) { color: #ffffff !important; }
+html[data-clinic-warm] [data-dark-page] [aria-label="閉じる"]:is(.bg-black\/60,.bg-black\/70,.bg-black\/80),
+html[data-clinic-warm] [data-dark-page] [aria-label="閉じる"]:is(.bg-black\/60,.bg-black\/70,.bg-black\/80) svg { color: #ffffff !important; }
 /* CTA等のオレンジ（theme.ctaBg が bg-blue系でなく orange系のとき）はそのまま活かす */
 }
 

@@ -30,7 +30,7 @@ function todayJst(): string {
   return jst.toISOString().split("T")[0];
 }
 
-export default function MyDailyTasks() {
+export default function MyDailyTasks({ showAiLabel = true }: { showAiLabel?: boolean } = {}) {
   const [tasks, setTasks] = useState<DailyTask[]>([]);
   const [loading, setLoading] = useState(true);
   const [, startTransition] = useTransition();
@@ -92,7 +92,7 @@ export default function MyDailyTasks() {
         <div className="flex items-center gap-2">
           <Sparkles className="w-5 h-5 text-violet-500" />
           <span className="text-sm font-black text-slate-800 dark:text-slate-100">今日やること</span>
-          <span className="text-[11px] text-slate-400">AI秘書から</span>
+          {showAiLabel && <span className="text-[11px] text-slate-400">AI秘書から</span>}
         </div>
         <span className="text-xs font-bold text-slate-500 dark:text-slate-400">
           {remaining > 0 ? `あと${remaining}件` : `全${tasks.length}件完了 🎉`}

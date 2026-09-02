@@ -17,14 +17,16 @@ const showLogoIcon = hasCustomLogo || isDefaultClinic;
 
 type Props = {
   role?: Role;
+  /** clinic_settings.sales_input_mode（"tally" なら「売上記帳」を「日計表」と表示） */
+  salesInputMode?: string | null;
   /** モバイル Drawer 内で使う場合 true。リンククリック時の onNavigate コールバックも併用 */
   variant?: "desktop" | "mobile";
   onNavigate?: () => void;
 };
 
-export default function AdminSidebar({ role = "owner", variant = "desktop", onNavigate }: Props) {
+export default function AdminSidebar({ role = "staff", variant = "desktop", onNavigate, salesInputMode }: Props) {
   const pathname = usePathname();
-  const items = getAdminNavItems(role);
+  const items = getAdminNavItems(role, { salesInputMode });
   const homeHref = isFamilyGift ? "/calendar" : "/admin/dashboard";
 
   // 「予約サイトを確認したい時がある」への対応。公式HPは院ごとに設定があれば出す。
@@ -141,7 +143,14 @@ export default function AdminSidebar({ role = "owner", variant = "desktop", onNa
 
       {/* 下部: ログアウト */}
       <div className="border-t border-[var(--sidebar-border)] px-3 py-3">
-        <form action={logoutAction}>
+        {/* 受付は共用アカウントでログインしっぱなし運用。誤タップ1回で再ログイン（パスワードを
+            知らない受付が詰む）にならないよう、確認を1回はさむ。 */}
+        <form
+          action={logoutAction}
+          onSubmit={(e) => {
+            if (!window.confirm("ログアウトしますか？\n次に使うときはメールアドレスとパスワードが必要です。")) e.preventDefault();
+          }}
+        >
           <button
             type="submit"
             className="w-full flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium text-slate-600 hover:bg-rose-50 hover:text-rose-600 transition-colors"

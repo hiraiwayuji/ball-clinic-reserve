@@ -8,13 +8,18 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
   ChevronLeft, ChevronRight, Loader2, RotateCcw,
-  UserCheck, CreditCard, XCircle, Plus, CalendarPlus, Pencil, Search, X,
+  UserCheck, CreditCard, XCircle, CalendarPlus, Pencil, Search, X, Ban, UserX, Bell, MessageCircle,
 } from "lucide-react";
 import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
 import { realtimeGuard } from "@/lib/realtime-guard";
 import { getTimelineRange, type TimelineData, type TimelineDay, type TimelineAppointment } from "@/app/actions/timeline";
-import { updateCheckinStatus, addAddonToAppointment, getAddonCourseInfo, sendReviewRequest, getReviewRequestConfig, restoreCancelledAppointment, deleteAppointment, setCancelledGhostHidden, getMonthCrossingFirstVisits, updateAppointmentDetails } from "@/app/actions/adminReserve";
+import {
+  updateCheckinStatus, addAddonToAppointment, getAddonCourseInfo, sendReviewRequest, getReviewRequestConfig,
+  restoreCancelledAppointment, deleteAppointment, setCancelledGhostHidden, getMonthCrossingFirstVisits,
+  updateAppointmentDetails, cancelAppointmentKeepRecord, markAppointmentNoShowUnexcused, notifyWaitlistOpening,
+  type WaitlistCandidate,
+} from "@/app/actions/adminReserve";
 import { cancelKindLabel } from "@/components/admin/CancelledAppointmentDialog";
 import { getStaffSchedulesForDates, upsertStaffScheduleForDate, type StaffDaySchedule } from "@/app/actions/staff-schedule";
 import { getMyRole } from "@/app/actions/auth";
@@ -76,7 +81,34 @@ type MovePlan = {
   durationMinutes: number;
   /** 複数担当の予約なら担当人数（2以上）。確認ダイアログに注意書きを出す */
   staffCount: number;
+  /**
+   * どこから来た移動か。"shift"＝予約詳細の「20分前／20分後」ボタン。
+   * shift のときは「やめる」で予約詳細に戻す（ドラッグは戻す先が無い）。
+   */
+  source: "drag" | "shift";
 };
+
+/** 予約の状態（status）の日本語。生の英語をそのまま画面に出さない。 */
+const STATUS_LABEL: Record<string, string> = {
+  confirmed: "確定",
+  pending: "仮予約（未確定）",
+  waiting: "キャンセル待ち",
+  cancelled: "キャンセル",
+};
+function statusLabel(status: string): string {
+  return STATUS_LABEL[status] ?? status;
+}
+
+/** 来院の状態（checkin_status）の日本語。null＝まだ来ていない。 */
+const CHECKIN_LABEL: Record<string, string> = {
+  arrived: "来院済",
+  in_treatment: "施術中",
+  done: "会計済",
+};
+function checkinLabel(checkin: string | null): string {
+  if (!checkin) return "未来院";
+  return CHECKIN_LABEL[checkin] ?? checkin;
+}
 
 /** 表示レンジ。"day"=1日だけ / "week"=月曜〜日曜を縦に7つ */
 type RangeMode = "day" | "week";
@@ -141,6 +173,21 @@ function statusColor(status: string, checkin: string | null, isFirstVisit: boole
   if (isFirstVisit) return "bg-amber-50 border-amber-300 text-amber-900 dark:bg-amber-900/20 dark:text-amber-100";
   return "bg-sky-50 border-sky-300 text-sky-900 dark:bg-sky-900/30 dark:text-sky-100";
 }
+
+/**
+ * 凡例に出す「予約バーの色」。statusColor をそのまま呼んで作るので、
+ * 色を変えたら凡例も自動で同じ色になる（手で2か所直す必要がない）。
+ * 並びは statusColor の優先順（キャンセル＞キャンセル待ち＞来院済＞会計済＞初診＞通常）ではなく
+ * 受付の人が見る頻度の順にしている。
+ */
+const BAR_LEGEND: { label: string; cls: string }[] = [
+  { label: "予約あり", cls: statusColor("confirmed", null, false) },
+  { label: "初診", cls: statusColor("confirmed", null, true) },
+  { label: "キャンセル待ち", cls: statusColor("waiting", null, false) },
+  { label: "受付済（来院）", cls: statusColor("confirmed", "arrived", false) },
+  { label: "会計済", cls: statusColor("confirmed", "done", false) },
+  { label: "キャンセル", cls: statusColor("cancelled", null, false) },
+];
 
 /**
  * 時間帯の帯（勤務時間・休憩・受付カバー）の位置。
@@ -428,6 +475,38 @@ export default function TodayTimelineWidget({
       onBreakCell(dateFromKey(dateKey), timeStr);
       return;
     }
+    // 斜線のマス（勤務時間外・休み・休憩・休診日）は予約を取れない時間。
+    // 見た目で分かるようにはしてあるが、押せてしまうと「その先生が入れない時間」に
+    // 予約が入る事故が続いたので、ここで止める。院長だけは事情が分かるので確認のうえ続行できる。
+    if (staffId && staffId !== UNASSIGNED_KEY) {
+      const staffName = staffRows.find((s) => s.id === staffId)?.name ?? "担当";
+      const day = data?.days.find((d) => d.date === dateKey);
+      const sched = (schedulesByDate[dateKey] ?? []).find((sc) => sc.staffId === staffId);
+      let reason: string | null = null;
+      if (day?.isHoliday) {
+        reason = `${format(dateFromKey(dateKey), "M/d(E)", { locale: ja })} は休診日です`;
+      } else if (sched?.isOff) {
+        reason = `${staffName}先生はこの日はお休みです`;
+      } else if (sched?.startTime && sched?.endTime) {
+        const start = hmToMinutes(sched.startTime);
+        const end = hmToMinutes(sched.endTime);
+        if (minuteOfDay < start || minuteOfDay >= end) {
+          reason = `${staffName}先生はこの時間は勤務時間外です（勤務 ${sched.startTime}〜${sched.endTime}）`;
+        } else if (
+          sched.breakStart && sched.breakEnd &&
+          minuteOfDay >= hmToMinutes(sched.breakStart) && minuteOfDay < hmToMinutes(sched.breakEnd)
+        ) {
+          reason = `${staffName}先生はこの時間は休憩中です（${sched.breakStart}〜${sched.breakEnd}）`;
+        }
+      }
+      if (reason) {
+        if (userRole !== "owner") {
+          toast.error(reason);
+          return;
+        }
+        if (!window.confirm(`${reason}。\nそれでも ${timeStr} に予約を入れますか？（院長のみ続行できます）`)) return;
+      }
+    }
     setReserveDialog({
       open: true,
       staffId: staffId === UNASSIGNED_KEY ? undefined : staffId,
@@ -443,12 +522,115 @@ export default function TodayTimelineWidget({
     try {
       const res = await updateCheckinStatus(apt.id, "arrived");
       if (res.success) {
-        toast.success(`${apt.customer_name ?? "患者"} を受付しました`);
+        toast.success(`${apt.customer_name ?? "患者"}様（${fmtTime(apt.start_time)}）を受付しました`);
         setSelectedApt(null);
         refresh();
       } else {
         toast.error(res.error ?? "受付処理に失敗しました");
       }
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  // 受付の取り消し（押し間違い用。来院前の状態に戻す）
+  const handleUncheckin = async (apt: TimelineAppointment) => {
+    if (actionLoading) return;
+    setActionLoading(true);
+    try {
+      const res = await updateCheckinStatus(apt.id, null);
+      if (res.success) {
+        toast.success(`${apt.customer_name ?? "患者"}様（${fmtTime(apt.start_time)}）の受付を取り消しました`);
+        setSelectedApt(null);
+        refresh();
+      } else {
+        toast.error(res.error ?? "受付の取り消しに失敗しました");
+      }
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  // キャンセルで枠が空いたとき、キャンセル待ちの方へ LINE で知らせるポップ
+  const [waitlistPop, setWaitlistPop] = useState<{ candidates: WaitlistCandidate[]; notified: string[] } | null>(null);
+  const [notifyingWaitlistId, setNotifyingWaitlistId] = useState<string | null>(null);
+  const handleNotifyWaitlist = async (id: string) => {
+    setNotifyingWaitlistId(id);
+    try {
+      const r = await notifyWaitlistOpening(id);
+      if (r.success) {
+        toast.success("キャンセル待ちの方へ、LINEで空きをお知らせしました");
+        setWaitlistPop((p) => (p ? { ...p, notified: [...p.notified, id] } : p));
+      } else {
+        toast.error(r.error ?? "送信に失敗しました");
+      }
+    } catch {
+      toast.error("通信エラーが発生しました");
+    } finally {
+      setNotifyingWaitlistId(null);
+    }
+  };
+
+  /** 予約の「M/d(E) HH:MM」。確認ダイアログで患者名と一緒に見せる */
+  const aptWhenLabel = (apt: TimelineAppointment) =>
+    `${format(dateFromKey(jstDateKey(apt.start_time)), "M/d(E)", { locale: ja })} ${fmtTime(apt.start_time)}`;
+
+  // 予約詳細から直接「キャンセルにする」（記録は残る・枠は空きに戻る）。
+  // これまでは 予約変更 → 削除 → キャンセルにする と3段階だった。
+  const handleCancelKeepRecord = async (apt: TimelineAppointment) => {
+    if (actionLoading) return;
+    const name = apt.customer_name ?? "患者";
+    if (!window.confirm(
+      `${name}様 ${aptWhenLabel(apt)} の予約をキャンセルにしますか？\n\n` +
+      `カレンダーに薄く「キャンセル」と残り、枠は空きに戻ります。\n（あとから「元に戻す」もできます）`,
+    )) return;
+    setActionLoading(true);
+    try {
+      const res = await cancelAppointmentKeepRecord(apt.id);
+      if (res.success) {
+        toast.success(`${name}様（${fmtTime(apt.start_time)}）をキャンセルにしました`);
+        setSelectedApt(null);
+        refresh();
+        const cands = ("waitlistCandidates" in res ? res.waitlistCandidates : []) as WaitlistCandidate[];
+        if (cands.length > 0) setWaitlistPop({ candidates: cands, notified: [] });
+      } else {
+        toast.error(res.error ?? "キャンセルに失敗しました");
+      }
+    } catch {
+      toast.error("通信エラーが発生しました");
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  // 開始時刻を過ぎても来なかった予約を「来院なし（無断キャンセル）」にする。
+  // キャンセルの回数に数えられ、院の設定によっては予約制限の対象になる。
+  const handleNoShow = async (apt: TimelineAppointment) => {
+    if (actionLoading) return;
+    const name = apt.customer_name ?? "患者";
+    if (!window.confirm(
+      `${name}様 ${aptWhenLabel(apt)} を「来院なし（無断キャンセル）」にしますか？\n\n` +
+      `無断キャンセルとして回数に数えられます。\n連絡があってのキャンセルなら「キャンセルにする」を選んでください。`,
+    )) return;
+    setActionLoading(true);
+    try {
+      const res = await markAppointmentNoShowUnexcused(apt.id);
+      if (res.success) {
+        toast.success(`${name}様（${fmtTime(apt.start_time)}）を来院なし（無断キャンセル）にしました`);
+        if (res.blockedUntil) {
+          toast.warning(
+            `${name}様は無断キャンセルが続いたため、` +
+            `${format(new Date(res.blockedUntil), "M/d", { locale: ja })} までネット予約を停止しました`,
+            { duration: 10000 },
+          );
+        }
+        setSelectedApt(null);
+        refresh();
+      } else {
+        toast.error(res.error ?? "来院なしにできませんでした");
+      }
+    } catch {
+      toast.error("通信エラーが発生しました");
     } finally {
       setActionLoading(false);
     }
@@ -621,7 +803,49 @@ export default function TodayTimelineWidget({
       toTimeLabel: minutesToHm(toMinute),
       durationMinutes,
       staffCount: (apt.additional_staff?.length ?? 0) + 1,
+      source: "drag",
     });
+  };
+
+  // 予約詳細の「20分前／20分後」ボタン → ドラッグと同じ確認ダイアログ（10:00 → 10:20）を出してから動かす。
+  // 以前は押した瞬間に動いていたが、押し間違いがそのまま登録されるので確認を1回はさむ。
+  const openShiftPlan = (apt: TimelineAppointment, deltaMinutes: number) => {
+    if (!data) return;
+    const start = new Date(apt.start_time);
+    const end = apt.end_time ? new Date(apt.end_time) : new Date(start.getTime() + data.slotMinutes * 60000);
+    const durationMinutes = Math.max(
+      Math.round((end.getTime() - start.getTime()) / 60000),
+      data.slotMinutes,
+    );
+    const next = new Date(start.getTime() + deltaMinutes * 60000);
+    const fromDateKey = jstDateKey(apt.start_time);
+    const toDateKey = jstDateKey(next.toISOString());
+    const laneId = apt.staff_id ?? defaultStaffId ?? "";
+    const laneName = apt.staff_name ?? staffRows.find((s) => s.id === laneId)?.name ?? "担当未設定";
+    setSelectedApt(null);
+    setMovePlan({
+      apt,
+      toStaffId: laneId,
+      toStaffName: laneName,
+      fromStaffName: laneName,
+      staffChanged: false,
+      dateChanged: toDateKey !== fromDateKey,
+      fromDateLabel: format(dateFromKey(fromDateKey), "M/d(E)", { locale: ja }),
+      toDateKey,
+      toDateLabel: format(dateFromKey(toDateKey), "M/d(E)", { locale: ja }),
+      fromTimeLabel: fmtTime(apt.start_time),
+      toTimeLabel: fmtTime(next.toISOString()),
+      durationMinutes,
+      staffCount: (apt.additional_staff?.length ?? 0) + 1,
+      source: "shift",
+    });
+  };
+
+  // 移動の確認で「やめる」。詳細から来たときは詳細に戻す
+  const cancelMovePlan = () => {
+    const plan = movePlan;
+    setMovePlan(null);
+    if (plan?.source === "shift") setSelectedApt(plan.apt);
   };
 
   // 確認ダイアログの「移動する」
@@ -675,47 +899,11 @@ export default function TodayTimelineWidget({
     }
   };
 
-  // 予約の詳細から時間だけをその場でずらす。
-  // これまでは「予約変更」を開いてプルダウンを選んで保存、と5タップ必要だった。
-  const [shiftingTime, setShiftingTime] = useState(false);
+  // 予約の詳細から時間だけをずらす操作（「20分前／20分後」）は openShiftPlan → runMove に一本化した。
   // 担当かぶりで動かせなかったときのお知らせ。閉じるまで残す（2026-08-22 ぼーるくん依頼）。
   const [overlapError, setOverlapError] = useState<string | null>(null);
   // かぶりで止まった操作を、院長の判断でやり直すための再実行関数
   const [overlapRetry, setOverlapRetry] = useState<null | (() => Promise<void>)>(null);
-  const shiftAppointmentTime = async (apt: TimelineAppointment, deltaMinutes: number, allowOverlap: boolean = false) => {
-    const start = new Date(apt.start_time);
-    const end = apt.end_time ? new Date(apt.end_time) : new Date(start.getTime() + 30 * 60000);
-    const durationMinutes = Math.max(1, Math.round((end.getTime() - start.getTime()) / 60000));
-    const next = new Date(start.getTime() + deltaMinutes * 60000);
-    const dateKey = next.toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" });
-    const timeLabel = next.toLocaleTimeString("ja-JP", { timeZone: "Asia/Tokyo", hour: "2-digit", minute: "2-digit", hour12: false });
-    setShiftingTime(true);
-    try {
-      const res = await updateAppointmentDetails(
-        apt.id, dateKey, timeLabel, apt.memo ?? "", apt.is_first_visit, durationMinutes,
-        // 院長が「重なりを承知で進める」を押したときだけ許可を添える
-        allowOverlap ? { allowOverlap: true } : undefined,
-      );
-      if (res.success) {
-        toast.success(`${apt.customer_name ?? "患者"}様を ${timeLabel} に変更しました`);
-        setSelectedApt(null);
-        refresh();
-      } else if ("overlap" in res && res.overlap) {
-        if ("needsOwner" in res && res.needsOwner) {
-          setOverlapRetry(() => async () => { await shiftAppointmentTime(apt, deltaMinutes, true); });
-        } else {
-          setOverlapRetry(null);
-        }
-        setOverlapError(res.error ?? "同じ担当の重複予約はできません。");
-      } else {
-        toast.error(res.error ?? "時間の変更に失敗しました");
-      }
-    } catch {
-      toast.error("通信エラーが発生しました");
-    } finally {
-      setShiftingTime(false);
-    }
-  };
 
   // 時間軸の刻みリスト（営業終了時刻のラベルも末尾に含める）。
   // 土曜は営業時間が違うので、日ごとに作る。
@@ -1186,6 +1374,14 @@ export default function TodayTimelineWidget({
                   />
                   取れない時間（勤務時間外・休憩・休み）
                 </span>
+                {/* 予約バーの色。statusColor から作った BAR_LEGEND なので、バーと必ず同じ色になる */}
+                <span className="text-slate-300 dark:text-slate-600">｜</span>
+                {BAR_LEGEND.map((l) => (
+                  <span key={l.label} className="inline-flex items-center gap-1">
+                    <span className={`inline-block w-4 h-3 rounded-sm border ${l.cls}`} />
+                    {l.label}
+                  </span>
+                ))}
               </div>
               {/* 時間軸ヘッダ */}
               <div
@@ -1840,7 +2036,10 @@ export default function TodayTimelineWidget({
                             {a.medical_record_number && (
                               <span className="ml-1 text-[9px] font-bold opacity-70 tabular-nums">No.{a.medical_record_number}</span>
                             )}
-                            {a.is_first_visit ? " ⓢ" : ""}
+                            {/* 初診はスマホ表示と同じ「初診」バッジ（「ⓢ」では受付の人に意味が伝わらない） */}
+                            {a.is_first_visit && (
+                              <span className="ml-1 text-[9px] font-black bg-amber-500 text-white px-1 rounded" title="初診の患者様です">初診</span>
+                            )}
                             {!isCancelled && monthCrossIds.has(a.id) && (
                               <span
                                 className="ml-1 text-[9px] font-bold bg-violet-600 text-white px-1 rounded"
@@ -1943,7 +2142,8 @@ export default function TodayTimelineWidget({
                 {userRole !== "owner" && (
                   <>
                     <br />
-                    どうしても重ねる必要があるときは、<span className="font-bold">院長先生の許可</span>が必要です。
+                    院長先生に頼むとき：院長のログインでこの画面を開き
+                    『重なりを承知で進める（院長）』を押してもらってください。
                   </>
                 )}
               </div>
@@ -1978,14 +2178,14 @@ export default function TodayTimelineWidget({
       {movePlan && (
         <div
           className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4"
-          onClick={() => !moving && setMovePlan(null)}
+          onClick={() => !moving && cancelMovePlan()}
         >
           <div
             className="bg-white dark:bg-slate-900 rounded-xl shadow-xl max-w-sm w-full p-5 space-y-4"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="text-base font-bold text-slate-900 dark:text-slate-100">
-              この予約を移しますか？
+              {movePlan.source === "shift" ? "この時間にずらしますか？" : "この予約を移しますか？"}
             </div>
             <div className="space-y-2 text-sm">
               <div className="font-bold text-slate-800 dark:text-slate-100">
@@ -2049,7 +2249,7 @@ export default function TodayTimelineWidget({
               <Button
                 type="button"
                 variant="outline"
-                onClick={() => setMovePlan(null)}
+                onClick={cancelMovePlan}
                 disabled={moving}
                 className="flex-1"
               >
@@ -2061,7 +2261,7 @@ export default function TodayTimelineWidget({
                 disabled={moving}
                 className="flex-1 bg-blue-600 hover:bg-blue-700 text-white"
               >
-                {moving ? "移動中…" : "移動する"}
+                {moving ? "移動中…" : movePlan.source === "shift" ? "この時間にする" : "移動する"}
               </Button>
             </div>
           </div>
@@ -2127,17 +2327,27 @@ export default function TodayTimelineWidget({
                 </div>
               )}
               {selectedApt.room_name && <div><span className="text-slate-500">部屋:</span> {selectedApt.room_name}</div>}
+              {/* 担当が決まっていない予約。バーの赤い「●」だけだと見落とすので、ここにも文字で出す */}
+              {!selectedApt.staff_id && selectedApt.status !== "cancelled" && (
+                <div className="rounded-lg bg-rose-50 dark:bg-rose-900/20 border border-rose-200 dark:border-rose-800 px-3 py-2 text-xs font-bold text-rose-700 dark:text-rose-300">
+                  ● 担当が決まっていません（下の「予約変更」から担当を選んでください）
+                </div>
+              )}
               <div>
                 <span className="text-slate-500">状態:</span>{" "}
                 {selectedApt.status === "cancelled"
                   ? `${cancelKindLabel(selectedApt.cancel_kind, selectedApt.no_show)}済み（この枠は空き扱い）`
-                  : selectedApt.status}
-                {selectedApt.is_first_visit && " (初診)"}
-                {selectedApt.checkin_status && (
-                  <span className="ml-2 text-xs px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200 font-semibold">
-                    {selectedApt.checkin_status === "arrived" ? "受付済" :
-                     selectedApt.checkin_status === "in_treatment" ? "施術中" :
-                     selectedApt.checkin_status === "done" ? "完了" : selectedApt.checkin_status}
+                  : statusLabel(selectedApt.status)}
+                {selectedApt.is_first_visit && "（初診）"}
+                {selectedApt.status !== "cancelled" && (
+                  <span
+                    className={`ml-2 text-xs px-2 py-0.5 rounded font-semibold ${
+                      selectedApt.checkin_status
+                        ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200"
+                        : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300"
+                    }`}
+                  >
+                    {checkinLabel(selectedApt.checkin_status)}
                   </span>
                 )}
               </div>
@@ -2278,7 +2488,8 @@ export default function TodayTimelineWidget({
                 {/* ずらす幅は院の予約枠（clinic_settings.slot_duration_minutes）の1・2・3倍。
                     30分決め打ちにすると、20分単位で運用している からだ鍼灸整骨院で
                     枠とズレた時刻に動いてしまう（2026-08-10 藤川先生／絶対ルール）。
-                    からだ=20分 → ±20/40/60、30分の院 → ±30/60/90。 */}
+                    からだ=20分 → 20/40/60分前・後、30分の院 → 30/60/90分前・後。
+                    押すと「10:00 → 10:20」の確認ダイアログが出てから動く。 */}
                 {(() => {
                   const step = data?.slotMinutes ?? 30;
                   return [-3, -2, -1, 1, 2, 3].map((n) => n * step);
@@ -2286,23 +2497,37 @@ export default function TodayTimelineWidget({
                   <button
                     key={d}
                     type="button"
-                    disabled={shiftingTime || actionLoading}
-                    onClick={() => shiftAppointmentTime(selectedApt, d)}
-                    className="flex-1 px-1 py-1.5 rounded-lg text-xs font-bold border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700 disabled:opacity-50 tabular-nums"
+                    disabled={moving || actionLoading}
+                    onClick={() => openShiftPlan(selectedApt, d)}
+                    className="flex-1 px-1 py-1.5 rounded-lg text-[11px] leading-tight font-bold border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700 disabled:opacity-50 tabular-nums"
+                    aria-label={d > 0 ? `${d}分後にずらす` : `${-d}分前にずらす`}
                   >
-                    {d > 0 ? `+${d}` : d}
+                    {d > 0 ? `${d}分後` : `${-d}分前`}
                   </button>
                 ))}
               </div>
               <div className="flex gap-2">
-                <Button
-                  onClick={() => handleCheckin(selectedApt)}
-                  disabled={actionLoading || selectedApt.checkin_status === "arrived"}
-                  className="flex-1 bg-blue-600 hover:bg-blue-700 text-white"
-                >
-                  <UserCheck className="w-4 h-4 mr-1.5" />
-                  {selectedApt.checkin_status === "arrived" ? "受付済" : "受付"}
-                </Button>
+                {/* 受付。押し間違いに備えて、受付済のあとは同じボタンで取り消せる */}
+                {selectedApt.checkin_status === "arrived" ? (
+                  <Button
+                    onClick={() => handleUncheckin(selectedApt)}
+                    disabled={actionLoading}
+                    variant="outline"
+                    className="flex-1 border-emerald-400 text-emerald-800 dark:text-emerald-200 hover:bg-emerald-50 dark:hover:bg-emerald-900/30"
+                  >
+                    <UserCheck className="w-4 h-4 mr-1.5" />
+                    受付済 ✓（取り消す）
+                  </Button>
+                ) : (
+                  <Button
+                    onClick={() => handleCheckin(selectedApt)}
+                    disabled={actionLoading || selectedApt.checkin_status === "done" || selectedApt.checkin_status === "in_treatment"}
+                    className="flex-1 bg-blue-600 hover:bg-blue-700 text-white"
+                  >
+                    <UserCheck className="w-4 h-4 mr-1.5" />
+                    {selectedApt.checkin_status ? checkinLabel(selectedApt.checkin_status) : "受付"}
+                  </Button>
+                )}
                 <Button
                   onClick={() => handleGoToSales(selectedApt)}
                   disabled={actionLoading}
@@ -2394,8 +2619,92 @@ export default function TodayTimelineWidget({
                 <Pencil className="w-4 h-4 mr-1.5" />
                 予約変更（時刻・コース・担当・メモを編集）
               </Button>
+
+              {/* キャンセル系。予約変更 → 削除 → 選ぶ、と3段階だったのを直付けにする。
+                  会計済（done）の予約はキャンセルの対象ではないので出さない。 */}
+              {selectedApt.checkin_status !== "done" && (
+                <div className="flex gap-2 pt-1">
+                  <Button
+                    onClick={() => handleCancelKeepRecord(selectedApt)}
+                    disabled={actionLoading}
+                    variant="outline"
+                    className="flex-1 border-rose-300 dark:border-rose-700 text-rose-700 dark:text-rose-300 hover:bg-rose-50 dark:hover:bg-rose-950/40"
+                  >
+                    <Ban className="w-4 h-4 mr-1.5" />
+                    この予約をキャンセルにする
+                  </Button>
+                  {/* 開始時刻を過ぎて、まだ来ていない予約だけ「来院なし」を出す */}
+                  {!selectedApt.checkin_status && new Date(selectedApt.start_time).getTime() < Date.now() && (
+                    <Button
+                      onClick={() => handleNoShow(selectedApt)}
+                      disabled={actionLoading}
+                      variant="outline"
+                      className="flex-1 border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800"
+                    >
+                      <UserX className="w-4 h-4 mr-1.5" />
+                      来院なし（無断キャンセル）
+                    </Button>
+                  )}
+                </div>
+              )}
             </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* キャンセルで枠が空いたとき：キャンセル待ちの方へ LINE で知らせる */}
+      {waitlistPop && (
+        <div
+          className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4"
+          onClick={() => setWaitlistPop(null)}
+        >
+          <div
+            className="bg-white dark:bg-slate-900 rounded-xl shadow-xl max-w-sm w-full p-5 space-y-3"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-2 text-base font-bold text-slate-900 dark:text-slate-100">
+              <Bell className="w-5 h-5 text-amber-500" />
+              この方に予約できるようになりました
+            </div>
+            <p className="text-sm text-slate-600 dark:text-slate-300">
+              キャンセルで枠が空きました。キャンセル待ちの方へ、LINEで空きをお知らせしましょう（先着順でのご案内です）。
+            </p>
+            <div className="space-y-2 max-h-72 overflow-y-auto">
+              {waitlistPop.candidates.map((c) => {
+                const notified = waitlistPop.notified.includes(c.appointmentId);
+                return (
+                  <div
+                    key={c.appointmentId}
+                    className="flex items-center justify-between gap-2 rounded-xl border border-slate-200 dark:border-white/10 px-3 py-2.5"
+                  >
+                    <div className="min-w-0">
+                      <p className="font-bold text-sm text-slate-800 dark:text-slate-100 truncate">
+                        {c.customerName}
+                        {c.isFirstVisit && <span className="ml-1.5 text-[10px] text-amber-600">初診</span>}
+                      </p>
+                      <p className="text-xs text-slate-500 dark:text-slate-400">
+                        希望 {format(dateFromKey(jstDateKey(c.startTime)), "M/d", { locale: ja })} {fmtTime(c.startTime)}
+                        {!c.hasLine && "・LINE未登録"}
+                      </p>
+                    </div>
+                    <Button
+                      type="button"
+                      size="sm"
+                      disabled={!c.hasLine || notifyingWaitlistId === c.appointmentId || notified}
+                      onClick={() => handleNotifyWaitlist(c.appointmentId)}
+                      className="bg-green-600 hover:bg-green-700 text-white shrink-0 disabled:opacity-50"
+                    >
+                      <MessageCircle className="w-4 h-4 mr-1" />
+                      {notified ? "送信済み" : notifyingWaitlistId === c.appointmentId ? "送信中..." : "LINEで知らせる"}
+                    </Button>
+                  </div>
+                );
+              })}
+            </div>
+            <Button type="button" variant="outline" onClick={() => setWaitlistPop(null)} className="w-full">
+              閉じる
+            </Button>
           </div>
         </div>
       )}
@@ -2409,6 +2718,7 @@ export default function TodayTimelineWidget({
           defaultCourseId={nextReserveDialog.courseId}
           defaultStaffId={nextReserveDialog.staffId}
           defaultTime={nextReserveDialog.time}
+          slotMinutes={data?.slotMinutes}
           hideTrigger
           onSuccess={() => {
             toast.success("次回予約を登録しました");
@@ -2426,6 +2736,7 @@ export default function TodayTimelineWidget({
           defaultDate={reserveDialog.date}
           defaultTime={reserveDialog.time}
           defaultStaffId={reserveDialog.staffId}
+          slotMinutes={data?.slotMinutes}
           hideTrigger
           onSuccess={refresh}
         />
@@ -2437,6 +2748,7 @@ export default function TodayTimelineWidget({
           open={editDialog.open}
           onOpenChange={(o) => setEditDialog((s) => ({ ...s, open: o }))}
           appointment={editDialog.appointment}
+          slotMinutes={data?.slotMinutes}
           onSuccess={() => {
             setEditDialog({ open: false, appointment: null });
             refresh();

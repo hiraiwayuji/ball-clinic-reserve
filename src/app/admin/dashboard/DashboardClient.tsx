@@ -25,9 +25,19 @@ type DashboardClientProps = {
   aiSecretaryEnabled?: boolean;
   /** 経費管理 UI（ショートカット等）を表示するか。clinic_settings.expense_owner_only と role の組合せで決定 */
   canSeeExpenses?: boolean;
+  /** ログイン中の role。staff（受付）には売上目標・集客・AI提案などオーナー向けブロックを出さない */
+  role?: "owner" | "admin" | "staff";
+  /** clinic_settings.view_type。"timeline" の院は上に予約タイムテーブルがあるので、この中の予約リストは出さない（二重表示） */
+  viewType?: "list" | "timeline";
 };
 
-export default function DashboardClient({ aiSecretaryEnabled = true, canSeeExpenses = true }: DashboardClientProps = {}) {
+export default function DashboardClient({ aiSecretaryEnabled = true, canSeeExpenses = true, role = "staff", viewType = "list" }: DashboardClientProps = {}) {
+  // 受付（staff/admin）は「今日の来院状況」だけあればよい。売上目標・SNS進捗・記事提案・誕生日配信は
+  // オーナーの仕事なので出さない（共用アカウントで誰でも見えてしまう売上額も隠れる）。
+  const isOwner = role === "owner";
+  // 売上額・目標達成率はオーナーだけ（お金・経営数値は owner 専用。expense_owner_only の値に関わらず）
+  const showSalesTiles = isOwner;
+  const showAppointmentList = viewType !== "timeline";
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
@@ -157,10 +167,12 @@ export default function DashboardClient({ aiSecretaryEnabled = true, canSeeExpen
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
           <h1 className="text-3xl font-black tracking-tight text-slate-900 dark:text-slate-50 border-l-8 border-violet-600 pl-4">
-            V-ARC AI秘書 ダッシュボード
+            {isOwner ? "ダッシュボード" : "今日の来院状況"}
           </h1>
           <p className="text-slate-500 dark:text-slate-400 mt-2 font-medium">
-            本日の予約状況、売上進捗、そしてAI秘書からのアドバイスを一画面で管理します。
+            {isOwner
+              ? (aiSecretaryEnabled ? "本日の予約状況、売上進捗、AI秘書からのアドバイスを一画面で確認できます。" : "本日の予約状況と売上進捗を一画面で確認できます。")
+              : "本日の予約・待合・施術中・会計済みの人数です。数字を押すと受付画面に移ります。"}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -172,7 +184,7 @@ export default function DashboardClient({ aiSecretaryEnabled = true, canSeeExpen
       </div>
 
       {/* ── 今日モード ヒーロー帯 ───────────────────────────────────── */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+      <div className={`grid grid-cols-2 gap-3 ${showSalesTiles ? "sm:grid-cols-3 lg:grid-cols-6" : "sm:grid-cols-4"}`}>
         {/* 本日予約 */}
         <Link href="/admin/counter" className="group col-span-1 sm:col-span-1 lg:col-span-1 bg-gradient-to-br from-blue-600 to-violet-700 rounded-2xl p-5 text-white shadow-lg hover:shadow-xl hover:scale-[1.02] transition-all">
           <div className="flex items-start justify-between">
@@ -221,7 +233,8 @@ export default function DashboardClient({ aiSecretaryEnabled = true, canSeeExpen
           </div>
         </Link>
 
-        {/* 本日売上 */}
+        {/* 本日売上（オーナー、または経費・売上を見てよい設定の院だけ） */}
+        {showSalesTiles && (<>
         <Link href="/admin/sales" className="group col-span-1 sm:col-span-1 lg:col-span-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-5 hover:scale-[1.02] transition-all shadow-sm">
           <div className="flex items-start justify-between">
             <CreditCard className="w-5 h-5 text-amber-500" />
@@ -249,6 +262,7 @@ export default function DashboardClient({ aiSecretaryEnabled = true, canSeeExpen
             </div>
           </div>
         </div>
+        </>)}
       </div>
 
       {/* 初診バッジ */}
@@ -273,6 +287,8 @@ export default function DashboardClient({ aiSecretaryEnabled = true, canSeeExpen
         />
       )}
 
+      {/* ここから下はオーナー向け（売上目標・タスク・記事提案・誕生日）。受付には出さない。 */}
+      {isOwner && (
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
 
         {/* 1. 経営目標・売上進捗 */}
@@ -378,12 +394,13 @@ export default function DashboardClient({ aiSecretaryEnabled = true, canSeeExpen
           <CardHeader className="bg-slate-50/50 dark:bg-slate-800/20 border-b dark:border-slate-800 pb-4">
             <CardTitle className="flex items-center text-lg text-slate-800 dark:text-slate-100">
               <Calendar className="w-5 h-5 mr-2 text-blue-600 dark:text-violet-400" />
-              本日のスケジュール・AI秘書タスク
+              {showAppointmentList ? (aiSecretaryEnabled ? "本日のスケジュール・AI秘書タスク" : "本日のスケジュール・タスク") : (aiSecretaryEnabled ? "AI秘書タスク" : "今日のタスク")}
             </CardTitle>
-            <CardDescription className="dark:text-slate-400">今日の予約状況と連動したタスク管理</CardDescription>
+            <CardDescription className="dark:text-slate-400">{showAppointmentList ? "今日の予約状況と連動したタスク管理" : "予約は上の予約タイムテーブルで。ここはタスクだけ"}</CardDescription>
           </CardHeader>
-          <CardContent className="pt-6 grid grid-cols-1 md:grid-cols-2 gap-8">
+          <CardContent className={`pt-6 grid grid-cols-1 gap-8 ${showAppointmentList ? "md:grid-cols-2" : ""}`}>
 
+            {showAppointmentList && (
             <div className="space-y-6">
               <h4 className="text-xs font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest flex items-center gap-2">
                 <Clock className="w-4 h-4 text-violet-600 dark:text-violet-400" /> 予約タイムライン
@@ -444,11 +461,12 @@ export default function DashboardClient({ aiSecretaryEnabled = true, canSeeExpen
                 </Button>
               </Link>
             </div>
+            )}
 
             <div className="space-y-3">
               <div className="flex justify-between items-center">
                 <h4 className="text-sm font-bold text-slate-700 flex items-center gap-2">
-                  <Sparkles className="w-4 h-4 text-amber-500" /> AI秘書が提案する今日のタスク
+                  <Sparkles className="w-4 h-4 text-amber-500" /> {aiSecretaryEnabled ? "AI秘書が提案する今日のタスク" : "今日のタスク"}
                 </h4>
                 <Link href="/admin/tasks" className="text-xs text-amber-600 hover:underline font-medium">すべて見る →</Link>
               </div>
@@ -458,7 +476,7 @@ export default function DashboardClient({ aiSecretaryEnabled = true, canSeeExpen
                   <div className="bg-gradient-to-br from-amber-50 to-orange-50 rounded-xl p-5 border border-amber-100 text-center hover:border-amber-300 transition-colors cursor-pointer">
                     <Sparkles className="w-8 h-8 text-amber-400 mx-auto mb-2" />
                     <p className="text-sm font-medium text-amber-800">本日のタスクを追加する</p>
-                    <p className="text-xs text-amber-600/70 mt-1">AIが提案するSNSタスクを管理できます</p>
+                    <p className="text-xs text-amber-600/70 mt-1">{aiSecretaryEnabled ? "AIが提案するSNSタスクを管理できます" : "SNS・販促のタスクを管理できます"}</p>
                   </div>
                 </Link>
               ) : (
@@ -497,11 +515,13 @@ export default function DashboardClient({ aiSecretaryEnabled = true, canSeeExpen
           </CardContent>
         </Card>
 
-        {/* 3. BlogProposal & AIMemo */}
+        {/* 3. BlogProposal & AIMemo（AI秘書を出す院だけ） */}
+        {aiSecretaryEnabled && (
         <div className="lg:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-6">
           <BlogProposal clinicContext={JSON.stringify(data)} />
           <AIMemo />
         </div>
+        )}
 
         {canSeeExpenses && (
           <Card className="lg:col-span-1 shadow-sm border-slate-200">
@@ -555,8 +575,8 @@ export default function DashboardClient({ aiSecretaryEnabled = true, canSeeExpen
                             <span className="ml-1.5 text-[10px] font-bold text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded-full border border-slate-200 tabular-nums align-middle">No.{c.medical_record_number}</span>
                           )}
                         </span>
-                        <Link href="/admin/marketing">
-                          <Button size="sm" className="h-7 bg-rose-500 hover:bg-rose-600 text-[10px]">LINE送信</Button>
+                        <Link href="/admin/marketing/message">
+                          <Button size="sm" className="h-7 bg-rose-500 hover:bg-rose-600 text-[10px]">LINEでお知らせ</Button>
                         </Link>
                       </div>
                     ))}
@@ -578,7 +598,7 @@ export default function DashboardClient({ aiSecretaryEnabled = true, canSeeExpen
                 </div>
                 <Link href="/admin/marketing" className="block">
                   <Button variant="ghost" className="w-full text-xs text-rose-600 hover:text-rose-700 hover:bg-rose-50">
-                    マーケティング画面で詳細を見る →
+                    SNS・LINE等の画面で詳細を見る →
                   </Button>
                 </Link>
               </div>
@@ -587,6 +607,14 @@ export default function DashboardClient({ aiSecretaryEnabled = true, canSeeExpen
         </Card>
 
       </div>
+      )}
+
+      {/* 受付でも経費を入れてよい設定の院は、経費入力への入口だけ残す */}
+      {!isOwner && canSeeExpenses && (
+        <Link href="/admin/expenses" className="inline-flex items-center gap-2 text-sm font-bold text-emerald-700 hover:text-emerald-800">
+          <Coins className="w-4 h-4" /> 経費入力画面へ <ArrowRight className="w-4 h-4" />
+        </Link>
+      )}
 
       <PatientSearchPanel
         open={patientPanelOpen}

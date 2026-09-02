@@ -34,8 +34,12 @@ import { getCourses, getStaffList, getRooms, type ReservationCourse, type Reserv
 import { getMyRole } from "@/app/actions/auth";
 import { AddAppointmentDialog } from "./AddAppointmentDialog";
 import { toast } from "sonner";
-import { getTimeSlots } from "@/lib/time-slots";
+import { getTimeSlots, type SlotMinutes } from "@/lib/time-slots";
 import { useClinicSlotDuration } from "@/lib/use-clinic-slot-duration";
+
+/** 院の枠として扱える値（10/15/20/30）か。それ以外が来たらフックの値に任せる */
+const isSlotMinutes = (v: number | undefined): v is SlotMinutes =>
+  v === 10 || v === 15 || v === 20 || v === 30;
 import { OverlapFixList } from "@/components/admin/OverlapFixList";
 
 interface EditAppointmentDialogProps {
@@ -43,6 +47,11 @@ interface EditAppointmentDialogProps {
   onOpenChange: (open: boolean) => void;
   appointment: any;
   onSuccess?: () => void;
+  /**
+   * 院の予約枠（分）。取得済みの画面（タイムテーブル）から渡すとフックより優先。
+   * end_time が無い古い予約の所要時間の初期値にも使う（30分決め打ちにしない）。
+   */
+  slotMinutes?: number;
 }
 
 export function EditAppointmentDialog({
@@ -50,8 +59,12 @@ export function EditAppointmentDialog({
   onOpenChange,
   appointment,
   onSuccess,
+  slotMinutes: slotMinutesProp,
 }: EditAppointmentDialogProps) {
-  const slotMinutes = useClinicSlotDuration();
+  const hookSlotMinutes = useClinicSlotDuration();
+  const slotMinutes: SlotMinutes = isSlotMinutes(slotMinutesProp) ? slotMinutesProp : hookSlotMinutes;
+  // ネット予約で入ったままの仮予約か（受付が内容を確認して確定する必要がある）
+  const isPending = appointment?.status === "pending";
   // スタッフ別（タイムテーブル）から開くと customers ではなく customer_name で渡ってくる。
   // 名前が空のまま「次回予約」へ進むと患者が紐付かず、別レコードが作られてしまう。
   const patientName: string = appointment?.customers?.name ?? appointment?.customer_name ?? "";
@@ -73,7 +86,7 @@ export function EditAppointmentDialog({
   const isOwner = userRole === "owner";
   // かぶりで止まった操作を、院長の判断でやり直すための覚え書き
   const [pendingOverlapAction, setPendingOverlapAction] =
-    useState<null | "save" | "adjacent">(null);
+    useState<null | "save" | "saveConfirm" | "adjacent">(null);
   useEffect(() => { getMyRole().then((r) => setUserRole(r)).catch(() => {}); }, []);
   const [seriesFutureCount, setSeriesFutureCount] = useState<number>(0);
   // キャンセル待ち：削除で空きが出たとき候補を出して LINE で空きを知らせる
@@ -182,14 +195,15 @@ export function EditAppointmentDialog({
         setCustMrn("");
       }
 
-      let diffMinutes = 30;
+      // end_time が無い古い予約は院の枠1つぶん（30分決め打ちにしない。からだは20分）
+      let diffMinutes: number = slotMinutes;
       if (appointment.end_time) {
         const endDateTime = parseISO(appointment.end_time);
         diffMinutes = Math.round(
           (endDateTime.getTime() - startDateTime.getTime()) / (1000 * 60)
         );
       }
-      setDuration(diffMinutes > 0 ? diffMinutes.toString() : "30");
+      setDuration(diffMinutes > 0 ? diffMinutes.toString() : String(slotMinutes));
       setVisitType(appointment.is_first_visit ? "new" : "return");
       setMemo(appointment.memo || "");
 
@@ -259,7 +273,14 @@ export function EditAppointmentDialog({
     await saveAppointment(false);
   };
 
-  const saveAppointment = async (allowOverlap: boolean) => {
+  /**
+   * 予約を保存する。
+   * confirmAfter=true（仮予約の「この内容で予約を確定する」）のときは、
+   * 保存 → status を confirmed に → 「LINEを送りますか？」ポップ、の順に進む。
+   * ポップを出す前に onSuccess を呼ぶと親がこのダイアログごと閉じてしまうので、
+   * 一覧の更新はポップを閉じたとき（送る／送らない）に行う。
+   */
+  const saveAppointment = async (allowOverlap: boolean, confirmAfter: boolean = false) => {
     if (!date || !time || !appointment) {
       toast.error("日付と時間を選択してください");
       return;
@@ -303,12 +324,24 @@ export function EditAppointmentDialog({
         Object.keys(options).length > 0 ? options : undefined,
       );
       if (result.success) {
+        if (confirmAfter) {
+          const confirmed = await updateAppointmentStatus(appointment.id, "confirmed");
+          if (!confirmed.success) {
+            toast.error(confirmed.error || "予約確定に失敗しました（変更内容は保存されています）");
+            return;
+          }
+          toast.success("予約を確定しました");
+          setLineConfirmOpen(true);
+          return;
+        }
         toast.success("予約を更新しました");
         onOpenChange(false);
         onSuccess?.();
       } else if ("overlap" in result && result.overlap) {
         // 担当かぶりは直してもらわないと保存させない。ダイアログで残す。
-        setPendingOverlapAction(("needsOwner" in result && result.needsOwner) ? "save" : null);
+        setPendingOverlapAction(
+          ("needsOwner" in result && result.needsOwner) ? (confirmAfter ? "saveConfirm" : "save") : null,
+        );
         setOverlapError(result.error || "同じ担当の重複予約はできません。");
       } else {
         toast.error(result.error || "エラーが発生しました");
@@ -490,27 +523,10 @@ export function EditAppointmentDialog({
     }
   };
 
-  const handleConfirm = async () => {
-    if (!appointment) return;
-    setIsSubmitting(true);
-    try {
-      const result = await updateAppointmentStatus(appointment.id, "confirmed");
-      if (result.success) {
-        toast.success("予約を確定しました");
-        // ★ここで onSuccess() を呼ぶと親が selectedAppointment を null にして
-        //   このダイアログごとアンマウントされ、直後の「LINEを送りますか？」ポップが
-        //   表示される前に消えてしまう（＝一覧に戻ってしまう）バグだった。
-        //   一覧の更新は、ポップを閉じたあと（送る／送らない）に行う。
-        setLineConfirmOpen(true);
-      } else {
-        toast.error(result.error || "エラーが発生しました");
-      }
-    } catch {
-      toast.error("通信エラーが発生しました");
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
+  // 仮予約の確定は saveAppointment(false, true) に一本化した（内容の保存 → 確定 → LINEポップ）。
+  // ★確定直後に onSuccess() を呼ぶと親が selectedAppointment を null にして
+  //   このダイアログごとアンマウントされ、「LINEを送りますか？」ポップが
+  //   表示される前に消えてしまう。一覧の更新はポップを閉じたあとに行う。
 
   // 確定ポップ内「送る」: LINE確定通知を送ってから閉じる
   const handleConfirmSendLine = async () => {
@@ -641,6 +657,16 @@ export function EditAppointmentDialog({
             </button>
           </div>
         </DialogHeader>
+
+        {/* ネット予約の仮予約。受付が内容を見て確定するまで患者さんには確定が伝わらない */}
+        {isPending && (
+          <div className="mx-5 mt-4 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+            <p className="font-bold">ネット予約の仮予約です。内容を確認して確定してください。</p>
+            <p className="text-xs text-amber-800 mt-0.5">
+              日時・メニュー・担当を直してから、いちばん下の「この内容で予約を確定する」を押してください。
+            </p>
+          </div>
+        )}
 
         <form onSubmit={handleSubmit}>
           <div className="px-5 py-4 space-y-4">
@@ -901,14 +927,37 @@ export function EditAppointmentDialog({
 
           {/* Footer */}
           <div className="px-5 pb-5 pt-3 border-t space-y-2 sticky bottom-0 bg-white">
-            {/* Primary action */}
-            <Button
-              type="submit"
-              disabled={isSubmitting || !date || !time}
-              className="w-full h-11 bg-blue-600 hover:bg-blue-700 rounded-xl font-bold"
-            >
-              {isSubmitting ? "保存中..." : "変更を保存"}
-            </Button>
+            {/* Primary action。仮予約のときは「確定」が主ボタン（保存 → 確定 → LINEポップ）。
+                「変更を保存」は仮予約のままにしておきたいとき用の副ボタンに下げる。 */}
+            {isPending ? (
+              <>
+                <Button
+                  type="button"
+                  onClick={() => saveAppointment(false, true)}
+                  disabled={isSubmitting || !date || !time}
+                  className="w-full h-11 bg-emerald-600 hover:bg-emerald-700 rounded-xl font-bold text-white"
+                >
+                  <CheckCircle className="w-4 h-4 mr-1.5" />
+                  {isSubmitting ? "処理中..." : "この内容で予約を確定する"}
+                </Button>
+                <Button
+                  type="submit"
+                  variant="outline"
+                  disabled={isSubmitting || !date || !time}
+                  className="w-full h-10 rounded-xl text-sm"
+                >
+                  変更を保存（仮予約のまま）
+                </Button>
+              </>
+            ) : (
+              <Button
+                type="submit"
+                disabled={isSubmitting || !date || !time}
+                className="w-full h-11 bg-blue-600 hover:bg-blue-700 rounded-xl font-bold"
+              >
+                {isSubmitting ? "保存中..." : "変更を保存"}
+              </Button>
+            )}
 
             {/* 次回予約（この患者の新規予約をプリフィルして開く） */}
             <Button
@@ -1044,17 +1093,6 @@ export function EditAppointmentDialog({
 
             {/* Secondary actions */}
             <div className="flex gap-2">
-              {appointment.status === "pending" && (
-                <Button
-                  type="button"
-                  onClick={handleConfirm}
-                  disabled={isSubmitting}
-                  className="flex-1 h-10 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-sm"
-                >
-                  <CheckCircle className="w-4 h-4 mr-1" />
-                  予約確定
-                </Button>
-              )}
               <Button
                 type="button"
                 variant="outline"
@@ -1063,7 +1101,7 @@ export function EditAppointmentDialog({
                 className="flex-1 h-10 border-green-400 text-green-700 hover:bg-green-50 rounded-xl text-sm"
               >
                 <MessageCircle className="w-4 h-4 mr-1" />
-                LINE通知
+                {isPending ? "確定してLINE通知" : "LINE通知"}
               </Button>
               <Button
                 type="button"
@@ -1073,7 +1111,7 @@ export function EditAppointmentDialog({
                 className="flex-1 h-10 rounded-xl text-sm"
               >
                 <Trash2 className="w-4 h-4 mr-1" />
-                削除
+                キャンセル・削除
               </Button>
             </div>
           </div>
@@ -1138,8 +1176,8 @@ export function EditAppointmentDialog({
               {!isOwner && (
                 <>
                   <br />
-                  どうしても重ねる必要があるときは、<span className="font-bold">院長先生の許可</span>が必要です。
-                  先生にご確認ください。
+                  院長先生に頼むとき：院長のログインでこの画面を開き
+                  『重なりを承知で進める（院長）』を押してもらってください。
                 </>
               )}
             </div>
@@ -1175,6 +1213,7 @@ export function EditAppointmentDialog({
                   setOverlapError(null);
                   setPendingOverlapAction(null);
                   if (action === "save") await saveAppointment(true);
+                  else if (action === "saveConfirm") await saveAppointment(true, true);
                   else if (action === "adjacent") await handleAddAdjacent(true);
                 }}
                 className="w-full h-10 rounded-xl border-amber-300 text-amber-800 hover:bg-amber-50 text-sm font-bold"
@@ -1269,6 +1308,9 @@ export function EditAppointmentDialog({
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
                 間違えて入れた予約を消すとき用。カレンダーには何も残りません。
               </p>
+              <p className="text-xs font-bold text-rose-600 dark:text-rose-400 mt-1">
+                元に戻せません。ふつうは『キャンセルにする』を選んでください。
+              </p>
             </button>
 
             {/* まとめ削除は一番下・区切りの下に置く。すぐ上のキャンセルを押すつもりで
@@ -1299,13 +1341,14 @@ export function EditAppointmentDialog({
             )}
           </div>
           <DialogFooter>
+            {/* 「キャンセル」だと上の「キャンセルにする」と紛らわしい。閉じるだけなので「やめる」 */}
             <Button
               type="button"
               variant="outline"
               onClick={() => setDeleteChoiceOpen(false)}
               disabled={isSubmitting}
             >
-              キャンセル
+              やめる
             </Button>
           </DialogFooter>
         </DialogContent>

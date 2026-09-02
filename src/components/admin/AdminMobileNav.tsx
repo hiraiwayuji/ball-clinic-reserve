@@ -7,7 +7,7 @@ import { Menu, X } from "lucide-react";
 import AdminSidebar from "@/components/admin/AdminSidebar";
 import type { Role } from "@/lib/admin-nav";
 
-export default function AdminMobileNav({ role = "owner" }: { role?: Role }) {
+export default function AdminMobileNav({ role = "staff", salesInputMode }: { role?: Role; salesInputMode?: string | null }) {
   const [open, setOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
   const pathname = usePathname();
@@ -67,7 +67,7 @@ export default function AdminMobileNav({ role = "owner" }: { role?: Role }) {
         >
           <X className="w-5 h-5" />
         </button>
-        <AdminSidebar role={role} variant="mobile" onNavigate={() => setOpen(false)} />
+        <AdminSidebar role={role} salesInputMode={salesInputMode} variant="mobile" onNavigate={() => setOpen(false)} />
       </div>
     </div>
   ) : null;

@@ -15,7 +15,7 @@ export default async function DashboardPage({
   searchParams: Promise<{ denied?: string }>;
 }) {
   const sp = await searchParams;
-  const role = (await getMyRole()) ?? "owner";
+  const role = (await getMyRole()) ?? "staff";
   const viewType = await getCurrentViewType();
   const aiSecretaryMode = await getCurrentAiSecretaryMode();
   const hideAiSecretary = aiSecretaryMode === "admin_only" && role === "staff";
@@ -26,7 +26,7 @@ export default async function DashboardPage({
     <div className="space-y-6">
       {sp?.denied === "1" && (
         <div className="bg-rose-50 dark:bg-rose-900/20 border border-rose-300 dark:border-rose-800 text-rose-700 dark:text-rose-200 rounded-xl px-4 py-3 text-sm">
-          ⚠️ そのページはオーナー専用です。アクセス権限がないためダッシュボードに戻されました。
+          ⚠️ 開こうとしたページは院長先生専用のため、ダッシュボードに戻りました。必要なときは院長先生にお願いしてください。
         </div>
       )}
 
@@ -40,12 +40,12 @@ export default async function DashboardPage({
       {role === "owner" && <StaffTargetProgressWidget />}
 
       {/* 今日の先生タスク：院長は生成・承認パネル、先生は自分の「今日やること」 */}
-      {role === "owner" ? <OwnerDailyTaskPanel /> : <MyDailyTasks />}
+      {role === "owner" ? <OwnerDailyTaskPanel /> : <MyDailyTasks showAiLabel={!hideAiSecretary} />}
 
       {/* Phase 3: AI 秘書（role 別 × ai_secretary_mode 判定） */}
       {!hideAiSecretary && (role === "owner" ? <OwnerSecretaryWidget /> : <StaffSecretaryWidget />)}
 
-      <DashboardClient aiSecretaryEnabled={!hideAiSecretary} canSeeExpenses={canSeeExpenses} />
+      <DashboardClient aiSecretaryEnabled={!hideAiSecretary} canSeeExpenses={canSeeExpenses} role={role} viewType={viewType} />
     </div>
   );
 }

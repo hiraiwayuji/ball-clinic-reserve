@@ -1,5 +1,6 @@
 import { checkAdminAuth } from "@/app/actions/auth";
 import { getCurrentAiSecretaryMode } from "@/app/actions/clinic-slot";
+import { getSalesInputMode } from "@/app/actions/tally";
 import AiChatPanel from "@/components/AiChatPanel";
 import AdminSidebar from "@/components/admin/AdminSidebar";
 import AdminTopBar from "@/components/admin/AdminTopBar";
@@ -17,20 +18,24 @@ export default async function AdminLayout({
 }) {
   // admin配下のページはすべてここで認証チェックを行う（/admin/login は除くためlayoutの配置に注意）
   const auth = await checkAdminAuth();
-  const aiSecretaryMode = await getCurrentAiSecretaryMode();
+  const [aiSecretaryMode, salesInputMode] = await Promise.all([
+    getCurrentAiSecretaryMode(),
+    // サイドバーの「売上記帳／日計表」の表示名に使う（失敗しても既定表示で続行）
+    getSalesInputMode().catch(() => null),
+  ]);
   // admin_only モード × staff ロールでは AI秘書 (フローティングチャット) を非表示
   const hideAiSecretary = aiSecretaryMode === "admin_only" && auth.role === "staff";
 
   return (
     <ThemeProvider attribute="class" forcedTheme="light" enableSystem={false}>
       <div className="min-h-screen flex bg-[var(--background)] text-[var(--foreground)]">
-        <AdminSidebar role={auth.role} />
+        <AdminSidebar role={auth.role} salesInputMode={salesInputMode} />
 
         <div className="flex-1 flex flex-col min-w-0">
           {/* デプロイ後に開きっぱなしの画面を使い続けると「通信エラー」になるため、
               古い画面には開き直しの案内を出す（2026-08-28 受付で実際に発生） */}
           <NewVersionWatcher />
-          <AdminTopBar role={auth.role} />
+          <AdminTopBar role={auth.role} salesInputMode={salesInputMode} />
 
           {isDemo && (
             <div className="bg-amber-50 border-b border-amber-200 px-4 py-2 flex items-center gap-2 text-amber-700 text-xs font-bold">

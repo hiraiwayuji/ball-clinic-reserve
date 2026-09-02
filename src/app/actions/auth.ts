@@ -84,7 +84,13 @@ export async function checkAdminAuth(): Promise<AdminAuthInfo> {
     redirect("/admin-login?error=no-clinic-access");
   }
 
-  const role = (data.role as ClinicRole | null) ?? "owner";
+  // role が NULL のときは owner ではなく staff に倒す（fail-closed）。
+  // 2026-08-23 に受付の共用アカウントが owner 扱いで承認ゲートが全部素通りした事故の再発防止。
+  let role = data.role as ClinicRole | null;
+  if (!role) {
+    console.warn(`[checkAdminAuth] clinic_users.role is NULL for user ${user.id}; treating as staff`);
+    role = "staff";
+  }
   return {
     clinicId: data.clinic_id,
     userId: user.id,

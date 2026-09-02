@@ -16,7 +16,11 @@ const IS_BALL =
 /** からだ鍼灸整骨院の clinic_id（予約サイトのテーマ判定用） */
 const KARADA_CLINIC_ID = "d3b55abc-46a6-4cbe-8198-21c0392d9a2e";
 /** からだだけ HP 寄りの暖色（warm）、それ以外は白基調（light）に統一するための判定 */
-const IS_KARADA = process.env.NEXT_PUBLIC_CLINIC_ID === KARADA_CLINIC_ID;
+/** からだ検証用のテスト工場（localhost:3098）。本番と同じ見た目で確認するため warm を共有する */
+const KARADA_TEST_FACTORY_CLINIC_ID = "cafe0000-0000-4000-8000-000000000001";
+const IS_KARADA =
+  process.env.NEXT_PUBLIC_CLINIC_ID === KARADA_CLINIC_ID ||
+  process.env.NEXT_PUBLIC_CLINIC_ID === KARADA_TEST_FACTORY_CLINIC_ID;
 
 /** ボール本体だけ ball を、それ以外は中立値を返すフォールバック */
 const ball = <T,>(ballValue: T, otherValue: T): T => (IS_BALL ? ballValue : otherValue);
