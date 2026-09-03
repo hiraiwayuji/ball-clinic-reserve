@@ -19,6 +19,14 @@ export type ReportAnswer = {
   v: "ok" | "ng" | "";
   /** 自由記入。空文字なら書かれていない */
   m: string;
+  /**
+   * 選んだ選択肢の実際の文言（例:「消しておいてほしい」）。
+   * 質問ごとに選択肢の言葉が違う本文では、送信後の「届いている回答」を
+   * 一律「これでOK／ちがう」で出すと押した内容と違って見えるため、
+   * 画面表示にはこちらを優先して使う（無ければ従来どおり ok/ng で表示）。
+   * 空文字なら未指定（古い回答・本文側にラベルが無いとき）。
+   */
+  t?: string;
 };
 
 export type ClientReport = {
@@ -73,7 +81,9 @@ function sanitize(input: unknown, items: { id: string; label: string }[]): Repor
     if (!byId.has(id) || seen.has(id)) continue;   // 本文に無い項目・重複は捨てる
     seen.add(id);
     const v: ReportAnswer["v"] = a.v === "ok" || a.v === "ng" ? a.v : "";
-    out.push({ id, label: byId.get(id) ?? "", v, m: String(a.m ?? "").slice(0, 2000) });
+    // 選んだ選択肢の見出し文言。長すぎる／型が違う値は捨てて空にする（表示は ok/ng にフォールバック）。
+    const t = typeof a.t === "string" ? a.t.slice(0, 120) : "";
+    out.push({ id, label: byId.get(id) ?? "", v, m: String(a.m ?? "").slice(0, 2000), t });
   }
   return out;
 }

@@ -71,11 +71,16 @@ export default function ReportView({
       const picked = v.querySelector<HTMLInputElement>("input[type=radio]:checked");
       const memo = v.querySelector<HTMLTextAreaElement>("textarea");
       const raw = picked?.value;
+      // 選んだ選択肢に添えてある言葉（<label><input>のとなりの<span>）をそのまま控える。
+      // 「これでOK」だけで済まない選択肢（例:「30分に延ばしてほしい」）でも、
+      // 送信後にご本人が押した内容と同じ言葉で確認できるようにするため。
+      const pickedText = picked?.closest("label")?.querySelector("span")?.textContent?.trim() ?? "";
       return {
         id: v.getAttribute("data-q") ?? "",
         label: v.getAttribute("data-label") ?? "",
         v: raw === "ok" || raw === "ng" ? raw : "",
         m: memo ? memo.value.trim() : "",
+        t: pickedText,
       };
     });
   }, [blocks]);
@@ -200,7 +205,7 @@ export default function ReportView({
                 <div className="ans" key={`${a.id}-${i}`}>
                   <span className="q">{a.id}. {a.label}</span>
                   <span className={`a ${a.v === "ok" ? "ok" : a.v === "ng" ? "ng" : "non"}`}>
-                    {a.v === "ok" ? "これでOK" : a.v === "ng" ? "ちがう" : "未回答"}
+                    {a.t || (a.v === "ok" ? "これでOK" : a.v === "ng" ? "ちがう" : "未回答")}
                   </span>
                   {a.m && <span className="m">{a.m}</span>}
                 </div>
