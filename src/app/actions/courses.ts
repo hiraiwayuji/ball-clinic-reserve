@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { checkAdminAuth } from "./auth";
+import { writeAudit } from "@/lib/audit";
 import { PUBLIC_CLINIC_ID } from "@/lib/default-clinic-id";
 import { buildStaffSchedule } from "@/lib/staff-availability";
 
@@ -345,9 +346,36 @@ export async function deleteCourse(id: string) {
 
 // ── スタッフ保存（upsert） ──
 export async function saveStaff(staff: Partial<ReservationStaff> & { name: string }) {
-  const { clinicId } = await checkAdminAuth();
+  const { clinicId, userId, email: actorEmail, role: actorRole } = await checkAdminAuth();
   const { createClient } = await import("@/lib/supabase/server");
   const supabase = await createClient();
+
+  // 🚨 同じ院に同じ名前のスタッフを2件作らせない（2026-09-10 ボール接骨院の事故）。
+  //   「ボール」が2件になり、受付が2件目に予約を入れた結果、予約サイト
+  //   （メニューの担当＝1件目のボール）からその予約が見えず、埋まっている枠が
+  //   「予約可」と表示された。名前の前後空白と大文字小文字は同一視する。
+  //   DB 側にも同じ条件の unique index（uq_reservation_staff_clinic_name）を置き、二重に止める。
+  const trimmedName = String(staff.name ?? "").trim();
+  if (!trimmedName) return { success: false, error: "スタッフ名を入力してください" };
+  const nameKey = trimmedName.toLowerCase();
+  {
+    const { data: sameName, error: dupErr } = await supabase
+      .from("reservation_staff")
+      .select("id, name, is_active")
+      .eq("clinic_id", clinicId);
+    if (dupErr) return { success: false, error: dupErr.message };
+    const dup = (sameName ?? []).find(
+      (r: { id: string; name: string }) =>
+        String(r.name ?? "").trim().toLowerCase() === nameKey && r.id !== staff.id,
+    );
+    if (dup) {
+      const state = (dup as { is_active?: boolean }).is_active === false ? "（停止中）" : "";
+      return {
+        success: false,
+        error: `「${trimmedName}」はすでに登録されています${state}。同じ名前のスタッフは2件作れません。既存のスタッフを編集するか、別の名前にしてください。`,
+      };
+    }
+  }
 
   // email は trim、空文字なら null。重複バリデーションはサーバー側で軽くチェック
   const normalizedEmail = (() => {
@@ -371,7 +399,7 @@ export async function saveStaff(staff: Partial<ReservationStaff> & { name: strin
 
   const payload: Record<string, unknown> = {
     clinic_id: clinicId,
-    name: staff.name,
+    name: trimmedName,
     is_active: staff.is_active ?? true,
     sort_order: staff.sort_order ?? 0,
     show_in_timeline: staff.show_in_timeline ?? true,
@@ -397,19 +425,44 @@ export async function saveStaff(staff: Partial<ReservationStaff> & { name: strin
     payload.booking_until = /^\d{4}-\d{2}-\d{2}$/.test(d) ? d : null;
   }
 
+  // DB の unique index に当たったときも、受付が読める言葉で返す
+  const friendly = (e: { code?: string; message: string }) =>
+    e.code === "23505" || /uq_reservation_staff_clinic_name/.test(e.message)
+      ? `「${trimmedName}」はすでに登録されています。同じ名前のスタッフは2件作れません。`
+      : e.message;
+
   if (staff.id) {
+    const { data: before } = await supabase
+      .from("reservation_staff")
+      .select("*")
+      .eq("id", staff.id)
+      .eq("clinic_id", clinicId)
+      .maybeSingle();
     const { error } = await supabase
       .from("reservation_staff")
       .update(payload)
       .eq("id", staff.id)
       .eq("clinic_id", clinicId);
-    if (error) return { success: false, error: error.message };
+    if (error) return { success: false, error: friendly(error) };
+    await writeAudit({
+      clinicId, actorUserId: userId, actorEmail, actorRole,
+      actionType: "staff.update", targetTable: "reservation_staff", targetId: staff.id,
+      before: before ?? undefined, after: { ...(before ?? {}), ...payload },
+    });
   } else {
     // tenant-isolation-ignore: payload.clinic_id 設定済み（このファイルの saveStaff 内）
-    const { error } = await supabase
+    const { data: inserted, error } = await supabase
       .from("reservation_staff")
-      .insert(payload);
-    if (error) return { success: false, error: error.message };
+      .insert(payload)
+      .select("id")
+      .maybeSingle();
+    if (error) return { success: false, error: friendly(error) };
+    // 誰がいつスタッフを増やしたかを残す（8/27 の重複追加は記録が無く、操作者を特定できなかった）
+    await writeAudit({
+      clinicId, actorUserId: userId, actorEmail, actorRole,
+      actionType: "staff.create", targetTable: "reservation_staff", targetId: inserted?.id ?? null,
+      after: payload,
+    });
   }
 
   revalidatePath("/admin/settings");
@@ -418,9 +471,16 @@ export async function saveStaff(staff: Partial<ReservationStaff> & { name: strin
 
 // ── スタッフ削除 ──
 export async function deleteStaff(id: string) {
-  const { clinicId } = await checkAdminAuth();
+  const { clinicId, userId, email: actorEmail, role: actorRole } = await checkAdminAuth();
   const { createClient } = await import("@/lib/supabase/server");
   const supabase = await createClient();
+
+  const { data: before } = await supabase
+    .from("reservation_staff")
+    .select("*")
+    .eq("id", id)
+    .eq("clinic_id", clinicId)
+    .maybeSingle();
 
   const { error } = await supabase
     .from("reservation_staff")
@@ -429,6 +489,11 @@ export async function deleteStaff(id: string) {
     .eq("clinic_id", clinicId);
 
   if (error) return { success: false, error: error.message };
+  await writeAudit({
+    clinicId, actorUserId: userId, actorEmail, actorRole,
+    actionType: "staff.delete", targetTable: "reservation_staff", targetId: id,
+    before: before ?? undefined,
+  });
   revalidatePath("/admin/settings");
   return { success: true };
 }
