@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { checkAdminAuth } from "./auth";
 import { writeAudit } from "@/lib/audit";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { PUBLIC_CLINIC_ID } from "@/lib/default-clinic-id";
 import { buildStaffSchedule } from "@/lib/staff-availability";
 
@@ -574,7 +575,7 @@ export async function removeStaffBookingDate(staffId: string, date: string) {
  * 勤務表をネット予約の受付時間に使うかと、前後の準備・片付け分数。
  * follow=false（既定）の院では勤務表を一切見ない＝従来どおりの挙動。
  */
-async function getWorkScheduleLink(admin: any, clinicId: string): Promise<{ follow: boolean; prep: number }> {
+async function getWorkScheduleLink(admin: SupabaseClient, clinicId: string): Promise<{ follow: boolean; prep: number }> {
   try {
     const { data } = await admin
       .from("clinic_settings")
