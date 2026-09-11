@@ -47,6 +47,17 @@ export async function GET() {
       enabledCount: number;
       hasOwnerEnvFallback: boolean;
     };
+    /**
+     * 今月の送信通数（LINE Messaging API /v2/bot/message/quota, /quota/consumption）。
+     * 無料プランは月200通。使い切ると全 push が 429 になる（2026-09-11 からだで発生）。
+     */
+    quota: {
+      type: "none" | "limited" | "unknown";
+      limit: number | null;      // limited のとき上限通数
+      used: number | null;       // 今月の使用通数
+      remaining: number | null;  // 残り（limited のときだけ）
+      exhausted: boolean;        // true なら今月はもう送れない
+    };
     warnings: string[];
     error: string | null;
     checkedAt: string;
@@ -70,6 +81,7 @@ export async function GET() {
       enabledCount: 0,
       hasOwnerEnvFallback: Boolean(ownerLineUserId),
     },
+    quota: { type: "unknown", limit: null, used: null, remaining: null, exhausted: false },
     warnings: [],
     error: null,
     checkedAt: new Date().toISOString(),
@@ -122,6 +134,43 @@ export async function GET() {
   } catch (err: any) {
     result.tokenValid = false;
     result.error = `fetch error: ${err?.message ?? String(err)}`;
+  }
+
+  // ── 今月の送信通数（上限に達していると全送信が 429 で失敗する） ──
+  try {
+    const [quotaRes, usedRes] = await Promise.all([
+      fetch("https://api.line.me/v2/bot/message/quota", { headers: { Authorization: `Bearer ${token}` }, cache: "no-store" }),
+      fetch("https://api.line.me/v2/bot/message/quota/consumption", { headers: { Authorization: `Bearer ${token}` }, cache: "no-store" }),
+    ]);
+    if (quotaRes.ok) {
+      const q = (await quotaRes.json()) as { type?: string; value?: number };
+      if (q.type === "limited" && typeof q.value === "number") {
+        result.quota.type = "limited";
+        result.quota.limit = q.value;
+      } else if (q.type === "none") {
+        result.quota.type = "none";
+      }
+    }
+    if (usedRes.ok) {
+      const u = (await usedRes.json()) as { totalUsage?: number };
+      if (typeof u.totalUsage === "number") result.quota.used = u.totalUsage;
+    }
+    if (result.quota.type === "limited" && result.quota.limit !== null && result.quota.used !== null) {
+      result.quota.remaining = Math.max(0, result.quota.limit - result.quota.used);
+      result.quota.exhausted = result.quota.used >= result.quota.limit;
+      if (result.quota.exhausted) {
+        result.warnings.push(
+          `🚨 LINE公式アカウントの今月の送信上限（${result.quota.limit}通）に達しています（使用 ${result.quota.used}通）。` +
+          "患者さんへの確定LINE・院長への通知はすべて失敗します。来月1日に回復。今月中に送るにはプラン変更が必要です。",
+        );
+      } else if (result.quota.remaining <= Math.ceil(result.quota.limit * 0.2)) {
+        result.warnings.push(
+          `⚠ LINE公式アカウントの今月の送信通数が残り ${result.quota.remaining}通です（上限 ${result.quota.limit}通）。`,
+        );
+      }
+    }
+  } catch (err: any) {
+    result.warnings.push(`送信通数の取得で例外: ${err?.message ?? String(err)}`);
   }
 
   // ── admin_notification_targets テーブル状態 ──
@@ -201,6 +250,8 @@ export async function GET() {
 
   result.ok =
     result.tokenValid === true &&
+    // 今月の上限に達していたら送信は全部失敗するので ok=false にする
+    !result.quota.exhausted &&
     // 保存トークンが残っていて無効なら、送信は失敗するので ok=false にする
     result.storedClinicToken.valid !== false &&
     (result.notificationTargets.enabledCount > 0 || result.notificationTargets.hasOwnerEnvFallback);

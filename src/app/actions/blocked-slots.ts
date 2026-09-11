@@ -163,6 +163,9 @@ export async function createBlockedSlot(
         actionType: "予約NGブロック",
         summary: `${staff?.name ?? "担当"}先生の ${dateStr} ${startTime}〜${endTime} を予約不可にしました（${(reason && reason.trim()) || "理由未記入"}）`,
         clinicId,
+        // 2026-09-11: LINE月間送信数の枯渇対策で routine 操作はLINE通知しない方針にした。
+        // このブロックは監査ログには残る。LINEで知りたい場合は importance:"important" に変更する。
+        importance: "routine",
       });
     }
 

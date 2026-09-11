@@ -236,6 +236,7 @@ export async function updateClinicSettings(
       clinicId,
       actorRole: auth.role,
       actorEmail: auth.email,
+      importance: "important",
       actionType: "⚠️ 設定変更の申請（要承認）",
       summary: `スタッフが clinic_settings の変更を申請しました。\n/admin/approvals で内容を確認してください。`,
     });

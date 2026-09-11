@@ -412,6 +412,7 @@ export async function deleteTallyEntriesForName(
       clinicId,
       actorRole: auth.role,
       actorEmail: auth.email,
+      importance: "important",
       actionType: "窓口日計表の削除",
       summary: `${dateStr}${editor ? `（操作: ${editor}）` : ""} ${name}様の記帳を削除\n${summaryLines.length > 0 ? summaryLines.join("\n") : "（金額の入力なし）"}`,
     });

@@ -1,5 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import { CLINIC_CONFIG } from "@/lib/clinic-config";
+import { describeLinePushFailure } from "@/lib/line-push-error";
 
 const FALLBACK_EMAIL = "hiraiwayuji@gmail.com";
 
@@ -84,9 +85,11 @@ export async function pushLineText(
       });
       if (res.ok) return { ok: true };
       const body = await res.text().catch(() => "");
-      last = `${c.name}トークン:${res.status} ${body.slice(0, 140)}`;
-      console.error(`[admin-notify] LINE push failed to=${to}: ${last}`);
-      if (res.status !== 401 && res.status !== 403) break; // 宛先不正等は再試行しても同じ
+      const failure = describeLinePushFailure(res.status, body);
+      // 画面に出る detail は「なぜ送れないか」が分かる日本語にする（429「今月の上限」など）
+      last = failure.message;
+      console.error(`[admin-notify] LINE push failed to=${to}: ${c.name}トークン:${res.status} code=${failure.code} ${body.slice(0, 140)}`);
+      if (res.status !== 401 && res.status !== 403) break; // 宛先不正・上限超過等は再試行しても同じ
     } catch (err) {
       last = `${c.name}トークン: 通信エラー`;
       console.error(`[admin-notify] LINE push error to=${to}:`, err);
@@ -193,7 +196,8 @@ export async function pushLineToOwners(clinicId: string, text: string): Promise<
         });
         if (!res.ok) {
           const errBody = await res.text().catch(() => "");
-          console.error(`[admin-notify] LINE push failed (${res.status}) to=${lineId}: ${errBody}`);
+          const f = describeLinePushFailure(res.status, errBody);
+          console.error(`[admin-notify] LINE push failed (${res.status}) code=${f.code} to=${lineId}: ${errBody}`);
         } else {
           console.log(`[admin-notify] LINE push success to=${lineId}`);
         }
@@ -218,7 +222,8 @@ export async function pushLineToCustomer(lineUserId: string, text: string): Prom
     });
     if (!res.ok) {
       const errBody = await res.text().catch(() => "");
-      console.error(`[admin-notify] customer LINE push failed (${res.status}): ${errBody}`);
+      const f = describeLinePushFailure(res.status, errBody);
+      console.error(`[admin-notify] customer LINE push failed (${res.status}) code=${f.code}: ${errBody}`);
     }
   } catch (err) {
     console.error("[admin-notify] customer LINE push error:", err);

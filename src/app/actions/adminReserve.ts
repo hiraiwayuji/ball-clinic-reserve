@@ -7,6 +7,7 @@ import { checkAdminAuth } from "./auth";
 import { writeAudit, notifyOwnerOfStaffAction } from "@/lib/audit";
 import { awardPoints } from "@/lib/gamification";
 import { getLineAccessToken, pushLineToCustomer } from "@/lib/admin-notify";
+import { describeLinePushFailure } from "@/lib/line-push-error";
 import { getPushTargetsForCustomer, getPushTargetsForCustomers } from "@/lib/line-links";
 import { isTimeWithinStaffHoursYmd, isStaffAvailableOnYmd, isStaffSpanBookableYmd, buildStaffSchedule, type StaffSchedule } from "@/lib/staff-availability";
 import { formatDateTimeLine, formatVisitLabel } from "@/lib/appointment-summary";
@@ -1877,16 +1878,11 @@ export async function sendLineConfirmation(appointmentId: string) {
       }
 
       const errBody = await res.json().catch(() => ({}));
-      console.error(`[LINE送信失敗] status=${res.status}`, errBody);
-      // status code に応じた具体的なエラー（友だち追加してないと一律で返さない）
-      if (res.status === 401) {
-        lastError = { success: false, error: "LINE 認証エラー。設定の LINE_CHANNEL_ID/SECRET が正しいか確認してください。" };
-      } else if (res.status === 403) {
-        lastError = { success: false, error: "この患者は LINE 公式アカウントの友だち登録が解除されているか、まだ追加していません。患者に友だち追加を案内してください。" };
-      } else {
-        const detail = errBody?.message ? `（${errBody.message}）` : "";
-        lastError = { success: false, error: `LINE 送信失敗 (HTTP ${res.status})${detail}` };
-      }
+      // status code と本文から「なぜ送れないか」を受付が読める言葉にする
+      // （429「今月の上限」を「送信に失敗しました」で握り潰していた 2026-09-11 の再発防止）
+      const failure = describeLinePushFailure(res.status, errBody);
+      console.error(`[LINE送信失敗] status=${res.status} code=${failure.code}`, errBody);
+      lastError = { success: false, error: failure.message };
     }
 
     if (sent === 0 && lastError) return lastError;
@@ -2520,6 +2516,7 @@ export async function deleteAppointment(
       clinicId: auth.clinicId,
       actorRole: auth.role,
       actorEmail: auth.email,
+      importance: "important",
       actionType: scope === "future" ? "⚠️ 連続予約の一括削除" : "⚠️ 予約の削除",
       summary: scope === "future"
         ? `${customerName ?? "(顧客名不明)"}様\n${before?.start_time ?? ""} 以降の連続予約 ${deletedCount} 件を削除\nメモ: ${before?.memo ?? ""}`
@@ -2990,13 +2987,14 @@ export async function notifyWaitlistOpening(waitingAppointmentId: string) {
       }
 
       const errBody = await res.json().catch(() => ({}));
-      console.error(`[キャンセル待ちLINE送信失敗] status=${res.status}`, errBody);
-      if (res.status === 403) {
-        lastError = { success: false, error: "この方はLINE公式アカウントの友だち登録がないため送信できません。お電話でご連絡ください。" };
-      } else {
-        const detail = errBody?.message ? `（${errBody.message}）` : "";
-        lastError = { success: false, error: `LINE送信に失敗しました (HTTP ${res.status})${detail}` };
-      }
+      const failure = describeLinePushFailure(res.status, errBody);
+      console.error(`[キャンセル待ちLINE送信失敗] status=${res.status} code=${failure.code}`, errBody);
+      lastError = {
+        success: false,
+        error: failure.kind === "not_friend"
+          ? "この方はLINE公式アカウントの友だち登録がないため送信できません。お電話でご連絡ください。"
+          : failure.message,
+      };
     }
 
     if (sent === 0 && lastError) return lastError;

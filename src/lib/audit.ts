@@ -6,6 +6,7 @@
 
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { getLineAccessToken } from "@/lib/admin-notify";
+import { describeLinePushFailure } from "@/lib/line-push-error";
 
 export type AuditActorRole = "owner" | "admin" | "staff" | "unknown" | "system";
 
@@ -102,15 +103,29 @@ async function listLineTargets(clinicId?: string): Promise<string[]> {
 /**
  * staff/admin が機微操作を行ったときに登録済みの通知先（複数）へ LINE Push する。
  * オーナー本人の操作は通知不要（actorRole が 'owner' の場合はスキップ）。
+ *
+ * 🚨 LINE へ飛ばすのは importance:"important"（削除・日計表の削除・設定変更の申請など、
+ *    取り返しがつかない／承認が要る操作）だけ。予約の作成・変更・確定・キャンセル・
+ *    日計表の修正といった毎日の受付業務は audit_log（writeAudit）に残るだけで、LINE は送らない。
+ *
+ * 背景（2026-09-11 からだ鍼灸整骨院）: 受付が共用の staff アカウントになった 8/23 以降、
+ * 受付の操作1回ごとに院長の LINE へ通知が飛び、9月上旬で LINE公式アカウントの無料枠
+ * （月200通）を使い切った。その結果、患者さんへの予約確定LINEも院長への仮予約通知も
+ * 全部 429 で失敗した。通知は「見なくていいものを送らない」が原則。
  */
+export type StaffActionImportance = "routine" | "important";
+
 export async function notifyOwnerOfStaffAction(opts: {
   actorRole: AuditActorRole;
   actorEmail?: string | null;
   actionType: string;
   summary: string;
   clinicId?: string;
+  /** 省略時は routine（＝LINEは送らない。監査ログのみ） */
+  importance?: StaffActionImportance;
 }): Promise<void> {
   if (opts.actorRole === "owner") return;
+  if ((opts.importance ?? "routine") !== "important") return;
 
   const targets = await listLineTargets(opts.clinicId);
   if (targets.length === 0) return;
@@ -130,7 +145,8 @@ export async function notifyOwnerOfStaffAction(opts: {
         });
         if (!res.ok) {
           const body = await res.text().catch(() => "");
-          console.warn("[audit-notify] LINE push 失敗:", res.status, body);
+          const f = describeLinePushFailure(res.status, body);
+          console.warn(`[audit-notify] LINE push 失敗: ${res.status} code=${f.code}`, body);
         }
       } catch (err) {
         console.warn("[audit-notify] LINE push エラー:", err);
