@@ -5,6 +5,7 @@ import { checkAdminAuth } from "@/app/actions/auth";
 import { getClinicSettings } from "./settings";
 import { pushLineText } from "@/lib/admin-notify";
 import { getPushTargetsForCustomers } from "@/lib/line-links";
+import { publicBaseUrl } from "@/lib/public-url";
 import {
   CAMPAIGN_INFO,
   buildCampaignSamples,
@@ -694,7 +695,9 @@ export async function sendWelcomeQuestionnaire(testLineId: string | null = null)
 export async function sendReferralMessage(targetId: string, customMessage?: string) {
   await checkAdminAuth();
   
-  const presentationUrl = `${process.env.NEXT_PUBLIC_APP_URL || 'https://ball-clinic-reserve.vercel.app'}/presentation`;
+  // 外部（他院）へ送るリンク。ボール固有ドメインの決め打ちだと、他院から送ったときに
+  // 別院のURLを配ってしまう。公開URLの共通ヘルパーに寄せる（2026-09-12）。
+  const presentationUrl = `${publicBaseUrl()}/presentation`;
   
   const defaultMsg = 
     `【ご紹介】次世代接骨院DXツール「V-ARC」のご案内\n\n` +

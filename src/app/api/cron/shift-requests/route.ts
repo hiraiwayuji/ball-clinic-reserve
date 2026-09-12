@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient as createAdminClient } from "@supabase/supabase-js";
 import { pushLineToOwners, pushLineToStaff, sendEmailTo } from "@/lib/admin-notify";
+import { publicBaseUrl } from "@/lib/public-url";
 
 // 出勤希望アンケートの自動運用（Vercel Cron: 毎日 9:00 JST = 0:00 UTC）。
 // ▼ 募集ラウンド（shift_request_rounds）が登録されている院：
@@ -25,11 +26,7 @@ function todayJST(): string {
     timeZone: "Asia/Tokyo", year: "numeric", month: "2-digit", day: "2-digit",
   }).format(new Date());
 }
-function baseUrl(): string {
-  if (process.env.NEXT_PUBLIC_APP_URL) return process.env.NEXT_PUBLIC_APP_URL.replace(/\/$/, "");
-  if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`;
-  return "http://localhost:3000";
-}
+const baseUrl = publicBaseUrl;
 // YYYY-MM-DD の日数加減（カレンダー日付のみ・JST想定でTZズレ無し）
 function ymd(d: Date): string {
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;

@@ -1,6 +1,6 @@
 "use server";
 
-import { checkAdminAuth, getMyStaffId } from "@/app/actions/auth";
+import { checkAdminAuth, getMyStaffId, requireRole } from "@/app/actions/auth";
 import { getDayStaffSummary } from "@/app/actions/staff-schedule";
 import { createClient as createServiceClient } from "@supabase/supabase-js";
 import { revalidatePath } from "next/cache";
@@ -37,6 +37,13 @@ export type DailyTask = {
   completed_at: string | null;
 };
 
+/** JSTでの「今日」(yyyy-MM-dd)。Vercelの実行環境はUTCなので、日付判定には必ずこれを使う。 */
+function todayJstStr(): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Tokyo", year: "numeric", month: "2-digit", day: "2-digit",
+  }).format(new Date());
+}
+
 function mapRow(r: any): DailyTask {
   return {
     id: r.id,
@@ -61,11 +68,15 @@ const SELECT = "id, staff_id, title, description, due_date, status, priority, ta
 
 /**
  * 院長用：指定日の全タスク（承認待ち含む）をスタッフ別に取得。
+ *
+ * 🚨 オーナー限定。画面（/admin/dashboard）は role で出し分けているが、サーバーアクションは
+ * URLを知らなくても直接呼べるため、ここでも役割を見る。からだの受付は共用の staff アカウント
+ * 運用なので、画面だけで隠しても全スタッフの評価材料が読めてしまう（2026-09-12 検品指摘）。
  */
 export async function listDailyTasksForDate(
   dateStr: string,
 ): Promise<{ success: boolean; tasks?: DailyTask[]; error?: string }> {
-  const { clinicId } = await checkAdminAuth();
+  const { clinicId } = await requireRole(["owner"]);
   const sb = getServiceClient();
   if (!sb) return { success: false, error: "サーバー設定エラー" };
 
@@ -343,6 +354,11 @@ export async function addManualTask(input: {
   if (!input.staff_id || !input.title?.trim() || !input.due_date) {
     return { success: false, error: "必須項目が不足しています" };
   }
+  // 過ぎた日に入れても、先生の画面（当日ぶんだけを見る getMyDayTasks）には二度と出ない。
+  // 画面側でも止めているが、サーバーでも弾いて「届かない指示」を作れないようにする。
+  if (input.due_date < todayJstStr()) {
+    return { success: false, error: "過ぎた日には割り当てできません（先生の画面に出ないため）。今日か、これからの日を選んでください。" };
+  }
   const { error } = await sb.from("staff_tasks").insert({
     clinic_id: clinicId,
     staff_id: input.staff_id,
@@ -469,4 +485,48 @@ export async function ensureTodayTemplateTasks(staffId: string, dateStr: string)
   await ensureTemplateTasksFor(sb, clinicId, staffId, dateStr);
   revalidatePath("/admin/dashboard");
   return { success: true };
+}
+
+// ── 履歴（院長のみ） ───────────────────────────────────────────
+// 「今日やること」は日付ごとに単発で見るのが基本だが、院長が過去の記入状況を
+// ざっと振り返れるよう、日付レンジの完了件数サマリを別途用意する。
+// listDailyTasksForDate(dateStr) を1日ずつ呼べば同じ情報は取れるが、
+// 直近14日を一覧するのに14回リクエストするのは無駄なので、この専用集計を使う。
+
+export type TaskDaySummary = { date: string; total: number; done: number; pendingApproval: number };
+
+/**
+ * 院長用：指定期間（両端含む）の日別タスク件数サマリ。
+ * 履歴の一覧・振り返り用。1日ごとの詳細は listDailyTasksForDate を使う。
+ */
+export async function listTaskDaySummaries(
+  fromDate: string,
+  toDate: string,
+): Promise<{ success: boolean; days?: TaskDaySummary[]; error?: string }> {
+  const { clinicId } = await requireRole(["owner"]);
+  const sb = getServiceClient();
+  if (!sb) return { success: false, error: "サーバー設定エラー" };
+
+  const { data, error } = await sb
+    .from("staff_tasks")
+    .select("due_date, status, approved")
+    .eq("clinic_id", clinicId)
+    .gte("due_date", fromDate)
+    .lte("due_date", toDate)
+    // 既定の上限(1000行)で黙って過少集計にならないように明示する
+    .range(0, 9999);
+
+  if (error) return { success: false, error: error.message };
+
+  const byDate = new Map<string, TaskDaySummary>();
+  for (const r of (data ?? []) as { due_date: string; status: string; approved: boolean }[]) {
+    if (!r.due_date) continue;
+    if (!byDate.has(r.due_date)) byDate.set(r.due_date, { date: r.due_date, total: 0, done: 0, pendingApproval: 0 });
+    const d = byDate.get(r.due_date)!;
+    d.total += 1;
+    if (r.status === "done") d.done += 1;
+    if (!r.approved) d.pendingApproval += 1;
+  }
+  const days = Array.from(byDate.values()).sort((a, b) => a.date.localeCompare(b.date));
+  return { success: true, days };
 }

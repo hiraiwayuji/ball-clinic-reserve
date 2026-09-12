@@ -6,16 +6,13 @@ import { PUBLIC_CLINIC_ID } from "@/lib/default-clinic-id";
 import { linkLineToCustomer } from "@/lib/line-links";
 import { getLineAccessToken } from "@/lib/admin-notify";
 import { formatDateTimeLine, formatVisitLabel } from "@/lib/appointment-summary";
+import { publicBaseUrl } from "@/lib/public-url";
 
 function generateReserveToken(): string {
   return randomBytes(16).toString("hex");
 }
 
-function getReserveBaseUrl(): string {
-  if (process.env.NEXT_PUBLIC_APP_URL) return process.env.NEXT_PUBLIC_APP_URL.replace(/\/$/, "");
-  if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`;
-  return "http://localhost:3000";
-}
+const getReserveBaseUrl = publicBaseUrl;
 
 // 署名検証は LINE_CHANNEL_SECRET 必須（webhook 受信側）
 const channelSecret = process.env.LINE_CHANNEL_SECRET || "";

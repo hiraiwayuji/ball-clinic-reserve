@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { checkAdminAuth } from "./auth";
 import { revalidatePath } from "next/cache";
 import { randomBytes } from "crypto";
+import { publicBaseUrl } from "@/lib/public-url";
 import {
   TRAINING_CLINIC_IDS,
   AXES,
@@ -452,11 +453,10 @@ export async function updateAssessment(
 
 // ───────────────────────── 患者レポート（LINE送信＋公開ページ） ─────────────────────────
 
-function reportBaseUrl(): string {
-  if (process.env.NEXT_PUBLIC_APP_URL) return process.env.NEXT_PUBLIC_APP_URL.replace(/\/$/, "");
-  if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`;
-  return "http://localhost:3000";
-}
+// 患者さんに配るリンクなので、必ず公開URL（Vercelログインが要らないURL）を使う。
+// 以前は VERCEL_URL（デプロイ固有・保護対象）にフォールバックしていて、
+// 送ったレポートを患者さんが開けなかった（2026-09-12 からだで発覚）。
+const reportBaseUrl = publicBaseUrl;
 
 export type ReportPreview = {
   assessmentId: string;

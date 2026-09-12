@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient as createAdminClient } from "@supabase/supabase-js";
 import { pushLineToOwners } from "@/lib/admin-notify";
 import { metricsScore, type PostMetrics } from "@/lib/ai-marketing";
+import { publicBaseUrl } from "@/lib/public-url";
 
 // SNS投稿の朝リマインド（Vercel Cron: 毎朝 8:00 JST = 23:00 UTC）。
 // - 今日が投稿予定日（scheduled_date）の投稿案があれば院長LINEへ通知
@@ -31,11 +32,7 @@ function todayJST(): string {
   }).format(new Date());
 }
 
-function baseUrl(): string {
-  if (process.env.NEXT_PUBLIC_APP_URL) return process.env.NEXT_PUBLIC_APP_URL.replace(/\/$/, "");
-  if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`;
-  return "http://localhost:3000";
-}
+const baseUrl = publicBaseUrl;
 
 type PostRow = {
   id: string;
