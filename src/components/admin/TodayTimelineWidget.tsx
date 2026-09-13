@@ -28,6 +28,8 @@ import { AddAppointmentDialog } from "@/components/admin/AddAppointmentDialog";
 import { EditAppointmentDialog } from "@/components/admin/EditAppointmentDialog";
 import { PendingReservationsButton } from "@/components/admin/PendingReservationsButton";
 import { getBlockedSlots, deleteBlockedSlot, type BlockedSlot } from "@/app/actions/blocked-slots";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { sortBreakdown } from "@/lib/menu-family";
 
 // スタッフ未指定の予約をまとめる仮想列
 const UNASSIGNED_KEY = "__unassigned__";
@@ -1322,6 +1324,7 @@ export default function TodayTimelineWidget({
               const timeMarks = buildTimeMarks(day, data.slotMinutes);
               const aptsByStaff = buildAptsByStaff(day, data.slotMinutes);
               const monthCounts = data.staffMonthCounts[day.monthKey] ?? {};
+              const monthBreakdown = data.staffMonthBreakdown?.[day.monthKey] ?? {};
               const isToday = isSameDay(dayDate, new Date());
               const dow = dayDate.getDay();
               return (
@@ -1531,6 +1534,16 @@ export default function TodayTimelineWidget({
                 const monthCount = (monthCounts[s.id] ?? 0)
                   + (s.id === defaultStaffId ? (monthCounts[UNASSIGNED_KEY] ?? 0) : 0);
                 const target = s.monthly_visit_target ?? 0;
+                // 件数を押したときの「メニュー別の内訳」。件数と同じく、担当未設定分はデフォルト行に合算する
+                const breakdownCounts: Record<string, number> = { ...(monthBreakdown[s.id] ?? {}) };
+                if (s.id === defaultStaffId) {
+                  for (const [label, n] of Object.entries(monthBreakdown[UNASSIGNED_KEY] ?? {})) {
+                    breakdownCounts[label] = (breakdownCounts[label] ?? 0) + n;
+                  }
+                }
+                const breakdown = sortBreakdown(breakdownCounts);
+                const breakdownMax = breakdown[0]?.count ?? 0;
+                const breakdownTotal = breakdown.reduce((n, b) => n + b.count, 0);
                 // 達成率に応じてバッジ色を切替: 100%以上=緑、80%以上=青、それ未満=スレート
                 const achievementBadge = target > 0
                   ? (monthCount >= target
@@ -1730,14 +1743,60 @@ export default function TodayTimelineWidget({
                         <span className="truncate">{s.name}</span>
                       )}
                       {(monthCount > 0 || target > 0) ? (
-                        <span
-                          className={`shrink-0 text-[10px] font-black px-1.5 py-0.5 rounded-full tabular-nums ${achievementBadge}`}
-                          title={target > 0
-                            ? `${day.monthLabel}実績 ${monthCount} / 目標 ${target}（達成率 ${Math.round((monthCount / target) * 100)}%）`
-                            : `${day.monthLabel}の予約件数（キャンセル除く）`}
-                        >
-                          {target > 0 ? `${monthCount} / ${target}` : monthCount}
-                        </span>
+                        <Popover>
+                          <PopoverTrigger
+                            className={`shrink-0 text-[10px] font-black px-1.5 py-0.5 rounded-full tabular-nums cursor-pointer hover:ring-2 hover:ring-blue-300 dark:hover:ring-blue-700 transition ${achievementBadge}`}
+                            title="押すとメニュー別の内訳を表示します"
+                            aria-label={`${s.name}の${day.monthLabel}の件数の内訳を見る`}
+                          >
+                            {target > 0 ? `${monthCount} / ${target}` : monthCount}
+                          </PopoverTrigger>
+                          <PopoverContent align="start" className="w-72">
+                            <div className="space-y-2">
+                              <div>
+                                <p className="text-sm font-black text-slate-800 dark:text-slate-100">
+                                  {s.name}・{day.monthLabel}の内訳
+                                </p>
+                                <p className="text-xs text-slate-500 dark:text-slate-400 tabular-nums">
+                                  {target > 0
+                                    ? `予約 ${monthCount}件 / 目標 ${target}件（達成率 ${Math.round((monthCount / target) * 100)}%）`
+                                    : `予約 ${monthCount}件`}
+                                </p>
+                                {breakdownTotal > 0 && (
+                                  <p className="text-xs font-bold text-slate-600 dark:text-slate-300 tabular-nums">
+                                    メニュー別 のべ {breakdownTotal}件
+                                  </p>
+                                )}
+                              </div>
+                              {breakdown.length === 0 ? (
+                                <p className="text-xs text-slate-400">この月の予約はまだありません。</p>
+                              ) : (
+                                <ul className="space-y-1.5">
+                                  {breakdown.map((b) => (
+                                    <li key={b.label} className="text-xs">
+                                      <div className="flex items-center justify-between gap-2">
+                                        <span className="font-bold text-slate-700 dark:text-slate-200 truncate">{b.label}</span>
+                                        <span className="font-black tabular-nums text-slate-800 dark:text-slate-100 shrink-0">{b.count}件</span>
+                                      </div>
+                                      <div className="mt-0.5 h-1.5 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
+                                        <div
+                                          className="h-full rounded-full bg-blue-500"
+                                          style={{ width: `${breakdownMax > 0 ? Math.max(4, Math.round((b.count / breakdownMax) * 100)) : 0}%` }}
+                                        />
+                                      </div>
+                                    </li>
+                                  ))}
+                                </ul>
+                              )}
+                              <p className="text-[10px] leading-relaxed text-slate-400 border-t border-slate-100 dark:border-slate-800 pt-1.5">
+                                キャンセルは含みません。時間ちがいのメニュー（20分・40分など）は同じ種類にまとめています。
+                                1回の予約で複数のメニュー（例: 保険施術＋鍼灸）を行ったときは、それぞれのメニューに数えるため、
+                                「のべ」は予約の件数より多くなることがあります（ダッシュボードの「スタッフ別 月間目標達成率」と同じ数え方）。
+                                2人の先生で担当した予約は、それぞれの先生に数えています。
+                              </p>
+                            </div>
+                          </PopoverContent>
+                        </Popover>
                       ) : (
                         <span className="shrink-0 text-[10px] text-slate-300 dark:text-slate-600 tabular-nums">—</span>
                       )}

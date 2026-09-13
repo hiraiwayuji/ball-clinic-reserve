@@ -3,6 +3,29 @@
 import { checkAdminAuth } from "./auth";
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { buildStaffSpans } from "@/lib/staff-spans";
+import { aggregateStaffMonth, type MonthAptRow } from "@/lib/menu-family";
+
+/** Supabase の1回あたりの最大行数（プロジェクト設定。これより大きい range を指定しても1000で切られる） */
+const MONTH_PAGE_SIZE = 1000;
+
+/** 月次件数用の予約を1ページぶん取る。並びを固定しないとページの境目で重複・欠落が出る。 */
+function monthAptPage(
+  sb: NonNullable<ReturnType<typeof getAdminSupabase>>,
+  clinicId: string,
+  monthStart: string,
+  monthEnd: string,
+  from: number,
+) {
+  return sb.from("appointments")
+    .select("staff_id, course_id, course_name, additional_staff, additional_courses, start_time")
+    .eq("clinic_id", clinicId)
+    .neq("status", "cancelled")
+    .gte("start_time", monthStart)
+    .lte("start_time", monthEnd)
+    .order("start_time", { ascending: true })
+    .order("id", { ascending: true })
+    .range(from, from + MONTH_PAGE_SIZE - 1);
+}
 
 function getAdminSupabase() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -83,6 +106,13 @@ export type TimelineData = {
    * 担当未設定分は __unassigned__ キー。
    */
   staffMonthCounts: Record<string, Record<string, number>>;
+  /**
+   * 先生ごとの「メニュー別の内訳」。「月 → staff_id → メニューの種類 → 件数」。
+   * 種類は menuFamily() で「保険施術（初診）→保険施術」のようにまとめた名前。
+   * ダッシュボードの「スタッフ別 月間目標達成率（カテゴリ別）」と同じく、1回の予約の
+   * 主メニュー＋追加メニューをそれぞれ担当全員に数える。**合計は staffMonthCounts 以上になる。**
+   */
+  staffMonthBreakdown: Record<string, Record<string, Record<string, number>>>;
 };
 
 const JST_MS = 9 * 3600 * 1000;
@@ -176,12 +206,8 @@ export async function getTimelineRange(
         .order("start_time", { ascending: true }),
       // 月次の予約（件数集計のため staff_id と additional_staff を取得）
       // 担当が複数人の予約は、各スタッフの実績にそれぞれ +1 する
-      sb.from("appointments")
-        .select("staff_id, additional_staff, start_time")
-        .eq("clinic_id", clinicId)
-        .neq("status", "cancelled")
-        .gte("start_time", monthStart)
-        .lte("start_time", monthEnd),
+      // メニュー名も取り、件数を押したときの「メニュー別の内訳」に使う
+      monthAptPage(sb, clinicId, monthStart, monthEnd, 0),
       sb.from("clinic_settings")
         .select("slot_duration_minutes, business_open_weekday, business_close_weekday, business_open_saturday, business_close_saturday, admin_timeline_open_weekday, admin_timeline_close_weekday, admin_timeline_open_saturday, admin_timeline_close_saturday, closed_weekdays")
         .eq("id", clinicId)
@@ -290,23 +316,29 @@ export async function getTimelineRange(
     }
 
     // 月次件数を「月 → staff_id」で集計（メイン担当 + 追加担当の各人に +1）
-    const staffMonthCounts: Record<string, Record<string, number>> = {};
-    (monthAptRes.data ?? []).forEach((row: any) => {
-      const monthKey = jstDateKey(row.start_time).slice(0, 7);
-      if (!staffMonthCounts[monthKey]) staffMonthCounts[monthKey] = {};
-      const bucket = staffMonthCounts[monthKey];
-      const targetIds = new Set<string>();
-      targetIds.add(row.staff_id ?? "__unassigned__");
-      const add = row.additional_staff;
-      if (Array.isArray(add)) {
-        for (const s of add) {
-          if (s?.staff_id) targetIds.add(s.staff_id);
-        }
+    // 月次件数と、その「メニュー別の内訳」を集計（数え方は aggregateStaffMonth のコメント参照）。
+    // 純粋関数に分けてあるのは、本番の実データで「件数が変わっていない」ことを検証できるようにするため。
+    // Supabase は1回に1000行までしか返さない（range を大きくしても頭打ち。2026-09-14 実測）。
+    // 1ページ目がちょうど満杯なら続きを取り、件数を黙って少なく数えないようにする。
+    // 取れなかったときは黙らない。件数が少なく見えている原因をログで追えるようにする
+    // （タイムテーブル本体は出したいので、ここでは画面をエラーにはしない）。
+    if (monthAptRes.error) {
+      console.error("[timeline] 月次件数の取得に失敗:", monthAptRes.error.message);
+    }
+    const monthRows: MonthAptRow[] = [...((monthAptRes.data ?? []) as MonthAptRow[])];
+    for (let from = MONTH_PAGE_SIZE; monthRows.length === from; from += MONTH_PAGE_SIZE) {
+      const { data: more, error: moreErr } = await monthAptPage(sb, clinicId, monthStart, monthEnd, from);
+      if (moreErr) {
+        console.error(`[timeline] 月次件数の${from + 1}件目以降の取得に失敗（件数が少なく出ます）:`, moreErr.message);
+        break;
       }
-      for (const key of targetIds) {
-        bucket[key] = (bucket[key] ?? 0) + 1;
-      }
-    });
+      if (!more?.length) break;
+      monthRows.push(...(more as MonthAptRow[]));
+    }
+    const { counts: staffMonthCounts, breakdown: staffMonthBreakdown } = aggregateStaffMonth(
+      monthRows,
+      (iso) => jstDateKey(iso).slice(0, 7),
+    );
 
     // 休診日セット（臨時休診＋定休曜日）
     const holidaySet = new Set<string>(
@@ -343,7 +375,7 @@ export async function getTimelineRange(
 
     return {
       success: true,
-      data: { staff, slotMinutes, days, staffMonthCounts },
+      data: { staff, slotMinutes, days, staffMonthCounts, staffMonthBreakdown },
     };
   } catch (err: any) {
     console.error("getTimelineRange error:", err);
