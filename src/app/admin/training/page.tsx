@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Dumbbell, Search, ChevronRight, Loader2, CalendarClock, Target, NotebookPen } from "lucide-react";
+import { Dumbbell, Search, ChevronRight, Loader2, CalendarClock, Target, NotebookPen, SlidersHorizontal } from "lucide-react";
 import { listTrainingPatients, type TrainingPatientRow } from "@/app/actions/training";
 import { searchPatients } from "@/app/actions/patientSearch";
 
@@ -46,14 +46,20 @@ export default function TrainingHomePage() {
 
   return (
     <div className="max-w-3xl mx-auto space-y-6">
-      <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center gap-3">
         <div className="w-11 h-11 rounded-xl bg-emerald-500/10 text-emerald-600 flex items-center justify-center">
           <Dumbbell className="w-6 h-6" />
         </div>
-        <div>
+        <div className="min-w-0 flex-1">
           <h1 className="text-xl font-bold">トレーニング評価</h1>
-          <p className="text-xs text-slate-500">筋力・反射・運動神経の3軸＋左右差で採点し、宿題と次回目標を記録します</p>
+          <p className="text-xs text-slate-500">項目ごとに軸（筋力・柔軟性など）で採点し、左右差・宿題・次回目標を記録します</p>
         </div>
+        <Link
+          href="/admin/training/settings"
+          className="inline-flex items-center gap-1.5 h-10 px-3 rounded-lg border border-slate-200 bg-white text-sm font-bold text-slate-700 hover:bg-slate-50"
+        >
+          <SlidersHorizontal className="w-4 h-4" />評価の項目を設定
+        </Link>
       </div>
 
       {/* 患者検索 */}

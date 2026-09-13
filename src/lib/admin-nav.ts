@@ -42,7 +42,7 @@ const CLINIC_NAV_ITEMS: NavItem[] = [
   // label は院の記帳方式（sales_input_mode）で差し替える（getAdminNavItems 参照）。日計表の院で「売上記帳」と出ると、開いた先の見出し「窓口日計表」と合わず迷うため。
   { href: "/admin/sales", label: "売上記帳", icon: Coins, allow: ["owner", "admin", "staff"], group: "日々の業務", description: "窓口の売上をその日のうちに記帳する画面。当日ぶんは受付でも直せます" },
   { href: "/admin/customers", label: "患者さん", icon: Users, allow: ["owner", "admin", "staff"], group: "日々の業務", description: "患者さんの一覧・検索・LINE連携の確認" },
-  { href: "/admin/training", label: "トレーニング評価", icon: Dumbbell, allow: ["owner", "admin", "staff"], group: "トレーニング", description: "身体機能を筋力・反射・運動神経の3軸＋左右差で採点し、宿題と次回目標を記録" },
+  { href: "/admin/training", label: "トレーニング評価", icon: Dumbbell, allow: ["owner", "admin", "staff"], group: "トレーニング", description: "身体機能を項目×軸（筋力・柔軟性など・院で編集可）＋左右差で採点し、宿題と次回目標を記録" },
   { href: "/attendance", label: "打刻・自分の勤怠", icon: Clock, allow: ["owner", "admin", "staff"], group: "出勤", description: "出勤・退勤の打刻と、自分の勤怠の確認" },
   { href: "/shift-request", label: "出勤希望を出す", icon: CalendarOff, allow: ["owner", "admin", "staff"], group: "出勤", description: "来月の出勤希望・休み希望を提出する" },
   { href: "/admin/leaderboard", label: "ランキング", icon: Trophy, allow: ["owner", "admin", "staff"], group: "出勤", description: "スタッフの頑張りポイントランキング" },

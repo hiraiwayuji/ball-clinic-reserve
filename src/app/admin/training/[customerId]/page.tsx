@@ -12,16 +12,17 @@ import {
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
+import TrainingPhotos from "./TrainingPhotos";
 import {
   getPatientTraining, deleteAssessment, getClinicBenchmark, getReportPreview, sendTrainingReport,
   sendTrainingReportTest,
   type PatientTraining, type ClinicBenchmark, type ReportPreview,
 } from "@/app/actions/training";
 import {
-  AXES, REGIONS, axesFor, sidesFor, cellKey, AXIS_LABEL, SIDE_LABEL,
+  DEFAULT_CATALOG, axesFor, sidesFor, cellKey, SIDE_LABEL, axesToShow,
   axisAverages, regionAverages, overallAverage, asymmetries, toScoreMap, diffLevel, scoreColor,
   growth, movers, daysBetween, resolveBaseline, nearestSession, PERIOD_PRESETS, gradeOf, weaknessScan,
-  type Assessment, type AxisKey, type Growth, type Mover, type Weakness,
+  type Assessment, type AxisKey, type Growth, type Mover, type Weakness, type TrainingCatalog,
 } from "@/lib/training-catalog";
 
 const fmtDelta = (d: number | null): string => (d == null ? "–" : d > 0 ? `+${d.toFixed(1)}` : d.toFixed(1));
@@ -130,12 +131,14 @@ export default function PatientTrainingPage() {
   useEffect(() => { load(); }, [load]);
 
   const latest = data?.assessments[0] ?? null;
+  // この院の軸・項目（院で編集できる。未設定なら標準セット）
+  const cat: TrainingCatalog = data?.catalog ?? DEFAULT_CATALOG;
   const radarData = useMemo(
-    () => (latest ? regionAverages(latest.measurements).filter((r) => r.value != null).map((r) => ({ label: r.label, value: r.value as number })) : []),
-    [latest],
+    () => (latest ? regionAverages(latest.measurements, cat).filter((r) => r.value != null).map((r) => ({ label: r.label, value: r.value as number })) : []),
+    [latest, cat],
   );
-  const axisAvg = useMemo(() => (latest ? axisAverages(latest.measurements) : null), [latest]);
-  const asym = useMemo(() => (latest ? asymmetries(latest.measurements) : []), [latest]);
+  const axisAvg = useMemo(() => (latest ? axisAverages(latest.measurements, cat) : null), [latest, cat]);
+  const asym = useMemo(() => (latest ? asymmetries(latest.measurements, cat) : []), [latest, cat]);
   const trend = useMemo(() => {
     if (!data) return [];
     return [...data.assessments]
@@ -159,18 +162,18 @@ export default function PatientTrainingPage() {
     if (!from || from.id === to.id) return { from: null, to, g: null as Growth | null, movers: [] as Mover[], span: null as string | null };
     return {
       from, to,
-      g: growth(from, to),
-      movers: movers(from, to),
+      g: growth(from, to, cat),
+      movers: movers(from, to, cat),
       span: `${from.assessed_on} → ${to.assessed_on}（${daysBetween(from.assessed_on, to.assessed_on)}日）`,
     };
-  }, [data, latest, periodKey, useCustom, customFrom, customTo]);
+  }, [data, latest, periodKey, useCustom, customFrom, customTo, cat]);
 
   // 弱点スキャン（最新 vs 前回）
   const weaknesses = useMemo(() => {
     const A = data?.assessments ?? [];
     if (!latest) return [] as Weakness[];
-    return weaknessScan(latest, A[1] ?? null);
-  }, [data, latest]);
+    return weaknessScan(latest, A[1] ?? null, cat);
+  }, [data, latest, cat]);
 
   const handleDelete = async (id: string) => {
     if (!confirm("この評価を削除しますか？（元に戻せません）")) return;
@@ -246,7 +249,7 @@ export default function PatientTrainingPage() {
           {/* 軸サマリー（最新） */}
           {axisAvg && (
             <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-              {AXES.map((a) => {
+              {axesToShow(cat, axisAvg).map((a) => {
                 const v = axisAvg[a.key];
                 return (
                   <Card key={a.key}>
@@ -265,12 +268,13 @@ export default function PatientTrainingPage() {
 
           {/* 他者比較（ランク＋みんなの平均） */}
           {benchmark && axisAvg && (
-            <BenchmarkPanel bench={benchmark} myAxis={axisAvg} />
+            <BenchmarkPanel cat={cat} bench={benchmark} myAxis={axisAvg} />
           )}
 
           {/* 期間で見る伸び（期間指定） */}
           {period && (
             <PeriodGrowthPanel
+              cat={cat}
               period={period}
               periodKey={periodKey}
               setPeriodKey={(k) => { setPeriodKey(k); setUseCustom(false); }}
@@ -414,6 +418,7 @@ export default function PatientTrainingPage() {
               {data.assessments.map((a) => (
                 <HistoryCard
                   key={a.id}
+                  cat={cat}
                   a={a}
                   open={openId === a.id}
                   onToggle={() => setOpenId(openId === a.id ? null : a.id)}
@@ -431,7 +436,7 @@ export default function PatientTrainingPage() {
 }
 
 // 他者比較（評価ランク＋みんなの平均・順位）
-function BenchmarkPanel({ bench, myAxis }: { bench: ClinicBenchmark; myAxis: Record<AxisKey, number | null> }) {
+function BenchmarkPanel({ cat, bench, myAxis }: { cat: TrainingCatalog; bench: ClinicBenchmark; myAxis: Record<AxisKey, number | null> }) {
   const g = gradeOf(bench.myOverall);
   return (
     <Card>
@@ -453,7 +458,7 @@ function BenchmarkPanel({ bench, myAxis }: { bench: ClinicBenchmark; myAxis: Rec
         </div>
         {/* 軸別: この子 vs 平均 */}
         <div className="space-y-2.5">
-          {AXES.map((a) => {
+          {axesToShow(cat, myAxis).map((a) => {
             const mine = myAxis[a.key];
             const avg = bench.axisAvg[a.key];
             const gr = gradeOf(mine);
@@ -480,10 +485,10 @@ function BenchmarkPanel({ bench, myAxis }: { bench: ClinicBenchmark; myAxis: Rec
 // 期間で見る伸び（期間指定 + その期間の伸び + 項目別）
 type PeriodData = { from: Assessment | null; to: Assessment; g: Growth | null; movers: Mover[]; span: string | null };
 function PeriodGrowthPanel({
-  period, periodKey, setPeriodKey, useCustom, setUseCustom,
+  cat, period, periodKey, setPeriodKey, useCustom, setUseCustom,
   customFrom, setCustomFrom, customTo, setCustomTo,
 }: {
-  period: PeriodData; periodKey: string; setPeriodKey: (k: string) => void;
+  cat: TrainingCatalog; period: PeriodData; periodKey: string; setPeriodKey: (k: string) => void;
   useCustom: boolean; setUseCustom: (b: boolean) => void;
   customFrom: string; setCustomFrom: (s: string) => void; customTo: string; setCustomTo: (s: string) => void;
 }) {
@@ -524,7 +529,7 @@ function PeriodGrowthPanel({
                 <div className="text-3xl font-black leading-none" style={{ color: deltaColor(period.g.overall) }}>{fmtDelta(period.g.overall)}</div>
               </div>
               <div className="flex gap-4">
-                {AXES.map((a) => (
+                {axesToShow(cat, period.g!.axes).map((a) => (
                   <div key={a.key}><div className="text-xs text-slate-500">{a.label}</div><div className="text-lg font-bold" style={{ color: deltaColor(period.g!.axes[a.key]) }}>{fmtDelta(period.g!.axes[a.key])}</div></div>
                 ))}
               </div>
@@ -604,9 +609,12 @@ function MoversPanel({ movers }: { movers: Mover[] }) {
   );
 }
 
-function HistoryCard({ a, open, onToggle, onDelete, onReport, editHref }: { a: Assessment; open: boolean; onToggle: () => void; onDelete: () => void; onReport: () => void; editHref: string }) {
-  const axisAvg = axisAverages(a.measurements);
+function HistoryCard({ cat, a, open, onToggle, onDelete, onReport, editHref }: { cat: TrainingCatalog; a: Assessment; open: boolean; onToggle: () => void; onDelete: () => void; onReport: () => void; editHref: string }) {
+  const axisAvg = axisAverages(a.measurements, cat);
   const map = toScoreMap(a.measurements);
+  // 表に出す軸・項目：表示中のもの ＋ 非表示でもこの回に点数があるもの
+  const tableAxes = axesToShow(cat, axisAvg);
+  const tableRegions = cat.regions.filter((r) => !r.hidden || a.measurements.some((m) => m.item_key === r.key));
   return (
     <div className="rounded-xl border bg-white overflow-hidden">
       <div className="flex items-center justify-between px-4 py-3">
@@ -614,7 +622,7 @@ function HistoryCard({ a, open, onToggle, onDelete, onReport, editHref }: { a: A
           <div className="min-w-0">
             <div className="font-bold text-sm">{a.assessed_on}{a.assessor_name ? `・${a.assessor_name}` : ""}</div>
             <div className="flex gap-2 mt-1 text-[11px]">
-              {AXES.map((ax) => {
+              {tableAxes.map((ax) => {
                 const v = axisAvg[ax.key];
                 return <span key={ax.key} className="text-slate-500">{ax.label} <b style={{ color: v != null ? scoreColor(v) : "#cbd5e1" }}>{v != null ? v.toFixed(1) : "–"}</b></span>;
               })}
@@ -644,6 +652,11 @@ function HistoryCard({ a, open, onToggle, onDelete, onReport, editHref }: { a: A
         </div>
       )}
 
+      {/* 写真（この回の記録） */}
+      <div className="px-4 pb-3">
+        <TrainingPhotos assessmentId={a.id} />
+      </div>
+
       {/* 詳細スコア表 */}
       {open && (
         <div className="border-t px-4 py-3 overflow-x-auto">
@@ -651,17 +664,17 @@ function HistoryCard({ a, open, onToggle, onDelete, onReport, editHref }: { a: A
             <thead>
               <tr className="text-slate-400">
                 <th className="text-left font-medium pb-1">部位</th>
-                {AXES.map((ax) => <th key={ax.key} className="font-medium pb-1 px-1">{ax.label}</th>)}
+                {tableAxes.map((ax) => <th key={ax.key} className="font-medium pb-1 px-1">{ax.label}</th>)}
               </tr>
             </thead>
             <tbody>
-              {REGIONS.map((r) => {
-                const applicable = axesFor(r);
+              {tableRegions.map((r) => {
+                const applicable = axesFor(r, cat, true);
                 const sides = sidesFor(r);
                 return (
                   <tr key={r.key} className="border-t border-slate-100">
                     <td className="py-1.5 font-medium whitespace-nowrap">{r.label}</td>
-                    {AXES.map((ax) => {
+                    {tableAxes.map((ax) => {
                       if (!applicable.includes(ax.key)) return <td key={ax.key} className="text-center text-slate-300">–</td>;
                       return (
                         <td key={ax.key} className="text-center px-1">

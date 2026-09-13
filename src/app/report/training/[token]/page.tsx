@@ -10,10 +10,11 @@
 import { createClient as createAdminClient } from "@supabase/supabase-js";
 import type { Metadata } from "next";
 import { PUBLIC_CLINIC_ID } from "@/lib/default-clinic-id";
+import PrintButton from "./PrintButton";
 import {
-  AXES, REGIONS, axisAverages, overallAverage, asymmetries, regionAverages,
+  resolveCatalog, axesToShow, axisAverages, overallAverage, asymmetries, regionAverages,
   scoreColor, diffLevel, growth, gradeOf,
-  type Assessment, type Measurement, type RegionKey, type AxisKey, type Side,
+  type Assessment, type Measurement, type RegionKey, type AxisKey, type Side, type TrainingCatalog,
 } from "@/lib/training-catalog";
 
 export const dynamic = "force-dynamic";
@@ -35,6 +36,10 @@ type LoadResult = {
   customerName: string;
   current: Assessment;
   prev: Assessment | null;
+  /** この院の軸・項目（院で編集した名前で表示する） */
+  catalog: TrainingCatalog;
+  /** 院で「レポートに載せる」にした写真（期限つきURL） */
+  photos: { url: string; caption: string | null }[];
 } | null;
 
 async function load(token: string): Promise<LoadResult> {
@@ -57,7 +62,7 @@ async function load(token: string): Promise<LoadResult> {
 
   const [{ data: customer }, { data: settings }, { data: prevHead }] = await Promise.all([
     supabase.from("customers").select("name").eq("id", customerId).eq("clinic_id", clinicId).maybeSingle(),
-    supabase.from("clinic_settings").select("clinic_name").eq("id", clinicId).maybeSingle(),
+    supabase.from("clinic_settings").select("clinic_name, training_catalog").eq("id", clinicId).maybeSingle(),
     supabase
       .from("training_assessments")
       .select("id, customer_id, assessed_on, assessor_name, overall_memo, next_goal, homework")
@@ -76,6 +81,28 @@ async function load(token: string): Promise<LoadResult> {
     .eq("clinic_id", clinicId)
     .in("assessment_id", ids);
 
+  // 患者さんに見せる写真：院で「レポートに載せる」にしたものだけ。非公開の保存場所から期限つきURLを作る。
+  const { data: photoRows } = await supabase
+    .from("training_photos")
+    .select("storage_path, caption")
+    .eq("clinic_id", clinicId)
+    .eq("assessment_id", (head as any).id)
+    .eq("show_in_report", true)
+    .order("created_at", { ascending: true })
+    .limit(20);
+  let photos: { url: string; caption: string | null }[] = [];
+  if (photoRows && photoRows.length) {
+    const { data: signed } = await supabase.storage
+      .from("training-photos")
+      .createSignedUrls(photoRows.map((p: any) => p.storage_path as string), 60 * 60);
+    photos = photoRows
+      .map((p: any) => ({
+        url: (signed ?? []).find((s) => s.path === p.storage_path)?.signedUrl ?? "",
+        caption: (p.caption as string | null) ?? null,
+      }))
+      .filter((p) => !!p.url);
+  }
+
   const pick = (aid: string): Measurement[] =>
     (ms ?? [])
       .filter((m: any) => m.assessment_id === aid)
@@ -93,6 +120,8 @@ async function load(token: string): Promise<LoadResult> {
     customerName: (customer as any)?.name ?? "",
     current: toAssessment(head),
     prev: prevHead ? toAssessment(prevHead) : null,
+    catalog: resolveCatalog((settings as any)?.training_catalog ?? null),
+    photos,
   };
 }
 
@@ -135,16 +164,16 @@ export default async function TrainingReportPage({ params }: { params: Promise<{
     );
   }
 
-  const { clinicName, customerName, current, prev } = data;
-  const aa = axisAverages(current.measurements);
+  const { clinicName, customerName, current, prev, catalog, photos } = data;
+  const aa = axisAverages(current.measurements, catalog);
   const overall = overallAverage(current.measurements);
-  const g = prev ? growth(prev, current) : null;
-  const asym = asymmetries(current.measurements).filter((x) => x.diff >= 2).slice(0, 4);
-  const radar = regionAverages(current.measurements).filter((r) => r.value != null).map((r) => ({ label: r.label, value: r.value as number }));
+  const g = prev ? growth(prev, current, catalog) : null;
+  const asym = asymmetries(current.measurements, catalog).filter((x) => x.diff >= 2).slice(0, 4);
+  const radar = regionAverages(current.measurements, catalog).filter((r) => r.value != null).map((r) => ({ label: r.label, value: r.value as number }));
   const grade = gradeOf(overall);
 
   return (
-    <main className="min-h-screen bg-slate-50 text-slate-900 py-6 px-4">
+    <main className="min-h-screen bg-slate-50 text-slate-900 py-6 px-4 print:bg-white print:py-0">
       <div className="max-w-lg mx-auto space-y-4">
         {/* ヘッダー */}
         <div className="text-center">
@@ -173,7 +202,7 @@ export default async function TrainingReportPage({ params }: { params: Promise<{
 
         {/* 4軸 */}
         <div className="grid grid-cols-2 gap-2">
-          {AXES.map((ax) => {
+          {axesToShow(catalog, aa).map((ax) => {
             const v = aa[ax.key];
             const d = g?.axes[ax.key] ?? null;
             return (
@@ -227,6 +256,22 @@ export default async function TrainingReportPage({ params }: { params: Promise<{
           </div>
         )}
 
+        {/* 写真（院で「レポートに載せる」にしたもの） */}
+        {photos.length > 0 && (
+          <div className="bg-white rounded-2xl border p-4 break-inside-avoid">
+            <h2 className="text-sm font-bold mb-2">📷 今日の写真</h2>
+            <div className="grid grid-cols-2 gap-2">
+              {photos.map((p, i) => (
+                <figure key={i} className="space-y-1">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={p.url} alt={p.caption ?? "トレーニングの写真"} className="w-full aspect-square object-cover rounded-lg border" />
+                  {p.caption && <figcaption className="text-[11px] text-slate-500">{p.caption}</figcaption>}
+                </figure>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* メモ・目標・宿題 */}
         {current.overall_memo && (
           <div className="bg-white rounded-2xl border p-4">
@@ -246,6 +291,8 @@ export default async function TrainingReportPage({ params }: { params: Promise<{
             <p className="text-sm text-amber-900 whitespace-pre-wrap">{current.homework}</p>
           </div>
         )}
+
+        <PrintButton />
 
         <p className="text-center text-[11px] text-slate-400 pt-2">
           このページはあなた専用のリンクです。<br />{clinicName}

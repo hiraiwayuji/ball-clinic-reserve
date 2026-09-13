@@ -12,11 +12,12 @@ import {
 } from "lucide-react";
 import { getPatientById } from "@/app/actions/patientSearch";
 import {
-  getLatestAssessment, saveAssessment, getAssessmentEdit, updateAssessment, type SaveMeasurement,
+  getLatestAssessment, saveAssessment, getAssessmentEdit, updateAssessment, getTrainingCatalog, type SaveMeasurement,
 } from "@/app/actions/training";
 import {
-  REGIONS, axesFor, sidesFor, cellKey, AXIS_LABEL, SIDE_LABEL, TOTAL_CELLS,
-  toScoreMap, diffLevel, scoreColor, type Assessment, type RegionKey, type AxisKey, type Side,
+  DEFAULT_CATALOG, axesFor, sidesFor, cellKey, axisLabel, SIDE_LABEL, totalCells,
+  toScoreMap, diffLevel, scoreColor,
+  type Assessment, type Region, type RegionKey, type AxisKey, type Side, type TrainingCatalog,
 } from "@/lib/training-catalog";
 
 function todayJst(): string {
@@ -77,7 +78,12 @@ export default function AssessmentForm({
 
   // 採点値: cellKey -> score
   const [scores, setScores] = useState<Record<string, number>>({});
-  const [expanded, setExpanded] = useState<Set<RegionKey>>(new Set([REGIONS[0].key]));
+  // この院の軸・項目（読み込むまでは標準セット）
+  const [catalog, setCatalog] = useState<TrainingCatalog>(DEFAULT_CATALOG);
+  // 修正のとき、読み込んだ時点で点数が入っていたセル。
+  // 非表示にした軸・項目の点数も画面に出しておかないと、保存したときに消えてしまうため。
+  const [initialKeys, setInitialKeys] = useState<Set<string>>(new Set());
+  const [expanded, setExpanded] = useState<Set<RegionKey>>(new Set());
 
   const [assessedOn, setAssessedOn] = useState(todayJst());
   const [assessorName, setAssessorName] = useState("");
@@ -97,7 +103,9 @@ export default function AssessmentForm({
           const a = data.assessment;
           setPatientName(data.patientName);
           setPrev(data.prev);
+          setCatalog(data.catalog);
           setScores(toScoreMap(a.measurements));
+          setInitialKeys(new Set(Object.keys(toScoreMap(a.measurements))));
           setAssessedOn(a.assessed_on);
           setAssessorName(a.assessor_name ?? "");
           setOverallMemo(a.overall_memo ?? "");
@@ -106,13 +114,21 @@ export default function AssessmentForm({
           // 修正時は点数の入っている部位を開いておく（探さなくていいように）
           const touched = new Set<RegionKey>(a.measurements.map((m) => m.item_key));
           if (touched.size > 0) setExpanded(touched);
+          else {
+            const first = data.catalog.regions.find((r) => !r.hidden);
+            if (first) setExpanded(new Set([first.key]));
+          }
         } else {
-          const [p, latest] = await Promise.all([
+          const [p, latest, cs] = await Promise.all([
             getPatientById(customerId),
             getLatestAssessment(customerId),
+            getTrainingCatalog(),
           ]);
           setPatientName(p?.name ?? "");
           setPrev(latest);
+          setCatalog(cs.catalog);
+          const first = cs.catalog.regions.find((r) => !r.hidden);
+          if (first) setExpanded(new Set([first.key]));
         }
       } finally {
         setLoading(false);
@@ -121,6 +137,30 @@ export default function AssessmentForm({
   }, [customerId, assessmentId]);
 
   const prevMap = useMemo(() => (prev ? toScoreMap(prev.measurements) : {}), [prev]);
+
+  // 採点画面に出す項目と軸：表示中のもの ＋（修正のとき）非表示だけど点数が入っていたもの
+  const formRegions = useMemo(() => {
+    const hadScore = (r: Region) => [...initialKeys].some((k) => k.startsWith(r.key + ":"));
+    return catalog.regions
+      .filter((r) => !r.hidden || hadScore(r))
+      .map((r) => {
+        const shownAxes = axesFor(r, catalog, true).filter((ax) => {
+          const axis = catalog.axes.find((a) => a.key === ax);
+          if (axis && !axis.hidden && !r.hidden) return true;
+          return sidesFor(r).some((sd) => initialKeys.has(cellKey(r.key, ax, sd)));
+        });
+        // 読み込んだ時点で点数があった軸は、項目の軸リストから外れていても必ず出す（出さないと保存で消える）
+        const initialAxes = [...initialKeys]
+          .filter((k) => k.startsWith(r.key + ":"))
+          .map((k) => k.split(":")[1]);
+        return { region: r, axes: [...new Set([...shownAxes, ...initialAxes])] };
+      })
+      .filter((x) => x.axes.length > 0);
+  }, [catalog, initialKeys]);
+  const total = useMemo(
+    () => formRegions.reduce((n, x) => n + x.axes.length * sidesFor(x.region).length, 0) || totalCells(catalog),
+    [formRegions, catalog],
+  );
   const filledCount = Object.keys(scores).length;
 
   const setScore = (key: string, v: number | null) => {
@@ -142,9 +182,10 @@ export default function AssessmentForm({
   };
 
   const regionFilled = (key: RegionKey) => {
-    const r = REGIONS.find((x) => x.key === key)!;
+    const row = formRegions.find((x) => x.region.key === key);
+    if (!row) return 0;
     let n = 0;
-    for (const ax of axesFor(r)) for (const sd of sidesFor(r)) if (scores[cellKey(key, ax, sd)] != null) n++;
+    for (const ax of row.axes) for (const sd of sidesFor(row.region)) if (scores[cellKey(key, ax, sd)] != null) n++;
     return n;
   };
 
@@ -155,8 +196,8 @@ export default function AssessmentForm({
     }
     setSaving(true);
     const measurements: SaveMeasurement[] = [];
-    for (const r of REGIONS) {
-      for (const ax of axesFor(r)) {
+    for (const { region: r, axes } of formRegions) {
+      for (const ax of axes) {
         for (const sd of sidesFor(r)) {
           const v = scores[cellKey(r.key, ax, sd)];
           if (v != null) measurements.push({ item_key: r.key, axis: ax, side: sd, score: v });
@@ -223,7 +264,7 @@ export default function AssessmentForm({
             {isEdit && <Pencil className="w-4 h-4 text-amber-600 shrink-0" />}
             {patientName || "患者"} さんの評価{isEdit ? "を修正" : ""}
           </div>
-          <div className="text-xs text-slate-500">入力済み {filledCount} / {TOTAL_CELLS} 項目</div>
+          <div className="text-xs text-slate-500">入力済み {filledCount} / {total} 項目</div>
         </div>
       </div>
 
@@ -235,7 +276,7 @@ export default function AssessmentForm({
 
       {/* 進捗バー */}
       <div className="h-1.5 rounded-full bg-slate-100 overflow-hidden mb-4">
-        <div className="h-full bg-emerald-500 transition-all" style={{ width: `${(filledCount / TOTAL_CELLS) * 100}%` }} />
+        <div className="h-full bg-emerald-500 transition-all" style={{ width: `${Math.min(100, (filledCount / total) * 100)}%` }} />
       </div>
 
       {/* 前回のつづき */}
@@ -266,10 +307,10 @@ export default function AssessmentForm({
 
       {/* 部位カード */}
       <div className="space-y-2">
-        {REGIONS.map((r) => {
+        {formRegions.map(({ region: r, axes: regionAxes }) => {
           const open = expanded.has(r.key);
           const filled = regionFilled(r.key);
-          const total = axesFor(r).length * sidesFor(r).length;
+          const regionTotal = regionAxes.length * sidesFor(r).length;
           return (
             <div key={r.key} className="rounded-xl border bg-white overflow-hidden">
               <button
@@ -280,9 +321,12 @@ export default function AssessmentForm({
                 <div className="flex items-center gap-2">
                   <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-500">{r.group}</span>
                   <span className="font-bold">{r.label}</span>
+                  {r.hidden && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-200 text-slate-500">非表示の項目</span>
+                  )}
                   {filled > 0 && (
                     <span className="text-[11px] px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 font-bold">
-                      {filled}/{total}
+                      {filled}/{regionTotal}
                     </span>
                   )}
                 </div>
@@ -292,11 +336,12 @@ export default function AssessmentForm({
               {open && (
                 <div className="px-4 pb-4 pt-1 space-y-4 border-t">
                   {r.hint && <p className="text-xs text-slate-400 -mt-0.5">測り方の例：{r.hint}</p>}
-                  {axesFor(r).map((ax) => (
+                  {regionAxes.map((ax) => (
                     <AxisBlock
                       key={ax}
                       region={r.key}
                       axis={ax}
+                      label={axisLabel(catalog, ax)}
                       sides={sidesFor(r)}
                       scores={scores}
                       prevMap={prevMap}
@@ -340,9 +385,9 @@ export default function AssessmentForm({
 }
 
 function AxisBlock({
-  region, axis, sides, scores, prevMap, setScore,
+  region, axis, label, sides, scores, prevMap, setScore,
 }: {
-  region: RegionKey; axis: AxisKey; sides: Side[];
+  region: RegionKey; axis: AxisKey; label: string; sides: Side[];
   scores: Record<string, number>; prevMap: Record<string, number>;
   setScore: (key: string, v: number | null) => void;
 }) {
@@ -365,7 +410,7 @@ function AxisBlock({
   return (
     <div>
       <div className="flex items-center gap-2 mb-1.5">
-        <span className="text-sm font-bold">{AXIS_LABEL[axis]}</span>
+        <span className="text-sm font-bold">{label}</span>
         {diffBadge}
       </div>
       <div className="space-y-2">
