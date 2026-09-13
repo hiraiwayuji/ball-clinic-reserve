@@ -507,16 +507,23 @@ export async function listTaskDaySummaries(
   const sb = getServiceClient();
   if (!sb) return { success: false, error: "サーバー設定エラー" };
 
-  const { data, error } = await sb
-    .from("staff_tasks")
-    .select("due_date, status, approved")
-    .eq("clinic_id", clinicId)
-    .gte("due_date", fromDate)
-    .lte("due_date", toDate)
-    // 既定の上限(1000行)で黙って過少集計にならないように明示する
-    .range(0, 9999);
-
-  if (error) return { success: false, error: error.message };
+  // Supabase は1回に1000行までしか返さない（range を大きくしても頭打ち。2026-09-14 実測）。
+  // 満杯のページが返ったら続きを取り、黙って少なく集計しないようにする。並びは id で固定。
+  const PAGE = 1000;
+  const data: { due_date: string; status: string; approved: boolean }[] = [];
+  for (let from = 0; ; from += PAGE) {
+    const { data: page, error } = await sb
+      .from("staff_tasks")
+      .select("due_date, status, approved")
+      .eq("clinic_id", clinicId)
+      .gte("due_date", fromDate)
+      .lte("due_date", toDate)
+      .order("id", { ascending: true })
+      .range(from, from + PAGE - 1);
+    if (error) return { success: false, error: error.message };
+    data.push(...((page ?? []) as typeof data));
+    if ((page?.length ?? 0) < PAGE) break;
+  }
 
   const byDate = new Map<string, TaskDaySummary>();
   for (const r of (data ?? []) as { due_date: string; status: string; approved: boolean }[]) {
