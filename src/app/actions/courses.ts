@@ -36,6 +36,13 @@ export type ReservationCourse = {
   is_repeat_only: boolean;
   regular_price: number | null;
   badge_label: string | null;
+  /**
+   * 患者向けメニュー画面での見出し（例: 鍼灸 / 整体・マッサージ / セットメニュー）。NULL=見出しなし。
+   * 集計用の category（柔整/鍼灸/整体）とは別物。全メニュー未設定の院は見出しなしの一覧で表示される。
+   */
+  menu_group?: string | null;
+  /** 患者向けメニュー画面の先頭「おすすめ」に表示する（自分の見出しにも重ねて出る） */
+  is_recommended?: boolean;
   /** 集計用カテゴリ: jusei (柔整) / shinkyu (鍼灸) / seitai (整体) / null (未分類) */
   category?: "jusei" | "shinkyu" | "seitai" | null;
   /** このスタッフが出勤している日だけ予約可（NULL=誰でも可）。予約時はこのスタッフを自動で担当に。 */
@@ -288,6 +295,15 @@ export async function saveCourse(course: Partial<ReservationCourse> & { name: st
   // 売上に出さない（さみ整体）。undefined は触らない。
   if (course.exclude_from_sales !== undefined) {
     payload.exclude_from_sales = course.exclude_from_sales;
+  }
+  // 患者向けメニュー画面の見出し。undefined は触らない（有効/無効の切替などで消さない）。空白だけなら見出しなし。
+  if (course.menu_group !== undefined) {
+    const g = (course.menu_group ?? "").trim().slice(0, 30);
+    payload.menu_group = g || null;
+  }
+  // おすすめ表示。undefined は触らない。
+  if (course.is_recommended !== undefined) {
+    payload.is_recommended = !!course.is_recommended;
   }
 
   if (course.id) {

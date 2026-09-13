@@ -324,6 +324,8 @@ function CourseRow({
   const [freeWithJihi, setFreeWithJihi] = useState(course.free_with_jihi ?? false);
   const [excludeFromSales, setExcludeFromSales] = useState(course.exclude_from_sales ?? false);
   const [badgeLabel, setBadgeLabel] = useState(course.badge_label ?? "");
+  const [menuGroup, setMenuGroup] = useState(course.menu_group ?? "");
+  const [isRecommended, setIsRecommended] = useState(course.is_recommended ?? false);
   const [sortOrder, setSortOrder] = useState((course.sort_order ?? 0).toString());
   const [category, setCategory] = useState<"jusei" | "shinkyu" | "seitai" | "">(
     (course.category as any) ?? "",
@@ -354,6 +356,8 @@ function CourseRow({
       free_with_jihi: freeWithJihi,
       exclude_from_sales: excludeFromSales,
       badge_label: badgeLabel.trim() || null,
+      menu_group: menuGroup.trim() || null,
+      is_recommended: isRecommended,
       category: category || null,
     });
     setSaving(false);
@@ -539,6 +543,40 @@ function CourseRow({
               className="h-9 mt-1"
               placeholder="例: 人気No.1 / 期間限定"
             />
+          </div>
+          <div className="border border-sky-200 dark:border-sky-800 bg-sky-50/60 dark:bg-sky-950/30 rounded-lg p-2.5 space-y-2">
+            <div>
+              <Label className="text-xs font-bold text-slate-700 dark:text-slate-200">
+                予約サイトでの見出し
+              </Label>
+              <Input
+                value={menuGroup}
+                onChange={e => setMenuGroup(e.target.value)}
+                className="h-9 mt-1 bg-white dark:bg-slate-900"
+                maxLength={30}
+                placeholder="例: 鍼灸 / 整体・マッサージ / セットメニュー"
+              />
+              <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">
+                患者さんのメニュー画面で、同じ見出しのメニューがまとまって表示されます。
+                見出しの順番は、その見出しの一番上のメニューの並び順で決まります。
+                空欄のメニューは最後の「その他のメニュー」に入ります。
+                どのメニューにも見出しを付けなければ、今までどおり見出しなしで表示されます。
+              </p>
+            </div>
+            <label className="flex items-start gap-2 text-sm text-slate-700 dark:text-slate-200 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={isRecommended}
+                onChange={e => setIsRecommended(e.target.checked)}
+                className="w-4 h-4 accent-sky-600 mt-0.5"
+              />
+              <span>
+                <span className="font-bold">「おすすめ」に表示する</span>
+                <span className="block text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                  メニュー画面のいちばん上にまとめて出ます。自分の見出しからは消えません。
+                </span>
+              </span>
+            </label>
           </div>
           <div className="flex flex-col gap-2 pt-1">
             <label className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-200 cursor-pointer">

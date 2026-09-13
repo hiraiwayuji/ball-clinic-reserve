@@ -24,6 +24,7 @@ import { CLINIC_CONFIG } from "@/lib/clinic-config";
 import { getThemeClasses } from "@/lib/lp-theme";
 import LPHero from "@/components/reserve/LPHero";
 import { useClinicPatientCanPickStaff } from "@/lib/use-clinic-patient-staff";
+import { buildMenuSections } from "@/lib/menu-sections";
 
 type Tab = "coupon" | "menu" | "all";
 type AudienceFilter = "all" | "first" | "repeat";
@@ -110,6 +111,15 @@ export default function MenuLPClient({ initialCourses, settings }: Props) {
     });
   }, [initialCourses, tab, audience]);
 
+  // 見出しごとに分ける（タブ・対象区分で絞り込んだあとに分ける）。
+  // どのメニューにも見出し・おすすめが無い院は grouped=false で、今までどおりの一覧。
+  const menuSections = useMemo(() => buildMenuSections(filteredCourses), [filteredCourses]);
+
+  const jumpToSection = (key: string) => {
+    const el = typeof document !== "undefined" ? document.getElementById(`menu-section-${key}`) : null;
+    if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+
   const counts = useMemo(() => ({
     coupon: initialCourses.filter(c => c.is_coupon).length,
     menu: initialCourses.filter(c => !c.is_coupon).length,
@@ -189,6 +199,28 @@ export default function MenuLPClient({ initialCourses, settings }: Props) {
               );
             })}
           </div>
+
+          {/* 見出しへのジャンプ（見出しを使っている院だけ） */}
+          {menuSections.grouped && menuSections.sections.length > 1 && (
+            <nav aria-label="メニューの種類" className="flex gap-1.5 mt-2 overflow-x-auto pb-0.5 -mx-1 px-1">
+              {menuSections.sections.map((sec) => (
+                <button
+                  key={sec.key}
+                  type="button"
+                  onClick={() => jumpToSection(sec.key)}
+                  className={`shrink-0 h-8 px-3 rounded-full text-[12px] font-black border transition whitespace-nowrap ${
+                    sec.key === "recommended"
+                      ? "bg-amber-400 text-slate-900 border-amber-400"
+                      : "bg-zinc-800 text-zinc-100 border-zinc-700 hover:border-zinc-500"
+                  }`}
+                >
+                  {sec.key === "recommended" && <Star className="inline w-3 h-3 mr-0.5 -mt-0.5" />}
+                  {sec.title}
+                  <span className="ml-1 text-[10px] opacity-70 tabular-nums">{sec.courses.length}</span>
+                </button>
+              ))}
+            </nav>
+          )}
         </div>
       </div>
 
@@ -196,7 +228,7 @@ export default function MenuLPClient({ initialCourses, settings }: Props) {
       <div className="max-w-2xl mx-auto px-4 py-5 space-y-3">
         {filteredCourses.length === 0 ? (
           <EmptyState tab={tab} />
-        ) : (
+        ) : !menuSections.grouped ? (
           filteredCourses.map(course => (
             <CouponCard
               key={course.id}
@@ -205,6 +237,39 @@ export default function MenuLPClient({ initialCourses, settings }: Props) {
               availabilityDate={availability ? (availability[course.id] ?? null) : undefined}
               onSelect={() => setSelectedCourse(course)}
             />
+          ))
+        ) : (
+          menuSections.sections.map((sec) => (
+            <section
+              key={sec.key}
+              id={`menu-section-${sec.key}`}
+              aria-labelledby={`menu-section-title-${sec.key}`}
+              className="scroll-mt-44 space-y-3 pt-2 first:pt-0"
+            >
+              <h3
+                id={`menu-section-title-${sec.key}`}
+                className={`flex items-center gap-2 text-base font-black tracking-tight ${
+                  sec.key === "recommended" ? "text-amber-300" : "text-white"
+                }`}
+              >
+                {sec.key === "recommended" ? (
+                  <Star className="w-4 h-4" />
+                ) : (
+                  <span className={`w-1 h-4 rounded-full ${theme.ctaBg}`} aria-hidden />
+                )}
+                {sec.title}
+                <span className="text-[11px] font-bold text-zinc-400 tabular-nums">{sec.courses.length}件</span>
+              </h3>
+              {sec.courses.map(course => (
+                <CouponCard
+                  key={`${sec.key}-${course.id}`}
+                  course={course}
+                  themeColor={themeColor}
+                  availabilityDate={availability ? (availability[course.id] ?? null) : undefined}
+                  onSelect={() => setSelectedCourse(course)}
+                />
+              ))}
+            </section>
           ))
         )}
       </div>
