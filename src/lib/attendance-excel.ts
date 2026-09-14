@@ -1,5 +1,6 @@
 import * as XLSX from "xlsx";
 import type { AttendanceExcelStaff } from "@/app/actions/attendance";
+import { effectiveBreakMinutes, spanMinutes } from "@/lib/attendance-pay";
 
 /**
  * 月次勤怠管理表（Excel）の生成。
@@ -44,6 +45,16 @@ function formula(f: string): Cell {
   return { t: "n", f };
 }
 
+/**
+ * 深夜時間（22時〜翌5時に在席した分・総稼働を超えない）の数式。lib/attendance-pay.ts の nightMinutesWithin と同じ。
+ * 翌5時は 29/24（TIME(29,0,0) は24時間で折り返して 5:00 になるため使えない）。
+ * 旧式 F-22:00 は22時より後の出勤・5時越え・5時前出勤で深夜を多く数えていた。
+ */
+function nightExpr(row: number): string {
+  const D = `D${row}`, F = `F${row}`, G = `G${row}`;
+  return `IF(COUNT(${D},${F})=2,MIN(${G},MAX(0,MIN(${F},29/24)-MAX(${D},22/24))+MAX(0,MIN(${F},5/24)-${D})),0)`;
+}
+
 /** Excelのシート名に使えない文字を除く（: \ / ? * [ ] と31文字制限） */
 function safeSheetName(name: string): string {
   return name.replace(/[:\\/?*[\]]/g, " ").slice(0, 31);
@@ -53,7 +64,6 @@ export function downloadMonthlyAttendanceExcel(
   month: string,                    // "YYYY-MM"
   clinicName: string,
   staffList: AttendanceExcelStaff[],
-  defaultBreakMinutes = 45,
 ) {
   const [yy, mm] = month.split("-").map(Number);
   const rY = reiwaYear(yy);
@@ -95,9 +105,12 @@ export function downloadMonthlyAttendanceExcel(
       // そのままだと退勤 < 出勤 になり総稼働がマイナスになるので翌日扱いにする。
       if (clockIn != null && clockOut != null && clockOut < clockIn) clockOut += 1;
 
-      // 休憩は記録されている実績を使う。未記録の日だけ既定値を入れる
-      // （森川先生=2時間、森藤先生=45分、パートは休憩なし、と人によって違うため）
-      const brkMin = d.breakMinutes > 0 ? d.breakMinutes : defaultBreakMinutes;
+      // 休憩は「その日の記録 → その人のいつもの休憩 → 法定の最低ライン」の順で決める
+      // （森川先生=2時間、森藤先生=45分、パートは休憩なし、と人によって違うため）。
+      // 画面の「勤怠一覧・給与」と同じ関数で決める（lib/attendance-pay.ts）。
+      const brkMin = effectiveBreakMinutes(
+        d.breakMinutes, staff.defaultBreakMinutes, spanMinutes(d.clockIn, d.clockOut),
+      ).minutes;
       const brk = hasPunch ? brkMin / (24 * 60) : null;
       const note = d.isClosed && !hasPunch ? "院休診" : null;
 
@@ -112,9 +125,9 @@ export function downloadMonthlyAttendanceExcel(
         formula(`IF(COUNT(D${row},F${row})=2,F${row}-D${row}-E${row},0)`),                  // G 総稼働
         formula(`G${row}-I${row}-K${row}`),                                                 // H 通常勤務
         formula(`MAX(0,G${row}-TIME(8,0,0))-K${row}`),                                      // I 普通残業
-        formula(`MAX(0,IF(COUNT(F${row})=1,F${row}-TIME(22,0,0),0))-K${row}`),              // J 深夜
-        // 深夜残業＝「22時以降」と「8時間超」が重なっている分だけ
-        formula(`MIN(MAX(0,IF(COUNT(F${row})=1,F${row}-TIME(22,0,0),0)),MAX(0,G${row}-TIME(8,0,0)))`), // K 深夜残業
+        formula(`${nightExpr(row)}-K${row}`),                                              // J 深夜
+        // 深夜残業＝「深夜（22時〜翌5時）」と「8時間超」が重なっている分だけ
+        formula(`MIN(${nightExpr(row)},MAX(0,G${row}-TIME(8,0,0)))`),                     // K 深夜残業
         note,
       ]);
     });

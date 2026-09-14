@@ -20,6 +20,7 @@ import {
   hashWagePasscode,
 } from "@/lib/attendance-device";
 import { writeAudit } from "@/lib/audit";
+import { calcLedgerDay, formatMinutes } from "@/lib/attendance-pay";
 
 /**
  * 勤怠（出退勤の打刻）＋残業の見える化 [Phase 1]
@@ -299,6 +300,14 @@ export async function getMyAttendance(
   if (!staffId) return { records: [], missingCount: 0 };
   const db = admin();
   if (!(await verifyStaff(db, staffId))) return { records: [], missingCount: 0 };
+  // 休憩の記録が無い日は、その人の「いつもの休憩」で実働を出す（院長の一覧・勤怠管理表と同じ）
+  const { data: staffBreak } = await db
+    .from("reservation_staff")
+    .select("default_break_minutes")
+    .eq("clinic_id", PUBLIC_CLINIC_ID)
+    .eq("id", staffId)
+    .maybeSingle();
+  const staffDefaultBreak = (staffBreak?.default_break_minutes as number | null | undefined) ?? null;
 
   const { date: today } = jstNow();
   const from = new Date(`${today}T00:00:00+09:00`);
@@ -326,20 +335,20 @@ export async function getMyAttendance(
     const clockIn = hm(r.clock_in_at);
     const clockOut = hm(r.clock_out_at);
     const [y, m, d] = String(r.work_date).split("-").map(Number);
-    let worked: string | null = null;
-    if (r.clock_in_at && r.clock_out_at) {
-      const mins =
-        Math.round((new Date(r.clock_out_at).getTime() - new Date(r.clock_in_at).getTime()) / 60000)
-        - (Number(r.break_minutes ?? 0) || 0);
-      const safe = Math.max(0, mins);
-      worked = `${Math.floor(safe / 60)}:${String(safe % 60).padStart(2, "0")}`;
-    }
+    // 実働は院長の「勤怠一覧・給与」・勤怠管理表と同じルール（lib/attendance-pay.ts）で出す。
+    // 別の式で出すと、本人の画面と院長の画面で実働が食い違う。
+    const day = calcLedgerDay({
+      clockIn,
+      clockOut,
+      breakMinutes: r.break_minutes == null ? null : Number(r.break_minutes),
+    }, null, staffDefaultBreak);
+    const worked: string | null = day.split ? formatMinutes(day.split.total) : null;
     return {
       workDate: r.work_date as string,
       weekday: WD[new Date(Date.UTC(y, m - 1, d)).getUTCDay()],
       clockIn,
       clockOut,
-      breakMinutes: Number(r.break_minutes ?? 0) || 0,
+      breakMinutes: day.breakUsed,
       // 今日はまだ勤務中かもしれないので、打刻もれとは見なさない
       missing: r.work_date !== today && (!clockIn || !clockOut),
       worked,
@@ -864,17 +873,22 @@ export async function setAttendanceTimes(
   recordId: string,
   clockInHm: string | null,   // "HH:mm" / null=クリア
   clockOutHm: string | null,
+  /** 休憩（分）。undefined＝変えない／null＝未記録に戻す（いつもの休憩→法定の最低ラインで計算） */
+  breakMinutes?: number | null,
 ): Promise<{ success: boolean; error?: string }> {
   const auth = await requireRole(["owner"]);
   const isHm = (v: string | null) => v === null || /^([01]\d|2[0-3]):[0-5]\d$/.test(v);
   if (!isHm(clockInHm) || !isHm(clockOutHm)) {
     return { success: false, error: "時刻は HH:MM で入力してください" };
   }
+  if (breakMinutes !== undefined && !isValidBreak(breakMinutes)) {
+    return { success: false, error: "休憩は0〜600分の整数で入力してください" };
+  }
 
   const db = admin();
   const { data: before } = await db
     .from("staff_attendance")
-    .select("id, staff_id, staff_name, work_date, clock_in_at, clock_out_at, is_overtime, overtime_reason_type")
+    .select("id, staff_id, staff_name, work_date, clock_in_at, clock_out_at, is_overtime, overtime_reason_type, break_minutes")
     .eq("id", recordId)
     .eq("clinic_id", auth.clinicId)
     .maybeSingle();
@@ -903,6 +917,7 @@ export async function setAttendanceTimes(
     is_overtime: isOvertime,
     updated_at: new Date().toISOString(),
   };
+  if (breakMinutes !== undefined) payload.break_minutes = breakMinutes;
   // 残業でなくなったら、残業理由も一緒に消す（残っていると一覧の判定が矛盾する）
   if (!isOvertime) {
     payload.overtime_reason_type = null;
@@ -927,12 +942,255 @@ export async function setAttendanceTimes(
     before: {
       staff_name: before.staff_name, work_date: workDate,
       clock_in_at: before.clock_in_at, clock_out_at: before.clock_out_at,
-      is_overtime: before.is_overtime,
+      is_overtime: before.is_overtime, break_minutes: before.break_minutes,
     },
     after: {
       staff_name: before.staff_name, work_date: workDate,
       clock_in_at: clockInAt, clock_out_at: clockOutAt,
       is_overtime: isOvertime,
+      break_minutes: breakMinutes !== undefined ? breakMinutes : before.break_minutes,
+    },
+  });
+
+  return { success: true };
+}
+
+/** 休憩の分数として正しいか（null＝未記録はOK） */
+function isValidBreak(v: number | null): boolean {
+  return v === null || (Number.isInteger(v) && v >= 0 && v <= 600);
+}
+
+// ── 勤怠一覧・給与（全員の打刻を一覧で見る・時給で計算する・直す）─────────
+
+export type LedgerStaff = {
+  id: string;
+  name: string;
+  displayColor: string | null;
+  /** 時給。合言葉で解錠していないときは必ず null（金額そのものを画面に渡さない） */
+  hourlyWage: number | null;
+  /** いつもの休憩（分）。null＝未設定（法定の最低ラインで計算） */
+  defaultBreakMinutes: number | null;
+};
+
+export type LedgerRecord = {
+  id: string;
+  staffId: string;
+  staffName: string;
+  workDate: string;            // "YYYY-MM-DD"
+  clockIn: string | null;      // "HH:mm"（JST）
+  clockOut: string | null;     // "HH:mm"（JST）
+  breakMinutes: number | null; // 記録値。null＝未記録（いつもの休憩→法定の最低ラインで計算）
+  isOvertime: boolean;
+};
+
+/**
+ * オーナー：指定月の全員の打刻（勤怠一覧・給与ページ用）。owner専用。
+ * 載せる人は勤怠管理表と同じ「今いる打刻対象のスタッフ＋その月に打刻がある人（退職者を含む）」。
+ * 時間と金額の計算は画面側で lib/attendance-pay.ts を使う（修正ダイアログで保存前に結果を見せるため）。
+ */
+export async function getAttendanceLedger(month: string): Promise<{
+  success: boolean;
+  staff?: LedgerStaff[];
+  records?: LedgerRecord[];
+  wagesUnlocked?: boolean;
+  hasWagePasscode?: boolean;
+  today?: string;
+  error?: string;
+}> {
+  const { clinicId } = await requireRole(["owner"]);
+  if (!/^\d{4}-\d{2}$/.test(month)) return { success: false, error: "月の指定が不正です" };
+  const [yy, mm] = month.split("-").map(Number);
+  const monthStart = `${month}-01`;
+  const monthEnd = `${month}-${String(new Date(yy, mm, 0).getDate()).padStart(2, "0")}`;
+
+  const { createClient } = await import("@/lib/supabase/server");
+  const supabase = await createClient();
+  const [wagesUnlocked, { data: settings }, { data: staffRows, error: staffErr }, attendanceRes] = await Promise.all([
+    canSeeWages(clinicId),
+    supabase.from("clinic_settings").select("wage_passcode_hash").eq("id", clinicId).maybeSingle(),
+    supabase.from("reservation_staff")
+      .select("id, name, display_color, hourly_wage, default_break_minutes, sort_order, is_active, attendance_excluded, created_at")
+      .eq("clinic_id", clinicId)
+      .order("sort_order", { ascending: true })
+      .order("created_at", { ascending: true }),
+    // 1か月×スタッフ数なので1000行には届かない（11人×31日=341行）
+    supabase.from("staff_attendance")
+      .select("id, staff_id, staff_name, work_date, clock_in_at, clock_out_at, break_minutes, is_overtime")
+      .eq("clinic_id", clinicId)
+      .gte("work_date", monthStart).lte("work_date", monthEnd)
+      .order("work_date", { ascending: true }),
+  ]);
+  if (staffErr) return { success: false, error: staffErr.message };
+  if (attendanceRes.error) return { success: false, error: attendanceRes.error.message };
+
+  const hm = (iso: string | null) =>
+    iso
+      ? new Intl.DateTimeFormat("ja-JP", { timeZone: "Asia/Tokyo", hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(iso))
+      : null;
+
+  type LedgerAttendanceRow = {
+    id: string; staff_id: string; staff_name: string; work_date: string;
+    clock_in_at: string | null; clock_out_at: string | null; break_minutes: number | null; is_overtime: boolean | null;
+  };
+  type LedgerStaffRow = {
+    id: string; name: string; display_color: string | null; hourly_wage: number | null;
+    default_break_minutes: number | null; is_active: boolean | null; attendance_excluded: boolean | null;
+  };
+  const rows = (attendanceRes.data ?? []) as LedgerAttendanceRow[];
+  const punched = new Set(rows.map((r) => r.staff_id));
+  const staff: LedgerStaff[] = ((staffRows ?? []) as LedgerStaffRow[])
+    .filter((s) => (s.is_active !== false && s.attendance_excluded !== true) || punched.has(s.id as string))
+    .map((s) => ({
+      id: s.id as string,
+      name: s.name as string,
+      displayColor: (s.display_color as string | null) ?? null,
+      hourlyWage: wagesUnlocked ? ((s.hourly_wage as number | null) ?? null) : null,
+      defaultBreakMinutes: (s.default_break_minutes as number | null) ?? null,
+    }));
+
+  const records: LedgerRecord[] = rows.map((r) => ({
+    id: r.id as string,
+    staffId: r.staff_id as string,
+    staffName: r.staff_name as string,
+    workDate: r.work_date as string,
+    clockIn: hm(r.clock_in_at),
+    clockOut: hm(r.clock_out_at),
+    breakMinutes: r.break_minutes == null ? null : Number(r.break_minutes),
+    isOvertime: !!r.is_overtime,
+  }));
+
+  return {
+    success: true,
+    staff,
+    records,
+    wagesUnlocked,
+    hasWagePasscode: !!(settings?.wage_passcode_hash as string | null),
+    today: jstNow().date,
+  };
+}
+
+/**
+ * オーナー：スタッフの「いつもの休憩（分）」を決める。owner専用。
+ * 休憩の記録が無い日の実働・支給額の目安はこの値で計算する。null＝未設定（法定の最低ライン）。
+ */
+export async function setStaffDefaultBreak(
+  staffId: string,
+  minutes: number | null,
+): Promise<{ success: boolean; error?: string }> {
+  const auth = await requireRole(["owner"]);
+  if (!isValidBreak(minutes)) return { success: false, error: "休憩は0〜600分の整数で入力してください" };
+  const db = admin();
+  const { data: before } = await db
+    .from("reservation_staff")
+    .select("id, name, default_break_minutes")
+    .eq("clinic_id", auth.clinicId)
+    .eq("id", staffId)
+    .maybeSingle();
+  if (!before) return { success: false, error: "スタッフが見つかりません" };
+  const { error } = await db
+    .from("reservation_staff")
+    .update({ default_break_minutes: minutes })
+    .eq("clinic_id", auth.clinicId)
+    .eq("id", staffId);
+  if (error) return { success: false, error: error.message };
+  await writeAudit({
+    clinicId: auth.clinicId,
+    actorUserId: auth.userId,
+    actorEmail: auth.email,
+    actorRole: auth.role,
+    actionType: "staff.default_break.update",
+    targetTable: "reservation_staff",
+    targetId: staffId,
+    before: { name: before.name, default_break_minutes: before.default_break_minutes },
+    after: { name: before.name, default_break_minutes: minutes },
+  });
+  return { success: true };
+}
+
+/**
+ * オーナー：打刻が1件も無い日の記録を追加する（出勤も退勤も押し忘れた日など）。owner専用。
+ * すでにその日の記録があるときは追加しない（一覧の「修正」から直してもらう）。
+ * 残業かどうかは打刻・時刻修正と同じ基準（シフト終了＋猶予）で判定し、追加は監査ログに残す。
+ */
+export async function addAttendanceRecord(
+  staffId: string,
+  workDate: string,         // "YYYY-MM-DD"
+  clockInHm: string,        // "HH:mm"
+  clockOutHm: string | null,
+  breakMinutes: number | null,
+): Promise<{ success: boolean; error?: string }> {
+  const auth = await requireRole(["owner"]);
+  const isHm = (v: string) => /^([01]\d|2[0-3]):[0-5]\d$/.test(v);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(workDate)) return { success: false, error: "日付が不正です" };
+  if (!clockInHm || !isHm(clockInHm)) return { success: false, error: "出勤の時刻を入力してください" };
+  if (clockOutHm !== null && !isHm(clockOutHm)) return { success: false, error: "退勤の時刻は HH:MM で入力してください" };
+  if (!isValidBreak(breakMinutes)) return { success: false, error: "休憩は0〜600分の整数で入力してください" };
+  if (workDate > jstNow().date) return { success: false, error: "これから先の日付には追加できません" };
+
+  const db = admin();
+  const { data: staffRow } = await db
+    .from("reservation_staff")
+    .select("id, name")
+    .eq("clinic_id", auth.clinicId)
+    .eq("id", staffId)
+    .maybeSingle();
+  if (!staffRow) return { success: false, error: "スタッフが見つかりません" };
+
+  const clockInAt = new Date(`${workDate}T${clockInHm}:00+09:00`).toISOString();
+  const clockOutAt = clockOutHm ? new Date(`${workDate}T${clockOutHm}:00+09:00`).toISOString() : null;
+  if (clockOutAt && new Date(clockOutAt) <= new Date(clockInAt)) {
+    return { success: false, error: "退勤は出勤より後の時刻にしてください" };
+  }
+
+  const { data: existing } = await db
+    .from("staff_attendance")
+    .select("id")
+    .eq("clinic_id", auth.clinicId)
+    .eq("staff_id", staffId)
+    .eq("work_date", workDate)
+    .maybeSingle();
+  if (existing) return { success: false, error: "この日の記録はすでにあります。一覧の「修正」から直してください" };
+
+  const cfg = await getAttendanceConfig();
+  const overtimeAfterMin = await overtimeThresholdMinutes(db, auth.clinicId, staffId, workDate, cfg);
+  const isOvertime = clockOutAt ? jstPartsOf(clockOutAt).minutes > overtimeAfterMin : false;
+
+  const { data: inserted, error } = await db
+    .from("staff_attendance")
+    .insert({
+      clinic_id: auth.clinicId,
+      staff_id: staffId,
+      staff_name: staffRow.name as string,
+      work_date: workDate,
+      clock_in_at: clockInAt,
+      clock_out_at: clockOutAt,
+      break_minutes: breakMinutes,
+      is_overtime: isOvertime,
+      updated_at: new Date().toISOString(),
+    })
+    .select("id")
+    .single();
+  if (error) {
+    // 同時に打刻が入った場合など（1人1日1件の制約）
+    if ((error as { code?: string }).code === "23505") {
+      return { success: false, error: "この日の記録はすでにあります。一覧の「修正」から直してください" };
+    }
+    return { success: false, error: error.message };
+  }
+
+  await writeAudit({
+    clinicId: auth.clinicId,
+    actorUserId: auth.userId,
+    actorEmail: auth.email,
+    actorRole: auth.role,
+    actionType: "attendance.record.create",
+    targetTable: "staff_attendance",
+    targetId: inserted.id as string,
+    before: null,
+    after: {
+      staff_name: staffRow.name, work_date: workDate,
+      clock_in_at: clockInAt, clock_out_at: clockOutAt,
+      break_minutes: breakMinutes, is_overtime: isOvertime,
     },
   });
 
@@ -1201,14 +1459,16 @@ export type AttendanceExcelDay = {
   weekday: string;          // "月"〜"日"
   clockIn: string | null;   // "HH:mm"
   clockOut: string | null;  // "HH:mm"
-  /** 休憩（分）。人によって違う（森川=120／森藤=45／パートは0）ので日ごとに持つ */
-  breakMinutes: number;
+  /** 休憩（分）。人によって違う（森川=120／森藤=45／パートは0）ので日ごとに持つ。null＝未記録（いつもの休憩→法定で計算） */
+  breakMinutes: number | null;
   isClosed: boolean;
 };
 
 export type AttendanceExcelStaff = {
   staffId: string;
   staffName: string;
+  /** いつもの休憩（分）。null＝未設定（法定の最低ライン） */
+  defaultBreakMinutes: number | null;
   days: AttendanceExcelDay[];
 };
 
@@ -1235,7 +1495,7 @@ export async function getMonthlyAttendanceForExcel(
     // 退職者も含めて全員取る。誰を表に載せるかは下で決める
     // （退職した人でもその月に働いていれば、給与のために勤怠管理表が要る）
     supabase.from("reservation_staff")
-      .select("id, name, sort_order, is_active, attendance_excluded")
+      .select("id, name, sort_order, is_active, attendance_excluded, default_break_minutes")
       .eq("clinic_id", clinicId)
       .order("sort_order", { ascending: true }),
     supabase.from("clinic_settings").select("closed_weekdays").eq("id", clinicId).maybeSingle(),
@@ -1262,15 +1522,16 @@ export async function getMonthlyAttendanceForExcel(
   };
 
   // (staff_id, work_date) -> {clockIn, clockOut, break}。同日複数打刻は最初の出勤・最後の退勤を使う
-  const byKey = new Map<string, { in: string | null; out: string | null; brk: number }>();
+  const byKey = new Map<string, { in: string | null; out: string | null; brk: number | null }>();
   for (const r of (attendanceRes.data ?? []) as any[]) {
     const key = `${r.staff_id}|${r.work_date}`;
-    const cur = byKey.get(key) ?? { in: null, out: null, brk: 0 };
+    const cur = byKey.get(key) ?? { in: null, out: null, brk: null };
     const inT = hm(r.clock_in_at);
     const outT = hm(r.clock_out_at);
     if (inT && (!cur.in || inT < cur.in)) cur.in = inT;
     if (outT && (!cur.out || outT > cur.out)) cur.out = outT;
-    cur.brk = Math.max(cur.brk, Number(r.break_minutes ?? 0) || 0);
+    // 0 は「休憩なし」、null は「未記録」。0 を未記録と混ぜると、休憩なしの人からも休憩が引かれる
+    if (r.break_minutes != null) cur.brk = Math.max(cur.brk ?? 0, Number(r.break_minutes) || 0);
     byKey.set(key, cur);
   }
 
@@ -1297,11 +1558,16 @@ export async function getMonthlyAttendanceForExcel(
         weekday: WD[weekdayIdx],
         clockIn: rec?.in ?? null,
         clockOut: rec?.out ?? null,
-        breakMinutes: rec?.brk ?? 0,
+        breakMinutes: rec?.brk ?? null,
         isClosed: closedWeekdays.has(weekdayIdx) || holidaySet.has(dateStr),
       });
     }
-    return { staffId: s.id as string, staffName: s.name as string, days };
+    return {
+      staffId: s.id as string,
+      staffName: s.name as string,
+      defaultBreakMinutes: (s.default_break_minutes as number | null) ?? null,
+      days,
+    };
   });
 
   return { success: true, staff };

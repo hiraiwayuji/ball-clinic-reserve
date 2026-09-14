@@ -1,12 +1,13 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { format, addMonths } from "date-fns";
 import { ja } from "date-fns/locale";
 import { toast } from "sonner";
 import {
   Loader2, Clock, ChevronLeft, ChevronRight, AlertTriangle, Copy, Link2,
-  Save, Coins, Settings2, CheckCircle2, TrendingDown, Lock, Eye, EyeOff, Pencil, FileSpreadsheet,
+  Save, Coins, Settings2, CheckCircle2, TrendingDown, Lock, Eye, EyeOff, Pencil, FileSpreadsheet, ListChecks,
 } from "lucide-react";
 import {
   getAttendanceSettings, setAttendanceSettings, listStaffWages, setStaffWage, getAttendanceReport,
@@ -226,9 +227,15 @@ export default function AttendanceAdminPage() {
 
   return (
     <div className="max-w-3xl mx-auto px-4 py-6 space-y-5">
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 flex-wrap">
         <Clock className="w-6 h-6 text-blue-600" />
-        <h1 className="text-xl font-black text-slate-800">勤怠（残業の見える化）</h1>
+        <h1 className="text-xl font-black text-slate-800 flex-1">勤怠（残業の見える化）</h1>
+        <Link
+          href="/admin/attendance-list"
+          className="inline-flex items-center gap-1.5 h-9 px-3 rounded-xl bg-blue-600 text-white text-xs font-bold hover:bg-blue-700"
+        >
+          <ListChecks className="w-3.5 h-3.5" /> 全員の勤怠一覧・給与計算へ
+        </Link>
       </div>
 
       {/* 運用設定 */}
