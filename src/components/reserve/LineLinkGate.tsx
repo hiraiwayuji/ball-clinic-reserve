@@ -23,13 +23,15 @@ type Props = {
   /** 顧客特定用（ポーリングで連携済みかを照合する） */
   name: string;
   phone: string;
+  /** 「電話は同じ・名前が違う」で患者さんが「本人です」を選んだ（予約側と同じ人を照合するため） */
+  confirmedSamePerson?: boolean;
   /** 連携が確認できたら呼ばれる。親はここで予約を自動再送信する */
   onLinked: () => void | Promise<void>;
   /** 「仮予約」「キャンセル待ち」など、完了する操作の呼び名 */
   actionLabel?: string;
 };
 
-export default function LineLinkGate({ phone4, name, phone, onLinked, actionLabel = "仮予約" }: Props) {
+export default function LineLinkGate({ phone4, name, phone, confirmedSamePerson = false, onLinked, actionLabel = "仮予約" }: Props) {
   const [lineUrl, setLineUrl] = useState<string>(LINE_URL_FALLBACK);
   const [clinicPhone, setClinicPhone] = useState<string | null>(null);
   const [checking, setChecking] = useState(false);
@@ -57,7 +59,7 @@ export default function LineLinkGate({ phone4, name, phone, onLinked, actionLabe
     if (firedRef.current) return;
     if (!opts?.silent) setChecking(true);
     try {
-      const res = await getLineLinkStatus({ name, phone });
+      const res = await getLineLinkStatus({ name, phone, confirmedSamePerson });
       if (res.linked) await fireLinked();
     } catch {
       // ネットワーク一時失敗は次のポーリングに任せる
@@ -74,7 +76,7 @@ export default function LineLinkGate({ phone4, name, phone, onLinked, actionLabe
     }, POLL_INTERVAL_MS);
     return () => clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [name, phone]);
+  }, [name, phone, confirmedSamePerson]);
 
   if (linkedConfirmed) {
     return (

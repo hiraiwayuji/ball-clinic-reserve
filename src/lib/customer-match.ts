@@ -9,7 +9,7 @@
 // こちらは管理画面・アンケートなど「スタッフや本人が直接入力する」側で使う。
 
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { normalizeNameForMatch } from "@/lib/booking-customer";
+import { normalizeNameForMatch, pickCustomerByNameAndPhone } from "@/lib/booking-customer";
 import { normalizePhone } from "@/lib/phone";
 
 export type MatchedCustomer = {
@@ -23,8 +23,10 @@ export type MatchedCustomer = {
  *
  * 順番は「確かな順」。1件に絞れないときは**採用しない**（間違った人に紐づけるほうが事故なので）。
  *   1. 電話（正規化）＋ 氏名（正規化）が一致
- *   2. 電話（正規化）が一致する人がちょうど1人
- *   3. 氏名（正規化）が一致する人がちょうど1人
+ *   2. 氏名（正規化）が一致する人がちょうど1人
+ *   ※ 「電話だけ一致・名前は違う」は採用しない。家族（兄弟）は同じ電話を使うので、
+ *     弟のアンケートで兄のカルテ（名前・生年月日）を上書きしてしまう（2026-09-19）。
+ *     本人の書き方違いならカルテが2枚になるが、スタッフが統合できる（上書きは元に戻せない）。
  *
  * 仮電話番号 "080" を149人が共有しているような院があるので、
  * 2 は「1人だけのとき」に限る。
@@ -46,24 +48,9 @@ export async function findExistingCustomer(
     .eq("clinic_id", clinicId);
   if (error || !data) return null;
 
-  const rows = data as MatchedCustomer[];
-  const byPhone = phoneKey
-    ? rows.filter((c) => normalizePhone(c.phone) === phoneKey)
-    : [];
-
-  // 1. 電話＋氏名
-  if (phoneKey && nameKey) {
-    const both = byPhone.filter((c) => normalizeNameForMatch(c.name) === nameKey);
-    if (both.length === 1) return both[0];
-  }
-  // 2. 電話が1人だけ
-  if (byPhone.length === 1) return byPhone[0];
-  // 3. 同名が1人だけ
-  if (nameKey) {
-    const byName = rows.filter((c) => normalizeNameForMatch(c.name) === nameKey);
-    if (byName.length === 1) return byName[0];
-  }
-  return null;
+  // 判定ルールは Web予約と同じ pickCustomerByNameAndPhone に一本化（兄弟の取り違え防止）。
+  const picked = pickCustomerByNameAndPhone(data as MatchedCustomer[], input);
+  return picked.kind === "match" ? picked.customer : null; // phone_only は採用しない（上の※）
 }
 
 /**

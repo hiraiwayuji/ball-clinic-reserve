@@ -3,6 +3,7 @@
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { revalidatePath } from "next/cache";
 import { findExistingCustomer } from "@/lib/customer-match";
+import { normalizeNameForMatch } from "@/lib/booking-customer";
 import { normalizePhone } from "@/lib/phone";
 import { PUBLIC_CLINIC_ID } from "@/lib/default-clinic-id";
 
@@ -62,7 +63,10 @@ export async function submitQuestionnaire(data: QuestionnaireData): Promise<{ su
 
   if (existing) {
     // 既存顧客: プロフィールを更新
-    const patch: Record<string, any> = { name: name.trim() };
+    // 名前は表記ゆれ（空白・全角半角）の範囲でだけ直す。読みの違う名前で上書きすると
+    // 家族のカルテを別人の名前に書き換えてしまうため（2026-09-19 兄弟取り違え）。
+    const patch: Record<string, any> = {};
+    if (matched && normalizeNameForMatch(matched.name) === normalizeNameForMatch(name)) patch.name = name.trim();
     if (effectiveBirthMonth) patch.birth_month = effectiveBirthMonth;
     if (gender) patch.gender = gender;
     if (age_group) { try { patch.age_group = age_group; } catch {} }

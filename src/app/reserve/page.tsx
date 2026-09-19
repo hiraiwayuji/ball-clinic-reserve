@@ -28,6 +28,7 @@ import { normalizePhone } from "@/lib/phone";
 import { toast } from "sonner";
 import { CLINIC_CONFIG } from "@/lib/clinic-config";
 import ReserveLandingPage from "./ReserveLandingPage";
+import { isSameNameAs } from "@/lib/booking-customer";
 import LineLinkGate from "@/components/reserve/LineLinkGate";
 import { getPublicClinicSettings } from "@/app/actions/publicSettings";
 import { getPublicClinicHours } from "@/app/actions/settings";
@@ -95,6 +96,10 @@ function ReserveContent() {
   const [isSuccess, setIsSuccess] = useState(false);
   const [isWaitingResult, setIsWaitingResult] = useState(false);
   const [requiresQuestionnaire, setRequiresQuestionnaire] = useState(false);
+  // 電話番号は登録があるが名前が違う → 「本人（書き方違い）／家族の別の方」を選んでもらう
+  const [identityConfirm, setIdentityConfirm] = useState(false);
+  // 「ご家族の別の方です」を選んでアンケートへ進んだ（アンケート案内の文言を変える）
+  const [questionnaireForFamily, setQuestionnaireForFamily] = useState(false);
   // 予約完了後の「LINE連携のお願い」ポップアップ（アンケート済み・LINE未連携の人向け）
   const [showLineLinkPopup, setShowLineLinkPopup] = useState(false);
   const [lineLinkPhone4, setLineLinkPhone4] = useState<string | null>(null);
@@ -108,9 +113,14 @@ function ReserveContent() {
   const pendingFormData = useRef<FormData | null>(null);
   // アンケート誘導ボックスへ自動スクロールするための ref（初めての方の戸惑い防止）
   const questionnaireBoxRef = useRef<HTMLDivElement | null>(null);
+  const identityBoxRef = useRef<HTMLDivElement | null>(null);
   const [clinicHolidays, setClinicHolidays] = useState<ClinicHoliday[]>([]);
   // LINE 経由で選択された家族 customer（あれば name/phone をプリフィル + customerId を送信）
   const [selectedFamilyMember, setSelectedFamilyMember] = useState<LinkedCustomer | null>(null);
+  // LINEで紐づいた家族（例: 兄）を選んだまま、お名前欄を別の名前（弟）に書き換えたら家族選択は使わない。
+  // サーバー側（resolveBookingCustomer）も同じ判定で弾くが、画面の「〇〇さんでご予約します」表示も合わせる。
+  const familyMemberInUse =
+    selectedFamilyMember && isSameNameAs(selectedFamilyMember, name) ? selectedFamilyMember : null;
   // 予約フロー：datetime_first (既存) / menu_first (からだ等の治療院系UX)
   const [reserveFlow, setReserveFlow] = useState<"datetime_first" | "menu_first">("datetime_first");
   // メニュー自動選択（高校生以下=保険施術 / 大人=部分施術）の案内文。一度だけ試す。
@@ -286,6 +296,13 @@ function ReserveContent() {
     }
   }, [requiresQuestionnaire]);
 
+  // 「本人／ご家族」の確認が出たら、そこまでスクロールして気づいてもらう
+  useEffect(() => {
+    if (identityConfirm && identityBoxRef.current) {
+      identityBoxRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  }, [identityConfirm]);
+
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!date || !time) return;
@@ -318,6 +335,8 @@ function ReserveContent() {
 
     // 再送信に備えて前回の警告表示はリセット
     setRequiresQuestionnaire(false);
+    setIdentityConfirm(false);
+    setQuestionnaireForFamily(false);
     setDuplicateSameDay(false);
     setDuplicateOtherDay(null);
 
@@ -369,8 +388,8 @@ function ReserveContent() {
           formData.append("roomName", room.name);
         }
       }
-      if (selectedFamilyMember) {
-        formData.append("customerId", selectedFamilyMember.customer_id);
+      if (familyMemberInUse) {
+        formData.append("customerId", familyMemberInUse.customer_id);
       }
 
       await runReservation(formData);
@@ -379,6 +398,35 @@ function ReserveContent() {
     } finally {
       setIsSubmitting(false);
     }
+  };
+
+  // 初めての方 → アンケートへ。選んだ日時・お名前・電話・コース等を退避して
+  // アンケート完了後にそのまま仮予約を確定できるようにする（再度の日程選びを無くす）。
+  const startQuestionnaireFlow = () => {
+    try {
+      const course = courses.find((c) => c.id === selectedCourseId);
+      const staff = staffList.find((s) => s.id === selectedStaffId);
+      const room = rooms.find((rm) => rm.id === selectedRoomId);
+      const booking = {
+        date: date ? format(date, "yyyy-MM-dd") : "",
+        time,
+        visitType,
+        name,
+        phone,
+        isWaitlistIntent: bookedTimes.includes(time),
+        courseId: course?.id ?? "",
+        courseName: course?.name ?? "",
+        courseDurationMinutes: course?.duration_minutes ?? null,
+        staffId: staff?.id ?? "",
+        staffName: staff?.name ?? "",
+        roomId: room?.id ?? "",
+        roomName: room?.name ?? "",
+        addonCourseIds: selectedAddonIds,
+      };
+      sessionStorage.setItem(PENDING_BOOKING_KEY, JSON.stringify(booking));
+    } catch {}
+
+    setRequiresQuestionnaire(true);
   };
 
   // createReservation を実行し、結果に応じて成功 / アンケート / 重複警告を振り分ける
@@ -416,32 +464,12 @@ function ReserveContent() {
     }
 
     const r = result as any;
-    if (r.requiresQuestionnaire) {
-      // 初めての方 → アンケートへ。選んだ日時・お名前・電話・コース等を退避して
-      // アンケート完了後にそのまま仮予約を確定できるようにする（再度の日程選びを無くす）。
-      try {
-        const course = courses.find((c) => c.id === selectedCourseId);
-        const staff = staffList.find((s) => s.id === selectedStaffId);
-        const room = rooms.find((rm) => rm.id === selectedRoomId);
-        const booking = {
-          date: date ? format(date, "yyyy-MM-dd") : "",
-          time,
-          visitType,
-          name,
-          phone,
-          isWaitlistIntent: bookedTimes.includes(time),
-          courseId: course?.id ?? "",
-          courseName: course?.name ?? "",
-          courseDurationMinutes: course?.duration_minutes ?? null,
-          staffId: staff?.id ?? "",
-          staffName: staff?.name ?? "",
-          roomId: room?.id ?? "",
-          roomName: room?.name ?? "",
-          addonCourseIds: selectedAddonIds,
-        };
-        sessionStorage.setItem(PENDING_BOOKING_KEY, JSON.stringify(booking));
-      } catch {}
-      setRequiresQuestionnaire(true);
+    if (r.needsIdentityConfirm) {
+      // 兄弟・親子で同じ電話番号を使っている場合など。本人か家族かを選んでもらってから進める
+      pendingFormData.current = formData;
+      setIdentityConfirm(true);
+    } else if (r.requiresQuestionnaire) {
+      startQuestionnaireFlow();
     } else if (r.requiresLineLink) {
       // LINE連携必須の院で未連携 → 連携ゲートを表示。連携確認後に同じ内容で再送信する
       pendingFormData.current = formData;
@@ -456,6 +484,28 @@ function ReserveContent() {
       setDuplicateOtherDay(r.existingInfo || "別の日");
     } else {
       toast.error(result.error || "エラーが発生しました");
+    }
+  };
+
+  // 「電話は同じ・名前が違う」への回答
+  const handleIdentityAnswer = async (answer: "self" | "family") => {
+    setIdentityConfirm(false);
+    if (answer === "family") {
+      // ごきょうだい等 → 初めての方としてアンケートへ（新しいカルテを作る）
+      setQuestionnaireForFamily(true);
+      startQuestionnaireFlow();
+      return;
+    }
+    const fd = pendingFormData.current;
+    if (!fd) return;
+    fd.set("confirmedSamePerson", "true");
+    setIsSubmitting(true);
+    try {
+      await runReservation(fd);
+    } catch {
+      toast.error("送信エラーが発生しました。しばらく経ってから再度お試しください");
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -637,6 +687,7 @@ function ReserveContent() {
           phone4={lineGateInfo.phone4}
           name={name}
           phone={phone}
+          confirmedSamePerson={pendingFormData.current?.get("confirmedSamePerson") === "true"}
           actionLabel="仮予約"
           onLinked={async () => {
             const fd = pendingFormData.current;
@@ -1242,9 +1293,9 @@ function ReserveContent() {
                 <section className="order-5 space-y-6">
                   <h2 className="text-xl font-bold text-white tracking-tight">お客様情報</h2>
 
-                  {selectedFamilyMember && (
+                  {familyMemberInUse && (
                     <div className="p-4 bg-emerald-500/10 border border-emerald-500/30 rounded-2xl text-sm text-emerald-200">
-                      🏥 <span className="font-bold">{selectedFamilyMember.display_name ?? selectedFamilyMember.name}</span> さんでご予約します
+                      🏥 <span className="font-bold">{familyMemberInUse.display_name ?? familyMemberInUse.name}</span> さんでご予約します
                       <Link href="/reserve" className="ml-2 text-emerald-300 underline text-xs">
                         切替え
                       </Link>
@@ -1370,6 +1421,38 @@ function ReserveContent() {
                   </Button>
                 </div>
 
+                {identityConfirm && (
+                  <div ref={identityBoxRef} className="order-8 p-6 bg-amber-500/15 border-2 border-amber-400/50 rounded-3xl space-y-4">
+                    <p className="text-amber-200 font-black text-base">⏳ まだ仮予約は完了していません</p>
+                    <p className="text-amber-100/90 text-sm leading-relaxed">
+                      このお電話番号は、<span className="font-bold text-white">別のお名前</span>でご登録があります。<br />
+                      ご予約するのはどちらの方ですか？
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => handleIdentityAnswer("family")}
+                      disabled={isSubmitting}
+                      className="w-full text-left bg-white/10 hover:bg-white/15 border border-white/20 rounded-2xl p-4 space-y-1 disabled:opacity-40"
+                    >
+                      <span className="block text-white font-black text-sm">👨‍👩‍👧 ご家族の別の方です</span>
+                      <span className="block text-xs text-amber-100/85 leading-relaxed">
+                        ごきょうだい・親子で同じ電話番号をお使いの場合。初めての方は1回だけアンケートにお答えください（選んだ日時は引き継ぎます）。
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleIdentityAnswer("self")}
+                      disabled={isSubmitting}
+                      className="w-full text-left bg-white/10 hover:bg-white/15 border border-white/20 rounded-2xl p-4 space-y-1 disabled:opacity-40"
+                    >
+                      <span className="block text-white font-black text-sm">🙋 登録した本人です</span>
+                      <span className="block text-xs text-amber-100/85 leading-relaxed">
+                        登録のときと名前の書き方（カタカナ・漢字など）がちがうだけの場合。このまま申し込みます。
+                      </span>
+                    </button>
+                  </div>
+                )}
+
                 {requiresQuestionnaire && (
                   <div
                     ref={questionnaireBoxRef}
@@ -1378,10 +1461,17 @@ function ReserveContent() {
                     <p className="text-amber-200 font-black text-base flex items-center gap-2">
                       ⏳ まだ仮予約は完了していません
                     </p>
-                    <p className="text-amber-100/90 text-sm leading-relaxed">
-                      ご入力のお電話番号では、ご登録が見つかりませんでした。<br />
-                      次のどちらかでお進みください。
-                    </p>
+                    {questionnaireForFamily ? (
+                      <p className="text-amber-100/90 text-sm leading-relaxed">
+                        <span className="font-bold text-white">{name}</span> さんは、まだご登録がありません。<br />
+                        ご家族の方も、最初の1回だけアンケートへのご回答をお願いします。
+                      </p>
+                    ) : (
+                      <p className="text-amber-100/90 text-sm leading-relaxed">
+                        ご入力のお電話番号では、ご登録が見つかりませんでした。<br />
+                        次のどちらかでお進みください。
+                      </p>
+                    )}
 
                     {/* A: 初めての方 → アンケート（1回だけ） */}
                     <div className="bg-white/10 border border-white/15 rounded-2xl p-4 space-y-3">
@@ -1401,32 +1491,34 @@ function ReserveContent() {
                       </Link>
                     </div>
 
-                    {/* B: アンケート回答済み・来院歴のある方 → アンケートは不要 */}
-                    <div className="bg-white/10 border border-white/15 rounded-2xl p-4 space-y-3">
-                      <p className="text-white font-black text-sm">✅ アンケート回答済み・来院したことのある方</p>
-                      <p className="text-sm text-amber-100/90 leading-relaxed">
-                        アンケートにもう一度答える必要はありません。<br />
-                        <span className="font-bold text-white">ご登録のお電話番号</span>
-                        （当院にお伝えいただいている番号）を入力し直して、
-                        もう一度お申し込みください。
-                      </p>
-                      <p className="text-xs text-amber-100/80 leading-relaxed">
-                        番号が分からない場合は、LINEで
-                        <span className="font-bold text-white">電話番号の下4桁</span>
-                        を送るだけで紐づけできます。<br />
-                        紐づけ後、LINEのトークで「予約」と送ると、
-                        本人確認なしでそのまま予約できます。
-                      </p>
-                      <a
-                        href={LINE_URL}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="inline-flex w-full items-center justify-center bg-[#06C755] hover:bg-[#05b34c] text-white font-bold py-3.5 px-4 rounded-2xl transition-all gap-2 text-sm"
-                      >
-                        <MessageCircle className="w-4 h-4" />
-                        LINEで下4桁を送って紐づける
-                      </a>
-                    </div>
+                    {/* B: アンケート回答済み・来院歴のある方 → アンケートは不要（ご家族を選んだ場合は出さない） */}
+                    {!questionnaireForFamily && (
+                      <div className="bg-white/10 border border-white/15 rounded-2xl p-4 space-y-3">
+                        <p className="text-white font-black text-sm">✅ アンケート回答済み・来院したことのある方</p>
+                        <p className="text-sm text-amber-100/90 leading-relaxed">
+                          アンケートにもう一度答える必要はありません。<br />
+                          <span className="font-bold text-white">ご登録のお電話番号</span>
+                          （当院にお伝えいただいている番号）を入力し直して、
+                          もう一度お申し込みください。
+                        </p>
+                        <p className="text-xs text-amber-100/80 leading-relaxed">
+                          番号が分からない場合は、LINEで
+                          <span className="font-bold text-white">電話番号の下4桁</span>
+                          を送るだけで紐づけできます。<br />
+                          紐づけ後、LINEのトークで「予約」と送ると、
+                          本人確認なしでそのまま予約できます。
+                        </p>
+                        <a
+                          href={LINE_URL}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex w-full items-center justify-center bg-[#06C755] hover:bg-[#05b34c] text-white font-bold py-3.5 px-4 rounded-2xl transition-all gap-2 text-sm"
+                        >
+                          <MessageCircle className="w-4 h-4" />
+                          LINEで下4桁を送って紐づける
+                        </a>
+                      </div>
+                    )}
                   </div>
                 )}
 

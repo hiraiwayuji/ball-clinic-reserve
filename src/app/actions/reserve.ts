@@ -3,7 +3,7 @@
 import { PUBLIC_CLINIC_ID } from "@/lib/default-clinic-id";
 import { pushLineToOwners, sendEmailToOwners } from "@/lib/admin-notify";
 import { getLineUidFromCookie } from "@/app/actions/family-line";
-import { resolveBookingCustomer, isBookingSuspendedNow } from "@/lib/booking-customer";
+import { resolveBookingCustomer, normalizeNameForMatch, pickCustomerByNameAndPhone } from "@/lib/booking-customer";
 import { normalizePhone } from "@/lib/phone";
 import { detectClinicMisconfig, CLINIC_MISCONFIG_USER_MESSAGE } from "@/lib/clinic-guard";
 
@@ -365,23 +365,6 @@ async function pickStaffForBooking(
   }
 }
 
-/**
- * 氏名照合用の正規化。
- * 完全一致だけだと「山内 颯人」と「山内颯人」、全角/半角スペースの違いで
- * 既存患者を見つけられず「初めての方は…」になる事故が起きる（2026-05 山内family 実例）。
- * - NFKC で全角英数/記号を半角化
- * - 全角・半角スペースをすべて除去
- * - 小文字化（romaji 表記ゆれの軽減）
- * ※ 別漢字（楓人/颯人）や romaji↔漢字（fuuta↔颯人）は正規化では吸収不可。
- *   そのケースは顧客マスタ側の名寄せ（統合）で対応する。
- */
-function normalizeNameForMatch(value: string): string {
-  return (value ?? "")
-    .normalize("NFKC")
-    .replace(/[\s　]/g, "")
-    .toLowerCase();
-}
-
 // キャンセル待ちを時間帯範囲で登録するアクション（例: 15:00 〜 20:00）
 export async function createWaitlistReservation(formData: FormData) {
   try {
@@ -434,12 +417,14 @@ export async function createWaitlistReservation(formData: FormData) {
         phone: normalizedPhone,
         requestedCustomerId: (formData.get("customerId") as string) || null,
         lineUid,
+        confirmedSamePerson: formData.get("confirmedSamePerson") === "true",
       });
       if (!resolved.ok) {
         return {
           success: false,
           error: resolved.error,
           requiresQuestionnaire: resolved.requiresQuestionnaire ?? false,
+          needsIdentityConfirm: resolved.needsIdentityConfirm ?? false,
         };
       }
       const customerId = resolved.customerId;
@@ -510,38 +495,28 @@ export async function createWaitlistReservation(formData: FormData) {
 /**
  * LINE連携必須ゲートのポーリング用：お名前＋電話番号から顧客を特定し、
  * LINE連携が完了したかだけを返す（個人情報は返さない）。
- * 照合ルールは createReservation と同じ（電話 exact → 氏名正規化・一意のときのみ）。
+ * 照合ルールは createReservation と同じ（pickCustomerByNameAndPhone）。
  */
-export async function getLineLinkStatus(params: { name?: string; phone?: string }): Promise<{ linked: boolean }> {
+export async function getLineLinkStatus(params: { name?: string; phone?: string; confirmedSamePerson?: boolean }): Promise<{ linked: boolean }> {
   noStore();
   try {
     const adminDb = getAdminSupabase();
     if (!adminDb) return { linked: false };
-    const phone = normalizePhone(params.phone ?? "");
-    let customerId: string | null = null;
-
-    if (phone) {
-      const { data } = await adminDb
-        .from("customers")
-        .select("id")
-        .eq("clinic_id", PUBLIC_CLINIC_ID)
-        .eq("phone", phone)
-        .maybeSingle();
-      customerId = data?.id ?? null;
-    }
-    if (!customerId && params.name) {
-      const target = normalizeNameForMatch(params.name);
-      if (target) {
-        const { data: clinicCustomers } = await adminDb
-          .from("customers")
-          .select("id, name")
-          .eq("clinic_id", PUBLIC_CLINIC_ID);
-        const matched = (clinicCustomers ?? []).filter(
-          (c) => normalizeNameForMatch(c.name as string) === target,
-        );
-        if (matched.length === 1) customerId = matched[0].id;
-      }
-    }
+    // 照合ルールは createReservation（resolveBookingCustomer）と同じ pickCustomerByNameAndPhone。
+    // 以前は「電話が一致した人」を先に選んでいたため、兄弟で電話を共有していると
+    // 兄の連携状況を見て「連携済み」と返し、弟の予約が連携待ちのまま進まなかった。
+    const { data: clinicCustomers } = await adminDb
+      .from("customers")
+      .select("id, name, phone")
+      .eq("clinic_id", PUBLIC_CLINIC_ID);
+    const picked = pickCustomerByNameAndPhone(
+      (clinicCustomers ?? []) as { id: string; name: string | null; phone: string | null }[],
+      { name: params.name ?? "", phone: params.phone ?? "" },
+    );
+    const customerId =
+      picked.kind === "match" || (picked.kind === "phone_only" && params.confirmedSamePerson)
+        ? picked.customer.id
+        : null;
     if (!customerId) return { linked: false };
 
     const state = await getCustomerLineState(customerId, PUBLIC_CLINIC_ID, adminDb);
@@ -1070,115 +1045,28 @@ export async function createReservation(formData: FormData) {
         }
       }
 
-      // ── LINE 経由の家族選択 ──
-      // /reserve に lt トークン経由で来たユーザーは ball_line_uid cookie を持つ。
-      // フォームから customerId が来たら、その customer が cookie の line_user_id に紐付いているかを検証。
-      if (requestedCustomerId) {
-        const lineUid = await getLineUidFromCookie();
-        if (lineUid) {
-          const { data: link } = await adminDb
-            .from("customer_line_links")
-            .select("customer_id")
-            .eq("line_user_id", lineUid)
-            .eq("customer_id", requestedCustomerId)
-            .eq("clinic_id", PUBLIC_CLINIC_ID)
-            .maybeSingle();
-          if (link) {
-            const { data: cust } = await adminDb
-              .from("customers")
-              .select("id, name, booking_suspended, booking_suspended_until")
-              .eq("id", requestedCustomerId)
-              .eq("clinic_id", PUBLIC_CLINIC_ID)
-              .maybeSingle();
-            if (cust) {
-              if (isBookingSuspendedNow(cust)) {
-                return { success: false, error: "現在、オンライン予約のご利用が停止されています。お電話またはLINEにてお問い合わせください。" };
-              }
-              customerId = cust.id;
-            }
-          }
-        }
+      // ── 顧客照合（キャンセル待ち・カフェと同じ resolveBookingCustomer に一本化） ──
+      // LINE家族選択 → 電話＋氏名 → 未登録ならアンケート誘導。
+      // 🚨 以前はここに独自の「電話が一致したらその人＋名前を上書き」があり、
+      //    兄弟で親の電話を共有していると弟の予約で兄のカルテ名が書き換わり、
+      //    「同じ日にすでにご予約があります」で弾かれていた（2026-09-19）。
+      const resolved = await resolveBookingCustomer(adminDb, {
+        clinicId: PUBLIC_CLINIC_ID,
+        name,
+        phone,
+        requestedCustomerId,
+        lineUid: requestedCustomerId ? await getLineUidFromCookie() : null,
+        confirmedSamePerson: formData.get("confirmedSamePerson") === "true",
+      });
+      if (!resolved.ok) {
+        return {
+          success: false,
+          error: resolved.error,
+          ...(resolved.requiresQuestionnaire ? { requiresQuestionnaire: true } : {}),
+          ...(resolved.needsIdentityConfirm ? { needsIdentityConfirm: true } : {}),
+        };
       }
-
-      // ── 通常の顧客照合（customerId 未指定 or 検証失敗時） ──
-      // LINE紐づけ済み or 顧客DB登録済みなら予約可能。
-      // 電話番号で照合 → 名前で照合 → 未登録ならアンケートへ誘導。
-      if (!customerId && phone) {
-        const { data: existing } = await adminDb
-          .from("customers")
-          .select("id, name, booking_suspended, booking_suspended_until, line_user_id")
-          .eq("clinic_id", PUBLIC_CLINIC_ID)
-          .eq("phone", phone)
-          .maybeSingle();
-
-        if (existing) {
-          if (isBookingSuspendedNow(existing)) {
-            return { success: false, error: "現在、オンライン予約のご利用が停止されています。お電話またはLINEにてお問い合わせください。" };
-          }
-          customerId = existing.id;
-          if (existing.name !== name) {
-            await adminDb.from("customers").update({ name }).eq("id", customerId).eq("clinic_id", PUBLIC_CLINIC_ID);
-          }
-        } else {
-          // 電話番号で見つからない場合 → アンケートへ誘導
-          return {
-            success: false,
-            error: "初めてオンライン予約をご希望の方は、先にアンケートへのご回答をお願いします。",
-            requiresQuestionnaire: true,
-          };
-        }
-      } else if (!customerId) {
-        // 電話番号なし（再診・名前のみ）→ 名前 + clinic_id で照合
-        // まず完全一致。見つからなければスペース/全角半角の揺れを吸収して再照合する
-        // （「山内 颯人」と「山内颯人」で別人扱いになる事故を防ぐ）。
-        let { data: existingList } = await adminDb
-          .from("customers")
-          .select("id, name, booking_suspended, booking_suspended_until, line_user_id")
-          .eq("name", name)
-          .eq("clinic_id", PUBLIC_CLINIC_ID)
-          .order("created_at", { ascending: false });
-
-        if (!existingList || existingList.length === 0) {
-          // 完全一致なし → 院内の顧客を正規化名で突き合わせる
-          const target = normalizeNameForMatch(name);
-          const { data: clinicCustomers } = await adminDb
-            .from("customers")
-            .select("id, name, booking_suspended, booking_suspended_until, line_user_id")
-            .eq("clinic_id", PUBLIC_CLINIC_ID);
-          existingList = (clinicCustomers ?? []).filter(
-            (c) => normalizeNameForMatch(c.name as string) === target,
-          );
-        }
-
-        if (!existingList || existingList.length === 0) {
-          // 名前でも見つからない → アンケートへ誘導
-          return {
-            success: false,
-            error: "初めてオンライン予約をご希望の方は、先にアンケートへのご回答をお願いします。",
-            requiresQuestionnaire: true,
-          };
-        }
-
-        if (existingList.length > 1) {
-          // 同名の顧客が複数存在 → 電話番号で特定が必要
-          return {
-            success: false,
-            error: "同じお名前の登録が複数あります。お手数ですが電話番号もご入力いただくか、お電話・LINEにてご予約ください。",
-          };
-        }
-
-        const existing = existingList[0];
-        if (isBookingSuspendedNow(existing)) {
-          return { success: false, error: "現在、オンライン予約のご利用が停止されています。お電話またはLINEにてお問い合わせください。" };
-        }
-        // LINE未紐づけ かつ 顧客DB登録済み → 予約は通す（スタッフが手動管理）
-        customerId = existing.id;
-      }
-
-      if (!customerId) {
-        // どのフローでも customer が確定しなかった（家族選択トークン期限切れ等の保険）
-        return { success: false, error: "ご予約者の情報が確認できませんでした。お手数ですがお名前と電話番号を再度ご入力ください。" };
-      }
+      customerId = resolved.customerId;
 
       // ── LINE 連携状況と電話下4桁を取得（必須ゲート＋完了画面ポップアップ用） ──
       let lineState = await getCustomerLineState(customerId, PUBLIC_CLINIC_ID, adminDb);
