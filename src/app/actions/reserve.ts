@@ -40,6 +40,7 @@ import { createClient as createServerClient } from "@/lib/supabase/server";
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { getTimeSlots, isDateWithinAllowedRange, isTimeSlotWithinTwoHours, isTodayJST, isAddonSpanWithinBusinessHours } from "@/lib/time-slots";
 import { buildStaffSpans } from "@/lib/staff-spans";
+import { countNgOnlyStaff, isPoolFull, countsTowardPool, type StaffNgBlock } from "@/lib/staff-ng-capacity";
 import { getSpecialDayForDate } from "@/app/actions/special-days";
 import { isTimeWithinStaffHoursYmd, isStaffAvailableOnYmd, isStaffSpanBookableYmd, buildStaffSchedule, type StaffSchedule } from "@/lib/staff-availability";
 
@@ -176,6 +177,20 @@ async function getDayCapacity(
   clinicId: string,
   dateStr: string,
 ): Promise<number> {
+  return (await getDayPool(db, clinicId, dateStr)).capacity;
+}
+
+/**
+ * getDayCapacity の中身。定員（capacity）に加えて「定員に数えた先生のID」も返す。
+ * 先生1人だけの予約NG（clinic_blocked_slots.staff_id）を定員から引くときに、
+ * 「その先生はそもそも定員に数えているか」を確かめるのに使う（staff-ng-capacity.ts）。
+ * staffIds が null のときは誰を数えたか分からない（単一枠モード・取得失敗）＝NGは引かない。
+ */
+async function getDayPool(
+  db: { from: (t: string) => any },
+  clinicId: string,
+  dateStr: string,
+): Promise<{ capacity: number; staffIds: string[] | null }> {
   try {
     const { data: settings } = await db
       .from("clinic_settings")
@@ -183,7 +198,7 @@ async function getDayCapacity(
       .eq("id", clinicId)
       .maybeSingle();
     const mode = (settings?.booking_capacity_mode as string | undefined) ?? "single";
-    if (mode !== "per_available_staff") return MAX_CAPACITY;
+    if (mode !== "per_available_staff") return { capacity: MAX_CAPACITY, staffIds: null };
 
     const { data: staff } = await db
       .from("reservation_staff")
@@ -191,7 +206,7 @@ async function getDayCapacity(
       .eq("clinic_id", clinicId)
       .eq("is_active", true)
       .or("available_for_online_booking.is.null,available_for_online_booking.eq.true");
-    if (!staff || staff.length === 0) return 1;
+    if (!staff || staff.length === 0) return { capacity: 1, staffIds: null };
 
     const wd = weekdayOf(dateStr);
     const { data: overrides } = await db
@@ -218,7 +233,7 @@ async function getDayCapacity(
         .map((o: { staff_id: string }) => o.staff_id),
     );
 
-    let count = 0;
+    const counted: string[] = [];
     for (const s of staff as Array<{ id: string; schedule_based_booking?: boolean; booking_weekdays?: string; booking_until?: string | null }>) {
       // 退職などで受付終了日を過ぎたスタッフは定員に数えない
       if (s.booking_until && dateStr > String(s.booking_until).slice(0, 10)) continue;
@@ -226,16 +241,19 @@ async function getDayCapacity(
       if (offSet.has(s.id)) continue;
       // 日付ごとの上書き（staff_booking_dates）は schedule_based_booking の ON/OFF に関係なく効かせる。
       // 「この日は受付しない」と明示したのに枠が減らない、という事故を防ぐため。
-      if (ovrMap.has(s.id)) { if (ovrMap.get(s.id)) count++; continue; }
-      if (!s.schedule_based_booking) { count++; continue; }
+      if (ovrMap.has(s.id)) { if (ovrMap.get(s.id)) counted.push(s.id); continue; }
+      if (!s.schedule_based_booking) { counted.push(s.id); continue; }
       const wds = String(s.booking_weekdays ?? "")
         .split(",").map((x) => x.trim()).filter(Boolean).map(Number);
-      if (wds.includes(wd)) count++;
+      if (wds.includes(wd)) counted.push(s.id);
     }
-    return Math.max(1, count);
+    // 誰も数えられなかったときは従来どおり最低1（設定ミスで全枠ロックを防ぐ）。
+    // このとき staffIds は null にして、NG で 0 まで引かれないようにする。
+    if (counted.length === 0) return { capacity: 1, staffIds: null };
+    return { capacity: counted.length, staffIds: counted };
   } catch (e) {
     console.error("getDayCapacity failed; falling back to 1", e);
-    return 1;
+    return { capacity: 1, staffIds: null };
   }
 }
 
@@ -649,7 +667,8 @@ export async function getDailyAvailability(
       requiredStaffId = (c?.required_staff_id as string | null) ?? null;
     }
 
-    const dayCapacity = await getDayCapacity(supabase, DEFAULT_CLINIC_ID, dateStr);
+    const dayPool = await getDayPool(supabase, DEFAULT_CLINIC_ID, dateStr);
+    const dayCapacity = dayPool.capacity;
 
     const { data, error } = await supabase
       .from("appointments")
@@ -722,6 +741,11 @@ export async function getDailyAvailability(
     //    休憩枠と同じ 5分刻みで展開すれば 10/15/20/30分 どの院でも正しく塞がる。
     const EXPAND_STEP_MS = 5 * 60000;
     const slotCounts: Record<string, number> = {};
+    // その時刻に自分の予約を持っている先生（先生個別NGを定員から二重に引かないために使う）
+    const busyStaffByTime: Record<string, Set<string>> = {};
+    // 定員に数えた先生の予約＋担当未設定の実予約だけの数（NGで減らした定員と比べる側）
+    const poolIds = new Set(dayPool.staffIds ?? []);
+    const poolCounts: Record<string, number> = {};
     (data ?? []).forEach((app: {
       start_time: string, end_time?: string, staff_id?: string | null, status?: string,
       course_id?: string | null,
@@ -761,23 +785,48 @@ export async function getDailyAvailability(
         const timeKey = jstFormatter.format(new Date(current)); // "HH:mm" in JST
 
         slotCounts[timeKey] = (slotCounts[timeKey] || 0) + 1;
+        if (app.staff_id) (busyStaffByTime[timeKey] ??= new Set()).add(app.staff_id);
+        if (countsTowardPool(app, poolIds)) poolCounts[timeKey] = (poolCounts[timeKey] || 0) + 1;
         current += EXPAND_STEP_MS;
       }
     });
 
     // 担当レーン指定時は1名で満枠、未指定時はその日の定員で判定
     const threshold = requiredStaffId ? 1 : dayCapacity;
-    const bookedTimes = Object.keys(slotCounts).filter(time => slotCounts[time] >= threshold);
 
-    // 臨時の休憩枠（clinic_blocked_slots）も予約不可として合流させる。
-    // 患者のスロット粒度（15/20/30分）に依存せず確実に塞ぐため、休憩 [start, end) を
-    // 5分刻みのキーに展開して union する（ALL_DAY_BLOCKED と同じ粒度）。
-    const blockedSet = new Set(bookedTimes);
     const { data: breaks } = await supabase
       .from("clinic_blocked_slots")
       .select("start_time, end_time, staff_id")
       .eq("clinic_id", DEFAULT_CLINIC_ID)
       .eq("date", dateStr);
+
+    // 🚨 担当自由のメニューは、先生個別の予約NG（対応不可）のぶんだけ定員を減らす。
+    // これをしないと、NGにした先生も「空いている1人」に数えられ、残りの先生が
+    // 埋まっている時間まで ◯空き に見える（2026-09-21 からだ 9/22 で発覚）。
+    // サーバー側の最終ガード（createReservation）も同じ countNgOnlyStaff を使う。
+    const hasStaffNg = !requiredStaffId && poolIds.size > 0
+      && (breaks ?? []).some((b: StaffNgBlock) => !!b.staff_id && poolIds.has(b.staff_id));
+    const NO_BUSY: ReadonlySet<string> = new Set();
+    const isFullAt = (timeKey: string): boolean => {
+      const total = slotCounts[timeKey] || 0;
+      if (!hasStaffNg) return total >= threshold;
+      const [h, m] = timeKey.split(":").map(Number);
+      const t = h * 60 + m;
+      const ngOnly = countNgOnlyStaff((breaks ?? []) as StaffNgBlock[], poolIds, t, t + 5, busyStaffByTime[timeKey] ?? NO_BUSY);
+      return isPoolFull({ totalCount: total, poolCount: poolCounts[timeKey] || 0, capacity: threshold, ngOnly });
+    };
+    const bookedTimes = Object.keys(slotCounts).filter(isFullAt);
+
+    // 臨時の休憩枠（clinic_blocked_slots）も予約不可として合流させる。
+    // 患者のスロット粒度（15/20/30分）に依存せず確実に塞ぐため、休憩 [start, end) を
+    // 5分刻みのキーに展開して union する（ALL_DAY_BLOCKED と同じ粒度）。
+    const blockedSet = new Set(bookedTimes);
+    // 予約が1件も無い時刻でも、NGで定員が0になっていれば塞ぐ
+    if (hasStaffNg) {
+      for (const key of ALL_DAY_BLOCKED) {
+        if (!blockedSet.has(key) && isFullAt(key)) blockedSet.add(key);
+      }
+    }
     (breaks ?? []).forEach((b: { start_time?: string; end_time?: string; staff_id?: string | null }) => {
       // staff_id 指定の枠（受付が特定の先生だけを予約NGにしたもの）は、
       // その先生が必須のコース（requiredStaffId一致）だけを塞ぐ。担当自由のコースは
@@ -1191,8 +1240,17 @@ export async function createReservation(formData: FormData) {
       //   各レーンの「同時1名」は下部のスタッフ重複チェックで担保する。
       // single モード（AILUS/RELAQ 等）:
       //   従来通り同一開始時刻で1枠のみ（挙動を変えない）。
-      const dayCapacity = await getDayCapacity(adminDb, DEFAULT_CLINIC_ID, rawDate);
+      const dayPool = await getDayPool(adminDb, DEFAULT_CLINIC_ID, rawDate);
+      const dayCapacity = dayPool.capacity;
       let occupied = 0;
+      // 時間帯が重なる予約（定員の判定と、先生個別NGの判定の両方で使う）
+      const { data: overlapping } = await adminDb
+        .from("appointments")
+        .select("id, staff_id, status")
+        .eq("clinic_id", DEFAULT_CLINIC_ID)
+        .neq("status", "cancelled")
+        .lt("start_time", endDateTimeStr)   // 既存の開始 < 新規の終了
+        .gt("end_time", startDateTimeStr);  // 既存の終了 > 新規の開始
       if (dayCapacity <= 1) {
         const { data: sameStart } = await adminDb
           .from("appointments")
@@ -1202,16 +1260,39 @@ export async function createReservation(formData: FormData) {
           .neq("status", "cancelled");
         occupied = sameStart?.length ?? 0;
       } else {
-        const { data: overlapping } = await adminDb
-          .from("appointments")
-          .select("id")
-          .eq("clinic_id", DEFAULT_CLINIC_ID)
-          .neq("status", "cancelled")
-          .lt("start_time", endDateTimeStr)   // 既存の開始 < 新規の終了
-          .gt("end_time", startDateTimeStr);  // 既存の終了 > 新規の開始
         occupied = overlapping?.length ?? 0;
       }
-      const isCapacityFull = occupied >= dayCapacity;
+
+      // 🚨 担当が決まっていない予約（担当自由のメニュー）は、先生個別の予約NG（対応不可）の
+      // ぶんだけ定員を減らす。画面側（getDailyAvailability）と同じ countNgOnlyStaff / isPoolFull を使う。
+      // ここを揃えないと「画面では×なのに古い画面や細工POSTで入る」「担当未設定の仮予約が入る」が起きる。
+      // 受付する先生が1人だけの日（dayCapacity<=1）でも同じように引く。
+      // staffIds が null（単一枠モードの院など）は誰を数えたか分からないので引かない＝従来どおり。
+      let ngOnly = 0;
+      let poolOccupied = 0;
+      if (!staffId && dayPool.staffIds && dayPool.staffIds.length > 0) {
+        const { data: ngBlocks } = await adminDb
+          .from("clinic_blocked_slots")
+          .select("start_time, end_time, staff_id")
+          .eq("clinic_id", DEFAULT_CLINIC_ID)
+          .eq("date", rawDate)
+          .not("staff_id", "is", null);
+        if (ngBlocks && ngBlocks.length > 0) {
+          const poolIds = new Set<string>(dayPool.staffIds);
+          const rows = (overlapping ?? []) as { staff_id?: string | null; status?: string | null }[];
+          const [rh, rm] = time.slice(0, 5).split(":").map(Number);
+          const reqStartMin = rh * 60 + rm;
+          const busy = new Set<string>(rows.map((o) => o.staff_id).filter((x): x is string => !!x));
+          ngOnly = countNgOnlyStaff(
+            ngBlocks as StaffNgBlock[], poolIds,
+            reqStartMin, reqStartMin + durationMinutes, busy,
+          );
+          poolOccupied = rows.filter((o) => countsTowardPool(o, poolIds)).length;
+        }
+      }
+      const isCapacityFull = isPoolFull({
+        totalCount: occupied, poolCount: poolOccupied, capacity: dayCapacity, ngOnly,
+      });
 
       // ダブルブッキングの厳格な防御（ユーザーが空きだと思って押したのに埋まっていた場合）
       if (isCapacityFull && !isWaitlistIntent) {

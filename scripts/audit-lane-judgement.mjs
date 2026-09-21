@@ -234,6 +234,104 @@ for (const rule of FILE_RULES) {
 const buildStaffSpans = loadBuildStaffSpans();
 if (buildStaffSpans) checkBehaviour(buildStaffSpans);
 
+// ───────────────────────────────────────────────────────────
+// (3) 先生個別の予約NG（対応不可）が、担当自由メニューの定員から引かれているか
+// ───────────────────────────────────────────────────────────
+// 🚨 2026-09-21 からだ鍼灸整骨院 9/22:
+//   森藤先生を終日「対応不可」にしても定員が2人のままで、森川先生に予約が入っている
+//   時間まで患者さんに「◯空き」と見えていた（予約すると担当未設定の仮予約が入る）。
+//   画面（getDailyAvailability）とサーバーの最終ガード（createReservation）の
+//   両方が countNgOnlyStaff を使っていること、その中身が変わっていないことを見る。
+const NG_FILE = "src/lib/staff-ng-capacity.ts";
+function checkStaffNgCapacity() {
+  if (!existsSync(NG_FILE)) {
+    fail(`${NG_FILE} が見つかりません`, "   移動・改名したら、この監査も直してください。");
+    return;
+  }
+  let ts;
+  try { ts = require_("typescript"); } catch { ts = null; }
+  if (ts) {
+    const js = ts.transpileModule(readFileSync(NG_FILE, "utf8"), {
+      compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
+    }).outputText;
+    const mod = { exports: {} };
+    new Function("module", "exports", js)(mod, mod.exports);
+    const fn = mod.exports.countNgOnlyStaff;
+    if (typeof fn !== "function") {
+      fail(`${NG_FILE} が countNgOnlyStaff を export していません`);
+    } else {
+      const pool = new Set([A, B]);
+      const C = "cccccccc-0000-0000-0000-000000000003"; // 定員に数えていない先生
+      const blocks = [
+        { staff_id: B, start_time: "10:00:00", end_time: "10:20:00" },
+        { staff_id: B, start_time: "10:20:00", end_time: "10:40:00" },
+        { staff_id: C, start_time: "10:00:00", end_time: "12:00:00" },
+        { staff_id: null, start_time: "18:00:00", end_time: "20:00:00" },
+      ];
+      const none = new Set();
+      const cases = [
+        ["NGの先生は定員から1人引く", fn(blocks, pool, 600, 620, none) === 1],
+        ["同じ先生のNGが続いていても引くのは1人", fn(blocks, pool, 600, 640, none) === 1],
+        ["NGが終わった直後（10:40）は引かない", fn(blocks, pool, 640, 660, none) === 0],
+        ["NGが始まる直前（9:40-10:00）は引かない", fn(blocks, pool, 580, 600, none) === 0],
+        ["NGの先生がその時間に予約も持っていれば二重に引かない", fn(blocks, pool, 600, 620, new Set([B])) === 0],
+        ["定員に数えていない先生のNGは引かない", fn(blocks, new Set([A]), 600, 620, none) === 0],
+        ["院ぜんたいの休憩（staff_id なし）は引かない", fn(blocks, pool, 1080, 1100, none) === 0],
+      ];
+      for (const [label, ok] of cases) {
+        if (!ok) fail(`先生個別NGの定員計算が変わっています: ${label}`);
+      }
+
+      // 「もう取れないか」の式そのもの。定員に数えていない先生（ネット受付しない院長など）の
+      // 予約を、NGで減らした定員と比べてはいけない（2026-09-21 検品で 9/21 15:20 に再現）。
+      const full = mod.exports.isPoolFull;
+      const toward = mod.exports.countsTowardPool;
+      if (typeof full !== "function" || typeof toward !== "function") {
+        fail(`${NG_FILE} が isPoolFull / countsTowardPool を export していません`);
+      } else {
+        const fullCases = [
+          ["院長の予約1件＋先生AがNG＋先生Bは空き → 取れる",
+            full({ totalCount: 1, poolCount: 0, capacity: 2, ngOnly: 1 }) === false],
+          ["先生Aの予約1件＋先生BがNG → 取れない",
+            full({ totalCount: 1, poolCount: 1, capacity: 2, ngOnly: 1 }) === true],
+          ["予約なし＋2人ともNG → 取れない",
+            full({ totalCount: 0, poolCount: 0, capacity: 2, ngOnly: 2 }) === true],
+          ["予約なし＋1人だけNG → 取れる",
+            full({ totalCount: 0, poolCount: 0, capacity: 2, ngOnly: 1 }) === false],
+          ["NGの無い日は従来どおり（1件では埋まらない）",
+            full({ totalCount: 1, poolCount: 1, capacity: 2, ngOnly: 0 }) === false],
+          ["NGの無い日は従来どおり（定員ぶん入れば埋まる）",
+            full({ totalCount: 2, poolCount: 1, capacity: 2, ngOnly: 0 }) === true],
+          ["受付する先生が1人の日にその先生がNG → 取れない",
+            full({ totalCount: 0, poolCount: 0, capacity: 1, ngOnly: 1 }) === true],
+          ["定員に数えた先生の予約は数える", toward({ staff_id: A, status: "confirmed" }, pool) === true],
+          ["定員に数えていない先生の予約は数えない", toward({ staff_id: C, status: "confirmed" }, pool) === false],
+          ["担当未設定の実予約は数える（安全側）", toward({ staff_id: null, status: "pending" }, pool) === true],
+          ["キャンセル待ちは数えない", toward({ staff_id: null, status: "waiting" }, pool) === false],
+        ];
+        for (const [label, ok] of fullCases) {
+          if (!ok) fail(`担当自由メニューの満枠判定が変わっています: ${label}`);
+        }
+      }
+    }
+  }
+  const code = stripComments(readFileSync("src/app/actions/reserve.ts", "utf8"));
+  const calls = Math.min(
+    code.split("countNgOnlyStaff(").length - 1,
+    code.split("isPoolFull(").length - 1,
+    code.split("countsTowardPool(").length - 1,
+  );
+  if (calls < 2) {
+    fail(
+      "reserve.ts が countNgOnlyStaff / isPoolFull / countsTowardPool を2か所（空き表示と登録ガード）で使っていません",
+      `   見つかった呼び出し: ${calls} か所
+` +
+      "   片方だけだと「×なのに入る」か「◯なのに弾かれる／担当未設定で入る」になります。",
+    );
+  }
+}
+checkStaffNgCapacity();
+
 if (ng > 0) {
   console.error(
     `\n${YELLOW}この監査は「予約が取れるかの判定を、画面と登録で同じにする」ためのものです。\n` +
@@ -245,3 +343,4 @@ if (ng > 0) {
 console.log(`${GREEN}✅ 予約の空き判定 OK（院内の画面・院内の登録・患者さんのWeb予約の3か所）${RESET}`);
 console.log("   ・buildStaffSpans を実際に動かして、先生ごとの受け持ち時間の分け方が変わっていないことを確認");
 console.log("   ・adminDaySlots / adminReserve / reserve が、どれもその土台を使っていることを確認");
+console.log("   ・先生個別の予約NGが、担当自由メニューの定員から引かれていることを確認（表示と登録の両方）");
