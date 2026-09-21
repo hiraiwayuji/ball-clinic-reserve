@@ -10,6 +10,17 @@ export type StaffScheduleDate = {
   end?: string | null;
 };
 
+/**
+ * その日だけの休憩の上書き（staff_working_overrides の kind="break"）。
+ * start/end が入っていればその時間が休憩、両方 null なら「その日は休憩なし」。
+ * 勤務表の毎週の休憩・手入力の休憩より優先する。
+ */
+export type StaffDateBreak = {
+  date: string;
+  start: string | null;
+  end: string | null;
+};
+
 export type StaffSchedule = {
   /** 毎週の出勤曜日（0=日..6=土） */
   weekdays: number[];
@@ -41,6 +52,8 @@ export type StaffSchedule = {
    * 退職・産休など。null/undefined = 期限なし。
    */
   bookingUntil?: string | null;
+  /** その日だけの休憩の上書き（移動・短縮・延長・休憩なし）。無ければ毎週の休憩どおり。 */
+  dateBreaks?: StaffDateBreak[];
 };
 
 /** staff_working_hours の1行 */
@@ -91,6 +104,7 @@ export function buildStaffSchedule(
   dates: StaffScheduleDate[] = [],
   weeklyRows: StaffWeeklyHoursRow[] = [],
   prepMinutes: number = 0,
+  dateBreaks: StaffDateBreak[] = [],
 ): StaffSchedule | null {
   if (!row) return null;
   const restrictDays = !!row.schedule_based_booking;
@@ -103,7 +117,10 @@ export function buildStaffSchedule(
   const weekly = buildWeeklyFromWorkingHours(weeklyRows, prepMinutes);
   const hasWeekly = Object.keys(weekly).length > 0;
   const bookingUntil = row.booking_until ? String(row.booking_until).slice(0, 10) : null;
-  if (!restrictDays && !hasHours && !hasBreak && !hasWeekly && !bookingUntil) return null;
+  // その日だけの休憩（時間つき）があれば、他に何も設定が無い先生でもスケジュールを返す。
+  // 「休憩なし」の上書きだけなら制限は増えないので null のままでよい。
+  const hasDateBreak = dateBreaks.some((b) => !!(b.start && b.end));
+  if (!restrictDays && !hasHours && !hasBreak && !hasWeekly && !bookingUntil && !hasDateBreak) return null;
   return {
     weekdays: String(row.booking_weekdays ?? "")
       .split(",").map((s) => s.trim()).filter(Boolean).map(Number)
@@ -116,6 +133,7 @@ export function buildStaffSchedule(
     restrictDays,
     weekly: hasWeekly ? weekly : undefined,
     bookingUntil,
+    dateBreaks: dateBreaks.length > 0 ? dateBreaks : undefined,
   };
 }
 
@@ -238,11 +256,16 @@ export function getStaffHoursForYmd(
   return null;
 }
 
-/** その日の休憩（手入力があればそれ、無ければ勤務表の曜日別）。無ければ null。 */
-function getStaffBreakForYmd(
+/**
+ * その日の休憩。無ければ null。
+ * 優先順位: ①その日だけの上書き（休憩なしも含む） → ②手入力の休憩 → ③勤務表の曜日別
+ */
+export function getStaffBreakForYmd(
   ymd: string,
   schedule: StaffSchedule,
 ): { start: string; end: string } | null {
+  const ovr = schedule.dateBreaks?.find((b) => b.date === ymd);
+  if (ovr) return ovr.start && ovr.end ? { start: ovr.start, end: ovr.end } : null;
   if (schedule.breakStart && schedule.breakEnd) {
     return { start: schedule.breakStart, end: schedule.breakEnd };
   }

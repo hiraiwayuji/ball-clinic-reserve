@@ -10,6 +10,7 @@ import { createWaitlistReservation, getDailyAvailability, getAutoCourseSelection
 import { getClinicHolidays, type ClinicHoliday } from "@/app/actions/holidays";
 import { getActiveCourses, getActiveStaff, getCourseRequiredStaffSchedule, getCoursesAvailability, type ReservationCourse } from "@/app/actions/courses";
 import { getBlockedTimesForCurrentClinic } from "@/app/actions/staff-schedule";
+import { getJpHolidayName } from "@/lib/jp-holidays";
 import { courseShortPrice } from "@/lib/course-price";
 import { isStaffAvailableOn, filterSlotsByStaffSchedule, type StaffSchedule } from "@/lib/staff-availability";
 import { Button } from "@/components/ui/button";
@@ -392,7 +393,7 @@ function ReserveCalendarContent() {
     // 担当固定コースなら、そのスタッフの出勤日スケジュールを取得（さみ整体など）
     getCourseRequiredStaffSchedule(courseIdParam).then(res => {
       if (!mounted) return;
-      if (res) { setStaffSchedule({ weekdays: res.weekdays, dates: res.dates, defaultStart: res.defaultStart, defaultEnd: res.defaultEnd, breakStart: res.breakStart, breakEnd: res.breakEnd, restrictDays: res.restrictDays, weekly: res.weekly, bookingUntil: res.bookingUntil }); setStaffScheduleName(res.staffName); }
+      if (res) { setStaffSchedule({ weekdays: res.weekdays, dates: res.dates, defaultStart: res.defaultStart, defaultEnd: res.defaultEnd, breakStart: res.breakStart, breakEnd: res.breakEnd, restrictDays: res.restrictDays, weekly: res.weekly, bookingUntil: res.bookingUntil, dateBreaks: res.dateBreaks }); setStaffScheduleName(res.staffName); }
       else { setStaffSchedule(null); setStaffScheduleName(""); }
     }).catch(() => { if (mounted) { setStaffSchedule(null); setStaffScheduleName(""); } });
     return () => { mounted = false; };
@@ -429,7 +430,7 @@ function ReserveCalendarContent() {
               weekdays: r.weekdays, dates: r.dates,
               defaultStart: r.defaultStart, defaultEnd: r.defaultEnd,
               breakStart: r.breakStart, breakEnd: r.breakEnd,
-              restrictDays: r.restrictDays, weekly: r.weekly, bookingUntil: r.bookingUntil,
+              restrictDays: r.restrictDays, weekly: r.weekly, bookingUntil: r.bookingUntil, dateBreaks: r.dateBreaks,
             };
           } catch {}
           laneList.push({ staffId: sid, staffName: st.name, courses: cs, schedule });
@@ -876,6 +877,8 @@ function ReserveCalendarContent() {
                 const isClickable = level !== "closed" && level !== "outOfRange" && level !== "past" && isCurrentMonth;
                 const todayDay = isToday(day);
                 const dow = idx % 7;
+                // 祝日は平日と違う見た目にする（日付を赤＋「祝」）。休診かどうかとは別の情報。
+                const holidayName = getJpHolidayName(dateStr);
 
                 // ステータス色（solid ベース）
                 const cellStyle = !isCurrentMonth
@@ -912,13 +915,18 @@ function ReserveCalendarContent() {
                     style={{ minHeight: "72px" }}
                   >
                     {/* 日付数字 */}
-                    <div className={`text-xs font-black mb-1 ${
-                      !isCurrentMonth ? "text-zinc-500" :
-                      dow === 0 ? "text-rose-400" :
-                      dow === 6 ? "text-blue-400" :
-                      "text-zinc-300"
-                    } ${todayDay ? "bg-blue-600 text-white w-5 h-5 flex items-center justify-center rounded-full text-[11px]" : ""}`}>
-                      {format(day, "d")}
+                    <div className="flex items-center justify-center gap-0.5 mb-1" title={holidayName ?? undefined}>
+                      <div className={`text-xs font-black ${
+                        !isCurrentMonth ? "text-zinc-500" :
+                        (dow === 0 || holidayName) ? "text-rose-400" :
+                        dow === 6 ? "text-blue-400" :
+                        "text-zinc-300"
+                      } ${todayDay ? "bg-blue-600 text-white w-5 h-5 flex items-center justify-center rounded-full text-[11px]" : ""}`}>
+                        {format(day, "d")}
+                      </div>
+                      {isCurrentMonth && holidayName && (
+                        <span className="text-[9px] font-black leading-none text-rose-400" aria-label={`祝日 ${holidayName}`}>祝</span>
+                      )}
                     </div>
 
                     {/* ステータス記号 */}
@@ -955,6 +963,18 @@ function ReserveCalendarContent() {
                   <h3 className="text-base font-black text-white">
                     {format(selectedDate, "M月d日（E）", { locale: ja })}
                   </h3>
+                  {(() => {
+                    const hn = getJpHolidayName(format(selectedDate, "yyyy-MM-dd"));
+                    if (!hn) return null;
+                    const hours = selectedSpecial && !selectedSpecial.closed && selectedSpecial.openTime && selectedSpecial.closeTime
+                      ? `${selectedSpecial.openTime}〜${selectedSpecial.closeTime}`
+                      : null;
+                    return (
+                      <p className="text-[11px] font-bold text-rose-400 mt-0.5">
+                        祝日（{hn}）{hours ? `・この日の受付は ${hours}` : ""}
+                      </p>
+                    );
+                  })()}
                 </div>
               </div>
               <button

@@ -499,10 +499,20 @@ export async function getBlockedTimesForDate(
       finalWorkMap.set(wo.staff_id, { start: wo.start_time.slice(0, 5), end: wo.end_time.slice(0, 5) });
     }
   }
-  // blocking override の break レコードで休憩上書き
-  for (const o of (blockingOverrides ?? []) as any[]) {
-    if (o.kind === "break" && o.start_time && o.end_time) {
+  // その日だけの休憩（kind="break"）で上書き。時間が両方 null の行は「その日は休憩なし」。
+  // 「休憩なし」の行は blocks_booking=false で入るので、blockingOverrides とは別に読む。
+  const { data: breakOverrides } = await sb
+    .from("staff_working_overrides")
+    .select("staff_id, start_time, end_time, status")
+    .eq("clinic_id", clinicId)
+    .eq("date", dateStr)
+    .eq("kind", "break");
+  for (const o of (breakOverrides ?? []) as any[]) {
+    if (o.status && o.status !== "approved") continue;
+    if (o.start_time && o.end_time) {
       weeklyBreakMap.set(o.staff_id, { start: o.start_time.slice(0, 5), end: o.end_time.slice(0, 5) });
+    } else {
+      weeklyBreakMap.delete(o.staff_id);
     }
   }
 
@@ -987,6 +997,14 @@ export type StaffDaySchedule = {
   endTime: string | null;     // "HH:MM"
   breakStart: string | null;  // "HH:MM" 休憩開始
   breakEnd: string | null;    // "HH:MM" 休憩終了
+  /**
+   * 休憩がどこから来ているか。
+   * "date" = その日だけ変更している（移動・短縮・延長・休憩なし）／"weekly" = いつもの休憩／null = 休憩の設定なし
+   */
+  breakSource: "date" | "weekly" | null;
+  /** いつもの休憩（勤務表の毎週の設定）。その日だけ変更中でも「元の時間」を出すために持つ */
+  weeklyBreakStart: string | null;
+  weeklyBreakEnd: string | null;
   source: "override" | "weekly" | "none";
   isOff: boolean;
   /**
@@ -1054,10 +1072,19 @@ export async function getStaffSchedulesForDates(
   }[];
 
   // date → staff_id → override
+  // 🚨 休憩の上書き（kind="break"）は、勤務時間の上書きとは別のマップに入れる。
+  // 以前は同じマップに staff_id をキーに入れていたため、同じ日に「勤務時間の変更」と
+  // 「休憩の変更」の両方があると後から来た行が前の行を消していた（どちらかが表示されない）。
   const overridesByDate = new Map<string, Map<string, { start_time: string | null; end_time: string | null; kind: string }>>();
+  const breaksByDate = new Map<string, Map<string, { start_time: string | null; end_time: string | null }>>();
   for (const o of (overrideRes.data ?? []) as any[]) {
     // date が timestamptz 等で返ってきても "yyyy-MM-dd" に揃える
     const key = String(o.date).slice(0, 10);
+    if (o.kind === "break") {
+      if (!breaksByDate.has(key)) breaksByDate.set(key, new Map());
+      breaksByDate.get(key)!.set(o.staff_id, { start_time: o.start_time ?? null, end_time: o.end_time ?? null });
+      continue;
+    }
     if (!overridesByDate.has(key)) overridesByDate.set(key, new Map());
     overridesByDate.get(key)!.set(o.staff_id, { start_time: o.start_time, end_time: o.end_time, kind: o.kind });
   }
@@ -1085,6 +1112,7 @@ export async function getStaffSchedulesForDates(
       activeStaff,
       overridesByDate.get(dateStr) ?? new Map(),
       weeklyByDow.get(dayOfWeekOf(dateStr)) ?? new Map(),
+      breaksByDate.get(dateStr) ?? new Map(),
     );
   }
   return { success: true, byDate };
@@ -1095,14 +1123,9 @@ function buildSchedulesForDay(
   staffList: { id: string; name: string; role: string | null; display_color: string | null; show_in_timeline: boolean | null }[],
   overrideMap: Map<string, { start_time: string | null; end_time: string | null; kind: string }>,
   weeklyMap: Map<string, { start_time: string; end_time: string; break_start: string | null; break_end: string | null }>,
+  // その日だけの休憩（kind="break"）。時間が両方 null の行は「その日は休憩なし」
+  breakOverrideMap: Map<string, { start_time: string | null; end_time: string | null }> = new Map(),
 ): StaffDaySchedule[] {
-  // 休憩オーバーライド（kind="break"）は勤務時間の override とは別枠で効かせる
-  const breakOverrideMap = new Map<string, { start_time: string; end_time: string }>();
-  for (const [staffId, o] of overrideMap) {
-    if (o.kind === "break" && o.start_time && o.end_time) {
-      breakOverrideMap.set(staffId, { start_time: o.start_time, end_time: o.end_time });
-    }
-  }
 
   return staffList.map((s) => {
     // 予約の受付に制限があるか（src/lib/staff-availability.ts の buildStaffSchedule が
@@ -1118,15 +1141,21 @@ function buildSchedulesForDay(
     // 休憩: breakOverride > weeklyDefault
     const breakOverride = breakOverrideMap.get(s.id);
     const weeklyBreak = weeklyMap.get(s.id);
+    const weeklyBreakStart = weeklyBreak?.break_start ? weeklyBreak.break_start.slice(0, 5) : null;
+    const weeklyBreakEnd = weeklyBreak?.break_end ? weeklyBreak.break_end.slice(0, 5) : null;
+    const ovrHasTime = !!(breakOverride?.start_time && breakOverride?.end_time);
     const breakStart = breakOverride
-      ? breakOverride.start_time.slice(0, 5)
-      : (weeklyBreak?.break_start ? weeklyBreak.break_start.slice(0, 5) : null);
+      ? (ovrHasTime ? breakOverride.start_time!.slice(0, 5) : null)
+      : weeklyBreakStart;
     const breakEnd = breakOverride
-      ? breakOverride.end_time.slice(0, 5)
-      : (weeklyBreak?.break_end ? weeklyBreak.break_end.slice(0, 5) : null);
+      ? (ovrHasTime ? breakOverride.end_time!.slice(0, 5) : null)
+      : weeklyBreakEnd;
+    const breakSource: "date" | "weekly" | null = breakOverride
+      ? "date"
+      : (weeklyBreakStart && weeklyBreakEnd ? "weekly" : null);
 
     const override = overrideMap.get(s.id);
-    if (override && override.kind !== "break") {
+    if (override) {
       const isOff = override.kind === "off" || override.kind === "leave";
       return {
         staffId: s.id,
@@ -1138,6 +1167,9 @@ function buildSchedulesForDay(
         endTime: isOff ? null : (override.end_time ? override.end_time.slice(0, 5) : null),
         breakStart,
         breakEnd,
+        breakSource,
+        weeklyBreakStart,
+        weeklyBreakEnd,
         source: "override",
         isOff,
         hasBookingLimit,
@@ -1155,6 +1187,9 @@ function buildSchedulesForDay(
         endTime: weekly.end_time.slice(0, 5),
         breakStart,
         breakEnd,
+        breakSource,
+        weeklyBreakStart,
+        weeklyBreakEnd,
         source: "weekly",
         isOff: false,
         hasBookingLimit,
@@ -1170,6 +1205,9 @@ function buildSchedulesForDay(
       endTime: null,
       breakStart,
       breakEnd,
+      breakSource,
+      weeklyBreakStart,
+      weeklyBreakEnd,
       source: "none",
       isOff: false,
       hasBookingLimit,
@@ -1192,14 +1230,20 @@ export async function upsertStaffScheduleForDate(
   startTime: string | null,
   endTime: string | null,
   isOff: boolean,
-  breakStart?: string | null,
-  breakEnd?: string | null,
 ): Promise<{ success: boolean; error?: string }> {
+  // 🚨 この関数は「その日だけの休憩」（kind="break" の行）に一切触らない。
+  // 休憩の行は 2026-09-21 から患者さんのWeb予約・院内の登録の判定にも効く。
+  // 以前はここでも休憩を upsert/delete していたため、勤務時間だけ直して保存すると
+  //   ・「この日は休憩なし」の行が消えて毎週の休憩が黙って復活する
+  //   ・誰も変えていないのに毎週と同じ時刻の行が作られ「変更中」になる
+  // という食い違いが起きた（検品指摘）。休憩は setStaffBreakForDate だけが書く。
   const auth = await requireRole(["owner"]);
   const sb = getServiceClient();
   if (!sb) return { success: false, error: "サーバー設定エラー" };
 
-  const kind = isOff ? "off" : "work";
+  // 🚨 DB の kind は meeting/leave/training/other/break/work だけ（"off" は CHECK 制約で弾かれる）。
+  // 以前は "off" を入れようとして、名前クリック→「休み」の保存が必ず失敗していた。
+  const kind = isOff ? "leave" : "work";
   const start = isOff ? null : startTime;
   const end = isOff ? null : endTime;
 
@@ -1227,32 +1271,7 @@ export async function upsertStaffScheduleForDate(
     if (error) return { success: false, error: error.message };
   }
 
-  // 2) 休憩時間オーバーライド（kind=break, blocks_booking=true）をupsert/delete
-  const { data: existingBreak } = await sb
-    .from("staff_working_overrides")
-    .select("id")
-    .eq("clinic_id", auth.clinicId)
-    .eq("staff_id", staffId)
-    .eq("date", dateStr)
-    .eq("kind", "break")
-    .maybeSingle();
-
-  if (breakStart && breakEnd && breakStart < breakEnd) {
-    // 休憩あり → upsert
-    if (existingBreak?.id) {
-      await sb.from("staff_working_overrides")
-        .update({ start_time: breakStart, end_time: breakEnd, blocks_booking: true, status: "approved", created_by_email: auth.email ?? null })
-        .eq("id", existingBreak.id).eq("clinic_id", auth.clinicId);
-    } else {
-      await sb.from("staff_working_overrides")
-        .insert({ clinic_id: auth.clinicId, staff_id: staffId, date: dateStr, kind: "break", start_time: breakStart, end_time: breakEnd, blocks_booking: true, status: "approved", created_by_email: auth.email ?? null, note: null });
-    }
-  } else if (existingBreak?.id) {
-    // 休憩クリア → 既存削除
-    await sb.from("staff_working_overrides").delete().eq("id", existingBreak.id).eq("clinic_id", auth.clinicId);
-  }
-
-  // 3) 「休み」はネット予約側の受付日にも反映する（2026-08-07 追加）。
+  // 2) 「休み」はネット予約側の受付日にも反映する（2026-08-07 追加）。
   //    患者側の空き計算は staff_booking_dates を見ているので、ここに入れないと
   //    先生が休みでも指名コース（保険施術＝森川先生 など）のWeb予約が取れてしまう。
   //    休みを外したときは行ごと削除して、通常の勤務表どおりに戻す。
@@ -1278,6 +1297,89 @@ export async function upsertStaffScheduleForDate(
 
   revalidatePath("/admin/dashboard");
   revalidatePath("/admin/settings/staff-schedule");
+  revalidatePath("/admin/appointments");
+  return { success: true };
+}
+
+/**
+ * 先生の休憩を「その日だけ」変える（移動・短縮・延長・休憩なし・いつもの時間に戻す）。
+ *
+ *   mode="set"   その日の休憩を start〜end にする
+ *   mode="none"  その日は休憩なしにする
+ *   mode="reset" その日だけの変更を消して、勤務表の毎週の休憩に戻す
+ *
+ * 保存先は staff_working_overrides の kind="break"（1先生・1日につき1行）。
+ * 予約表・院内の登録・患者さんのWeb予約のどれも、この行を同じ優先順位で見る
+ * （src/lib/staff-break-overrides.ts / staff-availability.ts の getStaffBreakForYmd）。
+ * 予約NGと同じく受付の操作なので、院長に限らず管理画面に入れる人なら使える。
+ */
+export async function setStaffBreakForDate(
+  staffId: string,
+  dateStr: string,
+  mode: "set" | "none" | "reset",
+  startTime?: string | null,
+  endTime?: string | null,
+): Promise<{ success: boolean; error?: string }> {
+  const auth = await checkAdminAuth();
+  const sb = getServiceClient();
+  if (!sb) return { success: false, error: "サーバー設定エラー" };
+
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return { success: false, error: "日付の形式が正しくありません。" };
+  const isHm = (v?: string | null): v is string => !!v && /^([01]\d|2[0-3]):[0-5]\d$/.test(v);
+  if (mode === "set") {
+    if (!isHm(startTime) || !isHm(endTime)) return { success: false, error: "休憩の開始と終了を入れてください。" };
+    if (endTime <= startTime) return { success: false, error: "終了は開始より後の時刻にしてください。" };
+  }
+
+  // 自院の先生か（他院の staff_id を渡されても書かない）
+  const { data: st } = await sb
+    .from("reservation_staff").select("id")
+    .eq("id", staffId).eq("clinic_id", auth.clinicId).maybeSingle();
+  if (!st) return { success: false, error: "先生が見つかりません。" };
+
+  const { data: existing, error: selErr } = await sb
+    .from("staff_working_overrides")
+    .select("id")
+    .eq("clinic_id", auth.clinicId)
+    .eq("staff_id", staffId)
+    .eq("date", dateStr)
+    .eq("kind", "break");
+  if (selErr) return { success: false, error: selErr.message };
+  const ids = ((existing ?? []) as { id: string }[]).map((r) => r.id);
+
+  if (mode === "reset") {
+    if (ids.length > 0) {
+      const { error } = await sb.from("staff_working_overrides").delete()
+        .eq("clinic_id", auth.clinicId).in("id", ids);
+      if (error) return { success: false, error: error.message };
+    }
+  } else {
+    const row = {
+      start_time: mode === "set" ? startTime : null,
+      end_time: mode === "set" ? endTime : null,
+      // 「休憩なし」は予約を止める行ではないので false（終日ブロックと取り違えられないように）
+      blocks_booking: mode === "set",
+      status: "approved",
+      created_by_email: auth.email ?? null,
+      note: mode === "set" ? "その日だけの休憩" : "その日は休憩なし",
+    };
+    if (ids.length > 0) {
+      const [keep, ...dups] = ids;
+      const { error } = await sb.from("staff_working_overrides").update(row)
+        .eq("id", keep).eq("clinic_id", auth.clinicId);
+      if (error) return { success: false, error: error.message };
+      // 1先生・1日につき1行に保つ（昔の重複が残っていたら消す）
+      if (dups.length > 0) {
+        await sb.from("staff_working_overrides").delete().eq("clinic_id", auth.clinicId).in("id", dups);
+      }
+    } else {
+      const { error } = await sb.from("staff_working_overrides")
+        .insert({ clinic_id: auth.clinicId, staff_id: staffId, date: dateStr, kind: "break", ...row });
+      if (error) return { success: false, error: error.message };
+    }
+  }
+
+  revalidatePath("/admin/dashboard");
   revalidatePath("/admin/appointments");
   return { success: true };
 }

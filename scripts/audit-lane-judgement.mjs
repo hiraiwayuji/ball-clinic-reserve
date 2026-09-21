@@ -332,6 +332,115 @@ function checkStaffNgCapacity() {
 }
 checkStaffNgCapacity();
 
+// ───────────────────────────────────────────────────────────
+// (4) 先生の「その日だけの休憩」が、どの空き判定にも同じ優先順位で効いているか
+// ───────────────────────────────────────────────────────────
+// 2026-09-21: 予約表で休憩を日ごとに動かせるようにした（staff_working_overrides kind="break"）。
+//   それまでは予約表の表示にしか効いておらず、患者さんのWeb予約と院内の登録は
+//   毎週の休憩のままだった。ここがズレると「予約表では空けたのにWebで取れない」
+//   「休憩にしたのにWebから予約が入る」になる。
+const AVAIL_FILE = "src/lib/staff-availability.ts";
+function checkStaffDateBreak() {
+  if (!existsSync(AVAIL_FILE)) {
+    fail(`${AVAIL_FILE} が見つかりません`, "   移動・改名したら、この監査も直してください。");
+    return;
+  }
+  let ts;
+  try { ts = require_("typescript"); } catch { ts = null; }
+  if (ts) {
+    const js = ts.transpileModule(readFileSync(AVAIL_FILE, "utf8"), {
+      compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
+    }).outputText;
+    const mod = { exports: {} };
+    new Function("module", "exports", js)(mod, mod.exports);
+    const { buildStaffSchedule, isStaffSpanBookableYmd, isTimeWithinStaffHoursYmd, filterSlotsByStaffSchedule } = mod.exports;
+    if (typeof buildStaffSchedule !== "function" || typeof isStaffSpanBookableYmd !== "function") {
+      fail(`${AVAIL_FILE} が buildStaffSchedule / isStaffSpanBookableYmd を export していません`);
+    } else {
+      // 2026-09-24 は木曜(4)。毎週の休憩は 14:00〜14:40
+      const weekly = [{ day_of_week: 4, start_time: "09:30:00", end_time: "18:00:00", break_start: "14:00:00", break_end: "14:40:00" }];
+      const row = { schedule_based_booking: false };
+      const THU = "2026-09-24";
+      const NEXT_THU = "2026-10-01";
+      const base = buildStaffSchedule(row, [], weekly, 0);
+      const moved = buildStaffSchedule(row, [], weekly, 0, [{ date: THU, start: "15:00", end: "15:40" }]);
+      const none = buildStaffSchedule(row, [], weekly, 0, [{ date: THU, start: null, end: null }]);
+      const onlyDate = buildStaffSchedule(row, [], [], 0, [{ date: THU, start: "13:00", end: "13:20" }]);
+      const slots = ["13:40", "14:00", "14:20", "14:40", "15:00", "15:20", "15:40"];
+      const d = new Date(2026, 8, 24);
+      const cases = [
+        ["上書きなし: いつもの休憩中(14:00)は取れない", isStaffSpanBookableYmd(THU, "14:00", 20, base) === false],
+        ["上書きなし: 休憩の外(15:00)は取れる", isStaffSpanBookableYmd(THU, "15:00", 20, base) === true],
+        ["休憩を15:00へ動かした日: 元の休憩(14:00)が取れる", isStaffSpanBookableYmd(THU, "14:00", 20, moved) === true],
+        ["休憩を15:00へ動かした日: 新しい休憩(15:00)は取れない", isStaffSpanBookableYmd(THU, "15:00", 20, moved) === false],
+        ["休憩を15:00へ動かした日: 休憩にかかる長いメニュー(14:40から40分)は取れない", isStaffSpanBookableYmd(THU, "14:40", 40, moved) === false],
+        ["休憩を15:00へ動かした日: 休憩の終わりちょうど(15:40)は取れる", isStaffSpanBookableYmd(THU, "15:40", 20, moved) === true],
+        ["動かしたのはその日だけ: 翌週はいつもの休憩(14:00)で取れない", isStaffSpanBookableYmd(NEXT_THU, "14:00", 20, moved) === false],
+        ["動かしたのはその日だけ: 翌週の15:00は取れる", isStaffSpanBookableYmd(NEXT_THU, "15:00", 20, moved) === true],
+        ["休憩なしの日: いつもの休憩の時間(14:00)が取れる", isStaffSpanBookableYmd(THU, "14:00", 20, none) === true],
+        ["休憩なしはその日だけ: 翌週は14:00が取れない", isStaffSpanBookableYmd(NEXT_THU, "14:00", 20, none) === false],
+        ["開始時刻だけの判定も同じ: 動かした日の15:20は休憩中", isTimeWithinStaffHoursYmd(THU, "15:20", moved) === false],
+        ["枠の一覧も同じ: 動かした日は 15:00/15:20 だけが消える",
+          JSON.stringify(filterSlotsByStaffSchedule(slots, d, moved)) === JSON.stringify(["13:40", "14:00", "14:20", "14:40", "15:40"])],
+        ["勤務表が無い先生でも、その日だけの休憩は効く", onlyDate !== null && isStaffSpanBookableYmd(THU, "13:00", 20, onlyDate) === false],
+        ["勤務表が無い先生: 休憩の外は取れる", onlyDate !== null && isStaffSpanBookableYmd(THU, "13:20", 20, onlyDate) === true],
+      ];
+      for (const [label, ok] of cases) {
+        if (!ok) fail(`その日だけの休憩の判定が変わっています: ${label}`);
+      }
+    }
+  }
+
+  // buildStaffSchedule を呼ぶ判定ファイルは、その日だけの休憩も一緒に渡していること
+  const FILES = [
+    ["src/app/actions/reserve.ts", "fetchStaffDateBreaks(", 5],
+    ["src/app/actions/courses.ts", "fetchStaffDateBreaks(", 3],
+    ["src/app/actions/adminReserve.ts", "dateBreaksOf(", 1],
+  ];
+  for (const [file, needle, min] of FILES) {
+    if (!existsSync(file)) { fail(`${file} が見つかりません`); continue; }
+    const code = stripComments(readFileSync(file, "utf8"));
+    const builds = code.split("buildStaffSchedule(").length - 1;
+    const uses = code.split(needle).length - 1;
+    if (uses < min) {
+      fail(
+        `${file} が、その日だけの休憩を空き判定に渡していません`,
+        `   buildStaffSchedule の呼び出し ${builds} か所に対して、${needle} が ${uses} か所（${min} か所以上のはず）。\n` +
+        "   渡し忘れた判定だけ、予約表で動かした休憩が効かなくなります。",
+      );
+    }
+  }
+
+  // 院長の「名前クリック→勤務時間」の保存は、その日だけの休憩（kind="break"）の行に触らないこと。
+  // 触ると、勤務時間だけ直したのに「休憩なし」が消えて毎週の休憩が黙って復活したり、
+  // 誰も変えていない日に毎週と同じ時刻の行ができて「変更中」になる（2026-09-21 検品指摘）。
+  const SCHED_FILE = "src/app/actions/staff-schedule.ts";
+  if (!existsSync(SCHED_FILE)) {
+    fail(`${SCHED_FILE} が見つかりません`);
+  } else {
+    const code = stripComments(readFileSync(SCHED_FILE, "utf8"));
+    const from = code.indexOf("export async function upsertStaffScheduleForDate");
+    const to = code.indexOf("export async function", from + 10);
+    if (from < 0 || to < 0) {
+      fail(`${SCHED_FILE} に upsertStaffScheduleForDate が見つかりません`, "   改名したら、この監査も直してください。");
+    } else {
+      const body = code.slice(from, to);
+      // 許しているのは「休憩以外の行を探す」ための .neq("kind", "break") だけ
+      const touches = body.replace(/\.neq\("kind",\s*"break"\)/g, "").includes('"break"');
+      if (touches) {
+        fail(
+          "upsertStaffScheduleForDate（名前クリックの勤務時間の保存）が、休憩の行（kind=\"break\"）を書き換えています",
+          "   休憩を書いてよいのは setStaffBreakForDate だけです。",
+        );
+      }
+    }
+    if (!code.includes("export async function setStaffBreakForDate")) {
+      fail(`${SCHED_FILE} に setStaffBreakForDate がありません`);
+    }
+  }
+}
+checkStaffDateBreak();
+
 if (ng > 0) {
   console.error(
     `\n${YELLOW}この監査は「予約が取れるかの判定を、画面と登録で同じにする」ためのものです。\n` +
@@ -344,3 +453,4 @@ console.log(`${GREEN}✅ 予約の空き判定 OK（院内の画面・院内の�
 console.log("   ・buildStaffSpans を実際に動かして、先生ごとの受け持ち時間の分け方が変わっていないことを確認");
 console.log("   ・adminDaySlots / adminReserve / reserve が、どれもその土台を使っていることを確認");
 console.log("   ・先生個別の予約NGが、担当自由メニューの定員から引かれていることを確認（表示と登録の両方）");
+console.log("   ・先生の「その日だけの休憩」が、Web予約・院内の登録のどちらにも効いていることを確認");

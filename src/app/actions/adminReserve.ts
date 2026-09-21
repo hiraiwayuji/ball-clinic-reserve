@@ -3742,7 +3742,7 @@ export async function suggestOverlapFixes(input: {
         .select("staff_id, available, start_time, end_time")
         .eq("clinic_id", clinicId).eq("date", ymd),
       db.from("staff_working_overrides")
-        .select("staff_id, kind, start_time, blocks_booking")
+        .select("staff_id, kind, start_time, end_time, blocks_booking, status")
         .eq("clinic_id", clinicId).eq("date", ymd),
       db.from("appointments")
         .select("id, start_time, end_time, staff_id, course_id, additional_staff, additional_courses")
@@ -3824,6 +3824,12 @@ export async function suggestOverlapFixes(input: {
 
     // 管理画面からの登録なので、ネット予約用の「準備時間」は差し引かない（prep=0）。
     // 受付時間ぎりぎりの枠も、スタッフが手で入れるぶんには取れるべきなので。
+    // その日だけの休憩（予約表で動かした休憩・休憩なし）。毎週の休憩より優先する。
+    // 患者さんのWeb予約（reserve.ts / courses.ts）と同じ行を見る。
+    const dateBreaksOf = (staffId: string) =>
+      ((offRes?.data ?? []) as any[])
+        .filter((o) => o.staff_id === staffId && o.kind === "break" && (!o.status || o.status === "approved"))
+        .map((o) => ({ date: ymd, start: normStaffTime(o.start_time), end: normStaffTime(o.end_time) }));
     const schedOf = new Map<string, StaffSchedule | null>();
     for (const st of staffRows) {
       const ovr = dateRows.find((d) => d.staff_id === st.id);
@@ -3832,6 +3838,7 @@ export async function suggestOverlapFixes(input: {
         ovr ? [{ date: ymd, available: !!ovr.available, start: normStaffTime(ovr.start_time), end: normStaffTime(ovr.end_time) }] : [],
         weeklyRows.filter((w) => w.staff_id === st.id),
         0,
+        dateBreaksOf(st.id),
       ));
     }
 

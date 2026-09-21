@@ -40,6 +40,7 @@ import { createClient as createServerClient } from "@/lib/supabase/server";
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { getTimeSlots, isDateWithinAllowedRange, isTimeSlotWithinTwoHours, isTodayJST, isAddonSpanWithinBusinessHours } from "@/lib/time-slots";
 import { buildStaffSpans } from "@/lib/staff-spans";
+import { fetchStaffDateBreaks } from "@/lib/staff-break-overrides";
 import { countNgOnlyStaff, isPoolFull, countsTowardPool, type StaffNgBlock } from "@/lib/staff-ng-capacity";
 import { getSpecialDayForDate } from "@/app/actions/special-days";
 import { isTimeWithinStaffHoursYmd, isStaffAvailableOnYmd, isStaffSpanBookableYmd, buildStaffSchedule, type StaffSchedule } from "@/lib/staff-availability";
@@ -127,6 +128,7 @@ async function canStaffTakeAddonSpan(
       ovr ? [{ date: ymd, available: !!ovr.available, start: normStaffTime(ovr.start_time), end: normStaffTime(ovr.end_time) }] : [],
       weekly,
       prep,
+      (await fetchStaffDateBreaks(db, PUBLIC_CLINIC_ID, { date: ymd, staffIds: [staffId] })).get(staffId) ?? [],
     );
     if (!sched) return true;
     if (!isStaffAvailableOnYmd(ymd, sched)) return false;
@@ -335,6 +337,9 @@ async function pickStaffForBooking(
         .map((b: any) => b.staff_id as string),
     );
 
+    // その日だけの休憩（予約表で動かした休憩）。勤務表の毎週の休憩より優先する。
+    const dateBreaksByStaff = await fetchStaffDateBreaks(db, clinicId, { date: dateStr });
+
     // 優先の先生を先頭に、あとは表示順
     const ordered = [...staffRows].sort((a: any, b: any) => {
       if (preferredStaffId) {
@@ -355,6 +360,7 @@ async function pickStaffForBooking(
         ovr ? [{ date: dateStr, available: !!ovr.available, start: normStaffTime(ovr.start_time), end: normStaffTime(ovr.end_time) }] : [],
         followSchedule ? (weeklyRows ?? []).filter((w: any) => w.staff_id === st.id) : [],
         prep,
+        dateBreaksByStaff.get(st.id) ?? [],
       );
       if (sched) {
         if (!isStaffAvailableOnYmd(dateStr, sched)) continue;
@@ -1011,6 +1017,7 @@ export async function createReservation(formData: FormData) {
               ovr ? [{ date: rawDate, available: !!ovr.available, start: normStaffTime(ovr.start_time), end: normStaffTime(ovr.end_time) }] : [],
               reqWeekly,
               reqPrep,
+              (await fetchStaffDateBreaks(adminDb, PUBLIC_CLINIC_ID, { date: rawDate, staffIds: [reqStaffId] })).get(reqStaffId) ?? [],
             );
             if (sched) {
               // 出勤日制（さみ・ヘッドスパ等）はその日に出勤していなければ予約不可
@@ -1077,6 +1084,7 @@ export async function createReservation(formData: FormData) {
             ovr ? [{ date: rawDate, available: !!ovr.available, start: normStaffTime(ovr.start_time), end: normStaffTime(ovr.end_time) }] : [],
             namedWeekly,
             namedPrep,
+            (await fetchStaffDateBreaks(adminDb, PUBLIC_CLINIC_ID, { date: rawDate, staffIds: [staffId] })).get(staffId) ?? [],
           );
           if (sched) {
             if (!isStaffAvailableOnYmd(rawDate, sched)) {
@@ -1518,6 +1526,7 @@ export async function createReservation(formData: FormData) {
                 ovr ? [{ date: rawDate, available: !!ovr.available, start: normStaffTime(ovr.start_time), end: normStaffTime(ovr.end_time) }] : [],
                 hsWeekly,
                 hsPrep,
+                (await fetchStaffDateBreaks(adminDb, DEFAULT_CLINIC_ID, { date: rawDate, staffIds: [hStaffId] })).get(hStaffId) ?? [],
               );
               if (hsSched) staffOk = isStaffAvailableOnYmd(rawDate, hsSched);
             }

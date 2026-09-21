@@ -22,6 +22,7 @@ import {
 } from "@/app/actions/adminReserve";
 import { cancelKindLabel } from "@/components/admin/CancelledAppointmentDialog";
 import { getStaffSchedulesForDates, upsertStaffScheduleForDate, type StaffDaySchedule } from "@/app/actions/staff-schedule";
+import { StaffBreakEditDialog, type StaffBreakEditTarget } from "@/components/admin/StaffBreakEditDialog";
 import { getMyRole } from "@/app/actions/auth";
 import type { ClinicRole } from "@/app/actions/auth";
 import { AddAppointmentDialog } from "@/components/admin/AddAppointmentDialog";
@@ -315,12 +316,27 @@ export default function TodayTimelineWidget({
   const [userRole, setUserRole] = useState<ClinicRole | null>(null);
   // 勤務時間編集ポップアップ。週表示では同じ先生が7日ぶん並ぶので "日付|staffId" で1つに絞る
   const [editingKey, setEditingKey] = useState<string | null>(null);
+  // 勤務時間編集ポップアップを出す位置（画面に固定）。名前を押した場所から決める
+  const [editAnchor, setEditAnchor] = useState<{ left: number; top: number }>({ left: 8, top: 8 });
+  // 🚨 窓は画面に固定して出しているので、開いたままスクロールすると表だけが動き、
+  // 窓が「別の日の同じ先生」の行の下に来てしまう（その日のつもりで別の日に保存する事故になる）。
+  // スクロール・画面サイズの変更が起きたら必ず閉じる。capture=true で内側のスクロール枠も拾う。
+  useEffect(() => {
+    if (!editingKey) return;
+    const close = () => setEditingKey(null);
+    window.addEventListener("scroll", close, true);
+    window.addEventListener("resize", close);
+    return () => {
+      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("resize", close);
+    };
+  }, [editingKey]);
   const [editStart, setEditStart] = useState<string>("");
   const [editEnd, setEditEnd] = useState<string>("");
-  const [editBreakStart, setEditBreakStart] = useState<string>("");
-  const [editBreakEnd, setEditBreakEnd] = useState<string>("");
   const [editIsOff, setEditIsOff] = useState<boolean>(false);
   const [scheduleLoading, setScheduleLoading] = useState(false);
+  // 先生の休憩を「その日だけ」変える小窓（休憩の斜線にある「休憩 ✎」から開く）
+  const [breakEditTarget, setBreakEditTarget] = useState<StaffBreakEditTarget | null>(null);
   // 受付AI調整メッセージ
   const [receptionAiMsg, setReceptionAiMsg] = useState<string | null>(null);
   // 月またぎ（先月から継続の患者様の今月最初の来院）バッジ対象の予約ID
@@ -440,6 +456,19 @@ export default function TodayTimelineWidget({
     return () => { sb.removeChannel(ch); };
   }, [refresh]);
 
+  // 先生の休憩を「その日だけ」変える小窓を開く
+  const openBreakEdit = (dateKey: string, dayDate: Date, staffId: string, staffName: string, sched: StaffDaySchedule) => {
+    setBreakEditTarget({
+      staffId,
+      staffName,
+      dateStr: dateKey,
+      dateLabel: format(dayDate, "M月d日(E)", { locale: ja }),
+      current: sched.breakStart && sched.breakEnd ? { start: sched.breakStart, end: sched.breakEnd } : null,
+      weekly: sched.weeklyBreakStart && sched.weeklyBreakEnd ? { start: sched.weeklyBreakStart, end: sched.weeklyBreakEnd } : null,
+      isDateOverride: sched.breakSource === "date",
+    });
+  };
+
   // 休憩枠の削除（帯の × ボタン）
   const handleDeleteBlocked = async (b: BlockedSlot) => {
     const label = b.staff_id ? "予約NG" : "休憩";
@@ -485,8 +514,13 @@ export default function TodayTimelineWidget({
       const day = data?.days.find((d) => d.date === dateKey);
       const sched = (schedulesByDate[dateKey] ?? []).find((sc) => sc.staffId === staffId);
       let reason: string | null = null;
+      // その日だけの受付時間（祝日 10:00〜18:00 など）の外も、斜線＝予約を取れない時間
+      const sp = day?.specialDay && !day.specialDay.closed && day.specialDay.openTime && day.specialDay.closeTime
+        ? day.specialDay : null;
       if (day?.isHoliday) {
         reason = `${format(dateFromKey(dateKey), "M/d(E)", { locale: ja })} は休診日です`;
+      } else if (sp && (minuteOfDay < hmToMinutes(sp.openTime!) || minuteOfDay >= hmToMinutes(sp.closeTime!))) {
+        reason = `${format(dateFromKey(dateKey), "M/d(E)", { locale: ja })} の受付は ${sp.openTime}〜${sp.closeTime} です${day?.jpHolidayName ? `（祝日・${day.jpHolidayName}）` : ""}`;
       } else if (sched?.isOff) {
         reason = `${staffName}先生はこの日はお休みです`;
       } else if (sched?.startTime && sched?.endTime) {
@@ -1002,6 +1036,21 @@ export default function TodayTimelineWidget({
                 ? `(${format(dateFromKey(rangeFromKey), "M/d(E)", { locale: ja })}〜${format(dateFromKey(rangeToKey), "M/d(E)", { locale: ja })})`
                 : `(${format(date, "M/d (E)", { locale: ja })})`}
             </span>
+            {/* 1日表示は日ごとの見出しが無いので、祝日・その日だけの受付時間をここに出す */}
+            {rangeMode !== "week" && (() => {
+              const d0 = data?.days?.[0];
+              if (!d0) return null;
+              return (
+                <>
+                  {d0.jpHolidayName && (
+                    <span className="ml-2 inline-block whitespace-nowrap align-middle text-[11px] font-black bg-rose-600 text-white px-1.5 py-0.5 rounded">祝 {d0.jpHolidayName}</span>
+                  )}
+                  {d0.specialDay && !d0.specialDay.closed && d0.specialDay.openTime && d0.specialDay.closeTime && (
+                    <span className="ml-1 inline-block whitespace-nowrap align-middle text-[11px] font-black bg-amber-500 text-white px-1.5 py-0.5 rounded">受付 {d0.specialDay.openTime}〜{d0.specialDay.closeTime}</span>
+                  )}
+                </>
+              );
+            })()}
           </CardTitle>
         </div>
         <div className="flex items-center gap-2">
@@ -1122,14 +1171,27 @@ export default function TodayTimelineWidget({
                     className={`px-2 py-1.5 mb-2 rounded-lg border text-sm font-bold flex items-center gap-2 ${
                       day.isHoliday
                         ? "bg-slate-100 border-slate-300 text-slate-500 dark:bg-slate-800 dark:border-slate-600 dark:text-slate-400"
-                        : isToday
-                          ? "bg-blue-50 border-blue-300 text-blue-800 dark:bg-blue-900/40 dark:border-blue-700 dark:text-blue-200"
-                          : "bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700"
+                        : day.jpHolidayName
+                          ? "bg-rose-50 border-rose-300 text-rose-800 dark:bg-rose-900/30 dark:border-rose-700 dark:text-rose-100"
+                          : isToday
+                            ? "bg-blue-50 border-blue-300 text-blue-800 dark:bg-blue-900/40 dark:border-blue-700 dark:text-blue-200"
+                            : "bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700"
                     }`}
                   >
                     <span>{format(dayDate, "M月d日(E)", { locale: ja })}</span>
                     {day.isHoliday && (
                       <span className="text-[10px] font-black bg-slate-500 text-white px-1.5 py-0.5 rounded">休診日</span>
+                    )}
+                    {day.jpHolidayName && (
+                      <span className="inline-block whitespace-nowrap text-[10px] font-black bg-rose-600 text-white px-1.5 py-0.5 rounded" title="祝日">祝 {day.jpHolidayName}</span>
+                    )}
+                    {day.specialDay && !day.specialDay.closed && day.specialDay.openTime && day.specialDay.closeTime && (
+                      <span className="inline-block whitespace-nowrap text-[10px] font-black bg-amber-500 text-white px-1.5 py-0.5 rounded" title={day.specialDay.note ?? "この日だけの受付時間"}>
+                        受付 {day.specialDay.openTime}〜{day.specialDay.closeTime}
+                      </span>
+                    )}
+                    {day.specialDay?.closed && !day.isHoliday && (
+                      <span className="text-[10px] font-black bg-slate-500 text-white px-1.5 py-0.5 rounded">この日は休み</span>
                     )}
                     {isToday && <span className="text-[10px] font-black bg-blue-600 text-white px-1.5 py-0.5 rounded">今日</span>}
                     <span className="ml-auto text-[11px] font-normal text-slate-400 tabular-nums">
@@ -1337,16 +1399,29 @@ export default function TodayTimelineWidget({
                   className={`px-2 py-1.5 mb-1 rounded-md border text-sm font-bold flex items-center gap-2 ${
                     day.isHoliday
                       ? "bg-slate-100 border-slate-300 text-slate-500 dark:bg-slate-800 dark:border-slate-600 dark:text-slate-400"
-                      : isToday
-                        ? "bg-blue-50 border-blue-300 text-blue-800 dark:bg-blue-900/40 dark:border-blue-700 dark:text-blue-200"
-                        : "bg-white/95 dark:bg-slate-900/95 border-slate-200 dark:border-slate-700"
+                      : day.jpHolidayName
+                        ? "bg-rose-50 border-rose-300 text-rose-800 dark:bg-rose-900/30 dark:border-rose-700 dark:text-rose-100"
+                        : isToday
+                          ? "bg-blue-50 border-blue-300 text-blue-800 dark:bg-blue-900/40 dark:border-blue-700 dark:text-blue-200"
+                          : "bg-white/95 dark:bg-slate-900/95 border-slate-200 dark:border-slate-700"
                   }`}
                 >
-                  <span className={day.isHoliday ? "" : dow === 0 ? "text-rose-600" : dow === 6 ? "text-blue-600" : ""}>
+                  <span className={day.isHoliday ? "" : (dow === 0 || day.jpHolidayName) ? "text-rose-600" : dow === 6 ? "text-blue-600" : ""}>
                     {format(dayDate, "M月d日(E)", { locale: ja })}
                   </span>
                   {day.isHoliday && (
                     <span className="text-[10px] font-black bg-slate-500 text-white px-1.5 py-0.5 rounded">休診日</span>
+                  )}
+                  {day.jpHolidayName && (
+                    <span className="inline-block whitespace-nowrap text-[10px] font-black bg-rose-600 text-white px-1.5 py-0.5 rounded" title="祝日">祝 {day.jpHolidayName}</span>
+                  )}
+                  {day.specialDay && !day.specialDay.closed && day.specialDay.openTime && day.specialDay.closeTime && (
+                    <span className="inline-block whitespace-nowrap text-[10px] font-black bg-amber-500 text-white px-1.5 py-0.5 rounded" title={day.specialDay.note ?? "この日だけの受付時間"}>
+                      受付 {day.specialDay.openTime}〜{day.specialDay.closeTime}
+                    </span>
+                  )}
+                  {day.specialDay?.closed && !day.isHoliday && (
+                    <span className="text-[10px] font-black bg-slate-500 text-white px-1.5 py-0.5 rounded">この日は休み</span>
                   )}
                   {isToday && <span className="text-[10px] font-black bg-blue-600 text-white px-1.5 py-0.5 rounded">今日</span>}
                   <span className="ml-auto text-[11px] font-normal text-slate-400 tabular-nums">
@@ -1376,6 +1451,10 @@ export default function TodayTimelineWidget({
                     }}
                   />
                   取れない時間（勤務時間外・休憩・休み）
+                </span>
+                <span className="inline-flex items-center gap-1">
+                  <span className="inline-flex items-center whitespace-nowrap rounded px-1 min-h-[16px] text-[10px] font-bold leading-none border border-slate-300 bg-white text-slate-600 dark:bg-slate-800 dark:border-slate-600 dark:text-slate-300">休憩 ✎</span>
+                  を押すと、その日だけ休憩を動かせます
                 </span>
                 {/* 予約バーの色。statusColor から作った BAR_LEGEND なので、バーと必ず同じ色になる */}
                 <span className="text-slate-300 dark:text-slate-600">｜</span>
@@ -1574,10 +1653,29 @@ export default function TodayTimelineWidget({
                 }
                 const laneCount = Math.max(1, laneEnds.length);
                 const sched = staffSchedules.find((sc) => sc.staffId === s.id);
-                const schedStart = sched?.startTime ? hmToMinutes(sched.startTime) : null;
-                const schedEnd = sched?.endTime ? hmToMinutes(sched.endTime) : null;
+                const rawSchedStart = sched?.startTime ? hmToMinutes(sched.startTime) : null;
+                const rawSchedEnd = sched?.endTime ? hmToMinutes(sched.endTime) : null;
                 const scheduleStart = day.scheduleStartHour * 60;
                 const scheduleEnd = day.scheduleEndHour * 60;
+                // その日だけの受付時間（祝日 10:00〜18:00 など）がある日は、その外を
+                // 「取れない時間（斜線）」にする。緑のままだと 18:00 以降も取れるように見え、
+                // 院が毎回「休憩」で塞ぐことになっていた（2026-09-21 藤川先生）。
+                const spOpen = day.specialDay && !day.specialDay.closed && day.specialDay.openTime ? hmToMinutes(day.specialDay.openTime) : null;
+                const spClose = day.specialDay && !day.specialDay.closed && day.specialDay.closeTime ? hmToMinutes(day.specialDay.closeTime) : null;
+                const hasSpecialHours = spOpen !== null && spClose !== null && spClose > spOpen;
+                const canFillRaw = (rawSchedStart === null || rawSchedEnd === null) && sched?.hasBookingLimit === false;
+                let schedStart = rawSchedStart;
+                let schedEnd = rawSchedEnd;
+                if (hasSpecialHours) {
+                  if (schedStart !== null && schedEnd !== null) {
+                    schedStart = Math.max(schedStart, spOpen!);
+                    schedEnd = Math.max(schedStart, Math.min(schedEnd, spClose!));
+                  } else if (canFillRaw) {
+                    // 勤務表が無く制限も無い先生は「営業時間ぜんぶ」＝この日は特別な受付時間ぜんぶ
+                    schedStart = spOpen!;
+                    schedEnd = spClose!;
+                  }
+                }
                 // 勤務時間バーの位置（スタッフ名の 140px を除いた幅に対して計算する）
                 //
                 // 勤務表が未登録の先生（source="none"／からだの島田先生など）は start/end が null。
@@ -1678,6 +1776,17 @@ export default function TodayTimelineWidget({
                         scheduleEnd,
                       );
                       if (!brkBand) return null;
+                      // この先生の予約（キャンセル以外）が休憩の時間に少しでも重なっているか
+                      const bS = hmToMinutes(sched.breakStart);
+                      const bE = hmToMinutes(sched.breakEnd);
+                      const breakHasApt = apts.some((a) => {
+                        if (a.status === "cancelled") return false;
+                        const aS = minuteOfDayJst(a._displayStart ?? a.start_time);
+                        const aE = a._displayEnd
+                          ? minuteOfDayJst(a._displayEnd)
+                          : (a.end_time ? minuteOfDayJst(a.end_time) : aS + data.slotMinutes);
+                        return aS < bE && aE > bS;
+                      });
                       return (
                         <div
                           className="absolute top-0 bottom-0 pointer-events-none flex items-start justify-start"
@@ -1694,7 +1803,28 @@ export default function TodayTimelineWidget({
                         >
                           {/* ラベルは帯の左上に寄せる。中央に白背景で置くと、
                               休憩時間に入っている予約バーの文字が読めなくなる（2026-08-22 検品指摘）。 */}
-                          <span className="text-[8px] text-slate-500 dark:text-slate-400 font-bold tracking-tight select-none pl-0.5 leading-none pt-px">休憩</span>
+                          {/* 帯そのものは押せないまま（下の予約バーやマスを邪魔しない）。
+                              「休憩 ✎」の札だけ押せて、その日だけの休憩の変更を開く。
+                              🚨 休憩に予約が重なっているときは札を出さない。札が予約バーの患者名を隠し、
+                              バーを押したつもりが休憩の小窓が開くため（2026-08-22 と同じ検品指摘の再発防止）。
+                              そのときの入口は、先生の名前の欄の「休憩 ✎」（常設）を使う。 */}
+                          {breakHasApt ? (
+                            <span className="text-[8px] text-slate-500 dark:text-slate-400 font-bold tracking-tight select-none pl-0.5 leading-none pt-px">休憩</span>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={(e) => { e.stopPropagation(); openBreakEdit(day.date, dayDate, s.id, s.name, sched); }}
+                              className={`pointer-events-auto ml-0.5 mt-0.5 inline-flex items-center whitespace-nowrap rounded px-1.5 min-h-[18px] text-[11px] font-bold leading-none select-none border shadow-sm hover:brightness-95 ${
+                                sched.breakSource === "date"
+                                  ? "bg-amber-500 border-amber-600 text-white"
+                                  : "bg-white/90 border-slate-300 text-slate-600 dark:bg-slate-800/90 dark:border-slate-600 dark:text-slate-300"
+                              }`}
+                              title={`${s.name}さんの休憩 ${sched.breakStart}〜${sched.breakEnd}${sched.breakSource === "date" ? "（この日だけ変更中）" : ""}。押すとこの日だけ時間を変えられます`}
+                              aria-label={`${s.name}さんの ${format(dayDate, "M月d日", { locale: ja })} の休憩を変える`}
+                            >
+                              休憩 ✎
+                            </button>
+                          )}
                         </div>
                       );
                     })()}
@@ -1717,20 +1847,52 @@ export default function TodayTimelineWidget({
                           </button>
                         );
                       })}
-                    <div data-staff-name-col className="px-2 py-1 text-sm font-medium text-slate-800 dark:text-slate-100 flex flex-col gap-0.5 sticky left-0 bg-white dark:bg-slate-900 z-10 border-r border-slate-200 dark:border-slate-700" style={{ gridRow: "1 / -1", gridColumn: "1" }}>
+                    {/* 窓を開いている行だけ重なり順を上げる。名前の欄は行ごとに重なり順が閉じているので、
+                        上げないと下の行の名前の欄が窓の上に描かれて「保存」が押せなくなる。 */}
+                    <div data-staff-name-col className={`px-2 py-1 text-sm font-medium text-slate-800 dark:text-slate-100 flex flex-col gap-0.5 sticky left-0 bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-700 ${isEditing ? "z-40" : "z-10"}`} style={{ gridRow: "1 / -1", gridColumn: "1" }}>
+                      {sched && !sched.isOff && !day.isHoliday && sched.breakSource !== "date" && (
+                        <button
+                          type="button"
+                          onClick={() => openBreakEdit(day.date, dayDate, s.id, s.name, sched)}
+                          className="order-last self-start inline-flex items-center whitespace-nowrap rounded border border-slate-300 bg-white text-slate-600 px-1 min-h-[16px] text-[10px] font-bold leading-none hover:bg-slate-50 dark:bg-slate-800 dark:border-slate-600 dark:text-slate-300"
+                          title={sched.breakStart && sched.breakEnd
+                            ? `休憩 ${sched.breakStart}〜${sched.breakEnd}。押すとこの日だけ時間を変えられます`
+                            : "この日だけの休憩を入れられます"}
+                          aria-label={`${s.name}さんの ${format(dayDate, "M月d日", { locale: ja })} の休憩を変える（名前の欄）`}
+                        >
+                          休憩 ✎
+                        </button>
+                      )}
+                      {sched && !sched.isOff && sched.breakSource === "date" && (
+                        <button
+                          type="button"
+                          onClick={() => openBreakEdit(day.date, dayDate, s.id, s.name, sched)}
+                          className="order-last self-start rounded bg-amber-100 border border-amber-300 text-amber-800 px-1 py-0.5 text-[10px] font-bold leading-tight text-left hover:bg-amber-200 dark:bg-amber-900/40 dark:border-amber-700 dark:text-amber-100"
+                          title="この日だけ休憩を変えています。押すと変更・元に戻すができます"
+                        >
+                          <span className="block whitespace-nowrap">{sched.breakStart && sched.breakEnd ? `休憩 ${sched.breakStart}〜${sched.breakEnd}` : "この日は休憩なし"}</span>
+                          <span className="block whitespace-nowrap">この日だけ変更中 ✎</span>
+                        </button>
+                      )}
                       <div className="flex items-center justify-between gap-1">
                       {userRole === "owner" ? (
                         <button
                           type="button"
-                          onClick={() => {
+                          onClick={(e) => {
                             if (isEditing) {
                               setEditingKey(null);
                             } else {
+                              // 窓は画面に固定して出す（予約表のスクロール枠に切り取られないように）。
+                              // 下に入りきらないときは、画面の下端に収まる位置まで上げる。
+                              const r = e.currentTarget.getBoundingClientRect();
+                              const POPUP_H = 230;
+                              setEditAnchor({
+                                left: Math.max(8, Math.min(r.left, window.innerWidth - 220)),
+                                top: Math.max(8, Math.min(r.bottom + 4, window.innerHeight - POPUP_H - 8)),
+                              });
                               setEditingKey(editKey);
                               setEditStart(sched?.startTime ?? "09:00");
                               setEditEnd(sched?.endTime ?? "18:00");
-                              setEditBreakStart(sched?.breakStart ?? "");
-                              setEditBreakEnd(sched?.breakEnd ?? "");
                               setEditIsOff(sched?.isOff ?? false);
                             }
                           }}
@@ -1830,10 +1992,15 @@ export default function TodayTimelineWidget({
                       {/* 勤務時間編集ポップアップ（owner のみ） */}
                       {isEditing && (
                         <div
-                          className="absolute left-0 top-full z-30 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-600 rounded-lg shadow-lg p-3 w-52"
+                          className="fixed z-50 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-600 rounded-lg shadow-lg p-3 w-52"
+                          style={{ left: editAnchor.left, top: editAnchor.top }}
                           onClick={(e) => e.stopPropagation()}
                         >
-                          <div className="text-xs font-semibold text-slate-700 dark:text-slate-200 mb-2">{s.name} の勤務時間</div>
+                          {/* どの日の変更かを必ず見せる（窓が名前を隠す位置に出ることがあるため） */}
+                          <div className="text-xs font-semibold text-slate-700 dark:text-slate-200 mb-2">
+                            <span className="block whitespace-nowrap text-[11px] font-black text-blue-700 dark:text-blue-300">{format(dayDate, "M月d日(E)", { locale: ja })}</span>
+                            {s.name} の勤務時間
+                          </div>
                           <label className="flex items-center gap-2 mb-2 text-xs text-slate-600 dark:text-slate-300">
                             <input
                               type="checkbox"
@@ -1851,13 +2018,16 @@ export default function TodayTimelineWidget({
                                 <span className="text-[10px] text-slate-400">〜</span>
                                 <input type="time" value={editEnd} onChange={(e) => setEditEnd(e.target.value)} className="flex-1 text-xs border border-slate-300 dark:border-slate-600 rounded px-1.5 py-1 bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100" />
                               </div>
-                              <label className="text-[10px] text-orange-500 dark:text-orange-400 font-semibold mt-1">休憩（予約ブロック）</label>
-                              <div className="flex items-center gap-1">
-                                <input type="time" value={editBreakStart} onChange={(e) => setEditBreakStart(e.target.value)} className="flex-1 text-xs border border-orange-300 dark:border-orange-700 rounded px-1.5 py-1 bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100" placeholder="なし" />
-                                <span className="text-[10px] text-slate-400">〜</span>
-                                <input type="time" value={editBreakEnd} onChange={(e) => setEditBreakEnd(e.target.value)} className="flex-1 text-xs border border-orange-300 dark:border-orange-700 rounded px-1.5 py-1 bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100" placeholder="なし" />
-                              </div>
-                              <p className="text-[9px] text-orange-400">休憩中は患者さんの予約をブロックします</p>
+                              {/* 休憩はここでは変えない（保存のたびに休憩の行を書き換えて食い違いの元になった）。
+                                  「休憩 ✎」と同じ小窓に一本化する。 */}
+                              <button
+                                type="button"
+                                onClick={() => { if (sched) { setEditingKey(null); openBreakEdit(day.date, dayDate, s.id, s.name, sched); } }}
+                                disabled={!sched}
+                                className="mt-1 text-[11px] font-semibold rounded border border-amber-300 bg-amber-50 text-amber-800 px-2 py-1 hover:bg-amber-100 disabled:opacity-50 dark:bg-amber-900/30 dark:border-amber-700 dark:text-amber-100"
+                              >
+                                休憩を変える（この日だけ）
+                              </button>
                             </div>
                           )}
                           <div className="flex gap-1.5">
@@ -1873,11 +2043,9 @@ export default function TodayTimelineWidget({
                                     editIsOff ? null : editStart,
                                     editIsOff ? null : editEnd,
                                     editIsOff,
-                                    editBreakStart || null,
-                                    editBreakEnd || null,
                                   );
                                   if (res.success) {
-                                    toast.success("勤務時間を更新しました");
+                                    toast.success(`${s.name}さんの ${format(dayDate, "M月d日(E)", { locale: ja })} の勤務時間を更新しました`);
                                     setEditingKey(null);
                                     refresh();
                                   } else {
@@ -2848,6 +3016,12 @@ export default function TodayTimelineWidget({
           </div>
         </div>
       )}
+      <StaffBreakEditDialog
+        target={breakEditTarget}
+        onClose={() => setBreakEditTarget(null)}
+        slotMinutes={data?.slotMinutes ?? 20}
+        onSaved={() => refresh()}
+      />
     </Card>
   );
 }

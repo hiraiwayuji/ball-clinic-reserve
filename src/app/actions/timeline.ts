@@ -3,6 +3,7 @@
 import { checkAdminAuth } from "./auth";
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { buildStaffSpans } from "@/lib/staff-spans";
+import { getJpHolidayName } from "@/lib/jp-holidays";
 import { aggregateStaffMonth, type MonthAptRow } from "@/lib/menu-family";
 
 /** Supabase の1回あたりの最大行数（プロジェクト設定。これより大きい range を指定しても1000で切られる） */
@@ -93,6 +94,13 @@ export type TimelineDay = {
   monthLabel: string; // "7月" など
   /** 休診日（clinic_holidays に登録された日 or 定休曜日）。タイムテーブルで一目で分かるようにする */
   isHoliday: boolean;
+  /** 祝日の名前（"国民の休日" など）。祝日でなければ null。見出しを平日と違う見た目にするため */
+  jpHolidayName: string | null;
+  /**
+   * その日だけの受付時間（clinic_special_days）。祝日の 10:00〜18:00 など。
+   * 無ければ null。closed=true はその日を休みにしている特別日。
+   */
+  specialDay: { closed: boolean; openTime: string | null; closeTime: string | null; note: string | null } | null;
 };
 
 export type TimelineData = {
@@ -188,7 +196,7 @@ export async function getTimelineRange(
     const lastDayOfMonth = new Date(ly, lm, 0).getDate();
     const monthEnd = `${ly}-${String(lm).padStart(2, "0")}-${String(lastDayOfMonth).padStart(2, "0")}T23:59:59+09:00`;
 
-    const [staffRes, aptRes, monthAptRes, settingsRes, holidayRes] = await Promise.all([
+    const [staffRes, aptRes, monthAptRes, settingsRes, holidayRes, specialRes] = await Promise.all([
       sb.from("reservation_staff")
         .select("id, name, sort_order, monthly_visit_target, booking_until")
         .eq("clinic_id", clinicId)
@@ -215,6 +223,12 @@ export async function getTimelineRange(
       // 休診日（臨時）。タイムテーブルで斜線＋バッジ表示するため
       sb.from("clinic_holidays")
         .select("date")
+        .eq("clinic_id", clinicId)
+        .gte("date", rangeStart.slice(0, 10))
+        .lte("date", rangeEnd.slice(0, 10)),
+      // その日だけの受付時間（祝日 10:00〜18:00 など）。見出しに出す
+      sb.from("clinic_special_days")
+        .select("date, closed, open_time, close_time, note")
         .eq("clinic_id", clinicId)
         .gte("date", rangeStart.slice(0, 10))
         .lte("date", rangeEnd.slice(0, 10)),
@@ -348,6 +362,14 @@ export async function getTimelineRange(
       String(settingsRes.data?.closed_weekdays ?? "")
         .split(",").map((x) => x.trim()).filter(Boolean).map(Number),
     );
+    // その日だけの受付時間（テーブルが無い・読めない院でも予約表は出す）
+    const hm5 = (v: string | null | undefined) => (v ? String(v).slice(0, 5) : null);
+    const specialByDate = new Map<string, { closed: boolean; openTime: string | null; closeTime: string | null; note: string | null }>();
+    for (const r of ((specialRes?.data ?? []) as { date: string; closed?: boolean | null; open_time?: string | null; close_time?: string | null; note?: string | null }[])) {
+      specialByDate.set(String(r.date).slice(0, 10), {
+        closed: !!r.closed, openTime: hm5(r.open_time), closeTime: hm5(r.close_time), note: r.note ?? null,
+      });
+    }
 
     const days: TimelineDay[] = dateStrs.map((dateStr) => {
       // 曜日判定（土曜は別の営業時間設定を使う）
@@ -370,6 +392,8 @@ export async function getTimelineRange(
         monthKey,
         monthLabel: `${parseInt(monthKey.slice(5), 10)}月`,
         isHoliday: holidaySet.has(dateStr) || closedWeekdays.has(dow),
+        jpHolidayName: getJpHolidayName(dateStr),
+        specialDay: specialByDate.get(dateStr) ?? null,
       };
     });
 

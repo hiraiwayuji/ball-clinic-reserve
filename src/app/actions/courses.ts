@@ -6,6 +6,13 @@ import { writeAudit } from "@/lib/audit";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { PUBLIC_CLINIC_ID } from "@/lib/default-clinic-id";
 import { buildStaffSchedule } from "@/lib/staff-availability";
+import { fetchStaffDateBreaks } from "@/lib/staff-break-overrides";
+
+/** 今日（JST）の "yyyy-MM-dd"。その日だけの休憩は過去ぶんを読まない。 */
+function todayJstYmd(): string {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Tokyo" }).format(new Date());
+}
+
 
 export type ReservationCourse = {
   id: string;
@@ -611,7 +618,7 @@ async function getWorkScheduleLink(admin: SupabaseClient, clinicId: string): Pro
 // 患者予約フロー用：コースに担当固定があり、そのスタッフが出勤日ベースなら
 // 出勤曜日・個別日を返す。無ければ null（＝日付制限なし）。
 export async function getCourseRequiredStaffSchedule(courseId: string): Promise<
-  { staffId: string; staffName: string; weekdays: number[]; dates: StaffBookingDate[]; defaultStart: string | null; defaultEnd: string | null; breakStart: string | null; breakEnd: string | null; restrictDays: boolean; weekly?: Record<number, { start: string; end: string; breakStart: string | null; breakEnd: string | null }>; bookingUntil: string | null } | null
+  { staffId: string; staffName: string; weekdays: number[]; dates: StaffBookingDate[]; defaultStart: string | null; defaultEnd: string | null; breakStart: string | null; breakEnd: string | null; restrictDays: boolean; weekly?: Record<number, { start: string; end: string; breakStart: string | null; breakEnd: string | null }>; bookingUntil: string | null; dateBreaks?: import("@/lib/staff-availability").StaffDateBreak[] } | null
 > {
   if (!courseId) return null;
   const { createClient: createAdminClient } = await import("@supabase/supabase-js");
@@ -655,6 +662,7 @@ export async function getCourseRequiredStaffSchedule(courseId: string): Promise<
     })),
     link.follow ? (weeklyRows ?? []) : [],
     link.prep,
+    (await fetchStaffDateBreaks(admin, DEFAULT_CLINIC_ID, { fromDate: todayJstYmd(), staffIds: [staffId] })).get(staffId) ?? [],
   );
   // 出勤日制でも受付時間・休憩でも勤務表でもない＝院の営業時間どおり（制限なし）
   if (!sched) return null;
@@ -670,6 +678,7 @@ export async function getCourseRequiredStaffSchedule(courseId: string): Promise<
     weekly: sched.weekly,
     bookingUntil: sched.bookingUntil ?? null,
     dates: sched.dates,
+    dateBreaks: sched.dateBreaks ?? [],
   };
 }
 
@@ -677,7 +686,7 @@ export async function getCourseRequiredStaffSchedule(courseId: string): Promise<
 // 予約フォームの指名欄で「その日お休みのスタッフを出さない」ために使う。
 // schedule_based でない常勤スタッフはこのマップに含まれない（＝常に指名可）。
 export async function getPublicStaffSchedules(): Promise<
-  Record<string, { weekdays: number[]; dates: StaffBookingDate[]; defaultStart: string | null; defaultEnd: string | null; breakStart: string | null; breakEnd: string | null; restrictDays: boolean; weekly?: Record<number, { start: string; end: string; breakStart: string | null; breakEnd: string | null }>; bookingUntil: string | null }>
+  Record<string, { weekdays: number[]; dates: StaffBookingDate[]; defaultStart: string | null; defaultEnd: string | null; breakStart: string | null; breakEnd: string | null; restrictDays: boolean; weekly?: Record<number, { start: string; end: string; breakStart: string | null; breakEnd: string | null }>; bookingUntil: string | null; dateBreaks?: import("@/lib/staff-availability").StaffDateBreak[] }>
 > {
   try {
     const { createClient: createAdminClient } = await import("@supabase/supabase-js");
@@ -704,7 +713,8 @@ export async function getPublicStaffSchedules(): Promise<
         .in("staff_id", ids),
       getWorkScheduleLink(admin, DEFAULT_CLINIC_ID),
     ]);
-    const out: Record<string, { weekdays: number[]; dates: StaffBookingDate[]; defaultStart: string | null; defaultEnd: string | null; breakStart: string | null; breakEnd: string | null; restrictDays: boolean; weekly?: Record<number, { start: string; end: string; breakStart: string | null; breakEnd: string | null }>; bookingUntil: string | null }> = {};
+    const publicDateBreaks = await fetchStaffDateBreaks(admin, DEFAULT_CLINIC_ID, { fromDate: todayJstYmd(), staffIds: ids });
+    const out: Record<string, { weekdays: number[]; dates: StaffBookingDate[]; defaultStart: string | null; defaultEnd: string | null; breakStart: string | null; breakEnd: string | null; restrictDays: boolean; weekly?: Record<number, { start: string; end: string; breakStart: string | null; breakEnd: string | null }>; bookingUntil: string | null; dateBreaks?: import("@/lib/staff-availability").StaffDateBreak[] }> = {};
     for (const s of staff) {
       const sched = buildStaffSchedule(
         s,
@@ -718,6 +728,7 @@ export async function getPublicStaffSchedules(): Promise<
           })),
         link.follow ? (weeklyRows ?? []).filter((w: { staff_id: string }) => w.staff_id === s.id) : [],
         link.prep,
+        publicDateBreaks.get(s.id as string) ?? [],
       );
       // 何の制限も無いスタッフはマップに入れない（＝常に指名可・院の営業時間どおり）
       if (!sched) continue;
@@ -731,6 +742,7 @@ export async function getPublicStaffSchedules(): Promise<
         weekly: sched.weekly,
         bookingUntil: sched.bookingUntil ?? null,
         dates: sched.dates,
+        dateBreaks: sched.dateBreaks ?? [],
       };
     }
     return out;
@@ -813,6 +825,7 @@ export async function getCoursesAvailability(): Promise<CourseAvailability[]> {
           .eq("clinic_id", DEFAULT_CLINIC_ID).in("staff_id", staffIds),
         getWorkScheduleLink(admin, DEFAULT_CLINIC_ID),
       ]);
+      const availDateBreaks = await fetchStaffDateBreaks(admin, DEFAULT_CLINIC_ID, { fromDate: todayJstYmd(), staffIds });
       for (const s of staffRows ?? []) {
         const dates = (dateRows ?? []).filter((d: { staff_id: string }) => d.staff_id === (s as { id: string }).id)
           .map((d: { date: string; available: boolean; start_time?: string | null; end_time?: string | null }) => ({
@@ -822,7 +835,7 @@ export async function getCoursesAvailability(): Promise<CourseAvailability[]> {
         const weekly = link.follow
           ? (weeklyRows ?? []).filter((w: { staff_id: string }) => w.staff_id === (s as { id: string }).id)
           : [];
-        const built = buildStaffSchedule(s, dates, weekly, link.prep);
+        const built = buildStaffSchedule(s, dates, weekly, link.prep, availDateBreaks.get((s as { id: string }).id) ?? []);
         if (built) staffSched.set((s as { id: string }).id, built);
       }
     }
