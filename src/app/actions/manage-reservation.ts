@@ -7,6 +7,9 @@ import { pushLineToOwners } from "@/lib/admin-notify";
 import { isDateWithinAllowedRange, isTimeSlotWithinTwoHours, isTodayJST } from "@/lib/time-slots";
 import { getBookingHorizonDays, getCurrentSlotDuration } from "@/app/actions/clinic-slot";
 import { getSpecialDayForDate } from "@/app/actions/special-days";
+import { getStaffSchedulesForDate } from "@/lib/staff-day-schedules";
+import { offDutyStaffAt } from "@/lib/staff-availability";
+import { getDailyAvailability } from "@/app/actions/reserve";
 
 const CLINIC_ID = PUBLIC_CLINIC_ID;
 
@@ -151,9 +154,88 @@ export async function rescheduleMyReservation(
   const newStart = new Date(newStartIso);
   const newEndIso = new Date(newStart.getTime() + durationMs).toISOString();
 
-  // 担当(レーン)があれば、新しい時間でそのレーンが空いているか確認（自分自身は除外）
   const staffId = (apt.staff_id as string | null) ?? null;
+  const durationMinutes = Math.max(1, Math.round(durationMs / 60000));
+
+  // 🚨 2026-09-24（からだ 9/24 17:40）と同じ穴をここにも塞ぐ。
+  // 日時変更は「他の予約と重なっていないか」しか見ていなかったので、
+  // 勤務時間外・休憩中・院ぜんたいの休憩（祝日の休憩など）・対応不可の時間へ動かせてしまった。
+  //
+  // ① 誰でも受けられるか（定員・院ぜんたいの休憩・受付時間外）は、患者さんの空き表示と
+  //    まったく同じ getDailyAvailability で判定する。別の式を書くと「画面では選べるのに
+  //    変更できない」「変更だけ抜け道になる」が必ず起きる（判定は1か所に寄せる）。
+  //    ただし自分の予約と時間が重なる move（同じ日の隣の枠へずらす等）では、自分自身が
+  //    「埋まっている側」に数えられてしまうので使わない。その場合は下の②③で担保する。
+  const oldYmd = new Date(apt.start_time).toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" });
+  const overlapsSelf = oldYmd === newDate
+    && oldStart.getTime() < new Date(newEndIso).getTime()
+    && oldEnd.getTime() > newStart.getTime();
+  // 担当未設定の予約は、下の③（担当の勤務時間・レーン）が効かない。
+  // 自分と重なる move でも①だけは必ず通す（誤って弾いてもLINEで相談できるほうが安全）。
+  if (!overlapsSelf || !staffId) {
+    // メニューが削除された昔の予約は courseId を渡さない。
+    // getDailyAvailability は自院に無い courseId を「全時刻ふさがり」で返すので、
+    // 渡すと何時を選んでも必ず弾かれる（2026-09-24 検品2回目の指摘）。
+    let courseIdForCheck = (apt.course_id as string | null) ?? null;
+    if (courseIdForCheck) {
+      const { data: courseRow } = await sb
+        .from("reservation_courses")
+        .select("id")
+        .eq("id", courseIdForCheck)
+        .eq("clinic_id", CLINIC_ID)
+        .maybeSingle();
+      if (!courseRow) courseIdForCheck = null;
+    }
+    const blocked = await getDailyAvailability(newDate, courseIdForCheck, { allowWithoutCourse: true });
+    if (blocked.includes(newTime)) {
+      return {
+        ok: false,
+        error: "その時間は受け付けておりません（すでに埋まっている・休憩・受付時間外など）。別のお時間をお選びいただくか、LINEからご相談ください。",
+      };
+    }
+  }
+
+  // ② 院ぜんたいの休憩（staff_id なし）と、担当の先生だけの「対応不可」。
+  //    ①を通らなかった move でも必ず見る。
+  {
+    const { data: ngRows } = await sb
+      .from("clinic_blocked_slots")
+      .select("start_time, end_time, staff_id")
+      .eq("clinic_id", CLINIC_ID)
+      .eq("date", newDate);
+    const toMinLocal = (hm?: string | null) => {
+      if (!hm) return null;
+      const [h, m] = String(hm).slice(0, 5).split(":").map(Number);
+      return Number.isFinite(h) && Number.isFinite(m) ? h * 60 + m : null;
+    };
+    const wantStart = toMinLocal(newTime)!;
+    const wantEnd = wantStart + durationMinutes;
+    const hitNg = (ngRows ?? []).some((b: { start_time?: string | null; end_time?: string | null; staff_id?: string | null }) => {
+      // 他の先生だけのNGは、この予約には関係ない（担当未設定の予約には院ぜんたいの休憩だけ効く）
+      if (b.staff_id && b.staff_id !== staffId) return false;
+      const bs = toMinLocal(b.start_time);
+      const be = toMinLocal(b.end_time);
+      if (bs === null || be === null) return false;
+      return wantStart < be && wantEnd > bs; // 半開区間
+    });
+    if (hitNg) {
+      return {
+        ok: false,
+        error: "その時間は受け付けておりません（休憩・対応不可の時間です）。別のお時間をお選びいただくか、LINEからご相談ください。",
+      };
+    }
+  }
+
+  // ③ 担当(レーン)があれば、その先生の勤務時間・休憩と、レーンの空き（自分自身は除外）
   if (staffId) {
+    const schedules = await getStaffSchedulesForDate(sb, CLINIC_ID, newDate, [staffId]);
+    const offDuty = offDutyStaffAt(schedules, newDate, newTime, durationMinutes);
+    if (offDuty.has(staffId)) {
+      return {
+        ok: false,
+        error: "ご予約の担当は、その時間は受け付けておりません（勤務時間外・休憩など）。別のお時間をお選びいただくか、LINEからご相談ください。",
+      };
+    }
     const { data: conf } = await sb
       .from("appointments")
       .select("id")

@@ -41,9 +41,10 @@ import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { getTimeSlots, isDateWithinAllowedRange, isTimeSlotWithinTwoHours, isTodayJST, isAddonSpanWithinBusinessHours } from "@/lib/time-slots";
 import { buildStaffSpans } from "@/lib/staff-spans";
 import { fetchStaffDateBreaks } from "@/lib/staff-break-overrides";
-import { countNgOnlyStaff, isPoolFull, countsTowardPool, type StaffNgBlock } from "@/lib/staff-ng-capacity";
+import { getStaffSchedulesForDate } from "@/lib/staff-day-schedules";
+import { countUnavailableOnlyStaff, isPoolFull, countsTowardPool, hitsBlockedSlot, type StaffNgBlock } from "@/lib/staff-ng-capacity";
 import { getSpecialDayForDate } from "@/app/actions/special-days";
-import { isTimeWithinStaffHoursYmd, isStaffAvailableOnYmd, isStaffSpanBookableYmd, buildStaffSchedule, type StaffSchedule } from "@/lib/staff-availability";
+import { isTimeWithinStaffHoursYmd, isStaffAvailableOnYmd, isStaffSpanBookableYmd, buildStaffSchedule, offDutyStaffAt, type StaffSchedule } from "@/lib/staff-availability";
 
 /** "HH:MM:SS"/"HH:MM"/null → "HH:MM"/null。スタッフ出勤時間（TIMEカラム）の正規化用 */
 function normStaffTime(v: string | null | undefined): string | null {
@@ -259,6 +260,8 @@ async function getDayPool(
   }
 }
 
+
+
 /**
  * 患者が担当を選ばない院で、予約に担当（レーン）を院側のルールで自動で割り当てる。
  *
@@ -269,7 +272,12 @@ async function getDayPool(
  * 「優先的にこの先生に入れたい（preferred_staff_id）」を用意している。
  * 優先の先生がその日休み・その時間に別の予約がある場合は、他の受付可能な先生に回す。
  *
- * 戻り値: 割り当てたスタッフ（誰も空いていなければ null＝担当未設定のまま）
+ * 戻り値:
+ *   { staff: 割り当てたスタッフ, failed: false } … 割り当てられた
+ *   { staff: null, failed: false }              … 誰も受けられない。**呼び出し側は予約を断る**
+ *                                                 （担当未設定のまま入れない。2026-09-24 からだ 9/24 17:40）
+ *   { staff: null, failed: true }               … DB障害などで判定できなかった。従来どおり
+ *                                                 担当未設定で受け付ける（障害中に全院が止まらないように）
  */
 async function pickStaffForBooking(
   db: any,
@@ -280,7 +288,7 @@ async function pickStaffForBooking(
   endIso: string,
   durationMinutes: number,
   preferredStaffId: string | null,
-): Promise<{ id: string; name: string | null } | null> {
+): Promise<{ staff: { id: string; name: string | null } | null; failed: boolean }> {
   try {
     const { data: staffRows } = await db
       .from("reservation_staff")
@@ -288,7 +296,7 @@ async function pickStaffForBooking(
       .eq("clinic_id", clinicId)
       .eq("is_active", true)
       .or("available_for_online_booking.is.null,available_for_online_booking.eq.true");
-    if (!staffRows || staffRows.length === 0) return null;
+    if (!staffRows || staffRows.length === 0) return { staff: null, failed: true };
 
     // その日の個別設定（受付しない日・時間の上書き）と、終日休みの登録
     const [{ data: dateRows }, { data: offRows }, { data: weeklyRows }, { data: settings }] = await Promise.all([
@@ -380,12 +388,15 @@ async function pickStaffForBooking(
         .limit(1);
       if (conflict && conflict.length > 0) continue;
 
-      return { id: st.id as string, name: (st.name as string) ?? null };
+      return { staff: { id: st.id as string, name: (st.name as string) ?? null }, failed: false };
     }
-    return null;
+    // 誰も受けられない。呼び出し側はここで予約を止める（担当未設定で入れない）。
+    return { staff: null, failed: false };
   } catch (e) {
+    // DB障害などで判定できなかった場合。ここを「誰も受けられない」と同じ扱いにすると
+    // 障害中に全院のWeb予約が黙って止まるので、従来どおり担当未設定で受け付ける。
     console.error("[pickStaffForBooking] failed:", e);
-    return null;
+    return { staff: null, failed: true };
   }
 }
 
@@ -661,16 +672,22 @@ export async function getDailyAvailability(
 
     // コースに担当(レーン)が設定されていれば、そのレーンの空きで判定する
     let requiredStaffId: string | null = null;
+    // メニューの所要時間。定員から「NG・受付時間外の先生」を引くときの判定幅に使う。
+    // 登録ガード（createReservation）も同じ所要時間で判定するので、ここを 5分固定にすると
+    // 「画面では選べるのに登録で弾かれる」になる。
+    let courseMinutes: number | null = null;
     if (courseId) {
       const { data: c } = await supabase
         .from("reservation_courses")
-        .select("id, required_staff_id")
+        .select("id, required_staff_id, duration_minutes")
         .eq("id", courseId)
         .eq("clinic_id", DEFAULT_CLINIC_ID)
         .maybeSingle();
       // 自院に存在しない courseId（他院IDや無効値）も fail-closed
       if (!c) return ALL_DAY_BLOCKED;
       requiredStaffId = (c?.required_staff_id as string | null) ?? null;
+      const d = Number((c as { duration_minutes?: number | null }).duration_minutes ?? 0);
+      courseMinutes = Number.isFinite(d) && d > 0 ? d : null;
     }
 
     const dayPool = await getDayPool(supabase, DEFAULT_CLINIC_ID, dateStr);
@@ -806,32 +823,86 @@ export async function getDailyAvailability(
       .eq("clinic_id", DEFAULT_CLINIC_ID)
       .eq("date", dateStr);
 
-    // 🚨 担当自由のメニューは、先生個別の予約NG（対応不可）のぶんだけ定員を減らす。
-    // これをしないと、NGにした先生も「空いている1人」に数えられ、残りの先生が
-    // 埋まっている時間まで ◯空き に見える（2026-09-21 からだ 9/22 で発覚）。
-    // サーバー側の最終ガード（createReservation）も同じ countNgOnlyStaff を使う。
+    // 🚨 担当自由のメニューは、先生個別の予約NG（対応不可）と、その時間に
+    // 受付時間外・休憩の先生のぶんだけ定員を減らす。
+    // これをしないと、NGにした先生・もう受付が終わっている先生も「空いている1人」に数えられ、
+    // 実際には誰も受けられない時間まで ◯空き に見える。
+    //   2026-09-21 からだ 9/22: NG の先生が定員に残っていた
+    //   2026-09-24 からだ 9/24 17:40: 森川=対応不可・森藤=受付17:30まで で誰も受けられないのに ◯
+    // サーバー側の最終ガード（createReservation）も同じ countUnavailableOnlyStaff を使う。
+    const spanMinutes = courseMinutes ?? slotMinutes;
+    // 担当固定コースはその先生、担当自由コースは定員に数えた先生ぜんいんの受付時間・休憩を読む。
+    // 🚨 担当固定コースで読まないと、画面側は開始時刻しか見ない filterSlotsByStaffSchedule だけになり、
+    // 受付 17:30 までの先生に 17:20 の20分枠が ◯ で出て、申し込みの最後に
+    // 「受付時間・休憩にかかってしまいます」で弾かれる（2026-09-24 検品3回目）。
+    const scheduleStaffIds = requiredStaffId ? [requiredStaffId] : [...poolIds];
+    const staffSchedules = scheduleStaffIds.length > 0
+      ? await getStaffSchedulesForDate(supabase, DEFAULT_CLINIC_ID, dateStr, scheduleStaffIds)
+      : new Map<string, StaffSchedule | null>();
+    const poolSchedules = requiredStaffId ? new Map<string, StaffSchedule | null>() : staffSchedules;
     const hasStaffNg = !requiredStaffId && poolIds.size > 0
-      && (breaks ?? []).some((b: StaffNgBlock) => !!b.staff_id && poolIds.has(b.staff_id));
-    const NO_BUSY: ReadonlySet<string> = new Set();
+      && ((breaks ?? []).some((b: StaffNgBlock) => !!b.staff_id && poolIds.has(b.staff_id))
+        || [...poolSchedules.values()].some((s) => !!s));
+    const keyOfMin = (min: number) =>
+      `${String(Math.floor(min / 60) % 24).padStart(2, "0")}:${String(min % 60).padStart(2, "0")}`;
+    /**
+     * その時刻「から」メニューを始められないか。
+     *
+     * 🚨 返すのは「開始できない時刻」であって「その一瞬だけ埋まっている時刻」ではない。
+     * 施術の終わりまで（timeKey 〜 timeKey+所要時間）を丸ごと見る:
+     *   - 定員から引くのは、その施術時間ぜんぶを受けられない先生（NG・受付時間外・休憩）
+     *   - 途中の5分でも定員が埋まっていたら開始できない
+     *   - 休憩（院ぜんたいの休憩・担当固定コースならその先生の予約NG）に少しでもかかったら不可
+     * 登録ガード（createReservation）も所要時間ぶんの重なりで判定しているので、ここを
+     * 「その一瞬だけ」にすると「選べるのに登録できない」に戻る（2026-09-24 検品指摘）。
+     * 画面側で所要時間ぶんの連続枠を数え直す必要も無くなる（数えると二重に塞がる）。
+     */
     const isFullAt = (timeKey: string): boolean => {
-      const total = slotCounts[timeKey] || 0;
-      if (!hasStaffNg) return total >= threshold;
       const [h, m] = timeKey.split(":").map(Number);
       const t = h * 60 + m;
-      const ngOnly = countNgOnlyStaff((breaks ?? []) as StaffNgBlock[], poolIds, t, t + 5, busyStaffByTime[timeKey] ?? NO_BUSY);
-      return isPoolFull({ totalCount: total, poolCount: poolCounts[timeKey] || 0, capacity: threshold, ngOnly });
+      const end = t + spanMinutes;
+      // 🚨 休憩に「食い込む」開始時刻も塞ぐ（2026-09-24 検品2回目の指摘）。
+      // 例: 祝日の休憩 13:00〜13:40 に 40分メニューの 12:40 を選ぶと 12:40〜13:20 が休憩に
+      // かぶる。ここを見ないと、患者さんは 12:40 を選べるのに、お名前やアンケートを
+      // 全部入れたあと登録ガード（hitBreak）で弾かれる。条件は登録ガードと同じで、
+      // 先生1人だけの予約NGは、その先生が必須のコース（requiredStaffId一致）だけを塞ぐ。
+      if (hitsBlockedSlot((breaks ?? []) as StaffNgBlock[], t, end, requiredStaffId)) return true;
+      // 担当固定コースは、その先生が施術の終わりまで受けられる時間だけ ◯ にする。
+      // 開始時刻だけ見ていると、受付 17:30 までの先生に 17:20 の20分枠が出てしまう。
+      if (requiredStaffId && offDutyStaffAt(staffSchedules, dateStr, timeKey, spanMinutes).has(requiredStaffId)) {
+        return true;
+      }
+      // 施術時間のどこかで自分の予約を持っている先生は、予約数の側で数えているので二重に引かない
+      let ngOnly = 0;
+      if (hasStaffNg) {
+        const busyInSpan = new Set<string>();
+        for (let u = t; u < end; u += 5) {
+          for (const id of busyStaffByTime[keyOfMin(u)] ?? []) busyInSpan.add(id);
+        }
+        ngOnly = countUnavailableOnlyStaff(
+          (breaks ?? []) as StaffNgBlock[], poolIds, t, end, busyInSpan,
+          offDutyStaffAt(poolSchedules, dateStr, timeKey, spanMinutes),
+        );
+      }
+      for (let u = t; u < end; u += 5) {
+        const k = keyOfMin(u);
+        const total = slotCounts[k] || 0;
+        if (!hasStaffNg) {
+          if (total >= threshold) return true;
+          continue;
+        }
+        if (isPoolFull({ totalCount: total, poolCount: poolCounts[k] || 0, capacity: threshold, ngOnly })) return true;
+      }
+      return false;
     };
-    const bookedTimes = Object.keys(slotCounts).filter(isFullAt);
 
     // 臨時の休憩枠（clinic_blocked_slots）も予約不可として合流させる。
     // 患者のスロット粒度（15/20/30分）に依存せず確実に塞ぐため、休憩 [start, end) を
     // 5分刻みのキーに展開して union する（ALL_DAY_BLOCKED と同じ粒度）。
-    const blockedSet = new Set(bookedTimes);
-    // 予約が1件も無い時刻でも、NGで定員が0になっていれば塞ぐ
-    if (hasStaffNg) {
-      for (const key of ALL_DAY_BLOCKED) {
-        if (!blockedSet.has(key) && isFullAt(key)) blockedSet.add(key);
-      }
+    const blockedSet = new Set<string>();
+    // 予約が1件も無い時刻でも、NG・受付時間外で定員が0になっていれば塞ぐ
+    for (const key of ALL_DAY_BLOCKED) {
+      if (isFullAt(key)) blockedSet.add(key);
     }
     (breaks ?? []).forEach((b: { start_time?: string; end_time?: string; staff_id?: string | null }) => {
       // staff_id 指定の枠（受付が特定の先生だけを予約NGにしたもの）は、
@@ -1271,8 +1342,9 @@ export async function createReservation(formData: FormData) {
         occupied = overlapping?.length ?? 0;
       }
 
-      // 🚨 担当が決まっていない予約（担当自由のメニュー）は、先生個別の予約NG（対応不可）の
-      // ぶんだけ定員を減らす。画面側（getDailyAvailability）と同じ countNgOnlyStaff / isPoolFull を使う。
+      // 🚨 担当が決まっていない予約（担当自由のメニュー）は、先生個別の予約NG（対応不可）と、
+      // その時間に受付時間外・休憩の先生のぶんだけ定員を減らす。
+      // 画面側（getDailyAvailability）と同じ countUnavailableOnlyStaff / isPoolFull / offDutyStaffAt を使う。
       // ここを揃えないと「画面では×なのに古い画面や細工POSTで入る」「担当未設定の仮予約が入る」が起きる。
       // 受付する先生が1人だけの日（dayCapacity<=1）でも同じように引く。
       // staffIds が null（単一枠モードの院など）は誰を数えたか分からないので引かない＝従来どおり。
@@ -1285,15 +1357,17 @@ export async function createReservation(formData: FormData) {
           .eq("clinic_id", DEFAULT_CLINIC_ID)
           .eq("date", rawDate)
           .not("staff_id", "is", null);
-        if (ngBlocks && ngBlocks.length > 0) {
+        const poolSchedules = await getStaffSchedulesForDate(adminDb, DEFAULT_CLINIC_ID, rawDate, dayPool.staffIds);
+        const offDuty = offDutyStaffAt(poolSchedules, rawDate, time, durationMinutes);
+        if ((ngBlocks && ngBlocks.length > 0) || offDuty.size > 0) {
           const poolIds = new Set<string>(dayPool.staffIds);
           const rows = (overlapping ?? []) as { staff_id?: string | null; status?: string | null }[];
           const [rh, rm] = time.slice(0, 5).split(":").map(Number);
           const reqStartMin = rh * 60 + rm;
           const busy = new Set<string>(rows.map((o) => o.staff_id).filter((x): x is string => !!x));
-          ngOnly = countNgOnlyStaff(
-            ngBlocks as StaffNgBlock[], poolIds,
-            reqStartMin, reqStartMin + durationMinutes, busy,
+          ngOnly = countUnavailableOnlyStaff(
+            (ngBlocks ?? []) as StaffNgBlock[], poolIds,
+            reqStartMin, reqStartMin + durationMinutes, busy, offDuty,
           );
           poolOccupied = rows.filter((o) => countsTowardPool(o, poolIds)).length;
         }
@@ -1341,9 +1415,19 @@ export async function createReservation(formData: FormData) {
           Number(courseDurationStr) || (await getCurrentSlotDuration()),
           preferredStaffId,
         );
-        if (picked) {
-          staffId = picked.id;
-          staffName = picked.name;
+        if (picked.staff) {
+          staffId = picked.staff.id;
+          staffName = picked.staff.name;
+        } else if (!picked.failed && dayPool.staffIds && dayPool.staffIds.length > 0) {
+          // 🚨 担当未設定のまま入れない（2026-09-24 からだ 9/24 17:40）。
+          // 受けられる先生が1人もいないのに予約を作ると、予約表では担当未設定として
+          // 先頭の列（からだなら藤川院長）に出てしまい、現場には「入れられない時間に
+          // 予約が入った」ように見える。空き判定側（getDailyAvailability）も同じ材料で
+          // 塞いでいるので、ここに来るのは古い画面・細工POST・すれ違いのときだけ。
+          return {
+            success: false,
+            error: "申し訳ありません。その時間は対応できる担当がいなくなりました。お手数ですが、別のお時間をお選びください。",
+          };
         }
       }
 

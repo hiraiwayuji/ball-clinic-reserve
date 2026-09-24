@@ -1464,6 +1464,14 @@ export default function TodayTimelineWidget({
                     {l.label}
                   </span>
                 ))}
+                {/* 担当未設定の予約は先頭の先生の列に置いているので、見分けがつくよう凡例にも出す */}
+                <span className="inline-flex items-center gap-1" title="担当がまだ決まっていない予約です。置いてある列の先生の予約ではありません。バーを押して担当を決めてください">
+                  <span
+                    className="inline-block w-4 h-3 rounded-sm bg-white dark:bg-slate-800"
+                    style={{ borderColor: "#e11d48", borderWidth: "2px", borderStyle: "dashed" }}
+                  />
+                  担当未設定（この列の先生の予約ではありません）
+                </span>
               </div>
               {/* 時間軸ヘッダ */}
               <div
@@ -2242,6 +2250,12 @@ export default function TodayTimelineWidget({
                             marginLeft: `${(offsetFrac / colSpan) * 100}%`,
                             width: `${Math.min((widthCols / colSpan) * 100, 100)}%`,
                             ...(linkColor ? { borderColor: linkColor, borderWidth: "2px" } : {}),
+                            // 🚨 担当未設定の予約は「先頭の先生の列」に置いて表示している（buildAptsByStaff）。
+                            // 20分のバーは細くて札の文字が読めないので、枠を赤い破線にして
+                            // 「その先生の予約ではない」ことが幅に関係なく分かるようにする（2026-09-24）。
+                            ...(!a.staff_id && !isCancelled
+                              ? { borderColor: "#e11d48", borderWidth: "2px", borderStyle: "dashed" }
+                              : {}),
                           }}
                           className={`text-[11px] leading-tight rounded border px-1 py-0.5 my-0.5 text-left truncate transition-all ${cls} ${
                             isLinkedCustomer ? "ring-2 ring-violet-400" : "hover:ring-2 hover:ring-blue-400"
@@ -2255,11 +2269,20 @@ export default function TodayTimelineWidget({
                             ? `${displayStartLabel} ${a.customer_name ?? ""} ${cancelKindLabel(a.cancel_kind, a.no_show)}（タップで復活できます）`
                             : hasMultiStaff
                               ? `${a.customer_name ?? ""}${a.medical_record_number ? ` (No.${a.medical_record_number})` : ""} ${laneCourseName ?? ""}（${s.name}先生の担当ぶん）\n通しの予約時間 ${wholeTimeLabel}（担当${splitCount}人・このバーは${splitLabel}）\n${draggable ? "このバーをドラッグすると予約まるごと動きます" : "移動は先頭の先生のバーからどうぞ"}`
-                              : `${displayStartLabel} ${a.customer_name ?? ""}${a.medical_record_number ? ` (No.${a.medical_record_number})` : ""} ${laneCourseName ?? ""}・ドラッグで時間や先生を変えられます`}
+                              : `${displayStartLabel} ${a.customer_name ?? ""}${a.medical_record_number ? ` (No.${a.medical_record_number})` : ""} ${laneCourseName ?? ""}${!a.staff_id ? `\n⚠ 担当未設定の予約です（${s.name}先生の予約ではありません）。バーを押して担当を決めてください` : ""}・ドラッグで時間や先生を変えられます`}
                         >
                           <div className={`truncate font-semibold ${isCancelled ? "line-through" : ""}`}>
+                            {/* 🚨 担当未設定の予約は「先頭の先生の列」に置いて表示している（buildAptsByStaff）。
+                                以前は小さな「●」だけだったため、からだ鍼灸整骨院で
+                                「藤川院長の勤務時間外に予約が入っている」と読み違えられた（2026-09-24）。
+                                誰の予約でもないことが一目で分かる札にする。 */}
                             {!a.staff_id && !isCancelled && (
-                              <span className="mr-0.5 text-[9px] font-bold text-rose-500" title="担当未設定（予約変更から担当を設定できます）">●</span>
+                              <span
+                                className="mr-1 text-[9px] font-black bg-rose-600 text-white px-1 rounded align-middle"
+                                title={`担当未設定の予約です（${s.name}先生の予約ではありません）。バーを押して担当を決めてください`}
+                              >
+                                担当未設定
+                              </span>
                             )}
                             {a.customer_name ?? "(顧客名なし)"}
                             {a.medical_record_number && (

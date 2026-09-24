@@ -764,16 +764,20 @@ function ReserveContent() {
     const requiredSteps = Math.max(1, Math.ceil((selCourse?.duration_minutes ?? slotMinutes) / slotMinutes));
     // コースの施術時間ぶんの連続枠が確保できるか（カレンダー画面と同じ判定）。
     // 昼休みで枠が飛ぶので、配列の隣ではなく時刻が slotMinutes ずつ続いているかで見る。
+    //
+    // 🚨 後ろの枠が「埋まっているか」はここで数えない（2026-09-24 検品指摘）。
+    // サーバーの空き判定（getDailyAvailability）が所要時間ぶんを丸ごと見て
+    // 「そこから始められない時刻」を返しているので、ここで重ねて数えると二重に塞がる。
     const toMinutes = (hm: string) => { const [h, m] = hm.split(":").map(Number); return h * 60 + m; };
     const canFit = (slot: string): boolean => {
       const idx = allSlots.indexOf(slot);
       if (idx < 0) return false;
+      if (bookedTimes.includes(slot)) return false;
       const base = toMinutes(slot);
-      for (let i = 0; i < requiredSteps; i++) {
+      for (let i = 1; i < requiredSteps; i++) {
         const next = allSlots[idx + i];
         if (!next) return false;
         if (toMinutes(next) !== base + i * slotMinutes) return false;
-        if (bookedTimes.includes(next)) return false;
       }
       return true;
     };

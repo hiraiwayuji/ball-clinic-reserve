@@ -282,6 +282,34 @@ function checkStaffNgCapacity() {
         if (!ok) fail(`先生個別NGの定員計算が変わっています: ${label}`);
       }
 
+      // 🚨 2026-09-24 からだ 9/24 17:40（藤川先生「予約入れれないところで入ってしまっています」）:
+      //   森川先生=対応不可・森藤先生=受付17:30まで で誰も受けられないのに定員が1残り、
+      //   ◯空き→予約成立→自動割当は誰も見つけられず**担当未設定**で入り、
+      //   予約表では先頭の列（藤川院長）に出た。
+      //   受付時間外・休憩の先生も、NG と同じように定員から引くこと。
+      const unavail = mod.exports.countUnavailableOnlyStaff;
+      if (typeof unavail !== "function") {
+        fail(`${NG_FILE} が countUnavailableOnlyStaff を export していません`);
+      } else {
+        const none = new Set();
+        const offCases = [
+          ["受付時間外の先生は定員から引く", unavail([], pool, 1060, 1080, none, new Set([A])) === 1],
+          ["受付時間外の先生が2人なら2人ぶん引く", unavail([], pool, 1060, 1080, none, new Set([A, B])) === 2],
+          ["NGの先生と受付時間外の先生が同じなら二重に引かない",
+            unavail(blocks, pool, 600, 620, none, new Set([B])) === 1],
+          ["NGの先生と受付時間外の先生が別ならそれぞれ引く",
+            unavail(blocks, pool, 600, 620, none, new Set([A])) === 2],
+          ["受付時間外でも、その時間に自分の予約を持っていれば二重に引かない",
+            unavail([], pool, 1060, 1080, new Set([A]), new Set([A])) === 0],
+          ["定員に数えていない先生が受付時間外でも引かない",
+            unavail([], new Set([A]), 1060, 1080, none, new Set([C])) === 0],
+          ["受付時間内なら引かない（従来どおり）", unavail([], pool, 600, 620, none, new Set()) === 0],
+        ];
+        for (const [label, ok] of offCases) {
+          if (!ok) fail(`受付時間外の先生の定員計算が変わっています: ${label}`);
+        }
+      }
+
       // 「もう取れないか」の式そのもの。定員に数えていない先生（ネット受付しない院長など）の
       // 予約を、NGで減らした定員と比べてはいけない（2026-09-21 検品で 9/21 15:20 に再現）。
       const full = mod.exports.isPoolFull;
@@ -317,16 +345,36 @@ function checkStaffNgCapacity() {
   }
   const code = stripComments(readFileSync("src/app/actions/reserve.ts", "utf8"));
   const calls = Math.min(
-    code.split("countNgOnlyStaff(").length - 1,
+    code.split("countUnavailableOnlyStaff(").length - 1,
     code.split("isPoolFull(").length - 1,
     code.split("countsTowardPool(").length - 1,
   );
   if (calls < 2) {
     fail(
-      "reserve.ts が countNgOnlyStaff / isPoolFull / countsTowardPool を2か所（空き表示と登録ガード）で使っていません",
+      "reserve.ts が countUnavailableOnlyStaff / isPoolFull / countsTowardPool を2か所（空き表示と登録ガード）で使っていません",
       `   見つかった呼び出し: ${calls} か所
 ` +
       "   片方だけだと「×なのに入る」か「◯なのに弾かれる／担当未設定で入る」になります。",
+    );
+  }
+
+  // 受付時間・休憩を定員から引く材料（offDutyStaffAt）も、空き表示と登録ガードの両方で使うこと。
+  const offCalls = code.split("offDutyStaffAt(").length - 1;
+  if (offCalls < 2) {
+    fail(
+      "reserve.ts が offDutyStaffAt を2か所（空き表示と登録ガード）で使っていません",
+      `   見つかった呼び出し: ${offCalls} か所\n` +
+      "   片方だけだと、受付が終わっている先生が定員に残り、9/24 17:40 と同じことが起きます。",
+    );
+  }
+
+  // 自動割当で誰も受けられなかったとき、担当未設定のまま予約を作らないこと（fail-closed）。
+  if (!/picked\.staff/.test(code) || !/picked\.failed/.test(code)) {
+    fail(
+      "reserve.ts が「担当を割り当てられなかった予約」を止めていません",
+      "   pickStaffForBooking が誰も見つけられなかったとき、担当未設定のまま入れると\n" +
+      "   予約表の先頭の列（からだなら藤川院長）に出て、入れられない時間に予約が入ったように見えます。\n" +
+      "   ただし DB障害で判定できなかったとき（failed）は、従来どおり受け付けること。",
     );
   }
 }
@@ -441,6 +489,145 @@ function checkStaffDateBreak() {
 }
 checkStaffDateBreak();
 
+// ───────────────────────────────────────────────────────────
+// (5) 実際に起きた事故そのものを、からだ鍼灸整骨院の本番の設定で再現して見張る
+// ───────────────────────────────────────────────────────────
+// 2026-09-24 藤川先生「予約入れれないところで入ってしまっています」。
+//   9/24(木) 17:40 は 森川先生=対応不可（17:00〜18:00）/ 森藤先生=受付17:30まで。
+//   誰も受けられないのに患者さんには ◯空き に見え、予約が成立して**担当未設定**で入り、
+//   予約表では先頭の列（藤川院長）に出た。
+// 「取れない時間が塞がるか」だけでなく「取れる時間まで塞いでいないか」も両方見る。
+function checkKarada0924() {
+  let ts;
+  try { ts = require_("typescript"); } catch { return; }
+  const load = (file) => {
+    if (!existsSync(file)) { fail(`${file} が見つかりません`); return null; }
+    const js = ts.transpileModule(readFileSync(file, "utf8"), {
+      compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
+    }).outputText;
+    const mod = { exports: {} };
+    new Function("module", "exports", js)(mod, mod.exports);
+    return mod.exports;
+  };
+  const avail = load(AVAIL_FILE);
+  const cap = load(NG_FILE);
+  if (!avail || !cap) return;
+  const { buildStaffSchedule, offDutyStaffAt } = avail;
+  const { countUnavailableOnlyStaff, isPoolFull } = cap;
+  if (typeof offDutyStaffAt !== "function") {
+    fail(`${AVAIL_FILE} が offDutyStaffAt を export していません`);
+    return;
+  }
+
+  const THU = "2026-09-24"; // 木曜(4)
+  const PREP = 30;          // からだの「準備・片付け」30分
+  const DUR = 20;           // 保険施術（再診）20分
+  const MORIKAWA = "morikawa";
+  const MORIFUJI = "morifuji";
+  // 本番の勤務表そのまま（2026-09-24 実測）
+  const schedules = new Map([
+    [MORIKAWA, buildStaffSchedule({ schedule_based_booking: false }, [],
+      [{ day_of_week: 4, start_time: "09:30:00", end_time: "20:30:00", break_start: "12:00:00", break_end: "14:00:00" }], PREP)],
+    [MORIFUJI, buildStaffSchedule({ schedule_based_booking: false }, [],
+      [{ day_of_week: 4, start_time: "09:30:00", end_time: "18:00:00", break_start: "14:00:00", break_end: "14:45:00" }], PREP)],
+  ]);
+  // 受付が入れた「森川先生だけ対応不可」17:00〜18:00（20分×3行）
+  const ngBlocks = [
+    { staff_id: MORIKAWA, start_time: "17:00:00", end_time: "17:20:00" },
+    { staff_id: MORIKAWA, start_time: "17:20:00", end_time: "17:40:00" },
+    { staff_id: MORIKAWA, start_time: "17:40:00", end_time: "18:00:00" },
+  ];
+  const pool = new Set([MORIKAWA, MORIFUJI]);
+  const NO_BUSY = new Set();
+  /** その時刻が「もう取れない」か（予約はまだ0件として、定員だけで見る） */
+  const full = (hm) => {
+    const [h, m] = hm.split(":").map(Number);
+    const t = h * 60 + m;
+    const ngOnly = countUnavailableOnlyStaff(
+      ngBlocks, pool, t, t + DUR, NO_BUSY, offDutyStaffAt(schedules, THU, hm, DUR),
+    );
+    return isPoolFull({ totalCount: 0, poolCount: 0, capacity: 2, ngOnly });
+  };
+
+  // 🚨 院ぜんたいの休憩（祝日の休憩 13:00〜13:40 など）に「食い込む」開始時刻も塞ぐこと。
+  //   2026-09-24 検品2回目: 画面側の連続枠判定をやめたとき、サーバーが休憩そのものの時間しか
+  //   塞いでいなかったため、40分メニューの 12:40 が ◯ に見えて、お名前やアンケートを全部
+  //   入れたあと登録ガードで弾かれる状態になっていた（選べるのに登録できない）。
+  //   登録ガード（createReservation の hitBreak）と同じ半開区間の重なりで見る。
+  // 製品コードの hitsBlockedSlot を**実際に動かして**確かめる（テストの中に書き直した
+  // 別実装を照合しても、半開区間を <= に変える等の退化は見つからない）。
+  const { hitsBlockedSlot } = cap;
+  if (typeof hitsBlockedSlot !== "function") {
+    fail(`${NG_FILE} が hitsBlockedSlot を export していません`);
+  } else {
+    // 祝日の休憩 13:00〜13:40（院ぜんたい）＋ 先生Bだけの予約NG 16:00〜16:20
+    const blocks = [
+      { staff_id: null, start_time: "13:00:00", end_time: "13:40:00" },
+      { staff_id: B, start_time: "16:00:00", end_time: "16:20:00" },
+    ];
+    const at = (hm, dur) => {
+      const [h, m] = hm.split(":").map(Number);
+      const s = h * 60 + m;
+      return [s, s + dur];
+    };
+    const hit = (hm, dur, req = null) => hitsBlockedSlot(blocks, ...at(hm, dur), req);
+    const breakCases = [
+      ["40分メニューは 12:40 から始められない（12:40〜13:20 が休憩にかぶる）", hit("12:40", 40) === true],
+      ["60分メニューは 12:20 から始められない", hit("12:20", 60) === true],
+      ["20分メニューなら 12:40 は取れる（12:40〜13:00 は休憩前）", hit("12:40", 20) === false],
+      ["休憩の終わりちょうど 13:40 からは取れる", hit("13:40", 40) === false],
+      ["休憩の中（13:00）は取れない", hit("13:00", 20) === true],
+      ["休憩と関係ない 10:00 は取れる", hit("10:00", 60) === false],
+      ["先生Bだけの予約NGは、担当自由のコースを塞がない", hit("16:00", 20) === false],
+      ["先生Bだけの予約NGは、先生B固定のコースを塞ぐ", hit("16:00", 20, B) === true],
+      ["先生Bだけの予約NGは、先生A固定のコースを塞がない", hit("16:00", 20, A) === false],
+      ["先生B固定のコースでも、NGに食い込む 15:40 の40分は塞ぐ", hit("15:40", 40, B) === true],
+      ["先生B固定のコースで、NGの終わりちょうど 16:20 は取れる", hit("16:20", 20, B) === false],
+      ["院ぜんたいの休憩は、先生固定のコースも塞ぐ", hit("13:00", 20, A) === true],
+    ];
+    for (const [label, ok] of breakCases) {
+      if (!ok) fail(`休憩にまたがる開始時刻の判定が変わっています: ${label}`);
+    }
+  }
+  // 画面（getDailyAvailability）が本当にこの判定を使っているか。
+  // 休憩そのものの時間を塞ぐだけに戻すと、40分メニューの 12:40 が ◯ に戻って同じ事故になる。
+  // 担当固定コースの受付時間・休憩（offDutyStaffAt）も同じ理由で必須。
+  {
+    const code = stripComments(readFileSync("src/app/actions/reserve.ts", "utf8"));
+    if (!code.includes("hitsBlockedSlot(")) {
+      fail(
+        "reserve.ts の空き表示が、休憩に「食い込む」開始時刻を塞いでいません",
+        "   休憩そのものの時間だけ塞ぐと、40分メニューの 12:40（12:40〜13:20 が休憩にかぶる）が\n" +
+        "   ◯ に見えて、申し込みの最後で登録ガードに弾かれます（選べるのに登録できない）。",
+      );
+    }
+    if (!/requiredStaffId\s*&&\s*offDutyStaffAt\(/.test(code)) {
+      fail(
+        "reserve.ts の空き表示が、担当固定コースの先生の受付時間・休憩を見ていません",
+        "   開始時刻しか見ないと、受付 17:30 までの先生に 17:20 の20分枠が ◯ で出て、\n" +
+        "   申し込みの最後に「受付時間・休憩にかかってしまいます」で弾かれます。",
+      );
+    }
+  }
+
+  const cases = [
+    // 塞がるべきところ（事故そのもの）
+    ["17:40 は取れない（森川=対応不可・森藤=受付17:30まで）", full("17:40") === true],
+    ["17:20 も取れない（森川=対応不可・森藤は20分だと17:30を超える）", full("17:20") === true],
+    // 塞ぎすぎていないところ（逆向き）
+    ["11:00 は取れる（2人とも受付中）", full("11:00") === false],
+    ["13:00 は取れる（森川は休憩でも森藤が受けられる）", full("13:00") === false],
+    ["14:00 は取れる（森藤は休憩でも森川の休憩は14:00で明け）", full("14:00") === false],
+    ["17:00 は取れる（森川は対応不可でも森藤はまだ受付中）", full("17:00") === false],
+    ["18:00 は取れる（森川の対応不可は18:00で明け）", full("18:00") === false],
+    ["20:00 は取れない（森川の受付も20:00まで）", full("20:00") === true],
+  ];
+  for (const [label, ok] of cases) {
+    if (!ok) fail(`からだ 9/24 の空き判定が変わっています: ${label}`);
+  }
+}
+checkKarada0924();
+
 if (ng > 0) {
   console.error(
     `\n${YELLOW}この監査は「予約が取れるかの判定を、画面と登録で同じにする」ためのものです。\n` +
@@ -454,3 +641,6 @@ console.log("   ・buildStaffSpans を実際に動かして、先生ごとの受
 console.log("   ・adminDaySlots / adminReserve / reserve が、どれもその土台を使っていることを確認");
 console.log("   ・先生個別の予約NGが、担当自由メニューの定員から引かれていることを確認（表示と登録の両方）");
 console.log("   ・先生の「その日だけの休憩」が、Web予約・院内の登録のどちらにも効いていることを確認");
+console.log("   ・その時間に受付時間外・休憩の先生が、担当自由メニューの定員から引かれていることを確認");
+console.log("   ・からだ 9/24 17:40 の事故を本番の勤務表で再現し、塞ぐ／塞ぎすぎない の両方を確認");
+console.log("   ・自動割当で誰も受けられなかったとき、担当未設定のまま予約を作らないことを確認");

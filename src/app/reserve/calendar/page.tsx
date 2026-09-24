@@ -1061,16 +1061,23 @@ function ReserveCalendarContent() {
                 // 連続枠が確保できるか判定。
                 // 配列の隣ではなく「時刻が slotMinutes ずつ続いているか」で見る。
                 // 昼休みなどで枠が飛んでいるとき、休憩をまたぐ長いメニューを通さないため。
+                //
+                // 🚨 後ろの枠が「埋まっているか」はここで数えない（2026-09-24 検品指摘）。
+                // サーバーの空き判定（getDailyAvailability）は所要時間ぶんを丸ごと見て
+                // 「そこから始められない時刻」を返している。ここで後ろの枠も数えると二重に塞がり、
+                // 40分メニューで実際には取れる枠まで「枠不足」になる
+                // （例: 13:40 から始められないだけで、13:20〜14:00 は取れるのに 13:20 が消える）。
+                // ここが見るのは「枠が時間どおり続いているか（営業時間・受付時間の端で切れていないか）」だけ。
                 const toMinutes = (hm: string) => { const [h, m] = hm.split(":").map(Number); return h * 60 + m; };
                 const canFitDuration = (slot: string): boolean => {
                   const idx = allSlots.indexOf(slot);
                   if (idx < 0) return false;
+                  if (dailySlots.includes(slot)) return false;
                   const base = toMinutes(slot);
-                  for (let i = 0; i < requiredSteps; i++) {
+                  for (let i = 1; i < requiredSteps; i++) {
                     const next = allSlots[idx + i];
                     if (!next) return false;
                     if (toMinutes(next) !== base + i * slotMinutes) return false;
-                    if (dailySlots.includes(next)) return false;
                   }
                   return true;
                 };

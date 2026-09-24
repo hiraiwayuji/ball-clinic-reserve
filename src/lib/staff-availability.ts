@@ -347,3 +347,31 @@ export function isStaffSpanBookableYmd(
   }
   return true;
 }
+
+/**
+ * その時刻に「受付時間外・休憩・その日休み」で受けられない先生のID。
+ * スケジュールが何も無い先生（null＝制限なし＝院の営業時間どおり）は入れない。
+ *
+ * 🚨 2026-09-24 からだ鍼灸整骨院 9/24 17:40（藤川先生「予約入れれないところで入ってしまっています」）:
+ *   同時受付人数（定員）は「その日ネット受付する先生の人数」だけで、先生ごとの
+ *   受付時間・休憩を見ていなかった。17:40 は 森川先生=対応不可 / 森藤先生=受付17:30まで で
+ *   誰も受けられないのに ◯空き に見え、予約が通って**担当未設定**のまま入り、
+ *   予約表では先頭の列（藤川院長）に出た。
+ *
+ * 施術の「終わりまで」で見る（isStaffSpanBookableYmd）。開始時刻だけ見ると
+ * 受付 17:30 までの先生に 17:20 開始の20分メニューが通ってしまう。
+ */
+export function offDutyStaffAt(
+  schedules: Map<string, StaffSchedule | null>,
+  ymd: string,
+  time: string,
+  durationMinutes: number,
+): Set<string> {
+  const off = new Set<string>();
+  for (const [staffId, schedule] of schedules) {
+    if (!schedule) continue; // 制限なし
+    if (!isStaffAvailableOnYmd(ymd, schedule)) { off.add(staffId); continue; }
+    if (!isStaffSpanBookableYmd(ymd, time, durationMinutes, schedule)) off.add(staffId);
+  }
+  return off;
+}

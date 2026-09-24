@@ -31,15 +31,53 @@ export function hmToMin(hm?: string | null): number | null {
 }
 
 /**
- * [startMin, endMin) に NG がかかっていて、かつその時間に自分の予約を持っていない
- * 「定員に数えている先生」の人数。
+ * [startMin, endMin) が休憩枠（clinic_blocked_slots）に少しでもかかるか。
+ *
+ * 🚨 2026-09-24 検品2回目:
+ *   休憩そのものの時間だけ塞いでいたため、祝日の休憩 13:00〜13:40 に対して
+ *   40分メニューの 12:40（12:40〜13:20 が休憩にかぶる）が ◯ に見え、患者さんが
+ *   お名前やアンケートを全部入れたあと登録ガードで弾かれる状態になっていた。
+ *
+ * 条件は登録ガード（createReservation の hitBreak）とまったく同じにする:
+ *   ・院ぜんたいの休憩（staff_id なし）は全コース対象
+ *   ・先生1人だけの予約NGは、その先生が必須のコース（requiredStaffId 一致）だけ対象
+ *   ・半開区間（終了時刻ちょうどは重ならない）
  */
-export function countNgOnlyStaff(
+export function hitsBlockedSlot(
+  blocks: StaffNgBlock[],
+  startMin: number,
+  endMin: number,
+  requiredStaffId: string | null,
+): boolean {
+  return blocks.some((b) => {
+    if (b.staff_id && b.staff_id !== requiredStaffId) return false;
+    const bs = hmToMin(b.start_time);
+    const be = hmToMin(b.end_time);
+    if (bs === null || be === null) return false;
+    return startMin < be && endMin > bs;
+  });
+}
+
+/**
+ * [startMin, endMin) に「予約NG（対応不可）」または「受付時間外・休憩」で受けられず、
+ * かつその時間に自分の予約を持っていない「定員に数えている先生」の人数。
+ *
+ * 🚨 背景（2026-09-24 からだ鍼灸整骨院 9/24 17:40・藤川先生「予約入れれないところで入ってしまっています」）:
+ *   定員は「その日ネット受付する先生の人数」で、先生ごとの受付時間・休憩を見ていなかった。
+ *   9/24 17:40 は 森川先生=対応不可・森藤先生=受付17:30まで で実際には誰も受けられないのに
+ *   定員1が残り、患者さんには「◯空き」に見えた。予約は通り、自動割当は誰も見つけられず
+ *   **担当未設定のまま**入って、予約表では先頭の列（藤川院長）に出てしまった。
+ *
+ * offDutyStaffIds には「その時間に受付時間外・休憩・その日休みで受けられない先生」を渡す。
+ * NG と同じように定員から引く（同じ先生が両方に当たっても二重に引かない＝Set で合流）。
+ */
+export function countUnavailableOnlyStaff(
   blocks: StaffNgBlock[],
   poolStaffIds: ReadonlySet<string>,
   startMin: number,
   endMin: number,
   busyStaffIds: ReadonlySet<string>,
+  offDutyStaffIds: ReadonlySet<string> = new Set<string>(),
 ): number {
   const ng = new Set<string>();
   for (const b of blocks) {
@@ -51,7 +89,29 @@ export function countNgOnlyStaff(
     if (bs === null || be === null) continue;
     if (startMin < be && endMin > bs) ng.add(b.staff_id); // 半開区間で重なり判定
   }
+  for (const id of offDutyStaffIds) {
+    if (!poolStaffIds.has(id)) continue;
+    // その時間に自分の予約を持っている先生は、予約数の側ですでに1人ぶん数えている
+    if (busyStaffIds.has(id)) continue;
+    ng.add(id);
+  }
   return ng.size;
+}
+
+/**
+ * [startMin, endMin) に NG がかかっていて、かつその時間に自分の予約を持っていない
+ * 「定員に数えている先生」の人数。
+ *
+ * 受付時間・休憩も一緒に引きたいときは countUnavailableOnlyStaff を使う（こちらは NG だけ）。
+ */
+export function countNgOnlyStaff(
+  blocks: StaffNgBlock[],
+  poolStaffIds: ReadonlySet<string>,
+  startMin: number,
+  endMin: number,
+  busyStaffIds: ReadonlySet<string>,
+): number {
+  return countUnavailableOnlyStaff(blocks, poolStaffIds, startMin, endMin, busyStaffIds);
 }
 
 /**
